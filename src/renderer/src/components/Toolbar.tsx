@@ -1,24 +1,12 @@
-import {
-  Command as CommandIcon,
-  FileCode,
-  RotateCw,
-  Save,
-  Settings as SettingsIcon
-} from 'lucide-react';
+import { Command as CommandIcon, RotateCw, Settings as SettingsIcon } from 'lucide-react';
 import { AppMenu } from './AppMenu';
 
 interface ToolbarProps {
-  filePath: string | null;
-  dirty: boolean;
-  saving: boolean;
-  savePulse: boolean;
-  onSave: () => void;
-  onInsertTemplate: () => void;
+  projectRoot: string;
   onRestart: () => void;
   onOpenSettings: () => void;
   onOpenPalette: () => void;
   status: string;
-  // プロジェクトメニュー
   recentProjects: string[];
   onNewProject: () => void;
   onOpenFolder: () => void;
@@ -28,12 +16,7 @@ interface ToolbarProps {
 }
 
 export function Toolbar({
-  filePath,
-  dirty,
-  saving,
-  savePulse,
-  onSave,
-  onInsertTemplate,
+  projectRoot,
   onRestart,
   onOpenSettings,
   onOpenPalette,
@@ -59,26 +42,7 @@ export function Toolbar({
         <div className="toolbar__divider" />
         <button
           type="button"
-          className={`toolbar__btn toolbar__btn--primary ${savePulse ? 'is-pulse' : ''}`}
-          onClick={onSave}
-          disabled={!dirty || saving}
-          title="保存 (Ctrl+S)"
-        >
-          <Save size={14} strokeWidth={2} />
-          <span>{saving ? '保存中' : '保存'}</span>
-        </button>
-        <button
-          type="button"
           className="toolbar__btn toolbar__btn--icon"
-          onClick={onInsertTemplate}
-          title="テンプレート挿入"
-          aria-label="テンプレート挿入"
-        >
-          <FileCode size={16} strokeWidth={1.75} />
-        </button>
-        <button
-          type="button"
-          className="toolbar__btn toolbar__btn--icon toolbar__btn--warning"
           onClick={onRestart}
           title="アプリを再起動"
           aria-label="再起動"
@@ -87,7 +51,7 @@ export function Toolbar({
         </button>
       </div>
       <div className="toolbar__right">
-        {filePath && <span className="toolbar__path">{filePath}</span>}
+        {projectRoot && <span className="toolbar__path">{projectRoot}</span>}
         {status && <span className="toolbar__status">{status}</span>}
         <button
           type="button"

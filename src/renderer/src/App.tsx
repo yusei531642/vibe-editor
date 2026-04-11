@@ -10,18 +10,16 @@ import type {
 import { Sidebar, type SidebarView } from './components/Sidebar';
 import { TabBar, type TabItem } from './components/TabBar';
 import { Toolbar } from './components/Toolbar';
-import { ClaudeMdEditor } from './components/ClaudeMdEditor';
 import { DiffView } from './components/DiffView';
 import { TerminalView } from './components/TerminalView';
 import { SettingsModal } from './components/SettingsModal';
 import { CommandPalette } from './components/CommandPalette';
-import { claudeMdTemplate } from './lib/template';
+import { WelcomePane } from './components/WelcomePane';
 import { useSettings } from './lib/settings-context';
 import { useToast } from './lib/toast-context';
 import { parseShellArgs } from './lib/parse-args';
 import type { Command } from './lib/commands';
 
-const CLAUDE_MD_TAB_ID = 'claude-md';
 const THEMES_FOR_PALETTE: ThemeName[] = [
   'claude-dark',
   'claude-light',
@@ -44,30 +42,22 @@ export function App(): JSX.Element {
   const [projectRoot, setProjectRoot] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
-
-  // CLAUDE.md
-  const [claudeMdPath, setClaudeMdPath] = useState<string | null>(null);
-  const [claudeMdExists, setClaudeMdExists] = useState<boolean>(false);
-  const [content, setContent] = useState<string>('');
-  const [savedContent, setSavedContent] = useState<string>('');
-  const [saving, setSaving] = useState<boolean>(false);
   const [status, setStatus] = useState<string>('');
-  const [savePulse, setSavePulse] = useState<boolean>(false);
 
   // sidebar
   const [sidebarView, setSidebarView] = useState<SidebarView>('changes');
 
-  // git (changes view)
+  // git
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const [gitLoading, setGitLoading] = useState<boolean>(true);
 
-  // sessions view
+  // sessions
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState<boolean>(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
-  // tabs
-  const [activeTabId, setActiveTabId] = useState<string>(CLAUDE_MD_TAB_ID);
+  // tabs (diff only — エディタタブは無し)
+  const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [diffTabs, setDiffTabs] = useState<DiffTab[]>([]);
   const [recentlyClosed, setRecentlyClosed] = useState<DiffTab[]>([]);
   const [sideBySide, setSideBySide] = useState<boolean>(true);
@@ -78,22 +68,76 @@ export function App(): JSX.Element {
   const [terminalVersion, setTerminalVersion] = useState<number>(0);
   const [resumeSessionId, setResumeSessionId] = useState<string | null>(null);
 
-  // 自動保存タイマー
-  const autoSaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
   const restartTerminal = useCallback(() => {
     setTerminalExited(false);
     setTerminalStatus('再起動中…');
     setTerminalVersion((v) => v + 1);
   }, []);
 
-  /**
-   * 指定されたルートでプロジェクトを読み直す。初回も切替時も共通で使う。
-   * - CLAUDE.md / git / sessions を並列取得
-   * - タブ・resume 状態をリセット
-   * - ターミナルを新しい cwd で再起動
-   * - recentProjects に追加
-   */
+  // ---------- Claude Code パネル リサイズ ----------
+  const MIN_PANEL = 320;
+  const MAX_PANEL = 900;
+  const resizeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
+  // 設定からの初期幅を CSS 変数に反映
+  useEffect(() => {
+    const w = Math.max(
+      MIN_PANEL,
+      Math.min(MAX_PANEL, settings.claudeCodePanelWidth ?? 460)
+    );
+    document.documentElement.style.setProperty('--claude-code-width', `${w}px`);
+  }, [settings.claudeCodePanelWidth]);
+
+  const handleResizeStart = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const currentWidth = Math.max(
+        MIN_PANEL,
+        Math.min(MAX_PANEL, settings.claudeCodePanelWidth ?? 460)
+      );
+      resizeDragRef.current = {
+        startX: e.clientX,
+        startWidth: currentWidth
+      };
+      document.body.classList.add('is-resizing');
+      const handleEl = e.currentTarget;
+      handleEl.classList.add('is-dragging');
+
+      let latestWidth = currentWidth;
+
+      const onMove = (ev: MouseEvent): void => {
+        const drag = resizeDragRef.current;
+        if (!drag) return;
+        const dx = drag.startX - ev.clientX; // 左へドラッグ = width 増える
+        const next = Math.max(
+          MIN_PANEL,
+          Math.min(MAX_PANEL, drag.startWidth + dx)
+        );
+        latestWidth = next;
+        // ドラッグ中は CSS 変数を直接書き換え（React 再レンダリング回避）
+        document.documentElement.style.setProperty(
+          '--claude-code-width',
+          `${next}px`
+        );
+      };
+
+      const onUp = (): void => {
+        resizeDragRef.current = null;
+        document.body.classList.remove('is-resizing');
+        handleEl.classList.remove('is-dragging');
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        // 確定値を設定に保存
+        void updateSettings({ claudeCodePanelWidth: latestWidth });
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    },
+    [settings.claudeCodePanelWidth, updateSettings]
+  );
+
+  /** 指定ルートでプロジェクトを読み込み直す */
   const loadProject = useCallback(
     async (root: string, options: { addToRecent?: boolean } = { addToRecent: true }) => {
       setProjectRoot(root);
@@ -101,35 +145,24 @@ export function App(): JSX.Element {
       setGitLoading(true);
 
       try {
-        const [md, gs, sess] = await Promise.all([
-          window.api.claudeMd.find(root),
+        const [gs, sess] = await Promise.all([
           window.api.git.status(root),
           window.api.sessions.list(root)
         ]);
 
-        setClaudeMdPath(md.path);
-        setClaudeMdExists(md.exists);
-        const initial = md.content ?? '';
-        setContent(initial);
-        setSavedContent(initial);
         setGitStatus(gs);
         setSessions(sess);
         // タブ・セッション状態をリセット
         setDiffTabs([]);
         setRecentlyClosed([]);
-        setActiveTabId(CLAUDE_MD_TAB_ID);
+        setActiveTabId(null);
         setResumeSessionId(null);
         setActiveSessionId(null);
         // ターミナル再起動
         setTerminalExited(false);
         setTerminalStatus('起動中…');
         setTerminalVersion((v) => v + 1);
-        setStatus(
-          md.exists
-            ? `プロジェクトを開きました: ${root}`
-            : 'CLAUDE.md がありません — Claude Code に作成依頼できます'
-        );
-        // 最近のプロジェクトに追加
+        setStatus(`${root.split(/[\\/]/).pop()}`);
         if (options.addToRecent !== false) {
           const rp = settings.recentProjects ?? [];
           const next = [root, ...rp.filter((p) => p !== root)].slice(0, 10);
@@ -144,34 +177,23 @@ export function App(): JSX.Element {
     [settings.recentProjects, updateSettings]
   );
 
-  // 初回ロード: 起動引数やcwdからプロジェクトを決定
+  // 初回ロード
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const root = await window.api.app.getProjectRoot();
         if (cancelled) return;
-        // 初回は loadProject を使わず直接読み込み（初期化時の state 依存ループを避ける）
         setProjectRoot(root);
-        const [md, gs, sess] = await Promise.all([
-          window.api.claudeMd.find(root),
+        const [gs, sess] = await Promise.all([
           window.api.git.status(root),
           window.api.sessions.list(root)
         ]);
         if (cancelled) return;
-        setClaudeMdPath(md.path);
-        setClaudeMdExists(md.exists);
-        const initial = md.content ?? '';
-        setContent(initial);
-        setSavedContent(initial);
         setGitStatus(gs);
         setGitLoading(false);
         setSessions(sess);
-        setStatus(
-          md.exists
-            ? '読み込み完了'
-            : 'CLAUDE.md がありません — Claude Code に作成依頼できます'
-        );
+        setStatus(root.split(/[\\/]/).pop() ?? root);
       } catch (err) {
         setStatus(`初期化エラー: ${String(err)}`);
         setGitLoading(false);
@@ -182,142 +204,15 @@ export function App(): JSX.Element {
     };
   }, []);
 
-  const dirty = content !== savedContent;
-
-  // タイトルバーに反映
+  // タイトルバー
   useEffect(() => {
-    const label = claudeMdExists ? 'CLAUDE.md' : 'CLAUDE.md (新規)';
-    const dirtyMark = dirty ? ' ●' : '';
-    const title = `claude-editor — ${label}${dirtyMark}`;
-    window.api.app.setWindowTitle(title).catch(() => undefined);
-  }, [dirty, claudeMdExists]);
-
-  // ---------- CLAUDE.md 保存 ----------
-
-  const handleSave = useCallback(async () => {
-    if (!claudeMdPath) return;
-    setSaving(true);
-    setStatus('保存中…');
-    try {
-      const res = await window.api.claudeMd.save(claudeMdPath, content);
-      if (res.ok) {
-        setSavedContent(content);
-        setClaudeMdExists(true);
-        setStatus(`保存しました (${new Date().toLocaleTimeString()})`);
-        setSavePulse(true);
-        setTimeout(() => setSavePulse(false), 600);
-      } else {
-        setStatus(`保存失敗: ${res.error ?? '不明なエラー'}`);
-        showToast(`保存失敗: ${res.error ?? ''}`, { tone: 'error' });
-      }
-    } finally {
-      setSaving(false);
-    }
-  }, [claudeMdPath, content, showToast]);
-
-  // 自動保存
-  useEffect(() => {
-    if (autoSaveTimerRef.current) {
-      clearInterval(autoSaveTimerRef.current);
-      autoSaveTimerRef.current = null;
-    }
-    if (settings.autoSave && claudeMdPath) {
-      autoSaveTimerRef.current = setInterval(() => {
-        setSavedContent((savedContentCurrent) => {
-          setContent((contentCurrent) => {
-            if (contentCurrent !== savedContentCurrent) {
-              window.api.claudeMd
-                .save(claudeMdPath, contentCurrent)
-                .then((res) => {
-                  if (res.ok) {
-                    setSavedContent(contentCurrent);
-                    setStatus(`自動保存 (${new Date().toLocaleTimeString()})`);
-                  }
-                })
-                .catch(() => undefined);
-            }
-            return contentCurrent;
-          });
-          return savedContentCurrent;
-        });
-      }, settings.autoSaveIntervalMs);
-    }
-    return () => {
-      if (autoSaveTimerRef.current) clearInterval(autoSaveTimerRef.current);
-    };
-  }, [settings.autoSave, settings.autoSaveIntervalMs, claudeMdPath]);
-
-  // ---------- テンプレート挿入（読み取り限定だが念のため残す） ----------
-
-  const handleInsertTemplate = useCallback(() => {
-    const before = content;
-    const name = projectRoot.split(/[\\/]/).pop() || 'my-project';
-    setContent(claudeMdTemplate(name));
-    setStatus('テンプレートを挿入しました（まだ保存されていません）');
-    showToast('テンプレートを挿入しました', {
-      action: {
-        label: '元に戻す',
-        onClick: () => {
-          setContent(before);
-          setStatus('テンプレート挿入を取り消しました');
-        }
-      },
-      duration: 6000
-    });
-  }, [projectRoot, content, showToast]);
+    const name = projectRoot.split(/[\\/]/).pop() || 'claude-editor';
+    window.api.app.setWindowTitle(`claude-editor — ${name}`).catch(() => undefined);
+  }, [projectRoot]);
 
   const handleRestart = useCallback(async () => {
-    if (dirty && !window.confirm('未保存の変更があります。保存せずに再起動しますか？')) {
-      return;
-    }
     await window.api.app.restart();
-  }, [dirty]);
-
-  // ---------- プロジェクトメニュー操作 ----------
-
-  const handleNewProject = useCallback(async () => {
-    const folder = await window.api.dialog.openFolder('新規プロジェクト: 空フォルダを選択/作成');
-    if (!folder) return;
-    const empty = await window.api.dialog.isFolderEmpty(folder);
-    if (!empty) {
-      showToast(
-        `フォルダが空ではありません。既存プロジェクトとして開きます`,
-        { tone: 'warning' }
-      );
-    } else {
-      showToast(`新規プロジェクトを作成: ${folder}`, { tone: 'success' });
-    }
-    await loadProject(folder);
-  }, [loadProject, showToast]);
-
-  const handleOpenFolder = useCallback(async () => {
-    const folder = await window.api.dialog.openFolder('既存プロジェクトを開く');
-    if (!folder) return;
-    await loadProject(folder);
-  }, [loadProject]);
-
-  const handleOpenFile = useCallback(async () => {
-    const file = await window.api.dialog.openFile('ファイルを開く');
-    if (!file) return;
-    // ファイルの親ディレクトリをプロジェクトとして開く
-    const parent = file.replace(/[\\/][^\\/]+$/, '');
-    await loadProject(parent);
-    showToast(`${file} を開きました。親フォルダをプロジェクトとして読み込んでいます`, {
-      tone: 'info'
-    });
-  }, [loadProject, showToast]);
-
-  const handleOpenRecent = useCallback(
-    async (path: string) => {
-      await loadProject(path);
-    },
-    [loadProject]
-  );
-
-  const handleClearRecent = useCallback(() => {
-    void updateSettings({ recentProjects: [] });
-    showToast('最近のプロジェクト履歴をクリアしました', { tone: 'info' });
-  }, [updateSettings, showToast]);
+  }, []);
 
   // ---------- データ更新 ----------
 
@@ -343,11 +238,8 @@ export function App(): JSX.Element {
     }
   }, [projectRoot]);
 
-  // 履歴ビューに切り替わったら最新を取得
   useEffect(() => {
-    if (sidebarView === 'sessions') {
-      void refreshSessions();
-    }
+    if (sidebarView === 'sessions') void refreshSessions();
   }, [sidebarView, refreshSessions]);
 
   const openDiffTab = useCallback(
@@ -400,7 +292,7 @@ export function App(): JSX.Element {
       setResumeSessionId(session.id);
       setActiveSessionId(session.id);
       setTerminalStatus(`セッション ${session.id.slice(0, 8)} に復帰中…`);
-      showToast(`セッション ${session.title.slice(0, 40)} に復帰`, { tone: 'info' });
+      showToast(`セッションに復帰: ${session.title.slice(0, 40)}`, { tone: 'info' });
       setTerminalVersion((v) => v + 1);
       setTerminalExited(false);
     },
@@ -411,7 +303,6 @@ export function App(): JSX.Element {
 
   const closeTab = useCallback(
     (id: string) => {
-      if (id === CLAUDE_MD_TAB_ID) return;
       setDiffTabs((prev) => {
         const target = prev.find((t) => t.id === id);
         if (!target || target.pinned) return prev;
@@ -420,8 +311,7 @@ export function App(): JSX.Element {
         );
         const next = prev.filter((t) => t.id !== id);
         if (activeTabId === id) {
-          const fallback = next.length > 0 ? next[next.length - 1].id : CLAUDE_MD_TAB_ID;
-          setActiveTabId(fallback);
+          setActiveTabId(next.length > 0 ? next[next.length - 1].id : null);
         }
         return next;
       });
@@ -447,14 +337,54 @@ export function App(): JSX.Element {
 
   const cycleTab = useCallback(
     (direction: 1 | -1) => {
-      const ids = [CLAUDE_MD_TAB_ID, ...diffTabs.map((t) => t.id)];
-      const idx = ids.indexOf(activeTabId);
-      if (idx < 0) return;
-      const next = (idx + direction + ids.length) % ids.length;
+      if (diffTabs.length === 0) return;
+      const ids = diffTabs.map((t) => t.id);
+      const idx = activeTabId ? ids.indexOf(activeTabId) : -1;
+      const next = ((idx < 0 ? 0 : idx) + direction + ids.length) % ids.length;
       setActiveTabId(ids[next]);
     },
     [activeTabId, diffTabs]
   );
+
+  // ---------- プロジェクトメニュー操作 ----------
+
+  const handleNewProject = useCallback(async () => {
+    const folder = await window.api.dialog.openFolder('新規プロジェクト: 空フォルダを選択/作成');
+    if (!folder) return;
+    const empty = await window.api.dialog.isFolderEmpty(folder);
+    if (!empty) {
+      showToast('フォルダが空ではありません。既存として開きます', { tone: 'warning' });
+    } else {
+      showToast('新規プロジェクトを作成', { tone: 'success' });
+    }
+    await loadProject(folder);
+  }, [loadProject, showToast]);
+
+  const handleOpenFolder = useCallback(async () => {
+    const folder = await window.api.dialog.openFolder('既存プロジェクトを開く');
+    if (!folder) return;
+    await loadProject(folder);
+  }, [loadProject]);
+
+  const handleOpenFile = useCallback(async () => {
+    const file = await window.api.dialog.openFile('ファイルを開く');
+    if (!file) return;
+    const parent = file.replace(/[\\/][^\\/]+$/, '');
+    await loadProject(parent);
+    showToast(`${file} の親フォルダをプロジェクトとして読み込みました`, { tone: 'info' });
+  }, [loadProject, showToast]);
+
+  const handleOpenRecent = useCallback(
+    async (path: string) => {
+      await loadProject(path);
+    },
+    [loadProject]
+  );
+
+  const handleClearRecent = useCallback(() => {
+    void updateSettings({ recentProjects: [] });
+    showToast('最近のプロジェクト履歴をクリアしました', { tone: 'info' });
+  }, [updateSettings, showToast]);
 
   // ---------- コマンドパレット ----------
 
@@ -478,27 +408,13 @@ export function App(): JSX.Element {
         category: 'プロジェクト',
         run: () => void handleOpenFile()
       },
-      ...((settings.recentProjects ?? []).slice(0, 5).map<Command>((p) => ({
+      ...(settings.recentProjects ?? []).slice(0, 5).map<Command>((p) => ({
         id: `project.recent.${p}`,
         title: `最近: ${p.split(/[\\/]/).pop()}`,
         subtitle: p,
         category: 'プロジェクト',
         run: () => void handleOpenRecent(p)
-      }))),
-      {
-        id: 'file.save',
-        title: 'CLAUDE.md を保存',
-        subtitle: 'Ctrl+S',
-        category: 'ファイル',
-        when: () => dirty && !!claudeMdPath,
-        run: () => void handleSave()
-      },
-      {
-        id: 'file.insertTemplate',
-        title: 'テンプレートを挿入',
-        category: 'ファイル',
-        run: () => handleInsertTemplate()
-      },
+      })),
       {
         id: 'view.sidebar.changes',
         title: 'サイドバー: 変更',
@@ -512,17 +428,11 @@ export function App(): JSX.Element {
         run: () => setSidebarView('sessions')
       },
       {
-        id: 'view.claudeMd',
-        title: 'CLAUDE.md タブへ',
-        subtitle: 'Ctrl+1',
-        category: 'ビュー',
-        run: () => setActiveTabId(CLAUDE_MD_TAB_ID)
-      },
-      {
         id: 'view.nextTab',
         title: '次のタブへ',
         subtitle: 'Ctrl+Tab',
         category: 'ビュー',
+        when: () => diffTabs.length > 0,
         run: () => cycleTab(1)
       },
       {
@@ -530,6 +440,7 @@ export function App(): JSX.Element {
         title: '前のタブへ',
         subtitle: 'Ctrl+Shift+Tab',
         category: 'ビュー',
+        when: () => diffTabs.length > 0,
         run: () => cycleTab(-1)
       },
       {
@@ -537,8 +448,8 @@ export function App(): JSX.Element {
         title: 'アクティブなタブを閉じる',
         subtitle: 'Ctrl+W',
         category: 'タブ',
-        when: () => activeTabId.startsWith('diff:'),
-        run: () => closeTab(activeTabId)
+        when: () => !!activeTabId,
+        run: () => activeTabId && closeTab(activeTabId)
       },
       {
         id: 'tab.reopen',
@@ -552,8 +463,8 @@ export function App(): JSX.Element {
         id: 'tab.togglePin',
         title: 'アクティブなタブをピン留め/解除',
         category: 'タブ',
-        when: () => activeTabId.startsWith('diff:'),
-        run: () => togglePin(activeTabId)
+        when: () => !!activeTabId,
+        run: () => activeTabId && togglePin(activeTabId)
       },
       {
         id: 'git.refresh',
@@ -591,12 +502,6 @@ export function App(): JSX.Element {
         run: () => setSettingsOpen(true)
       },
       {
-        id: 'settings.toggleAutoSave',
-        title: `自動保存を${settings.autoSave ? '無効' : '有効'}にする`,
-        category: '設定',
-        run: () => void updateSettings({ autoSave: !settings.autoSave })
-      },
-      {
         id: 'settings.cycleDensity',
         title: '情報密度を切り替え',
         subtitle: `現在: ${settings.density}`,
@@ -623,10 +528,10 @@ export function App(): JSX.Element {
     ];
     return list;
   }, [
-    dirty,
-    claudeMdPath,
-    handleSave,
-    handleInsertTemplate,
+    handleNewProject,
+    handleOpenFolder,
+    handleOpenFile,
+    handleOpenRecent,
     cycleTab,
     activeTabId,
     closeTab,
@@ -636,19 +541,15 @@ export function App(): JSX.Element {
     refreshGit,
     refreshSessions,
     settings.theme,
-    settings.autoSave,
     settings.density,
     settings.recentProjects,
     updateSettings,
     handleRestart,
     restartTerminal,
-    handleNewProject,
-    handleOpenFolder,
-    handleOpenFile,
-    handleOpenRecent
+    diffTabs.length
   ]);
 
-  // ---------- グローバルキーボードショートカット ----------
+  // ---------- グローバルショートカット ----------
 
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
@@ -671,13 +572,6 @@ export function App(): JSX.Element {
         setSettingsOpen(true);
         return;
       }
-      if (e.key === 's' || e.key === 'S') {
-        if (activeTabId === CLAUDE_MD_TAB_ID) {
-          e.preventDefault();
-          void handleSave();
-        }
-        return;
-      }
       if (e.key === 'Tab') {
         e.preventDefault();
         e.stopPropagation();
@@ -685,35 +579,23 @@ export function App(): JSX.Element {
         return;
       }
       if (e.key === 'w' || e.key === 'W') {
-        e.preventDefault();
-        e.stopPropagation();
-        closeTab(activeTabId);
+        if (activeTabId) {
+          e.preventDefault();
+          e.stopPropagation();
+          closeTab(activeTabId);
+        }
         return;
       }
       if (e.shiftKey && (e.key === 'T' || e.key === 't')) {
         e.preventDefault();
         reopenLastClosed();
-        return;
-      }
-      if (e.key === '1') {
-        e.preventDefault();
-        setActiveTabId(CLAUDE_MD_TAB_ID);
-        return;
       }
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [
-    paletteOpen,
-    settingsOpen,
-    activeTabId,
-    handleSave,
-    cycleTab,
-    closeTab,
-    reopenLastClosed
-  ]);
+  }, [paletteOpen, settingsOpen, activeTabId, cycleTab, closeTab, reopenLastClosed]);
 
-  // ---------- 起動引数の合成 (resume が指定されていれば --resume <id> を追加) ----------
+  // ---------- 起動引数合成 ----------
 
   const effectiveTerminalArgs = useMemo(() => {
     const base = parseShellArgs(settings.claudeArgs || '');
@@ -723,28 +605,17 @@ export function App(): JSX.Element {
 
   // ---------- タブリスト ----------
 
-  const tabs: TabItem[] = [
-    {
-      id: CLAUDE_MD_TAB_ID,
-      title: claudeMdExists ? 'CLAUDE.md' : 'CLAUDE.md (新規)',
-      dirty,
-      closable: false
-    },
-    ...diffTabs.map((t) => ({
-      id: t.id,
-      title: t.relPath.split('/').pop() ?? t.relPath,
-      closable: true as const,
-      pinned: t.pinned
-    }))
-  ];
+  const tabs: TabItem[] = diffTabs.map((t) => ({
+    id: t.id,
+    title: t.relPath.split('/').pop() ?? t.relPath,
+    closable: true as const,
+    pinned: t.pinned
+  }));
 
   const activeDiffTab = diffTabs.find((t) => t.id === activeTabId) ?? null;
   const activeDiffPath = activeDiffTab?.relPath ?? null;
 
-  const toolbarFilePath =
-    activeTabId === CLAUDE_MD_TAB_ID
-      ? claudeMdPath
-      : (activeDiffTab?.relPath ?? null);
+  const projectName = projectRoot.split(/[\\/]/).pop() || 'no project';
 
   return (
     <div className="layout">
@@ -764,12 +635,7 @@ export function App(): JSX.Element {
       />
       <main className="main">
         <Toolbar
-          filePath={toolbarFilePath}
-          dirty={dirty}
-          saving={saving}
-          savePulse={savePulse}
-          onSave={handleSave}
-          onInsertTemplate={handleInsertTemplate}
+          projectRoot={projectRoot}
           onRestart={handleRestart}
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenPalette={() => setPaletteOpen(true)}
@@ -781,27 +647,17 @@ export function App(): JSX.Element {
           onOpenRecent={handleOpenRecent}
           onClearRecent={handleClearRecent}
         />
-        <TabBar
-          tabs={tabs}
-          activeId={activeTabId}
-          onSelect={setActiveTabId}
-          onClose={closeTab}
-          onTogglePin={togglePin}
-        />
+        {tabs.length > 0 && (
+          <TabBar
+            tabs={tabs}
+            activeId={activeTabId ?? ''}
+            onSelect={setActiveTabId}
+            onClose={closeTab}
+            onTogglePin={togglePin}
+          />
+        )}
         <div className="content-area">
-          <div
-            className="pane"
-            style={{ display: activeTabId === CLAUDE_MD_TAB_ID ? 'flex' : 'none' }}
-          >
-            <ClaudeMdEditor
-              value={content}
-              originalValue={savedContent}
-              onChange={setContent}
-              onSaveShortcut={handleSave}
-            />
-          </div>
-
-          {activeDiffTab && activeTabId === activeDiffTab.id && (
+          {activeDiffTab ? (
             <div className="pane">
               <DiffView
                 result={activeDiffTab.result}
@@ -810,10 +666,21 @@ export function App(): JSX.Element {
                 onToggleSideBySide={() => setSideBySide((v) => !v)}
               />
             </div>
+          ) : (
+            <div className="pane">
+              <WelcomePane projectName={projectName} />
+            </div>
           )}
         </div>
       </main>
 
+      <div
+        className="resize-handle"
+        onMouseDown={handleResizeStart}
+        title="ドラッグで Claude Code パネルの幅を調整"
+        role="separator"
+        aria-orientation="vertical"
+      />
       <aside className="claude-code-panel">
         <header className="claude-code-panel__header">
           <div className="claude-code-panel__title-wrap">

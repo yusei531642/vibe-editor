@@ -1,18 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   AppSettings,
-  ClaudeMdFile,
   GitDiffResult,
   GitStatus,
-  SaveResult,
   SessionInfo,
-  SkillInfo,
   TerminalCreateOptions,
   TerminalCreateResult,
   TerminalExitInfo
 } from '../types/shared';
 
-// Renderer に公開するAPI。追加する際は src/types/ipc.d.ts の型も更新すること。
 const api = {
   ping: (): Promise<string> => ipcRenderer.invoke('ping'),
 
@@ -23,16 +19,11 @@ const api = {
       ipcRenderer.invoke('app:setWindowTitle', title)
   },
 
-  claudeMd: {
-    find: (projectRoot: string): Promise<ClaudeMdFile> =>
-      ipcRenderer.invoke('claude-md:find', projectRoot),
-    save: (filePath: string, content: string): Promise<SaveResult> =>
-      ipcRenderer.invoke('claude-md:save', filePath, content)
-  },
-
-  skills: {
-    list: (projectRoot: string): Promise<SkillInfo[]> =>
-      ipcRenderer.invoke('skills:list', projectRoot)
+  git: {
+    status: (projectRoot: string): Promise<GitStatus> =>
+      ipcRenderer.invoke('git:status', projectRoot),
+    diff: (projectRoot: string, relPath: string): Promise<GitDiffResult> =>
+      ipcRenderer.invoke('git:diff', projectRoot, relPath)
   },
 
   sessions: {
@@ -49,13 +40,6 @@ const api = {
       ipcRenderer.invoke('dialog:isFolderEmpty', folderPath)
   },
 
-  git: {
-    status: (projectRoot: string): Promise<GitStatus> =>
-      ipcRenderer.invoke('git:status', projectRoot),
-    diff: (projectRoot: string, relPath: string): Promise<GitDiffResult> =>
-      ipcRenderer.invoke('git:diff', projectRoot, relPath)
-  },
-
   settings: {
     load: (): Promise<AppSettings> => ipcRenderer.invoke('settings:load'),
     save: (settings: AppSettings): Promise<void> =>
@@ -70,10 +54,12 @@ const api = {
     resize: (id: string, cols: number, rows: number): Promise<void> =>
       ipcRenderer.invoke('terminal:resize', id, cols, rows),
     kill: (id: string): Promise<void> => ipcRenderer.invoke('terminal:kill', id),
+    savePastedImage: (
+      base64: string,
+      mimeType: string
+    ): Promise<{ ok: boolean; path?: string; error?: string }> =>
+      ipcRenderer.invoke('terminal:savePastedImage', base64, mimeType),
 
-    /**
-     * pty からのデータを購読する。返り値の関数を呼ぶと購読解除。
-     */
     onData: (id: string, cb: (data: string) => void): (() => void) => {
       const ch = `terminal:data:${id}`;
       const listener = (_e: Electron.IpcRendererEvent, data: string): void => cb(data);

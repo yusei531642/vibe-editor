@@ -1,5 +1,8 @@
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { randomUUID } from 'crypto';
+import { promises as fs } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import type { IPty } from 'node-pty';
 import type {
   TerminalCreateOptions,
@@ -141,6 +144,68 @@ export function registerTerminalIpc(): void {
       sessions.delete(id);
     }
   });
+
+  // 画像ペースト用: base64 を一時ファイルとして書き出し、絶対パスを返す
+  ipcMain.handle(
+    'terminal:savePastedImage',
+    async (
+      _e,
+      base64: string,
+      mimeType: string
+    ): Promise<{ ok: boolean; path?: string; error?: string }> => {
+      try {
+        const ext =
+          mimeType === 'image/png'
+            ? 'png'
+            : mimeType === 'image/jpeg' || mimeType === 'image/jpg'
+              ? 'jpg'
+              : mimeType === 'image/gif'
+                ? 'gif'
+                : mimeType === 'image/webp'
+                  ? 'webp'
+                  : mimeType === 'image/bmp'
+                    ? 'bmp'
+                    : 'png';
+
+        const dir = join(tmpdir(), 'claude-editor-pastes');
+        await fs.mkdir(dir, { recursive: true });
+
+        // 24時間より古いファイルは自動掃除
+        try {
+          const now = Date.now();
+          const TTL = 24 * 60 * 60 * 1000;
+          const entries = await fs.readdir(dir);
+          await Promise.all(
+            entries.map(async (name) => {
+              try {
+                const p = join(dir, name);
+                const s = await fs.stat(p);
+                if (now - s.mtimeMs > TTL) await fs.unlink(p);
+              } catch {
+                /* noop */
+              }
+            })
+          );
+        } catch {
+          /* noop */
+        }
+
+        // ファイル名: paste-YYYYMMDD-HHMMSS-<rand>.ext
+        const d = new Date();
+        const pad = (n: number): string => n.toString().padStart(2, '0');
+        const ts = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+        const rand = Math.random().toString(36).slice(2, 6);
+        const filename = `paste-${ts}-${rand}.${ext}`;
+        const filePath = join(dir, filename);
+
+        const buffer = Buffer.from(base64, 'base64');
+        await fs.writeFile(filePath, buffer);
+        return { ok: true, path: filePath };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      }
+    }
+  );
 
   // アプリ終了時に残存ptyを全て終了
   app.on('will-quit', () => {

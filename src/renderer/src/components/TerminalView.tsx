@@ -136,6 +136,73 @@ export function TerminalView({
       }
     });
 
+    // ---------- 画像ペーストフック ----------
+    // クリップボードに画像があれば一時ファイルに書き出して、パスを pty に流し込む
+    const handlePaste = (e: ClipboardEvent): void => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+
+      // 画像アイテムを探す
+      let imageItem: DataTransferItem | null = null;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.type.startsWith('image/')) {
+          imageItem = item;
+          break;
+        }
+      }
+      if (!imageItem) {
+        // 画像なし → テキストペーストは xterm にそのまま任せる
+        return;
+      }
+
+      // 画像あり: 既定のペースト（生のバイナリを textarea に投げ込み）を止める
+      e.preventDefault();
+      e.stopPropagation();
+
+      const blob = imageItem.getAsFile();
+      if (!blob) return;
+      const mime = imageItem.type;
+
+      (async () => {
+        try {
+          const buffer = await blob.arrayBuffer();
+          // ArrayBuffer → base64
+          let binary = '';
+          const bytes = new Uint8Array(buffer);
+          const chunkSize = 0x8000;
+          for (let i = 0; i < bytes.length; i += chunkSize) {
+            binary += String.fromCharCode.apply(
+              null,
+              Array.from(bytes.subarray(i, i + chunkSize))
+            );
+          }
+          const base64 = btoa(binary);
+
+          const res = await window.api.terminal.savePastedImage(base64, mime);
+          if (!res.ok || !res.path) {
+            term.writeln(`\r\n\x1b[31m[画像保存失敗] ${res.error ?? '不明なエラー'}\x1b[0m`);
+            return;
+          }
+
+          // 空白を含むパスは " で囲む。末尾に空白を付けて次の入力と区切る
+          const p = res.path;
+          const needQuote = /\s/.test(p);
+          const inserted = (needQuote ? `"${p}"` : p) + ' ';
+
+          if (ptyIdRef.current) {
+            await window.api.terminal.write(ptyIdRef.current, inserted);
+          }
+        } catch (err) {
+          term.writeln(`\r\n\x1b[31m[ペースト例外] ${String(err)}\x1b[0m`);
+        }
+      })();
+    };
+
+    // capture: true で xterm 内部の textarea より先にハンドリング
+    const pasteTarget = term.element ?? container;
+    pasteTarget.addEventListener('paste', handlePaste, true);
+
     // コンテナサイズ変化に追従
     const ro = new ResizeObserver(() => {
       if (!visible) return;
@@ -160,6 +227,11 @@ export function TerminalView({
       dataSub.dispose();
       offData?.();
       offExit?.();
+      try {
+        pasteTarget.removeEventListener('paste', handlePaste, true);
+      } catch {
+        /* noop */
+      }
       if (ptyIdRef.current) {
         void window.api.terminal.kill(ptyIdRef.current);
         ptyIdRef.current = null;

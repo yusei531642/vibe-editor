@@ -1,7 +1,5 @@
-import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron';
 import { join } from 'path';
-import { registerClaudeMdIpc } from './ipc/claude-md';
-import { registerSkillsIpc } from './ipc/skills';
 import { registerAppIpc } from './ipc/app';
 import { registerGitIpc } from './ipc/git';
 import { registerTerminalIpc } from './ipc/terminal';
@@ -11,6 +9,10 @@ import { registerDialogIpc } from './ipc/dialog';
 
 const isDev = !app.isPackaged;
 
+// デフォルトのアプリケーションメニュー（File/Edit/View/Window/Help）を完全に削除。
+// vibe coding UI にはネイティブメニューバーは不要。
+Menu.setApplicationMenu(null);
+
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
     width: 1440,
@@ -18,7 +20,7 @@ function createWindow(): void {
     minWidth: 1100,
     minHeight: 640,
     show: false,
-    autoHideMenuBar: false,
+    autoHideMenuBar: true,
     title: 'claude-editor',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -35,13 +37,11 @@ function createWindow(): void {
     }
   });
 
-  // 外部リンクは既定ブラウザで開く
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url);
     return { action: 'deny' };
   });
 
-  // dev: Vite dev server、本番: ビルド済みHTMLをロード
   const rendererUrl = process.env['ELECTRON_RENDERER_URL'];
   if (isDev && rendererUrl) {
     mainWindow.loadURL(rendererUrl);
@@ -53,9 +53,6 @@ function createWindow(): void {
 // preload 疎通確認用のping
 ipcMain.handle('ping', () => 'pong');
 
-// Phase 2/3/4 のIPCハンドラ群を登録
-registerClaudeMdIpc();
-registerSkillsIpc();
 registerAppIpc();
 registerGitIpc();
 registerTerminalIpc();
@@ -71,7 +68,6 @@ app.whenReady().then(() => {
   });
 });
 
-// 外部サイトへのナビゲーションをブロック
 app.on('web-contents-created', (_event, contents) => {
   contents.on('will-navigate', (event, navigationUrl) => {
     const rendererUrl = process.env['ELECTRON_RENDERER_URL'];

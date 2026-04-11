@@ -3,6 +3,17 @@ out/
 dist/
 release/
 tmp/
+.playwright-mcp/
+# icon 中間生成物（icon.svg / icon.ico / icon.png / generate-icons.mjs は追跡）
+build/icon-master.png
+build/icon-16.png
+build/icon-24.png
+build/icon-32.png
+build/icon-48.png
+build/icon-64.png
+build/icon-128.png
+build/icon-256.png
+build/render.html
 *.log
 npm-debug.log*
 .vite/

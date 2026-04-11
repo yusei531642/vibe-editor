@@ -1,0 +1,20 @@
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Design A: Serif "C" (typographic / claude.ai style) -->
+  <defs>
+    <linearGradient id="bgA" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#323029"/>
+      <stop offset="1" stop-color="#262523"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="200" fill="url(#bgA)"/>
+  <text
+    x="512"
+    y="720"
+    font-family="'Source Serif Pro', 'Source Serif 4', Georgia, 'Times New Roman', serif"
+    font-size="760"
+    font-weight="400"
+    fill="#D97757"
+    text-anchor="middle"
+    letter-spacing="-20"
+  >C</text>
+</svg>

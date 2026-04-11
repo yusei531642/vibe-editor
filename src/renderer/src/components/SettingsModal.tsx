@@ -265,34 +265,6 @@ export function SettingsModal({
             </div>
           </section>
 
-          {/* 保存動作 */}
-          <section className="modal__section">
-            <h3>保存動作</h3>
-            <label className="modal__checkbox">
-              <input
-                type="checkbox"
-                checked={draft.autoSave}
-                onChange={(e) => update('autoSave', e.target.checked)}
-              />
-              <span>CLAUDE.md の自動保存を有効にする</span>
-            </label>
-            {draft.autoSave && (
-              <label className="modal__label modal__label--full">
-                <span>自動保存の間隔（秒）</span>
-                <input
-                  type="number"
-                  min={5}
-                  max={600}
-                  step={5}
-                  value={Math.round(draft.autoSaveIntervalMs / 1000)}
-                  onChange={(e) =>
-                    update('autoSaveIntervalMs', (Number(e.target.value) || 30) * 1000)
-                  }
-                />
-              </label>
-            )}
-          </section>
-
           {/* Claude Code 起動オプション */}
           <section className="modal__section">
             <h3>Claude Code 起動オプション</h3>
