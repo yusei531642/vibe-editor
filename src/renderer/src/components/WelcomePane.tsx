@@ -9,7 +9,7 @@ export function WelcomePane({ projectName }: WelcomePaneProps): JSX.Element {
   return (
     <div className="welcome">
       <div className="welcome__inner">
-        <h1 className="welcome__title">claude-editor</h1>
+        <h1 className="welcome__title">vibe-editor</h1>
         <p className="welcome__subtitle">{t('welcome.subtitle')}</p>
         <p className="welcome__project">{projectName}</p>
 

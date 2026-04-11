@@ -21,7 +21,7 @@ function createWindow(): void {
     minHeight: 640,
     show: false,
     autoHideMenuBar: true,
-    title: 'claude-editor',
+    title: 'vibe-editor',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,

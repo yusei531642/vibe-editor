@@ -1,6 +1,6 @@
 {
-  "name": "claude-editor",
-  "version": "0.2.0",
+  "name": "vibe-editor",
+  "version": "0.3.0",
   "private": true,
   "description": "Electronベースの Claude Code 専用エディタ",
   "main": "out/main/index.js",
@@ -17,9 +17,9 @@
     "icons": "node build/generate-icons.mjs"
   },
   "build": {
-    "appId": "com.claude-editor.app",
-    "productName": "claude-editor",
-    "copyright": "Copyright © 2026 claude-editor",
+    "appId": "com.vibe-editor.app",
+    "productName": "vibe-editor",
+    "copyright": "Copyright © 2026 vibe-editor",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -51,7 +51,7 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false,
-      "shortcutName": "claude-editor"
+      "shortcutName": "vibe-editor"
     },
     "mac": {
       "icon": "build/icon.png",

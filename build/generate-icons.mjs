@@ -1,13 +1,16 @@
 // electron-builder 用アイコン生成スクリプト
-// 入力: build/icon-master.png (Playwright で SVG を rasterize 済み、1100x1100)
+// 入力: build/icon.svg (Source of truth)
 // 出力:
-//   build/icon.png      1024x1024 PNG (Linux / electron-builder main)
-//   build/icon.ico      Windows (16/24/32/48/64/128/256 同梱)
-//   build/icon-NN.png   個別サイズ (デバッグ用)
+//   build/icon.png      1024x1024 PNG (macOS / Linux / electron-builder main)
+//   build/icon.ico      Windows マルチサイズ (16/24/32/48/64/128/256)
+//   build/icon-NN.png   個別サイズ (デバッグ用、.gitignore対象)
+//
+// sharp + librsvg が SVG + Georgia フォントを解決できるので、
+// Playwright 等の Chromium ラスタライザは不要。
 
 import sharp from 'sharp';
 import toIco from 'png-to-ico';
-import { readFileSync, writeFileSync } from 'fs';
+import { writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -15,30 +18,29 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = __dirname;
 
 async function main() {
-  const masterPath = join(root, 'icon-master.png');
-  console.log('[icons] reading master:', masterPath);
+  const svgPath = join(root, 'icon.svg');
+  console.log('[icons] reading source:', svgPath);
 
-  // Playwright viewport (1100) から 1024x1024 を抽出（左上基準）
-  const master1024 = await sharp(masterPath)
-    .extract({ left: 0, top: 0, width: 1024, height: 1024 })
-    .png()
-    .toBuffer();
-  writeFileSync(join(root, 'icon.png'), master1024);
+  // 1024x1024 マスター PNG
+  const master = await sharp(svgPath).resize(1024, 1024).png().toBuffer();
+  writeFileSync(join(root, 'icon.png'), master);
+  writeFileSync(join(root, 'icon-master.png'), master);
   console.log('[icons] wrote icon.png (1024x1024)');
 
+  // 各サイズの PNG を sharp で生成
   const sizes = [16, 24, 32, 48, 64, 128, 256];
   const pngPaths = [];
   for (const size of sizes) {
     const p = join(root, `icon-${size}.png`);
-    await sharp(master1024).resize(size, size).png().toFile(p);
+    await sharp(svgPath).resize(size, size).png().toFile(p);
     pngPaths.push(p);
     console.log(`[icons] wrote icon-${size}.png`);
   }
 
-  // ico ファイル生成（16/24/32/48/64/128/256 を統合）
+  // マルチサイズ ICO 生成
   const ico = await toIco(pngPaths);
   writeFileSync(join(root, 'icon.ico'), ico);
-  console.log('[icons] wrote icon.ico (multi-size Windows icon)');
+  console.log('[icons] wrote icon.ico');
 
   console.log('[icons] done');
 }

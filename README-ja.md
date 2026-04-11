@@ -1,12 +1,12 @@
-# claude-editor
+# vibe-editor
 
 [English](README.md) · [日本語](README-ja.md)
 
-![claude-editor](docs/screenshot.png)
+![vibe-editor](docs/screenshot.png)
 
 > [Claude Code](https://claude.com/code) 専用のデスクトップシェル — **温かく、集中できる UI で vibe coding を。**
 
-claude-editor は Electron ベースのデスクトップアプリで、**「コードを書くのは Claude、人間はレビューする」** という一つの思想で設計されています。テキストエディタはありません。メインエリアは diff レビュー専用、右側は常時起動している Claude Code ターミナル、左側は変更ファイルと過去セッションの一覧です。
+vibe-editor は Electron ベースのデスクトップアプリで、**「コードを書くのは Claude、人間はレビューする」** という一つの思想で設計されています。テキストエディタはありません。メインエリアは diff レビュー専用、右側は常時起動している Claude Code ターミナル、左側は変更ファイルと過去セッションの一覧です。
 
 ---
 
@@ -39,8 +39,8 @@ claude-editor は Electron ベースのデスクトップアプリで、**「コ
 ## 開発モードで起動
 
 ```bash
-git clone https://github.com/yusei531642/claude-editor.git
-cd claude-editor
+git clone https://github.com/yusei531642/vibe-editor.git
+cd vibe-editor
 npm install
 npm run dev
 ```
@@ -58,18 +58,18 @@ npm run dist:win         # Windows NSIS インストーラ → release/
 npm run dist             # 現在の OS 向けインストーラ
 ```
 
-Windows ビルドの成果物は `release/claude-editor Setup 0.1.0.exe`（約 100 MB）。展開済みポータブル版は `release/win-unpacked/claude-editor.exe`。
+Windows ビルドの成果物は `release/vibe-editor Setup 0.1.0.exe`（約 100 MB）。展開済みポータブル版は `release/win-unpacked/vibe-editor.exe`。
 
 ### アイコンの再生成
 
-アイコンのソースは `build/icon.svg`（暗い角丸正方形にセリフの "C"）。Windows `.ico` とマスター PNG を再生成するには:
+アイコンのソースは `build/icon.svg`（暗い角丸正方形にセリフの "V"）。
+Windows `.ico` と PNG を再生成するには:
 
-1. `build/` を HTTP で配信 (例: `py -m http.server 8766`)
-2. Chromium 系ブラウザで `http://localhost:8766/render.html` を開き、viewport を 1100×1100 に
-3. スクリーンショットを `build/icon-master.png` に保存
-4. `npm run icons` を実行
+```bash
+npm run icons
+```
 
-（2段階プロセスになっているのは、librsvg がシステムのセリフフォントを確実に解決できないため。Chromium でレンダリングして正しい "C" のタイポグラフィを得ています。）
+`sharp` + `librsvg` で SVG を直接ラスタライズするため、Chromium 等は不要です。
 
 ---
 

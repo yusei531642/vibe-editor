@@ -1,4 +1,4 @@
-# claude-editor
+# vibe-editor
 
 Electronベースの Claude Code 専用エディタ。
 

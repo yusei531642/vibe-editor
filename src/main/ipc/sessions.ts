@@ -5,7 +5,7 @@ import type { SessionInfo } from '../../types/shared';
 
 /**
  * プロジェクト絶対パスを Claude Code のプロジェクト識別ディレクトリ名に変換する。
- * 例: `D:\Claude-editor` → `D--Claude-editor`
+ * 例: `D:\my-project` → `D--my-project`
  * Claude Code は非英数を `-` に置換するルール（観測ベース）。
  */
 function encodeProjectPath(absPath: string): string {

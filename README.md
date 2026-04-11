@@ -1,12 +1,12 @@
-# claude-editor
+# vibe-editor
 
 [English](README.md) · [日本語](README-ja.md)
 
-![claude-editor](docs/screenshot.png)
+![vibe-editor](docs/screenshot.png)
 
 > A minimal desktop companion for [Claude Code](https://claude.com/code) — **vibe coding with a warm, focused UI.**
 
-claude-editor is an Electron-based desktop shell designed around a single idea: **let Claude write the code, and let the human review.** There is no text editor. The main area is for diff review; the right panel is a persistent Claude Code terminal; the left panel shows what changed and past sessions.
+vibe-editor is an Electron-based desktop shell designed around a single idea: **let Claude write the code, and let the human review.** There is no text editor. The main area is for diff review; the right panel is a persistent Claude Code terminal; the left panel shows what changed and past sessions.
 
 ---
 
@@ -39,8 +39,8 @@ claude-editor is an Electron-based desktop shell designed around a single idea: 
 ## Install & run (dev)
 
 ```bash
-git clone https://github.com/<your-user>/claude-editor.git
-cd claude-editor
+git clone https://github.com/<your-user>/vibe-editor.git
+cd vibe-editor
 npm install
 npm run dev
 ```
@@ -58,18 +58,18 @@ npm run dist:win         # Windows NSIS installer → release/
 npm run dist             # Current platform installer (current OS)
 ```
 
-The built Windows installer lands at `release/claude-editor Setup 0.1.0.exe` (~100 MB). A portable unpacked app is also produced at `release/win-unpacked/claude-editor.exe`.
+The built Windows installer lands at `release/vibe-editor Setup 0.3.0.exe` (~100 MB). A portable unpacked app is also produced at `release/win-unpacked/vibe-editor.exe`.
 
 ### Icon regeneration
 
-The app icon source lives at `build/icon.svg`. To regenerate the Windows `.ico` and the master PNG:
+The app icon source lives at `build/icon.svg` (serif "V" on a warm dark square).
+Regenerate the Windows `.ico` and the master PNG with:
 
-1. Start a local HTTP server serving `build/` (e.g. `py -m http.server 8766`)
-2. Open `http://localhost:8766/render.html` in a Chromium-based browser with viewport set to 1100×1100
-3. Save the screenshot to `build/icon-master.png`
-4. Run `npm run icons`
+```bash
+npm run icons
+```
 
-(The two-step process exists because librsvg does not reliably resolve system serif fonts; rendering via Chromium gives correct typography for the serif "C".)
+This uses `sharp` + `librsvg` to rasterize directly from the SVG — no Chromium required.
 
 ---
 

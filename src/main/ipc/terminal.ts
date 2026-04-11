@@ -167,7 +167,7 @@ export function registerTerminalIpc(): void {
                     ? 'bmp'
                     : 'png';
 
-        const dir = join(tmpdir(), 'claude-editor-pastes');
+        const dir = join(tmpdir(), 'vibe-editor-pastes');
         await fs.mkdir(dir, { recursive: true });
 
         // 24時間より古いファイルは自動掃除

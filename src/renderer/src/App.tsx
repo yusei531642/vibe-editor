@@ -244,8 +244,8 @@ export function App(): JSX.Element {
 
   // タイトルバー
   useEffect(() => {
-    const name = projectRoot.split(/[\\/]/).pop() || 'claude-editor';
-    window.api.app.setWindowTitle(`claude-editor — ${name}`).catch(() => undefined);
+    const name = projectRoot.split(/[\\/]/).pop() || 'vibe-editor';
+    window.api.app.setWindowTitle(`vibe-editor — ${name}`).catch(() => undefined);
   }, [projectRoot]);
 
   const handleRestart = useCallback(async () => {
@@ -607,7 +607,7 @@ export function App(): JSX.Element {
       })),
       {
         id: 'app.restart',
-        title: 'claude-editor (アプリ) を再起動',
+        title: 'vibe-editor (アプリ) を再起動',
         category: 'アプリ',
         run: () => void handleRestart()
       }
