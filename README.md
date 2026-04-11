@@ -1,5 +1,7 @@
 # claude-editor
 
+[English](README.md) · [日本語](README-ja.md)
+
 ![claude-editor](docs/screenshot.png)
 
 > A minimal desktop companion for [Claude Code](https://claude.com/code) — **vibe coding with a warm, focused UI.**
