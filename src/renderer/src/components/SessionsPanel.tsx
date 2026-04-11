@@ -1,5 +1,6 @@
 import { RefreshCw } from 'lucide-react';
 import type { SessionInfo } from '../../../types/shared';
+import { useT } from '../lib/i18n';
 
 interface SessionsPanelProps {
   sessions: SessionInfo[];
@@ -35,29 +36,30 @@ export function SessionsPanel({
   onRefresh,
   onResume
 }: SessionsPanelProps): JSX.Element {
+  const t = useT();
   return (
     <div className="sidebar-view">
       <header className="sidebar-view__header">
         <div className="sidebar-view__meta">
-          <span className="git-count">{sessions.length} セッション</span>
+          <span className="git-count">
+            {t('sidebar.sessionCount', { count: sessions.length })}
+          </span>
         </div>
         <button
           type="button"
           className="sidebar__section-btn"
           onClick={onRefresh}
-          title="更新"
-          aria-label="更新"
+          title={t('sidebar.refresh')}
+          aria-label={t('sidebar.refresh')}
         >
           <RefreshCw size={13} strokeWidth={2} />
         </button>
       </header>
 
-      {loading && <p className="sidebar__note">読み込み中…</p>}
+      {loading && <p className="sidebar__note">{t('sidebar.loading')}</p>}
 
       {!loading && sessions.length === 0 && (
-        <p className="sidebar__note sidebar__note--dim">
-          このプロジェクトのセッション履歴はまだありません
-        </p>
+        <p className="sidebar__note sidebar__note--dim">{t('sidebar.noSessions')}</p>
       )}
 
       <ul className="sessions">

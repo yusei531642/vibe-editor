@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  ClaudeCheckResult,
   GitDiffResult,
   GitStatus,
   SessionInfo,
@@ -18,6 +19,7 @@ declare global {
         getProjectRoot(): Promise<string>;
         restart(): Promise<void>;
         setWindowTitle(title: string): Promise<void>;
+        checkClaude(command: string): Promise<ClaudeCheckResult>;
       };
       git: {
         status(projectRoot: string): Promise<GitStatus>;

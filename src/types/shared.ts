@@ -9,7 +9,11 @@ export type ThemeName =
 
 export type Density = 'compact' | 'normal' | 'comfortable';
 
+export type Language = 'ja' | 'en';
+
 export interface AppSettings {
+  /** UI 言語 */
+  language: Language;
   theme: ThemeName;
   uiFontFamily: string;
   uiFontSize: number;
@@ -26,7 +30,14 @@ export interface AppSettings {
   claudeCodePanelWidth: number;
 }
 
+export interface ClaudeCheckResult {
+  ok: boolean;
+  path?: string;
+  error?: string;
+}
+
 export const DEFAULT_SETTINGS: AppSettings = {
+  language: 'ja',
   theme: 'claude-dark',
   uiFontFamily:
     "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', sans-serif",

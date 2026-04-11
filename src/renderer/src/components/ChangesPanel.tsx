@@ -1,11 +1,13 @@
 import { GitBranch, RefreshCw } from 'lucide-react';
 import type { GitStatus, GitFileChange } from '../../../types/shared';
+import { useT } from '../lib/i18n';
 
 interface ChangesPanelProps {
   status: GitStatus | null;
   loading: boolean;
   onRefresh: () => void;
   onOpenDiff: (file: GitFileChange) => void;
+  onFileContextMenu: (e: React.MouseEvent, file: GitFileChange) => void;
   activeDiffPath: string | null;
 }
 
@@ -34,8 +36,10 @@ export function ChangesPanel({
   loading,
   onRefresh,
   onOpenDiff,
+  onFileContextMenu,
   activeDiffPath
 }: ChangesPanelProps): JSX.Element {
+  const t = useT();
   return (
     <div className="sidebar-view">
       <header className="sidebar-view__header">
@@ -47,28 +51,34 @@ export function ChangesPanel({
             </span>
           )}
           {status && status.ok && (
-            <span className="git-count">{status.files.length} 変更</span>
+            <span className="git-count">
+              {t('sidebar.filesChanged', { count: status.files.length })}
+            </span>
           )}
         </div>
         <button
           type="button"
           className="sidebar__section-btn"
           onClick={onRefresh}
-          title="更新"
-          aria-label="更新"
+          title={t('sidebar.refresh')}
+          aria-label={t('sidebar.refresh')}
         >
           <RefreshCw size={13} strokeWidth={2} />
         </button>
       </header>
 
-      {loading && <p className="sidebar__note">読み込み中…</p>}
+      {loading && <p className="sidebar__note">{t('sidebar.loading')}</p>}
 
       {!loading && status && !status.ok && (
-        <p className="sidebar__note sidebar__note--error">{status.error}</p>
+        <p className="sidebar__note sidebar__note--error">
+          {status.error === 'Gitリポジトリではありません'
+            ? t('sidebar.notGitRepo')
+            : status.error}
+        </p>
       )}
 
       {!loading && status && status.ok && status.files.length === 0 && (
-        <p className="sidebar__note sidebar__note--dim">変更なし</p>
+        <p className="sidebar__note sidebar__note--dim">{t('sidebar.noChanges')}</p>
       )}
 
       {!loading && status && status.ok && status.files.length > 0 && (
@@ -81,6 +91,7 @@ export function ChangesPanel({
                   type="button"
                   className={`gitfile ${isActive ? 'is-active' : ''}`}
                   onClick={() => onOpenDiff(f)}
+                  onContextMenu={(e) => onFileContextMenu(e, f)}
                   title={`${f.label}: ${f.path}`}
                 >
                   <span className={`gitfile__badge ${statusBadgeClass(f)}`}>

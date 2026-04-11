@@ -1,9 +1,20 @@
-import { useEffect, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import '@xterm/xterm/css/xterm.css';
 import { useSettings } from '../lib/settings-context';
 import { THEMES } from '../lib/themes';
+
+/**
+ * TerminalView を外から操作するためのハンドル。
+ * 親が ref で握って sendCommand を呼び出すと pty に書き込まれる。
+ */
+export interface TerminalViewHandle {
+  /** 文字列を pty に送る。`submit: true` なら末尾に `\r` を付けて Enter 相当 */
+  sendCommand(text: string, submit?: boolean): void;
+  /** ターミナルへフォーカスを移す */
+  focus(): void;
+}
 
 interface TerminalViewProps {
   cwd: string;
@@ -24,15 +35,11 @@ interface TerminalViewProps {
  * マウント時に一度だけ pty を起動し、アンマウント時に終了する。
  * タブ切替で display:none になっても DOM から外れなければ pty は生存する。
  */
-export function TerminalView({
-  cwd,
-  command,
-  args,
-  visible,
-  onStatus,
-  onActivity,
-  onExit
-}: TerminalViewProps): JSX.Element {
+export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
+  function TerminalView(
+    { cwd, command, args, visible, onStatus, onActivity, onExit },
+    ref
+  ): JSX.Element {
   const { settings } = useSettings();
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -42,6 +49,22 @@ export function TerminalView({
   // コールバックは毎レンダーで新しい関数になるので ref で安定化
   const callbacksRef = useRef({ onStatus, onActivity, onExit });
   callbacksRef.current = { onStatus, onActivity, onExit };
+
+  // 外部から TerminalView を操作するためのハンドル
+  useImperativeHandle(
+    ref,
+    () => ({
+      sendCommand(text: string, submit = true): void {
+        if (!ptyIdRef.current) return;
+        const payload = submit ? text + '\r' : text;
+        void window.api.terminal.write(ptyIdRef.current, payload);
+      },
+      focus(): void {
+        termRef.current?.focus();
+      }
+    }),
+    []
+  );
 
   // pty & terminal 初期化（cwd/command が変わらない限り一度だけ）
   useEffect(() => {
@@ -300,5 +323,7 @@ export function TerminalView({
     return () => clearTimeout(t);
   }, [visible]);
 
-  return <div className="terminal-view" ref={containerRef} />;
-}
+    return <div className="terminal-view" ref={containerRef} />;
+  }
+);
+

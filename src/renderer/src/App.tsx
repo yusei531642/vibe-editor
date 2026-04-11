@@ -11,10 +11,13 @@ import { Sidebar, type SidebarView } from './components/Sidebar';
 import { TabBar, type TabItem } from './components/TabBar';
 import { Toolbar } from './components/Toolbar';
 import { DiffView } from './components/DiffView';
-import { TerminalView } from './components/TerminalView';
+import { TerminalView, type TerminalViewHandle } from './components/TerminalView';
 import { SettingsModal } from './components/SettingsModal';
 import { CommandPalette } from './components/CommandPalette';
 import { WelcomePane } from './components/WelcomePane';
+import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
+import { ClaudeNotFound } from './components/ClaudeNotFound';
+import { useT } from './lib/i18n';
 import { useSettings } from './lib/settings-context';
 import { useToast } from './lib/toast-context';
 import { parseShellArgs } from './lib/parse-args';
@@ -39,6 +42,7 @@ interface DiffTab {
 export function App(): JSX.Element {
   const { settings, update: updateSettings, reset: resetSettings } = useSettings();
   const { showToast } = useToast();
+  const t = useT();
   const [projectRoot, setProjectRoot] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
@@ -63,16 +67,50 @@ export function App(): JSX.Element {
   const [sideBySide, setSideBySide] = useState<boolean>(true);
 
   // Claude Code terminal
-  const [terminalStatus, setTerminalStatus] = useState<string>('起動待ち');
+  const [terminalStatus, setTerminalStatus] = useState<string>('');
   const [terminalExited, setTerminalExited] = useState<boolean>(false);
   const [terminalVersion, setTerminalVersion] = useState<number>(0);
   const [resumeSessionId, setResumeSessionId] = useState<string | null>(null);
+  const terminalRef = useRef<TerminalViewHandle | null>(null);
+
+  // Claude CLI 検査状態
+  const [claudeCheck, setClaudeCheck] = useState<{
+    state: 'checking' | 'ok' | 'missing';
+    error?: string;
+  }>({ state: 'checking' });
+
+  // コンテキストメニュー
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    items: ContextMenuItem[];
+  } | null>(null);
 
   const restartTerminal = useCallback(() => {
     setTerminalExited(false);
-    setTerminalStatus('再起動中…');
+    setTerminalStatus('');
     setTerminalVersion((v) => v + 1);
   }, []);
+
+  // ---------- Claude CLI 検査 ----------
+  const runClaudeCheck = useCallback(async () => {
+    setClaudeCheck({ state: 'checking' });
+    try {
+      const res = await window.api.app.checkClaude(settings.claudeCommand || 'claude');
+      setClaudeCheck(
+        res.ok
+          ? { state: 'ok' }
+          : { state: 'missing', error: res.error }
+      );
+    } catch (err) {
+      setClaudeCheck({ state: 'missing', error: String(err) });
+    }
+  }, [settings.claudeCommand]);
+
+  // 設定の claudeCommand が変わるたびに再検査
+  useEffect(() => {
+    void runClaudeCheck();
+  }, [runClaudeCheck]);
 
   // ---------- Claude Code パネル リサイズ ----------
   const MIN_PANEL = 320;
@@ -283,6 +321,54 @@ export function App(): JSX.Element {
       }
     },
     [projectRoot]
+  );
+
+  // ---------- 差分レビュー依頼 ----------
+
+  /** 指定ファイルの変更を Claude Code にレビュー依頼するプロンプトを生成して ターミナルに送信 */
+  const reviewDiff = useCallback(
+    (file: GitFileChange) => {
+      // プロンプト文言は UI 言語に合わせる（Claude はどちらでも読める）
+      const prompt =
+        settings.language === 'en'
+          ? `Please review the changes in this file and point out any issues or possible improvements: ${file.path}`
+          : `このファイルの変更内容をレビューしてください。問題点や改善の余地があれば指摘してください: ${file.path}`;
+      const term = terminalRef.current;
+      if (!term) {
+        showToast(t('toast.terminalNotReady'), { tone: 'warning' });
+        return;
+      }
+      term.sendCommand(prompt, true);
+      showToast(t('toast.reviewRequested', { path: file.path }), { tone: 'info' });
+      term.focus();
+    },
+    [showToast, settings.language, t]
+  );
+
+  const handleFileContextMenu = useCallback(
+    (e: React.MouseEvent, file: GitFileChange) => {
+      e.preventDefault();
+      const items: ContextMenuItem[] = [
+        {
+          label: t('ctxMenu.openDiff'),
+          action: () => void openDiffTab(file)
+        },
+        {
+          label: t('ctxMenu.reviewDiff'),
+          action: () => reviewDiff(file),
+          divider: true
+        },
+        {
+          label: t('ctxMenu.copyPath'),
+          action: () => {
+            void navigator.clipboard.writeText(file.path);
+            showToast(t('toast.pathCopied'), { tone: 'info' });
+          }
+        }
+      ];
+      setContextMenu({ x: e.clientX, y: e.clientY, items });
+    },
+    [openDiffTab, reviewDiff, showToast, t]
   );
 
   // ---------- セッション復帰 ----------
@@ -626,6 +712,7 @@ export function App(): JSX.Element {
         gitLoading={gitLoading}
         onRefreshGit={refreshGit}
         onOpenDiff={openDiffTab}
+        onFileContextMenu={handleFileContextMenu}
         activeDiffPath={activeDiffPath}
         sessions={sessions}
         sessionsLoading={sessionsLoading}
@@ -684,8 +771,14 @@ export function App(): JSX.Element {
       <aside className="claude-code-panel">
         <header className="claude-code-panel__header">
           <div className="claude-code-panel__title-wrap">
-            <span className="claude-code-panel__dot" />
-            <span className="claude-code-panel__title">Claude Code</span>
+            <span
+              className="claude-code-panel__dot"
+              style={{
+                background:
+                  claudeCheck.state === 'missing' ? 'var(--warning)' : 'var(--accent)'
+              }}
+            />
+            <span className="claude-code-panel__title">{t('claudePanel.title')}</span>
             {resumeSessionId && (
               <span className="claude-code-panel__resume">
                 {resumeSessionId.slice(0, 8)}
@@ -694,25 +787,44 @@ export function App(): JSX.Element {
           </div>
           <div className="claude-code-panel__header-right">
             <span
-              className={`claude-code-panel__status ${terminalExited ? 'is-exited' : 'is-running'}`}
+              className={`claude-code-panel__status ${terminalExited || claudeCheck.state === 'missing' ? 'is-exited' : 'is-running'}`}
             >
-              {terminalExited ? '終了' : terminalStatus || '起動中'}
+              {claudeCheck.state === 'missing'
+                ? t('claudePanel.notFound.title')
+                : claudeCheck.state === 'checking'
+                  ? t('claudePanel.checking')
+                  : terminalExited
+                    ? t('claudePanel.exited')
+                    : terminalStatus || t('claudePanel.starting')}
             </span>
             <button
               type="button"
               className="claude-code-panel__restart"
               onClick={restartTerminal}
-              title="ターミナルを再起動"
-              aria-label="再起動"
+              title={t('claudePanel.restartTitle')}
+              aria-label={t('claudePanel.restartTitle')}
             >
               <RotateCw size={14} strokeWidth={2} />
             </button>
           </div>
         </header>
         <div className="claude-code-panel__body">
-          {projectRoot && (
+          {claudeCheck.state === 'checking' && (
+            <div className="claude-not-found__body" style={{ padding: 40, textAlign: 'center' }}>
+              {t('claudePanel.checking')}
+            </div>
+          )}
+          {claudeCheck.state === 'missing' && (
+            <ClaudeNotFound
+              error={claudeCheck.error}
+              onRetry={() => void runClaudeCheck()}
+              onOpenSettings={() => setSettingsOpen(true)}
+            />
+          )}
+          {claudeCheck.state === 'ok' && projectRoot && (
             <TerminalView
               key={terminalVersion}
+              ref={terminalRef}
               cwd={settings.claudeCwd || projectRoot}
               command={settings.claudeCommand || 'claude'}
               args={effectiveTerminalArgs}
@@ -741,6 +853,15 @@ export function App(): JSX.Element {
         commands={commands}
         onClose={() => setPaletteOpen(false)}
       />
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }

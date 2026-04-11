@@ -1100,6 +1100,77 @@ body.is-resizing * {
   margin: 0 2px;
 }
 
+/* ---------- Claude Code Not Found ---------- */
+
+.claude-not-found {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 32px;
+  text-align: center;
+  gap: 14px;
+}
+
+.claude-not-found__icon {
+  color: var(--warning);
+  opacity: 0.85;
+}
+
+.claude-not-found__title {
+  margin: 0;
+  font-family: var(--heading-font);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--text);
+}
+
+.claude-not-found__body {
+  margin: 0;
+  max-width: 360px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-dim);
+}
+
+.claude-not-found__detail {
+  margin: 0;
+  max-width: 360px;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 11px;
+  color: var(--text-mute);
+  background: var(--bg-hover);
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  word-break: break-word;
+}
+
+.claude-not-found__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.claude-not-found__install {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 12px;
+  font-family: var(--heading-font);
+  font-style: italic;
+  transition: color 0.1s;
+}
+
+.claude-not-found__install:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
+}
+
 /* ---------- ターミナル ---------- */
 
 .terminal-view {
@@ -1219,6 +1290,83 @@ body.is-resizing * {
   display: flex;
   background: var(--bg);
   padding: 12px 16px 16px;
+}
+
+/* ---------- コンテキストメニュー ---------- */
+
+.context-menu {
+  position: fixed;
+  z-index: 3500;
+  min-width: 240px;
+  max-width: 320px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45),
+    0 2px 8px rgba(217, 119, 87, 0.08);
+  padding: 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  animation: context-menu-in 120ms ease-out;
+}
+
+@keyframes context-menu-in {
+  from {
+    opacity: 0;
+    transform: scale(0.97) translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.context-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.context-menu__item:hover {
+  background: var(--bg-hover);
+}
+
+.context-menu__item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.context-menu__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  width: 16px;
+}
+
+.context-menu__label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-menu__divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 8px;
 }
 
 /* ---------- モーダル ---------- */
@@ -1906,6 +2054,49 @@ body.is-resizing * {
 }
 
 /* ---------- 密度カード / 自動保存チェックボックス ---------- */
+
+.lang-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.lang-card {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 13px;
+  transition: border-color 0.15s;
+}
+
+.lang-card:hover {
+  border-color: var(--text-mute);
+}
+
+.lang-card.is-selected {
+  border-color: var(--accent);
+}
+
+.lang-card input[type='radio'] {
+  display: none;
+}
+
+.lang-card strong {
+  font-family: var(--heading-font);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.lang-card span {
+  color: var(--text-mute);
+  font-size: 11px;
+}
 
 .density-grid {
   display: grid;

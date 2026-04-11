@@ -5,6 +5,7 @@ import type {
 } from '../../../types/shared';
 import { ChangesPanel } from './ChangesPanel';
 import { SessionsPanel } from './SessionsPanel';
+import { useT } from '../lib/i18n';
 
 export type SidebarView = 'changes' | 'sessions';
 
@@ -17,6 +18,7 @@ interface SidebarProps {
   gitLoading: boolean;
   onRefreshGit: () => void;
   onOpenDiff: (file: GitFileChange) => void;
+  onFileContextMenu: (e: React.MouseEvent, file: GitFileChange) => void;
   activeDiffPath: string | null;
 
   // sessions view
@@ -28,9 +30,10 @@ interface SidebarProps {
 }
 
 export function Sidebar(props: SidebarProps): JSX.Element {
+  const t = useT();
   return (
     <aside className="sidebar">
-      <nav className="sidebar-switcher" role="tablist" aria-label="サイドバービュー">
+      <nav className="sidebar-switcher" role="tablist" aria-label="Sidebar view">
         <button
           type="button"
           role="tab"
@@ -38,7 +41,7 @@ export function Sidebar(props: SidebarProps): JSX.Element {
           className={`sidebar-switcher__btn ${props.view === 'changes' ? 'is-active' : ''}`}
           onClick={() => props.onViewChange('changes')}
         >
-          変更
+          {t('sidebar.changes')}
           {props.gitStatus?.ok && props.gitStatus.files.length > 0 && (
             <span className="sidebar-switcher__badge">
               {props.gitStatus.files.length}
@@ -52,7 +55,7 @@ export function Sidebar(props: SidebarProps): JSX.Element {
           className={`sidebar-switcher__btn ${props.view === 'sessions' ? 'is-active' : ''}`}
           onClick={() => props.onViewChange('sessions')}
         >
-          履歴
+          {t('sidebar.history')}
           {props.sessions.length > 0 && (
             <span className="sidebar-switcher__badge">{props.sessions.length}</span>
           )}
@@ -66,6 +69,7 @@ export function Sidebar(props: SidebarProps): JSX.Element {
             loading={props.gitLoading}
             onRefresh={props.onRefreshGit}
             onOpenDiff={props.onOpenDiff}
+            onFileContextMenu={props.onFileContextMenu}
             activeDiffPath={props.activeDiffPath}
           />
         ) : (

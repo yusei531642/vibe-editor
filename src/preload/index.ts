@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   AppSettings,
+  ClaudeCheckResult,
   GitDiffResult,
   GitStatus,
   SessionInfo,
@@ -16,7 +17,9 @@ const api = {
     getProjectRoot: (): Promise<string> => ipcRenderer.invoke('app:getProjectRoot'),
     restart: (): Promise<void> => ipcRenderer.invoke('app:restart'),
     setWindowTitle: (title: string): Promise<void> =>
-      ipcRenderer.invoke('app:setWindowTitle', title)
+      ipcRenderer.invoke('app:setWindowTitle', title),
+    checkClaude: (command: string): Promise<ClaudeCheckResult> =>
+      ipcRenderer.invoke('app:checkClaude', command)
   },
 
   git: {

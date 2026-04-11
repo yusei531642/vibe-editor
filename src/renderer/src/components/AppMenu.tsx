@@ -7,6 +7,7 @@ import {
   FolderPlus,
   Menu
 } from 'lucide-react';
+import { useT } from '../lib/i18n';
 
 export interface AppMenuProps {
   recentProjects: string[];
@@ -28,6 +29,7 @@ export function AppMenu({
   onOpenRecent,
   onClearRecent
 }: AppMenuProps): JSX.Element {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -67,7 +69,7 @@ export function AppMenu({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        title="プロジェクトメニュー"
+        title={t('appMenu.title')}
       >
         <Menu size={16} strokeWidth={2} />
         <ChevronDown size={12} strokeWidth={2} className="app-menu__caret" />
@@ -82,8 +84,8 @@ export function AppMenu({
             onClick={pickAndClose(onNewProject)}
           >
             <FolderPlus size={16} strokeWidth={1.75} className="app-menu__item-icon" />
-            <span className="app-menu__item-label">新規プロジェクト…</span>
-            <span className="app-menu__item-hint">空フォルダを作成/選択</span>
+            <span className="app-menu__item-label">{t('appMenu.new')}</span>
+            <span className="app-menu__item-hint">{t('appMenu.newHint')}</span>
           </button>
           <button
             type="button"
@@ -92,8 +94,8 @@ export function AppMenu({
             onClick={pickAndClose(onOpenFolder)}
           >
             <Folder size={16} strokeWidth={1.75} className="app-menu__item-icon" />
-            <span className="app-menu__item-label">フォルダを開く…</span>
-            <span className="app-menu__item-hint">既存のプロジェクト</span>
+            <span className="app-menu__item-label">{t('appMenu.openFolder')}</span>
+            <span className="app-menu__item-hint">{t('appMenu.openFolderHint')}</span>
           </button>
           <button
             type="button"
@@ -102,14 +104,14 @@ export function AppMenu({
             onClick={pickAndClose(onOpenFile)}
           >
             <File size={16} strokeWidth={1.75} className="app-menu__item-icon" />
-            <span className="app-menu__item-label">ファイルを開く…</span>
-            <span className="app-menu__item-hint">単独ファイル</span>
+            <span className="app-menu__item-label">{t('appMenu.openFile')}</span>
+            <span className="app-menu__item-hint">{t('appMenu.openFileHint')}</span>
           </button>
 
           <div className="app-menu__divider" />
 
           <div className="app-menu__section-label">
-            <span>最近のプロジェクト</span>
+            <span>{t('appMenu.recent')}</span>
             {recentProjects.length > 0 && (
               <button
                 type="button"
@@ -119,13 +121,13 @@ export function AppMenu({
                   onClearRecent();
                 }}
               >
-                クリア
+                {t('appMenu.clear')}
               </button>
             )}
           </div>
 
           {recentProjects.length === 0 ? (
-            <div className="app-menu__empty">履歴なし</div>
+            <div className="app-menu__empty">{t('appMenu.empty')}</div>
           ) : (
             recentProjects.slice(0, 8).map((p) => (
               <button

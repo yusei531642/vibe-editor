@@ -1,5 +1,6 @@
 import { Command as CommandIcon, RotateCw, Settings as SettingsIcon } from 'lucide-react';
 import { AppMenu } from './AppMenu';
+import { useT } from '../lib/i18n';
 
 interface ToolbarProps {
   projectRoot: string;
@@ -28,6 +29,7 @@ export function Toolbar({
   onOpenRecent,
   onClearRecent
 }: ToolbarProps): JSX.Element {
+  const t = useT();
   return (
     <div className="toolbar">
       <div className="toolbar__left">
@@ -44,8 +46,8 @@ export function Toolbar({
           type="button"
           className="toolbar__btn toolbar__btn--icon"
           onClick={onRestart}
-          title="アプリを再起動"
-          aria-label="再起動"
+          title={t('toolbar.restart.title')}
+          aria-label={t('toolbar.restart.title')}
         >
           <RotateCw size={16} strokeWidth={1.75} />
         </button>
@@ -57,8 +59,8 @@ export function Toolbar({
           type="button"
           className="toolbar__btn toolbar__btn--icon"
           onClick={onOpenPalette}
-          title="コマンドパレット (Ctrl+Shift+P)"
-          aria-label="コマンドパレット"
+          title={t('toolbar.palette.title')}
+          aria-label={t('toolbar.palette.title')}
         >
           <CommandIcon size={16} strokeWidth={1.75} />
         </button>
@@ -66,8 +68,8 @@ export function Toolbar({
           type="button"
           className="toolbar__btn toolbar__btn--icon"
           onClick={onOpenSettings}
-          title="設定 (Ctrl+,)"
-          aria-label="設定"
+          title={t('toolbar.settings.title')}
+          aria-label={t('toolbar.settings.title')}
         >
           <SettingsIcon size={16} strokeWidth={1.75} />
         </button>

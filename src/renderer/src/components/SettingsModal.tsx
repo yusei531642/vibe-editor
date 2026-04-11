@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
-import type { AppSettings, Density, ThemeName } from '../../../types/shared';
+import type { AppSettings, Density, Language, ThemeName } from '../../../types/shared';
 import { DEFAULT_SETTINGS } from '../../../types/shared';
+import { useT } from '../lib/i18n';
 
 interface SettingsModalProps {
   open: boolean;
@@ -57,6 +58,7 @@ export function SettingsModal({
   onApply,
   onReset
 }: SettingsModalProps): JSX.Element | null {
+  const t = useT();
   const [draft, setDraft] = useState<AppSettings>(initial);
 
   // モーダルを開いた瞬間に最新の initial で draft を初期化
@@ -84,7 +86,7 @@ export function SettingsModal({
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <header className="modal__header">
-          <h2>設定</h2>
+          <h2>{t('settings.title')}</h2>
           <button
             type="button"
             className="modal__close"
@@ -96,9 +98,33 @@ export function SettingsModal({
         </header>
 
         <div className="modal__body">
+          {/* 言語 */}
+          <section className="modal__section">
+            <h3>{t('settings.language')}</h3>
+            <div className="lang-grid">
+              {(['ja', 'en'] as Language[]).map((lang) => (
+                <label
+                  key={lang}
+                  className={`lang-card ${draft.language === lang ? 'is-selected' : ''}`}
+                >
+                  <input
+                    type="radio"
+                    name="language"
+                    value={lang}
+                    checked={draft.language === lang}
+                    onChange={() => update('language', lang)}
+                  />
+                  <strong>{lang === 'ja' ? '日本語' : 'English'}</strong>
+                  <span>{lang === 'ja' ? 'Japanese' : 'English'}</span>
+                </label>
+              ))}
+            </div>
+            <p className="modal__note">{t('settings.language.desc')}</p>
+          </section>
+
           {/* テーマ */}
           <section className="modal__section">
-            <h3>テーマ</h3>
+            <h3>{t('settings.theme')}</h3>
             <div className="modal__theme-grid">
               {THEME_OPTIONS.map((opt) => (
                 <label
@@ -306,18 +332,18 @@ export function SettingsModal({
 
         <footer className="modal__footer">
           <button type="button" className="toolbar__btn" onClick={handleReset}>
-            デフォルトに戻す
+            {t('settings.reset')}
           </button>
           <div className="modal__footer-right">
             <button type="button" className="toolbar__btn" onClick={onClose}>
-              キャンセル
+              {t('settings.cancel')}
             </button>
             <button
               type="button"
               className="toolbar__btn toolbar__btn--primary"
               onClick={handleApply}
             >
-              適用して保存
+              {t('settings.apply')}
             </button>
           </div>
         </footer>
