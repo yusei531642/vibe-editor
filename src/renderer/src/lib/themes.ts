@@ -138,7 +138,7 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
 const HEADING_FONT_SERIF =
   "'Source Serif Pro', 'Source Serif 4', Georgia, 'Times New Roman', 'Yu Mincho', serif";
 const HEADING_FONT_SANS =
-  "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
+  "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic UI', sans-serif";
 
 function isClaudeTheme(name: ThemeName): boolean {
   return name === 'claude-light' || name === 'claude-dark';

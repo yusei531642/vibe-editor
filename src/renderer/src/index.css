@@ -1,9 +1,12 @@
 :root {
   /* 下記変数は SettingsProvider の applyTheme() により動的に上書きされる */
   --ui-font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    'Hiragino Sans', 'Yu Gothic UI', sans-serif;
-  --heading-font: 'Source Serif Pro', 'Source Serif 4', 'Tiempos Text',
-    Georgia, 'Times New Roman', 'Yu Mincho', serif;
+    'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic UI',
+    'Noto Sans JP', sans-serif;
+  --heading-font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic UI', sans-serif;
+  --mono-font: 'Cascadia Code', 'SFMono-Regular', 'Consolas', 'Liberation Mono',
+    'Menlo', monospace;
   --ui-font-size: 14px;
   --radius: 10px;
   --radius-sm: 6px;
@@ -76,6 +79,8 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+  font-feature-settings: "lnum", "kern";
+  line-height: 1.5;
 }
 
 :root[data-theme='light'],
@@ -117,6 +122,19 @@
 .app-menu__trigger:focus-visible {
   outline: none;
   box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+/* ---------- 禁則処理（日本語テキスト） ---------- */
+* {
+  word-break: break-word;
+  overflow-wrap: break-word;
+  line-break: strict;
+}
+
+/* ---------- テキスト選択 ---------- */
+::selection {
+  background: rgba(217, 119, 87, 0.3);
+  color: inherit;
 }
 
 html,
@@ -743,7 +761,7 @@ body.is-resizing * {
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 220px;
-  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-family: var(--mono-font);
 }
 
 .app-menu__item--recent .app-menu__item-icon {
@@ -794,7 +812,7 @@ body.is-resizing * {
 }
 
 .toolbar__path {
-  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-family: var(--mono-font);
   font-size: var(--text-sm);
   color: var(--text-mute);
   overflow: hidden;
@@ -1096,7 +1114,7 @@ body.is-resizing * {
 .session__id {
   font-size: 9px;
   color: var(--text-mute);
-  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-family: var(--mono-font);
   letter-spacing: 0.03em;
 }
 
@@ -1107,7 +1125,7 @@ body.is-resizing * {
   border: 1px solid rgba(217, 119, 87, 0.3);
   border-radius: 10px;
   padding: 2px 8px;
-  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-family: var(--mono-font);
 }
 
 /* ---------- Diff ビュー ---------- */
@@ -1132,7 +1150,7 @@ body.is-resizing * {
 }
 
 .diffview__path {
-  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-family: var(--mono-font);
   color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1268,7 +1286,7 @@ body.is-resizing * {
 
 .welcome__project {
   margin: 0 0 40px 0;
-  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-family: var(--mono-font);
   font-size: 12px;
   color: var(--text-mute);
   padding: 8px 16px;
@@ -1408,7 +1426,7 @@ body.is-resizing * {
 .claude-not-found__detail {
   margin: 0;
   max-width: 360px;
-  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-family: var(--mono-font);
   font-size: 11px;
   color: var(--text-mute);
   background: var(--bg-hover);
@@ -2900,7 +2918,7 @@ body.is-resizing * {
 .cmdp__subtitle {
   color: var(--text-dim);
   font-size: 11px;
-  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-family: var(--mono-font);
 }
 
 .cmdp__empty {

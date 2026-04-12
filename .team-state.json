@@ -1,0 +1,21 @@
+{
+  "team": { "id": "dev-duo", "name": "Dev Duo" },
+  "members": [
+    {
+      "agentId": "leader-1",
+      "role": "leader",
+      "agent": "claude",
+      "status": "active",
+      "joinedAt": "2026-04-12T00:00:00.000Z"
+    },
+    {
+      "agentId": "programmer-1",
+      "role": "programmer",
+      "agent": "claude",
+      "status": "active",
+      "joinedAt": "2026-04-12T00:00:00.000Z"
+    }
+  ],
+  "messages": [],
+  "tasks": []
+}
