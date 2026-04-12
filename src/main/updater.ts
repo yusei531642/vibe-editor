@@ -2,10 +2,14 @@
 // 起動時に最新版をチェックし、新版があればバックグラウンドでダウンロード。
 // 完了したらダイアログで再起動確認する。dev ビルドでは無効化する。
 
-import { app, dialog, BrowserWindow } from 'electron';
+import { app, dialog, BrowserWindow, Notification } from 'electron';
 import { autoUpdater } from 'electron-updater';
 
 let initialized = false;
+
+function getWin(): BrowserWindow | null {
+  return BrowserWindow.getAllWindows()[0] ?? null;
+}
 
 export function initAutoUpdater(): void {
   if (initialized) return;
@@ -19,11 +23,20 @@ export function initAutoUpdater(): void {
 
   autoUpdater.on('error', (err) => {
     console.error('[auto-updater] error:', err);
+    const win = getWin();
+    if (win) {
+      dialog.showMessageBox(win, {
+        type: 'error',
+        title: 'アップデートエラー',
+        message: 'アップデートに失敗しました',
+        detail: String(err.message || err)
+      });
+    }
   });
 
   autoUpdater.on('update-available', (info) => {
     console.log(`[auto-updater] update available: v${info.version}`);
-    const win = BrowserWindow.getAllWindows()[0];
+    const win = getWin();
     if (!win) return;
     const result = dialog.showMessageBoxSync(win, {
       type: 'info',
@@ -35,8 +48,24 @@ export function initAutoUpdater(): void {
       detail: `現在のバージョン: v${app.getVersion()}\n今すぐダウンロードしますか？`
     });
     if (result === 0) {
+      // ダウンロード中を通知
+      if (Notification.isSupported()) {
+        new Notification({
+          title: 'vibe-editor',
+          body: `v${info.version} をダウンロード中…`
+        }).show();
+      }
       autoUpdater.downloadUpdate().catch((err) => {
         console.error('[auto-updater] downloadUpdate failed:', err);
+        const w = getWin();
+        if (w) {
+          dialog.showMessageBox(w, {
+            type: 'error',
+            title: 'ダウンロード失敗',
+            message: 'アップデートのダウンロードに失敗しました',
+            detail: String(err.message || err)
+          });
+        }
       });
     }
   });
@@ -46,8 +75,9 @@ export function initAutoUpdater(): void {
   });
 
   autoUpdater.on('update-downloaded', (info) => {
-    const win = BrowserWindow.getAllWindows()[0];
-    const result = dialog.showMessageBoxSync(win ?? null!, {
+    const win = getWin();
+    if (!win) return;
+    const result = dialog.showMessageBoxSync(win, {
       type: 'info',
       buttons: ['今すぐ再起動', '後で'],
       defaultId: 0,
