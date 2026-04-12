@@ -2062,6 +2062,7 @@ body.is-resizing * {
   font-size: 12px;
 }
 
+.team-preset-card__edit,
 .team-preset-card__delete {
   display: flex;
   align-items: center;
@@ -2074,8 +2075,17 @@ body.is-resizing * {
   transition: color var(--dur-fast) var(--ease-out);
 }
 
+.team-preset-card__edit:hover {
+  color: var(--accent);
+}
+
 .team-preset-card__delete:hover {
   color: var(--warning);
+}
+
+.team-preset-card--saved[data-editing] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 /* チームビルダー */

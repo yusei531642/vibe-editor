@@ -14,7 +14,7 @@ export function initAutoUpdater(): void {
   // dev ビルドでは latest.yml が無いため no-op
   if (!app.isPackaged) return;
 
-  autoUpdater.autoDownload = true;
+  autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
 
   autoUpdater.on('error', (err) => {
@@ -23,6 +23,22 @@ export function initAutoUpdater(): void {
 
   autoUpdater.on('update-available', (info) => {
     console.log(`[auto-updater] update available: v${info.version}`);
+    const win = BrowserWindow.getAllWindows()[0];
+    if (!win) return;
+    const result = dialog.showMessageBoxSync(win, {
+      type: 'info',
+      buttons: ['ダウンロード', '後で'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'アップデートがあります',
+      message: `vibe-editor v${info.version} が利用可能です`,
+      detail: `現在のバージョン: v${app.getVersion()}\n今すぐダウンロードしますか？`
+    });
+    if (result === 0) {
+      autoUpdater.downloadUpdate().catch((err) => {
+        console.error('[auto-updater] downloadUpdate failed:', err);
+      });
+    }
   });
 
   autoUpdater.on('update-not-available', () => {
@@ -31,7 +47,7 @@ export function initAutoUpdater(): void {
 
   autoUpdater.on('update-downloaded', (info) => {
     const win = BrowserWindow.getAllWindows()[0];
-    const result = dialog.showMessageBoxSync(win, {
+    const result = dialog.showMessageBoxSync(win ?? null!, {
       type: 'info',
       buttons: ['今すぐ再起動', '後で'],
       defaultId: 0,

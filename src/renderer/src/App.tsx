@@ -53,6 +53,8 @@ interface TerminalTab {
   agent: TerminalAgent;
   role: TeamRole | null;
   teamId: string | null;
+  /** MCP チーム通信用のエージェント識別子 */
+  agentId: string;
   status: string;
   exited: boolean;
   resumeSessionId: string | null;
@@ -68,49 +70,40 @@ const ROLE_DESC: Record<TeamRole, string> = {
   reviewer: 'コードレビュー・バグ特定・改善提案'
 };
 
-/** チーム構成を含む動的プロンプトを生成 */
-function generateTeamPrompt(
+/** チームのシステムプロンプト（--append-system-prompt 用） */
+function generateTeamSystemPrompt(
   tab: TerminalTab,
   allTabs: TerminalTab[],
   team: Team | null
 ): string | undefined {
-  if (!tab.role) return undefined;
+  if (!tab.role || !tab.teamId || !team) return undefined;
 
-  // スタンドアロン（チーム無し）
-  if (!tab.teamId || !team) {
-    if (tab.role === 'leader') return undefined;
-    return `あなたは ${tab.role} ロールです。${ROLE_DESC[tab.role]}に集中してください。`;
-  }
-
-  // チーム所属 → 構成情報付きプロンプト
   const teamTabs = allTabs.filter((t) => t.teamId === tab.teamId);
   const roster = teamTabs
     .map((t) => {
       const agent = t.agent === 'claude' ? 'Claude Code' : 'Codex';
       const you = t.id === tab.id ? ' ← あなた' : '';
-      return `  - ${t.role ?? 'member'} (${agent})${you}`;
+      return `${t.role ?? 'member'}(${agent})${you}`;
     })
-    .join('\n');
+    .join(', ');
+
+  const mcpTools = 'MCP vive-team ツール: team_send(to,message), team_read(), team_assign_task(assignee,description), team_get_tasks(), team_update_task(task_id,status), team_status(status)';
 
   if (tab.role === 'leader') {
-    return `あなたはチーム「${team.name}」の Leader です。
-
-チーム構成:
-${roster}
-
-Leader として:
-1. プロジェクトの全体像を把握し、作業計画を立ててください
-2. 各メンバーの役割に応じたタスクを具体的に指示してください
-3. 進捗を確認し、メンバー間の作業を調整してください
-※ メンバーとは直接通信できません。ユーザーが仲介します。`;
+    return `あなたはチーム「${team.name}」のLeader。構成: ${roster}。${mcpTools}。手順: 1)プロジェクト調査 2)計画立案 3)team_assign_taskでタスク割振 4)team_readで進捗確認・team_sendで指示`;
   }
 
-  return `あなたはチーム「${team.name}」の ${tab.role} です。${ROLE_DESC[tab.role]}に集中してください。
+  return `あなたはチーム「${team.name}」の${tab.role}。役割:${ROLE_DESC[tab.role]}。構成: ${roster}。${mcpTools}。team_readでLeaderの指示を確認し、作業後team_sendで報告。`;
+}
 
-チーム構成:
-${roster}
+/** 短いアクション指示（initialMessage 用） */
+function generateTeamAction(tab: TerminalTab): string | undefined {
+  if (!tab.role || !tab.teamId) return undefined;
 
-Leader の指示に従い、あなたの役割に集中してください。`;
+  if (tab.role === 'leader') {
+    return 'プロジェクトを調査し、チームメンバーにタスクを割り振ってください。';
+  }
+  return 'team_read()でLeaderからのタスク指示を確認して作業を開始してください。';
 }
 
 export function App(): JSX.Element {
@@ -174,6 +167,7 @@ export function App(): JSX.Element {
       role?: TeamRole | null;
       teamId?: string | null;
       resumeSessionId?: string | null;
+      agentId?: string;
     }): number => {
       const id = nextTerminalIdRef.current++;
       const tab: TerminalTab = {
@@ -182,6 +176,7 @@ export function App(): JSX.Element {
         agent: opts?.agent ?? 'claude',
         role: opts?.role ?? null,
         teamId: opts?.teamId ?? null,
+        agentId: opts?.agentId ?? `agent-${id}`,
         status: '',
         exited: false,
         resumeSessionId: opts?.resumeSessionId ?? null,
@@ -199,8 +194,25 @@ export function App(): JSX.Element {
 
   const doCloseTab = useCallback((tabId: number) => {
     setTerminalTabs((prev) => {
-      if (prev.length <= 1) return prev;
       const next = prev.filter((t) => t.id !== tabId);
+      if (next.length === 0) {
+        // 最後の1個 → 新しいスタンドアロンタブを自動生成
+        const newId = nextTerminalIdRef.current++;
+        const fresh: TerminalTab = {
+          id: newId,
+          version: 1,
+          agent: 'claude',
+          role: null,
+          teamId: null,
+          agentId: `agent-${newId}`,
+          status: '',
+          exited: false,
+          resumeSessionId: null,
+          hasActivity: false
+        };
+        setActiveTerminalTabId(newId);
+        return [fresh];
+      }
       setActiveTerminalTabId((active) => {
         if (active !== tabId) return active;
         const idx = prev.findIndex((t) => t.id === tabId);
@@ -215,7 +227,24 @@ export function App(): JSX.Element {
     (teamId: string) => {
       setTerminalTabs((prev) => {
         const next = prev.filter((t) => t.teamId !== teamId);
-        if (next.length === 0) return prev; // 全部消えるのを防止
+        if (next.length === 0) {
+          // チーム全員しかいない場合 → 新しいスタンドアロンタブを自動生成
+          const newId = nextTerminalIdRef.current++;
+          const fresh: TerminalTab = {
+            id: newId,
+            version: 1,
+            agent: 'claude',
+            role: null,
+            teamId: null,
+            agentId: `agent-${newId}`,
+            status: '',
+            exited: false,
+            resumeSessionId: null,
+            hasActivity: false
+          };
+          setActiveTerminalTabId(newId);
+          return [fresh];
+        }
         setActiveTerminalTabId((active) => {
           if (next.some((t) => t.id === active)) return active;
           return next[next.length - 1].id;
@@ -223,6 +252,10 @@ export function App(): JSX.Element {
         return next;
       });
       setTeams((prev) => prev.filter((t) => t.id !== teamId));
+      // MCP クリーンアップ
+      if (projectRoot) {
+        void window.api.app.cleanupTeamMcp(projectRoot, teamId);
+      }
     },
     []
   );
@@ -346,7 +379,9 @@ export function App(): JSX.Element {
       try {
         const [gs, sess] = await Promise.all([
           window.api.git.status(root),
-          window.api.sessions.list(root)
+          window.api.sessions.list(root),
+          // 初回起動時に ~/.claude.json へ vive-team サーバーを登録
+          window.api.app.setupTeamMcp(root, '_init', '', [])
         ]);
 
         setGitStatus(gs);
@@ -366,6 +401,7 @@ export function App(): JSX.Element {
             agent: 'claude',
             role: null,
             teamId: null,
+            agentId: `agent-${newId}`,
             status: '起動中…',
             exited: false,
             resumeSessionId: null,
@@ -398,7 +434,9 @@ export function App(): JSX.Element {
         setProjectRoot(root);
         const [gs, sess] = await Promise.all([
           window.api.git.status(root),
-          window.api.sessions.list(root)
+          window.api.sessions.list(root),
+          // 初回起動時に ~/.claude.json へ vive-team サーバーを登録
+          window.api.app.setupTeamMcp(root, '_init', '', [])
         ]);
         if (cancelled) return;
         setGitStatus(gs);
@@ -704,7 +742,7 @@ export function App(): JSX.Element {
         subtitle: 'Ctrl+W',
         category: 'タブ',
         when: () => !!activeTabId,
-        run: () => activeTabId && closeTab(activeTabId)
+        run: () => { if (activeTabId) closeTab(activeTabId); }
       },
       {
         id: 'tab.reopen',
@@ -719,7 +757,7 @@ export function App(): JSX.Element {
         title: 'アクティブなタブをピン留め/解除',
         category: 'タブ',
         when: () => !!activeTabId,
-        run: () => activeTabId && togglePin(activeTabId)
+        run: () => { if (activeTabId) togglePin(activeTabId); }
       },
       {
         id: 'git.refresh',
@@ -739,7 +777,7 @@ export function App(): JSX.Element {
         subtitle: `${terminalTabs.length}/${MAX_TERMINALS}`,
         category: 'ターミナル',
         when: () => terminalTabs.length < MAX_TERMINALS,
-        run: () => addTerminalTab({ agent: 'claude' })
+        run: () => { addTerminalTab({ agent: 'claude' }); }
       },
       {
         id: 'terminal.addCodex',
@@ -747,7 +785,7 @@ export function App(): JSX.Element {
         subtitle: `${terminalTabs.length}/${MAX_TERMINALS}`,
         category: 'ターミナル',
         when: () => terminalTabs.length < MAX_TERMINALS,
-        run: () => addTerminalTab({ agent: 'codex' })
+        run: () => { addTerminalTab({ agent: 'codex' }); }
       },
       {
         id: 'terminal.createTeam',
@@ -901,18 +939,67 @@ export function App(): JSX.Element {
       if (tab.resumeSessionId && !isCodex) {
         base.push('--resume', tab.resumeSessionId);
       }
+      // チームのコンテキストをシステムプロンプトとして注入
+      if (!isCodex && tab.teamId) {
+        const team = teams.find((t) => t.id === tab.teamId) ?? null;
+        const sysPrompt = generateTeamSystemPrompt(tab, terminalTabs, team);
+        if (sysPrompt) {
+          base.push('--append-system-prompt', sysPrompt);
+        }
+      }
       return base;
     },
-    [settings.claudeArgs, settings.codexArgs]
+    [settings.claudeArgs, settings.codexArgs, teams, terminalTabs]
   );
 
-  /** タブのロールに対応する初期メッセージ（起動後に���ーム構成情報付きで自動送信） */
+  /** チームタブ用の環境変数を構築（MCP サーバーが読み取る） */
+  const [teamFilePaths, setTeamFilePaths] = useState<Record<string, string>>({});
+
+  // チーム作成時にファイルパスを解決してキャッシュ
+  useEffect(() => {
+    const teamIds = teams.map((t) => t.id);
+    for (const tid of teamIds) {
+      if (!teamFilePaths[tid]) {
+        void window.api.app.getTeamFilePath(tid).then((p) => {
+          setTeamFilePaths((prev) => ({ ...prev, [tid]: p }));
+        });
+      }
+    }
+  }, [teams, teamFilePaths]);
+
+  const getTerminalEnv = useCallback(
+    (tab: TerminalTab): Record<string, string> | undefined => {
+      if (!tab.teamId || !tab.role) return undefined;
+      const teamFile = teamFilePaths[tab.teamId];
+      if (!teamFile) return undefined;
+      return {
+        VIVE_TEAM_ID: tab.teamId,
+        VIVE_TEAM_ROLE: tab.role,
+        VIVE_AGENT_ID: tab.agentId,
+        VIVE_TEAM_FILE: teamFile
+      };
+    },
+    [teamFilePaths]
+  );
+
+  /** MCP サーバースクリプトのパス（チーム初回セットアップ用） */
+  const [mcpServerPath, setMcpServerPath] = useState<string>('');
+  useEffect(() => {
+    void window.api.app.getMcpServerPath().then(setMcpServerPath);
+  }, []);
+
+  /** タブのロールに対応する初期メッセージ（短いアクション指示のみ） */
   const getRolePrompt = useCallback(
     (tab: TerminalTab): string | undefined => {
-      const team = tab.teamId ? teams.find((t) => t.id === tab.teamId) ?? null : null;
-      return generateTeamPrompt(tab, terminalTabs, team);
+      if (!tab.role) return undefined;
+      // スタンドアロン（チーム無し）
+      if (!tab.teamId) {
+        if (tab.role === 'leader') return undefined;
+        return `${ROLE_DESC[tab.role]}に集中してください。`;
+      }
+      return generateTeamAction(tab);
     },
-    [teams, terminalTabs]
+    []
   );
 
   // 初回タブ作成: Claude OK かつ projectRoot 設定済みでタブなし
@@ -925,27 +1012,60 @@ export function App(): JSX.Element {
   // ---------- チーム作成 ----------
 
   const handleCreateTeam = useCallback(
-    (teamName: string, leader: { agent: TerminalAgent }, members: TeamMember[]) => {
+    async (teamName: string, leader: { agent: TerminalAgent }, members: TeamMember[]) => {
       const totalNeeded = 1 + members.length;
       if (terminalTabs.length + totalNeeded > MAX_TERMINALS) return;
 
       const teamId = `team-${Date.now()}`;
       setTeams((prev) => [...prev, { id: teamId, name: teamName }]);
 
-      // Leader を先に���成
-      addTerminalTab({ agent: leader.agent, role: 'leader' as TeamRole, teamId });
-      // ���ンバーを順次生成
-      for (const m of members) {
-        addTerminalTab({ agent: m.agent, role: m.role, teamId });
+      // MCP 用のメンバー一覧を事前構築
+      const allMembers = [
+        { agentId: `${teamId}-leader`, role: 'leader', agent: leader.agent },
+        ...members.map((m, i) => ({
+          agentId: `${teamId}-${m.role}-${i}`,
+          role: m.role,
+          agent: m.agent
+        }))
+      ];
+
+      // MCP サーバーをセットアップ（.mcp.json 更新 + チームステートファイル作成）
+      if (projectRoot) {
+        await window.api.app.setupTeamMcp(projectRoot, teamId, teamName, allMembers);
+      }
+
+      // Leader を先に生成
+      addTerminalTab({
+        agent: leader.agent,
+        role: 'leader' as TeamRole,
+        teamId,
+        agentId: allMembers[0].agentId
+      });
+      // メンバーを順次生成
+      for (let i = 0; i < members.length; i++) {
+        addTerminalTab({
+          agent: members[i].agent,
+          role: members[i].role,
+          teamId,
+          agentId: allMembers[i + 1].agentId
+        });
       }
     },
-    [addTerminalTab, terminalTabs.length]
+    [addTerminalTab, terminalTabs.length, projectRoot]
   );
 
   const handleSavePreset = useCallback(
     (preset: TeamPreset) => {
       const prev = settings.teamPresets ?? [];
-      void updateSettings({ teamPresets: [...prev, preset] });
+      const idx = prev.findIndex((p) => p.id === preset.id);
+      if (idx >= 0) {
+        // 既存プリセットを更新
+        const updated = [...prev];
+        updated[idx] = preset;
+        void updateSettings({ teamPresets: updated });
+      } else {
+        void updateSettings({ teamPresets: [...prev, preset] });
+      }
     },
     [settings.teamPresets, updateSettings]
   );
@@ -1233,6 +1353,7 @@ export function App(): JSX.Element {
                       : settings.claudeCommand || 'claude'
                   }
                   args={getTerminalArgs(tab)}
+                  env={getTerminalEnv(tab)}
                   visible={true}
                   initialMessage={getRolePrompt(tab)}
                   onStatus={(s) =>

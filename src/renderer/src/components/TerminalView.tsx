@@ -20,10 +20,12 @@ interface TerminalViewProps {
   cwd: string;
   command: string;
   args?: string[];
+  /** pty に渡す追加の環境変数 */
+  env?: Record<string, string>;
   /** 現在このペインが表示されているか（非表示時は fit をスキップ） */
   visible: boolean;
-  /** 起動後に自動送信するメッセージ（チームロールのプロンプト等） */
-  initialMessage?: string;
+  /** 起動後に自動送信するメッセージ（配列なら順番に送信） */
+  initialMessage?: string | string[];
   /** 起動中 / エラー表示用のコールバック */
   onStatus?: (status: string) => void;
   /** 出力イベント（非可視時のバッジ表示用） */
@@ -39,7 +41,7 @@ interface TerminalViewProps {
  */
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
   function TerminalView(
-    { cwd, command, args, visible, initialMessage, onStatus, onActivity, onExit },
+    { cwd, command, args, env, visible, initialMessage, onStatus, onActivity, onExit },
     ref
   ): JSX.Element {
   const { settings } = useSettings();
@@ -107,6 +109,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       if (e.ctrlKey && !e.altKey && key === 'c') {
         const selection = term.getSelection();
         if (selection) {
+          e.preventDefault();
           void navigator.clipboard.writeText(selection);
           term.clearSelection();
           return false;
@@ -115,6 +118,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       }
 
       if (e.ctrlKey && !e.altKey && key === 'v') {
+        e.preventDefault();
         void navigator.clipboard.readText().then((text) => {
           if (text) term.paste(text);
         });
@@ -151,7 +155,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           command,
           args,
           cols: initialCols,
-          rows: initialRows
+          rows: initialRows,
+          env
         });
 
         if (disposed) return;
@@ -165,19 +170,41 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         ptyIdRef.current = res.id;
         callbacksRef.current.onStatus?.(`実行中: ${res.command ?? command}`);
 
-        // ロールプロンプト等の初期メッセージを起動後に送信
-        if (initialMessage) {
-          const initTimer = setTimeout(() => {
-            if (ptyIdRef.current && !disposed) {
-              void window.api.terminal.write(ptyIdRef.current, initialMessage + '\r');
-            }
-          }, 2500);
-          cleanupTimers.push(initTimer);
-        }
+        // ロールプロンプト等の初期メッセージ: CLIが入力待ちになってから順次送信
+        const msgQueue = initialMessage
+          ? Array.isArray(initialMessage) ? [...initialMessage] : [initialMessage]
+          : [];
+        let msgIndex = 0;
+        let sendCooldown = false;
 
         offData = window.api.terminal.onData(res.id, (data) => {
           term.write(data);
           callbacksRef.current.onActivity?.();
+
+          // キューにメッセージが残っていてCLIが入力待ち状態を検出
+          if (msgIndex < msgQueue.length && ptyIdRef.current && !disposed && !sendCooldown) {
+            const stripped = data.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '');
+            // Claude Code: "? for shortcuts" 表示後にプロンプト準備完了
+            // Codex: "❯" or "> " at line start
+            const isReady = stripped.includes('? for shortcuts')
+              || stripped.includes('❯')
+              || /^\s*>\s*$/m.test(stripped);
+            if (isReady) {
+              sendCooldown = true;
+              const msg = msgQueue[msgIndex++];
+              const sendTimer = setTimeout(() => {
+                if (ptyIdRef.current && !disposed) {
+                  // 複数行は1行に整形して送信（ブラケットペーストは Claude Code で送信不可のため）
+                  const flat = msg.replace(/\n{2,}/g, ' | ').replace(/\n/g, ' ');
+                  void window.api.terminal.write(ptyIdRef.current, flat + '\r');
+                }
+                // 次のメッセージ送信まで少し待つ（CLIが処理完了するまで）
+                const cooldownTimer = setTimeout(() => { sendCooldown = false; }, 3000);
+                cleanupTimers.push(cooldownTimer);
+              }, 500);
+              cleanupTimers.push(sendTimer);
+            }
+          }
         });
         offExit = window.api.terminal.onExit(res.id, (info) => {
           term.writeln(

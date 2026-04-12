@@ -23,7 +23,23 @@ const api = {
     setZoomLevel: (level: number): Promise<void> =>
       ipcRenderer.invoke('app:setZoomLevel', level),
     getZoomLevel: (): Promise<number> =>
-      ipcRenderer.invoke('app:getZoomLevel')
+      ipcRenderer.invoke('app:getZoomLevel'),
+    setupTeamMcp: (
+      projectRoot: string,
+      teamId: string,
+      teamName: string,
+      members: { agentId: string; role: string; agent: string }[]
+    ): Promise<{ ok: boolean; teamFile?: string; error?: string }> =>
+      ipcRenderer.invoke('app:setupTeamMcp', projectRoot, teamId, teamName, members),
+    cleanupTeamMcp: (
+      projectRoot: string,
+      teamId: string
+    ): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('app:cleanupTeamMcp', projectRoot, teamId),
+    getTeamFilePath: (teamId: string): Promise<string> =>
+      ipcRenderer.invoke('app:getTeamFilePath', teamId),
+    getMcpServerPath: (): Promise<string> =>
+      ipcRenderer.invoke('app:getMcpServerPath')
   },
 
   git: {

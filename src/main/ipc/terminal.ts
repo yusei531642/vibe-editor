@@ -34,7 +34,7 @@ function resolveCommand(
   if (!command) {
     // 既定シェル
     if (process.platform === 'win32') {
-      return { command: process.env.COMSPEC || 'cmd.exe', args: [] };
+      return { command: 'powershell.exe', args: ['-NoLogo'] };
     }
     return { command: process.env.SHELL || '/bin/bash', args: [] };
   }

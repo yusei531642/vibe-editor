@@ -22,6 +22,15 @@ declare global {
         checkClaude(command: string): Promise<ClaudeCheckResult>;
         setZoomLevel(level: number): Promise<void>;
         getZoomLevel(): Promise<number>;
+        setupTeamMcp(
+          projectRoot: string,
+          teamId: string,
+          teamName: string,
+          members: { agentId: string; role: string; agent: string }[]
+        ): Promise<{ ok: boolean; teamFile?: string; error?: string }>;
+        cleanupTeamMcp(projectRoot: string, teamId: string): Promise<{ ok: boolean; error?: string }>;
+        getTeamFilePath(teamId: string): Promise<string>;
+        getMcpServerPath(): Promise<string>;
       };
       git: {
         status(projectRoot: string): Promise<GitStatus>;

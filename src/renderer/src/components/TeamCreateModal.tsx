@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Crown, Plus, Trash2, Users, X } from 'lucide-react';
+import { Crown, Pencil, Plus, Trash2, Users, X } from 'lucide-react';
 import type { Team, TeamMember, TeamPreset, TeamRole, TerminalAgent } from '../../../types/shared';
 import { useT } from '../lib/i18n';
 import { useAnimatedMount } from '../lib/use-animated-mount';
@@ -86,6 +86,8 @@ export function TeamCreateModal({
   ]);
   const [saveAsPreset, setSaveAsPreset] = useState(false);
   const [presetName, setPresetName] = useState('');
+  /** 編集中のプリセットID（null = 新規） */
+  const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
 
   if (!mounted) return null;
 
@@ -107,15 +109,48 @@ export function TeamCreateModal({
     );
   };
 
+  const loadPresetForEdit = (preset: TeamPreset): void => {
+    const leader = preset.members.find((m) => m.role === 'leader');
+    const others = preset.members.filter((m) => m.role !== 'leader');
+    setTeamName(preset.name);
+    setLeaderAgent(leader?.agent ?? 'claude');
+    setMembers(others.length > 0 ? others : [{ agent: 'claude', role: 'programmer' }]);
+    setEditingPresetId(preset.id);
+    setPresetName(preset.name);
+    setSaveAsPreset(true);
+  };
+
+  const handleSaveEditedPreset = (): void => {
+    if (!presetName.trim()) return;
+    onSavePreset({
+      id: editingPresetId ?? `custom-${Date.now()}`,
+      name: presetName.trim(),
+      members: [{ agent: leaderAgent, role: 'leader' as TeamRole }, ...members]
+    });
+    setEditingPresetId(null);
+    setSaveAsPreset(false);
+    setPresetName('');
+  };
+
+  const cancelEdit = (): void => {
+    setEditingPresetId(null);
+    setSaveAsPreset(false);
+    setPresetName('');
+    setTeamName('');
+    setLeaderAgent('claude');
+    setMembers([{ agent: 'claude', role: 'programmer' }]);
+  };
+
   const handleCreate = (): void => {
     const name = teamName.trim() || 'Team';
     if (saveAsPreset && presetName.trim()) {
       onSavePreset({
-        id: `custom-${Date.now()}`,
+        id: editingPresetId ?? `custom-${Date.now()}`,
         name: presetName.trim(),
         members: [{ agent: leaderAgent, role: 'leader' as TeamRole }, ...members]
       });
     }
+    setEditingPresetId(null);
     onCreate(name, { agent: leaderAgent }, members);
     onClose();
   };
@@ -185,7 +220,9 @@ export function TeamCreateModal({
                 </button>
               ))}
               {savedPresets.map((p) => (
-                <div key={p.id} className="team-preset-card team-preset-card--saved">
+                <div key={p.id} className="team-preset-card team-preset-card--saved"
+                  data-editing={editingPresetId === p.id ? '' : undefined}
+                >
                   <button
                     className="team-preset-card__main"
                     onClick={() => handleSavedPresetCreate(p)}
@@ -198,6 +235,13 @@ export function TeamCreateModal({
                     <span className="team-preset-card__count">
                       {p.members.length} {t('team.members')}
                     </span>
+                  </button>
+                  <button
+                    className="team-preset-card__edit"
+                    onClick={() => loadPresetForEdit(p)}
+                    title={t('team.editPreset')}
+                  >
+                    <Pencil size={12} />
                   </button>
                   <button
                     className="team-preset-card__delete"
@@ -296,9 +340,12 @@ export function TeamCreateModal({
               <input
                 type="checkbox"
                 checked={saveAsPreset}
-                onChange={(e) => setSaveAsPreset(e.target.checked)}
+                onChange={(e) => {
+                  setSaveAsPreset(e.target.checked);
+                  if (!e.target.checked) setEditingPresetId(null);
+                }}
               />
-              <span>{t('team.saveAsPreset')}</span>
+              <span>{editingPresetId ? t('team.updatePreset') : t('team.saveAsPreset')}</span>
             </label>
             {saveAsPreset && (
               <input
@@ -315,8 +362,24 @@ export function TeamCreateModal({
         </div>
 
         <footer className="modal__footer">
-          <div />
+          <div>
+            {editingPresetId && (
+              <button type="button" className="toolbar__btn" onClick={cancelEdit}>
+                {t('team.cancelEdit')}
+              </button>
+            )}
+          </div>
           <div className="modal__footer-right">
+            {editingPresetId && (
+              <button
+                type="button"
+                className="toolbar__btn toolbar__btn--primary"
+                onClick={handleSaveEditedPreset}
+                disabled={!presetName.trim()}
+              >
+                {t('team.savePreset')}
+              </button>
+            )}
             <button type="button" className="toolbar__btn" onClick={onClose}>
               {t('settings.cancel')}
             </button>
