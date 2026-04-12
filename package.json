@@ -1,6 +1,6 @@
 {
   "name": "vibe-editor",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "private": true,
   "description": "Electronベースの Claude Code 専用エディタ",
   "main": "out/main/index.js",
@@ -75,7 +75,8 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false,
-      "shortcutName": "vibe-editor"
+      "shortcutName": "vibe-editor",
+      "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "mac": {
       "icon": "build/icon.png",
