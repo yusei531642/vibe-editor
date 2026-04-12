@@ -1488,6 +1488,13 @@ body.is-resizing * {
   min-height: var(--toolbar-h);
   gap: 10px;
   box-shadow: 0 1px 0 var(--border);
+  -webkit-app-region: drag;
+}
+
+.claude-code-panel__header .app-menu,
+.claude-code-panel__header .app-menu__trigger,
+.claude-code-panel__header-right {
+  -webkit-app-region: no-drag;
 }
 
 .claude-code-panel__title-wrap {

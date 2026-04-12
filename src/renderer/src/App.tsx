@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Crown, Plus, RotateCw, Users } from 'lucide-react';
+import { Command as CommandIcon, Crown, Plus, RotateCw, Settings as SettingsIcon, Users } from 'lucide-react';
 import type {
   GitDiffResult,
   GitFileChange,
@@ -15,6 +15,7 @@ import type {
 import { Sidebar, type SidebarView } from './components/Sidebar';
 import { TabBar, type TabItem } from './components/TabBar';
 import { Toolbar } from './components/Toolbar';
+import { AppMenu } from './components/AppMenu';
 import { DiffView } from './components/DiffView';
 import { TerminalView, type TerminalViewHandle } from './components/TerminalView';
 import { SettingsModal } from './components/SettingsModal';
@@ -1183,10 +1184,35 @@ export function App(): JSX.Element {
       <aside className={`claude-code-panel${activeDiffTab ? '' : ' claude-code-panel--full'}`}>
         <header className="claude-code-panel__header">
           <div className="claude-code-panel__title-wrap">
+            <AppMenu
+              recentProjects={settings.recentProjects ?? []}
+              onNewProject={handleNewProject}
+              onOpenFolder={handleOpenFolder}
+              onOpenFile={handleOpenFile}
+              onOpenRecent={handleOpenRecent}
+              onClearRecent={handleClearRecent}
+            />
             <span className="claude-code-panel__dot" />
             <span className="claude-code-panel__title">{t('claudePanel.title')}</span>
           </div>
           <div className="claude-code-panel__header-right">
+            <button
+              type="button"
+              className="toolbar__btn toolbar__btn--icon"
+              onClick={() => setPaletteOpen(true)}
+              title={t('toolbar.palette.title')}
+            >
+              <CommandIcon size={16} strokeWidth={1.75} />
+            </button>
+            <button
+              type="button"
+              className="toolbar__btn toolbar__btn--icon"
+              onClick={() => setSettingsOpen(true)}
+              title={t('toolbar.settings.title')}
+            >
+              <SettingsIcon size={16} strokeWidth={1.75} />
+            </button>
+            <div className="toolbar__divider" />
             {/* + ボタン & 作成メニュー */}
             <div style={{ position: 'relative' }}>
               <button
