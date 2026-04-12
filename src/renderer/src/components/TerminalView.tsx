@@ -22,6 +22,8 @@ interface TerminalViewProps {
   args?: string[];
   /** 現在このペインが表示されているか（非表示時は fit をスキップ） */
   visible: boolean;
+  /** 起動後に自動送信するメッセージ（チームロールのプロンプト等） */
+  initialMessage?: string;
   /** 起動中 / エラー表示用のコールバック */
   onStatus?: (status: string) => void;
   /** 出力イベント（非可視時のバッジ表示用） */
@@ -37,7 +39,7 @@ interface TerminalViewProps {
  */
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
   function TerminalView(
-    { cwd, command, args, visible, onStatus, onActivity, onExit },
+    { cwd, command, args, visible, initialMessage, onStatus, onActivity, onExit },
     ref
   ): JSX.Element {
   const { settings } = useSettings();
@@ -87,7 +89,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         cursorAccent: themeVars.bg,
         selectionBackground: isLight ? '#add6ff' : '#264f78'
       },
-      scrollback: 10000,
+      scrollback: 5000,
       convertEol: false
     });
     const fit = new FitAddon();
@@ -139,6 +141,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     let offData: (() => void) | null = null;
     let offExit: (() => void) | null = null;
     let disposed = false;
+    const cleanupTimers: ReturnType<typeof setTimeout>[] = [];
 
     (async () => {
       try {
@@ -161,6 +164,16 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
 
         ptyIdRef.current = res.id;
         callbacksRef.current.onStatus?.(`実行中: ${res.command ?? command}`);
+
+        // ロールプロンプト等の初期メッセージを起動後に送信
+        if (initialMessage) {
+          const initTimer = setTimeout(() => {
+            if (ptyIdRef.current && !disposed) {
+              void window.api.terminal.write(ptyIdRef.current, initialMessage + '\r');
+            }
+          }, 2500);
+          cleanupTimers.push(initTimer);
+        }
 
         offData = window.api.terminal.onData(res.id, (data) => {
           term.write(data);
@@ -274,6 +287,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
 
     return () => {
       disposed = true;
+      cleanupTimers.forEach(clearTimeout);
       ro.disconnect();
       dataSub.dispose();
       offData?.();
@@ -351,7 +365,13 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     return () => clearTimeout(t);
   }, [visible]);
 
-    return <div className="terminal-view" ref={containerRef} />;
+    return (
+      <div
+        className="terminal-view"
+        ref={containerRef}
+        style={visible ? undefined : { display: 'none' }}
+      />
+    );
   }
 );
 

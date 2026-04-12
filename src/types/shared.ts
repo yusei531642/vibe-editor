@@ -28,6 +28,11 @@ export interface AppSettings {
   recentProjects: string[];
   /** 右側 Claude Code パネルの幅 (px) */
   claudeCodePanelWidth: number;
+  // ---------- Codex ----------
+  codexCommand: string;
+  codexArgs: string;
+  // ---------- チームプリセット ----------
+  teamPresets: TeamPreset[];
 }
 
 export interface ClaudeCheckResult {
@@ -50,7 +55,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   claudeArgs: '',
   claudeCwd: '',
   recentProjects: [],
-  claudeCodePanelWidth: 460
+  claudeCodePanelWidth: 460,
+  codexCommand: 'codex',
+  codexArgs: '',
+  teamPresets: []
 };
 
 /** git status --porcelain のエントリ */
@@ -86,6 +94,23 @@ export interface SessionInfo {
   title: string;
   messageCount: number;
   lastModifiedAt: string;
+}
+
+// ---------- エージェント & チーム ----------
+
+export type TerminalAgent = 'claude' | 'codex';
+
+export type TeamRole = 'planner' | 'programmer' | 'researcher' | 'reviewer';
+
+export interface TeamMember {
+  agent: TerminalAgent;
+  role: TeamRole;
+}
+
+export interface TeamPreset {
+  id: string;
+  name: string;
+  members: TeamMember[];
 }
 
 // ---------- ターミナル ----------

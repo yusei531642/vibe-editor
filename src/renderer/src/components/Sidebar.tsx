@@ -33,6 +33,9 @@ export function Sidebar(props: SidebarProps): JSX.Element {
   const t = useT();
   return (
     <aside className="sidebar">
+      <div className="sidebar__header">
+        <span className="sidebar__brand">vibe-editor</span>
+      </div>
       <nav className="sidebar-switcher" role="tablist" aria-label="Sidebar view">
         <button
           type="button"

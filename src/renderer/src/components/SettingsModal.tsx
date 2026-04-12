@@ -330,6 +330,31 @@ export function SettingsModal({
               変更後は右パネルの「再起動」ボタンでターミナルを再起動すると反映されます。
             </p>
           </section>
+
+          {/* Codex 起動オプション */}
+          <section className="modal__section">
+            <h3>Codex 起動オプション</h3>
+            <label className="modal__label modal__label--full">
+              <span>コマンド</span>
+              <input
+                type="text"
+                value={draft.codexCommand}
+                onChange={(e) => update('codexCommand', e.target.value)}
+                placeholder="codex"
+                spellCheck={false}
+              />
+            </label>
+            <label className="modal__label modal__label--full">
+              <span>引数（空白区切り）</span>
+              <input
+                type="text"
+                value={draft.codexArgs}
+                onChange={(e) => update('codexArgs', e.target.value)}
+                placeholder="--model o3"
+                spellCheck={false}
+              />
+            </label>
+          </section>
         </div>
 
         <footer className="modal__footer">

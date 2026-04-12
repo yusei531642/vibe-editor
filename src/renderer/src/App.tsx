@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RotateCw } from 'lucide-react';
+import { RotateCw, Users } from 'lucide-react';
 import type {
   GitDiffResult,
   GitFileChange,
   GitStatus,
   SessionInfo,
+  TeamMember,
+  TeamPreset,
+  TeamRole,
+  TerminalAgent,
   ThemeName
 } from '../../types/shared';
 import { Sidebar, type SidebarView } from './components/Sidebar';
@@ -17,6 +21,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { WelcomePane } from './components/WelcomePane';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { ClaudeNotFound } from './components/ClaudeNotFound';
+import { TeamCreateModal } from './components/TeamCreateModal';
 import { useT } from './lib/i18n';
 import { useSettings } from './lib/settings-context';
 import { useToast } from './lib/toast-context';
@@ -38,6 +43,31 @@ interface DiffTab {
   loading: boolean;
   pinned: boolean;
 }
+
+const MAX_TERMINALS = 10;
+
+interface TerminalTab {
+  id: number;
+  version: number;
+  agent: TerminalAgent;
+  role: TeamRole | null;
+  status: string;
+  exited: boolean;
+  resumeSessionId: string | null;
+  hasActivity: boolean;
+}
+
+/** チームロールに対応するシステムプロンプト */
+const ROLE_PROMPTS: Record<TeamRole, string> = {
+  planner:
+    'あなたはチームの Planner です。実装計画の作成・タスク分解・アーキテクチャ設計に集中してくだ��い。コードは書かず、他メンバーへの指示と全体調整を行ってください。',
+  programmer:
+    'あなたはチームの Programmer です。Planner の計画に基づいて高品質なコードを実装してください。ベストプラクティスとクリーンコードを意識してください。',
+  researcher:
+    'あなたはチームの Researcher です。コードベースの調査・ド���ュメント確認・API調査を行い、チームに必要な情報を提供してください。',
+  reviewer:
+    'あなたはチームの Reviewer です。コードの変更をレビューし、バグ特定・改善提案・セキュリティチェックを行ってください。'
+};
 
 export function App(): JSX.Element {
   const { settings, update: updateSettings, reset: resetSettings } = useSettings();
@@ -66,12 +96,13 @@ export function App(): JSX.Element {
   const [recentlyClosed, setRecentlyClosed] = useState<DiffTab[]>([]);
   const [sideBySide, setSideBySide] = useState<boolean>(true);
 
-  // Claude Code terminal
-  const [terminalStatus, setTerminalStatus] = useState<string>('');
-  const [terminalExited, setTerminalExited] = useState<boolean>(false);
-  const [terminalVersion, setTerminalVersion] = useState<number>(0);
-  const [resumeSessionId, setResumeSessionId] = useState<string | null>(null);
-  const terminalRef = useRef<TerminalViewHandle | null>(null);
+  // Claude Code / Codex terminal tabs (最大10個の同時実行をサポート)
+  const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
+  const [activeTerminalTabId, setActiveTerminalTabId] = useState<number>(0);
+  const nextTerminalIdRef = useRef(1);
+  const terminalRefs = useRef(new Map<number, TerminalViewHandle>());
+  const [tabCreateMenuOpen, setTabCreateMenuOpen] = useState(false);
+  const [teamModalOpen, setTeamModalOpen] = useState(false);
 
   // Claude CLI 検査状態
   const [claudeCheck, setClaudeCheck] = useState<{
@@ -86,11 +117,60 @@ export function App(): JSX.Element {
     items: ContextMenuItem[];
   } | null>(null);
 
-  const restartTerminal = useCallback(() => {
-    setTerminalExited(false);
-    setTerminalStatus('');
-    setTerminalVersion((v) => v + 1);
+  const addTerminalTab = useCallback(
+    (opts?: {
+      agent?: TerminalAgent;
+      role?: TeamRole | null;
+      resumeSessionId?: string | null;
+    }): number => {
+      const id = nextTerminalIdRef.current++;
+      const tab: TerminalTab = {
+        id,
+        version: 0,
+        agent: opts?.agent ?? 'claude',
+        role: opts?.role ?? null,
+        status: '',
+        exited: false,
+        resumeSessionId: opts?.resumeSessionId ?? null,
+        hasActivity: false
+      };
+      setTerminalTabs((prev) => {
+        if (prev.length >= MAX_TERMINALS) return prev;
+        return [...prev, tab];
+      });
+      setActiveTerminalTabId(id);
+      return id;
+    },
+    []
+  );
+
+  const closeTerminalTab = useCallback((tabId: number) => {
+    setTerminalTabs((prev) => {
+      if (prev.length <= 1) return prev;
+      const next = prev.filter((t) => t.id !== tabId);
+      setActiveTerminalTabId((active) => {
+        if (active !== tabId) return active;
+        const idx = prev.findIndex((t) => t.id === tabId);
+        const neighbor = next[Math.min(idx, next.length - 1)];
+        return neighbor?.id ?? next[0]?.id ?? 0;
+      });
+      return next;
+    });
   }, []);
+
+  const restartTerminalTab = useCallback((tabId: number) => {
+    setTerminalTabs((prev) =>
+      prev.map((t) =>
+        t.id === tabId
+          ? { ...t, version: t.version + 1, exited: false, status: '', hasActivity: false }
+          : t
+      )
+    );
+  }, []);
+
+  const restartTerminal = useCallback(() => {
+    restartTerminalTab(activeTerminalTabId);
+  }, [activeTerminalTabId, restartTerminalTab]);
 
   // ---------- Claude CLI 検査 ----------
   const runClaudeCheck = useCallback(async () => {
@@ -194,12 +274,22 @@ export function App(): JSX.Element {
         setDiffTabs([]);
         setRecentlyClosed([]);
         setActiveTabId(null);
-        setResumeSessionId(null);
         setActiveSessionId(null);
-        // ターミナル再起動
-        setTerminalExited(false);
-        setTerminalStatus('起動中…');
-        setTerminalVersion((v) => v + 1);
+        // ターミナルをリセット（全タブ閉じて新規1つ）
+        const newId = nextTerminalIdRef.current++;
+        setTerminalTabs([
+          {
+            id: newId,
+            version: 0,
+            agent: 'claude',
+            role: null,
+            status: '起動中…',
+            exited: false,
+            resumeSessionId: null,
+            hasActivity: false
+          }
+        ]);
+        setActiveTerminalTabId(newId);
         setStatus(`${root.split(/[\\/]/).pop()}`);
         if (options.addToRecent !== false) {
           const rp = settings.recentProjects ?? [];
@@ -328,12 +418,11 @@ export function App(): JSX.Element {
   /** 指定ファイルの変更を Claude Code にレビュー依頼するプロンプトを生成して ターミナルに送信 */
   const reviewDiff = useCallback(
     (file: GitFileChange) => {
-      // プロンプト文言は UI 言語に合わせる（Claude はどちらでも読める）
       const prompt =
         settings.language === 'en'
           ? `Please review the changes in this file and point out any issues or possible improvements: ${file.path}`
           : `このファイルの変更内容をレビューしてください。問題点や改善の余地があれば指摘してください: ${file.path}`;
-      const term = terminalRef.current;
+      const term = terminalRefs.current.get(activeTerminalTabId);
       if (!term) {
         showToast(t('toast.terminalNotReady'), { tone: 'warning' });
         return;
@@ -342,7 +431,7 @@ export function App(): JSX.Element {
       showToast(t('toast.reviewRequested', { path: file.path }), { tone: 'info' });
       term.focus();
     },
-    [showToast, settings.language, t]
+    [showToast, settings.language, t, activeTerminalTabId]
   );
 
   const handleFileContextMenu = useCallback(
@@ -375,14 +464,11 @@ export function App(): JSX.Element {
 
   const handleResumeSession = useCallback(
     (session: SessionInfo) => {
-      setResumeSessionId(session.id);
       setActiveSessionId(session.id);
-      setTerminalStatus(`セッション ${session.id.slice(0, 8)} に復帰中…`);
       showToast(`セッションに復帰: ${session.title.slice(0, 40)}`, { tone: 'info' });
-      setTerminalVersion((v) => v + 1);
-      setTerminalExited(false);
+      addTerminalTab({ resumeSessionId: session.id });
     },
-    [showToast]
+    [showToast, addTerminalTab]
   );
 
   // ---------- タブ操作 ----------
@@ -565,18 +651,38 @@ export function App(): JSX.Element {
         run: () => refreshSessions()
       },
       {
-        id: 'terminal.newSession',
-        title: '新しい Claude Code セッションを開始',
+        id: 'terminal.addClaude',
+        title: 'Claude Code タブを追加',
+        subtitle: `${terminalTabs.length}/${MAX_TERMINALS}`,
         category: 'ターミナル',
-        run: () => {
-          setResumeSessionId(null);
-          setActiveSessionId(null);
-          restartTerminal();
-        }
+        when: () => terminalTabs.length < MAX_TERMINALS,
+        run: () => addTerminalTab({ agent: 'claude' })
+      },
+      {
+        id: 'terminal.addCodex',
+        title: 'Codex タブを追加',
+        subtitle: `${terminalTabs.length}/${MAX_TERMINALS}`,
+        category: 'ターミナル',
+        when: () => terminalTabs.length < MAX_TERMINALS,
+        run: () => addTerminalTab({ agent: 'codex' })
+      },
+      {
+        id: 'terminal.createTeam',
+        title: 'Team を作成…',
+        category: 'ターミナル',
+        when: () => terminalTabs.length < MAX_TERMINALS,
+        run: () => setTeamModalOpen(true)
+      },
+      {
+        id: 'terminal.closeTab',
+        title: 'アクティブなターミナルタブを閉じる',
+        category: 'ターミナル',
+        when: () => terminalTabs.length > 1,
+        run: () => closeTerminalTab(activeTerminalTabId)
       },
       {
         id: 'terminal.restart',
-        title: 'Claude Code ターミナルを再起動',
+        title: 'ターミナルを再起動',
         category: 'ターミナル',
         run: () => restartTerminal()
       },
@@ -632,6 +738,10 @@ export function App(): JSX.Element {
     updateSettings,
     handleRestart,
     restartTerminal,
+    addTerminalTab,
+    closeTerminalTab,
+    activeTerminalTabId,
+    terminalTabs.length,
     diffTabs.length
   ]);
 
@@ -683,11 +793,60 @@ export function App(): JSX.Element {
 
   // ---------- 起動引数合成 ----------
 
-  const effectiveTerminalArgs = useMemo(() => {
-    const base = parseShellArgs(settings.claudeArgs || '');
-    if (resumeSessionId) return [...base, '--resume', resumeSessionId];
-    return base;
-  }, [settings.claudeArgs, resumeSessionId]);
+  const getTerminalArgs = useCallback(
+    (tab: TerminalTab) => {
+      const isCodex = tab.agent === 'codex';
+      const base = parseShellArgs(
+        isCodex ? settings.codexArgs || '' : settings.claudeArgs || ''
+      );
+      if (tab.resumeSessionId && !isCodex) {
+        base.push('--resume', tab.resumeSessionId);
+      }
+      return base;
+    },
+    [settings.claudeArgs, settings.codexArgs]
+  );
+
+  /** タブのロールに対応する初期メッセージ（起動後に自動送信） */
+  const getRolePrompt = useCallback((tab: TerminalTab): string | undefined => {
+    if (!tab.role) return undefined;
+    return ROLE_PROMPTS[tab.role];
+  }, []);
+
+  // 初回タブ作成: Claude OK かつ projectRoot 設定済みでタブなし
+  useEffect(() => {
+    if (claudeCheck.state === 'ok' && projectRoot && terminalTabs.length === 0) {
+      addTerminalTab();
+    }
+  }, [claudeCheck.state, projectRoot, terminalTabs.length, addTerminalTab]);
+
+  // ---------- チーム作成 ----------
+
+  const handleCreateTeam = useCallback(
+    (members: TeamMember[]) => {
+      for (const m of members) {
+        if (terminalTabs.length + members.indexOf(m) >= MAX_TERMINALS) break;
+        addTerminalTab({ agent: m.agent, role: m.role });
+      }
+    },
+    [addTerminalTab, terminalTabs.length]
+  );
+
+  const handleSavePreset = useCallback(
+    (preset: TeamPreset) => {
+      const prev = settings.teamPresets ?? [];
+      void updateSettings({ teamPresets: [...prev, preset] });
+    },
+    [settings.teamPresets, updateSettings]
+  );
+
+  const handleDeletePreset = useCallback(
+    (id: string) => {
+      const prev = settings.teamPresets ?? [];
+      void updateSettings({ teamPresets: prev.filter((p) => p.id !== id) });
+    },
+    [settings.teamPresets, updateSettings]
+  );
 
   // ---------- タブリスト ----------
 
@@ -702,6 +861,7 @@ export function App(): JSX.Element {
   const activeDiffPath = activeDiffTab?.relPath ?? null;
 
   const projectName = projectRoot.split(/[\\/]/).pop() || 'no project';
+  const activeTab = terminalTabs.find((t) => t.id === activeTerminalTabId) ?? null;
 
   return (
     <div className="layout">
@@ -772,30 +932,30 @@ export function App(): JSX.Element {
         <header className="claude-code-panel__header">
           <div className="claude-code-panel__title-wrap">
             <span
-              className="claude-code-panel__dot"
+              className={`claude-code-panel__dot${activeTab?.exited || claudeCheck.state === 'missing' ? ' is-exited' : ''}`}
               style={{
                 background:
-                  claudeCheck.state === 'missing' ? 'var(--warning)' : 'var(--accent)'
+                  claudeCheck.state === 'missing' ? 'var(--warning)' : undefined
               }}
             />
             <span className="claude-code-panel__title">{t('claudePanel.title')}</span>
-            {resumeSessionId && (
+            {activeTab?.resumeSessionId && (
               <span className="claude-code-panel__resume">
-                {resumeSessionId.slice(0, 8)}
+                {activeTab.resumeSessionId.slice(0, 8)}
               </span>
             )}
           </div>
           <div className="claude-code-panel__header-right">
             <span
-              className={`claude-code-panel__status ${terminalExited || claudeCheck.state === 'missing' ? 'is-exited' : 'is-running'}`}
+              className={`claude-code-panel__status ${activeTab?.exited || claudeCheck.state === 'missing' ? 'is-exited' : 'is-running'}`}
             >
               {claudeCheck.state === 'missing'
                 ? t('claudePanel.notFound.title')
                 : claudeCheck.state === 'checking'
                   ? t('claudePanel.checking')
-                  : terminalExited
+                  : activeTab?.exited
                     ? t('claudePanel.exited')
-                    : terminalStatus || t('claudePanel.starting')}
+                    : activeTab?.status || t('claudePanel.starting')}
             </span>
             <button
               type="button"
@@ -808,6 +968,106 @@ export function App(): JSX.Element {
             </button>
           </div>
         </header>
+
+        {/* ターミナルタブバー */}
+        <div className="terminal-tabs">
+          {terminalTabs.map((tab, idx) => (
+            <button
+              key={tab.id}
+              className={`terminal-tab${tab.id === activeTerminalTabId ? ' is-active' : ''}${tab.exited ? ' is-exited' : ''}`}
+              onClick={() => {
+                setActiveTerminalTabId(tab.id);
+                setTerminalTabs((prev) =>
+                  prev.map((t) =>
+                    t.id === tab.id ? { ...t, hasActivity: false } : t
+                  )
+                );
+              }}
+              title={`Terminal ${idx + 1}${tab.role ? ` (${tab.role})` : ''}`}
+            >
+              <span className={`terminal-tab__agent terminal-tab__agent--${tab.agent}`}>
+                {tab.agent === 'claude' ? 'C' : 'X'}
+              </span>
+              <span>{idx + 1}</span>
+              {tab.role && <span className="terminal-tab__role">{tab.role}</span>}
+              {tab.hasActivity && tab.id !== activeTerminalTabId && (
+                <span className="terminal-tab__activity" />
+              )}
+              {terminalTabs.length > 1 && (
+                <span
+                  className="terminal-tab__close"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    closeTerminalTab(tab.id);
+                  }}
+                  role="button"
+                  tabIndex={-1}
+                >
+                  &times;
+                </span>
+              )}
+            </button>
+          ))}
+          <div style={{ position: 'relative' }}>
+            <button
+              className="terminal-tabs__add"
+              onClick={() => setTabCreateMenuOpen((v) => !v)}
+              disabled={terminalTabs.length >= MAX_TERMINALS}
+              title={
+                terminalTabs.length >= MAX_TERMINALS
+                  ? t('claudePanel.tabLimit', { max: MAX_TERMINALS })
+                  : t('claudePanel.newTab')
+              }
+            >
+              +
+            </button>
+            {tabCreateMenuOpen && (
+              <>
+                <div
+                  style={{ position: 'fixed', inset: 0, zIndex: 499 }}
+                  onClick={() => setTabCreateMenuOpen(false)}
+                />
+                <div className="tab-create-menu">
+                  <button
+                    className="tab-create-menu__item"
+                    onClick={() => {
+                      addTerminalTab({ agent: 'claude' });
+                      setTabCreateMenuOpen(false);
+                    }}
+                    disabled={terminalTabs.length >= MAX_TERMINALS}
+                  >
+                    <span className="terminal-tab__agent terminal-tab__agent--claude">C</span>
+                    {t('claudePanel.addClaude')}
+                  </button>
+                  <button
+                    className="tab-create-menu__item"
+                    onClick={() => {
+                      addTerminalTab({ agent: 'codex' });
+                      setTabCreateMenuOpen(false);
+                    }}
+                    disabled={terminalTabs.length >= MAX_TERMINALS}
+                  >
+                    <span className="terminal-tab__agent terminal-tab__agent--codex">X</span>
+                    {t('claudePanel.addCodex')}
+                  </button>
+                  <div className="tab-create-menu__divider" />
+                  <button
+                    className="tab-create-menu__item"
+                    onClick={() => {
+                      setTeamModalOpen(true);
+                      setTabCreateMenuOpen(false);
+                    }}
+                    disabled={terminalTabs.length >= MAX_TERMINALS}
+                  >
+                    <Users size={14} />
+                    {t('claudePanel.createTeam')}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
         <div className="claude-code-panel__body">
           {claudeCheck.state === 'checking' && (
             <div className="claude-not-found__body" style={{ padding: 40, textAlign: 'center' }}>
@@ -821,18 +1081,47 @@ export function App(): JSX.Element {
               onOpenSettings={() => setSettingsOpen(true)}
             />
           )}
-          {claudeCheck.state === 'ok' && projectRoot && (
-            <TerminalView
-              key={terminalVersion}
-              ref={terminalRef}
-              cwd={settings.claudeCwd || projectRoot}
-              command={settings.claudeCommand || 'claude'}
-              args={effectiveTerminalArgs}
-              visible={true}
-              onStatus={setTerminalStatus}
-              onExit={() => setTerminalExited(true)}
-            />
-          )}
+          {claudeCheck.state === 'ok' &&
+            projectRoot &&
+            terminalTabs.map((tab) => (
+              <TerminalView
+                key={`term-${tab.id}-v${tab.version}`}
+                ref={(el) => {
+                  if (el) terminalRefs.current.set(tab.id, el);
+                  else terminalRefs.current.delete(tab.id);
+                }}
+                cwd={settings.claudeCwd || projectRoot}
+                command={
+                  tab.agent === 'codex'
+                    ? settings.codexCommand || 'codex'
+                    : settings.claudeCommand || 'claude'
+                }
+                args={getTerminalArgs(tab)}
+                visible={tab.id === activeTerminalTabId}
+                initialMessage={getRolePrompt(tab)}
+                onStatus={(s) =>
+                  setTerminalTabs((prev) =>
+                    prev.map((t) => (t.id === tab.id ? { ...t, status: s } : t))
+                  )
+                }
+                onExit={() =>
+                  setTerminalTabs((prev) =>
+                    prev.map((t) => (t.id === tab.id ? { ...t, exited: true } : t))
+                  )
+                }
+                onActivity={() => {
+                  if (tab.id !== activeTerminalTabId) {
+                    setTerminalTabs((prev) =>
+                      prev.map((t) =>
+                        t.id === tab.id && !t.hasActivity
+                          ? { ...t, hasActivity: true }
+                          : t
+                      )
+                    );
+                  }
+                }}
+              />
+            ))}
         </div>
       </aside>
 
@@ -862,6 +1151,17 @@ export function App(): JSX.Element {
           onClose={() => setContextMenu(null)}
         />
       )}
+
+      <TeamCreateModal
+        open={teamModalOpen}
+        onClose={() => setTeamModalOpen(false)}
+        onCreate={handleCreateTeam}
+        savedPresets={settings.teamPresets ?? []}
+        onSavePreset={handleSavePreset}
+        onDeletePreset={handleDeletePreset}
+        maxTerminals={MAX_TERMINALS}
+        currentTabCount={terminalTabs.length}
+      />
     </div>
   );
 }

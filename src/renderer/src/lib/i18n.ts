@@ -64,6 +64,32 @@ const ja: Dict = {
   'claudePanel.notFound.retry': '再検出',
   'claudePanel.notFound.settings': '設定で指定',
   'claudePanel.checking': '確認中…',
+  'claudePanel.newTab': '新しいターミナルタブ',
+  'claudePanel.closeTab': 'タブを閉じる',
+  'claudePanel.tabLimit': '上限に達しています（最大{max}）',
+  'claudePanel.addClaude': 'Claude Code を追加',
+  'claudePanel.addCodex': 'Codex を追加',
+  'claudePanel.createTeam': 'Team を作成…',
+
+  // ---------- Team ----------
+  'team.title': 'Team を作成',
+  'team.presets': 'プリセット',
+  'team.custom': 'カスタム',
+  'team.members': 'メンバー',
+  'team.addMember': 'メンバーを追加',
+  'team.removeMember': '削除',
+  'team.saveAsPreset': 'プリセットとして保存',
+  'team.presetName': 'プリセット名',
+  'team.deletePreset': 'プリセットを削除',
+  'team.create': '作成',
+  'team.remaining': '残り {count} タブ作成可能',
+  'team.tooMany': '{need} タブ必要（残り {remaining}）',
+
+  // ---------- Roles ----------
+  'role.planner': 'Planner',
+  'role.programmer': 'Programmer',
+  'role.researcher': 'Researcher',
+  'role.reviewer': 'Reviewer',
 
   // ---------- Settings ----------
   'settings.title': '設定',
@@ -176,6 +202,32 @@ const en: Dict = {
   'claudePanel.notFound.retry': 'Retry detection',
   'claudePanel.notFound.settings': 'Open settings',
   'claudePanel.checking': 'Checking…',
+  'claudePanel.newTab': 'New terminal tab',
+  'claudePanel.closeTab': 'Close tab',
+  'claudePanel.tabLimit': 'Limit reached (max {max})',
+  'claudePanel.addClaude': 'Add Claude Code',
+  'claudePanel.addCodex': 'Add Codex',
+  'claudePanel.createTeam': 'Create Team…',
+
+  // ---------- Team ----------
+  'team.title': 'Create Team',
+  'team.presets': 'Presets',
+  'team.custom': 'Custom',
+  'team.members': 'members',
+  'team.addMember': 'Add member',
+  'team.removeMember': 'Remove',
+  'team.saveAsPreset': 'Save as preset',
+  'team.presetName': 'Preset name',
+  'team.deletePreset': 'Delete preset',
+  'team.create': 'Create',
+  'team.remaining': '{count} tabs remaining',
+  'team.tooMany': 'Needs {need} tabs ({remaining} remaining)',
+
+  // ---------- Roles ----------
+  'role.planner': 'Planner',
+  'role.programmer': 'Programmer',
+  'role.researcher': 'Researcher',
+  'role.reviewer': 'Reviewer',
 
   // ---------- Settings ----------
   'settings.title': 'Settings',
