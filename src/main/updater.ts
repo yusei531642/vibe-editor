@@ -98,9 +98,16 @@ export function initAutoUpdater(): void {
       const mainWin = getWin();
       if (mainWin) mainWin.hide();
       showProgressWindow(info.version);
-      autoUpdater.downloadUpdate().catch((err) => {
-        console.error('[auto-updater] downloadUpdate failed:', err);
-      });
+      // リトライ付きダウンロード（SSL一時エラー対策）
+      const tryDownload = (retries: number): void => {
+        autoUpdater.downloadUpdate().catch((err) => {
+          console.error(`[auto-updater] downloadUpdate failed (retry=${retries}):`, err);
+          if (retries > 0) {
+            setTimeout(() => tryDownload(retries - 1), 2000);
+          }
+        });
+      };
+      tryDownload(2);
     }
   });
 

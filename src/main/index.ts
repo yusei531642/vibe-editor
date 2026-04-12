@@ -10,6 +10,10 @@ import { initAutoUpdater } from './updater';
 
 const isDev = !app.isPackaged;
 
+// GitHub CDN (release-assets.githubusercontent.com) との TLS ハンドシェイク安定化
+app.commandLine.appendSwitch('ignore-certificate-errors', 'false');
+app.commandLine.appendSwitch('ssl-version-min', 'tls1.2');
+
 // デフォルトのアプリケーションメニュー（File/Edit/View/Window/Help）を完全に削除。
 // vibe coding UI にはネイティブメニューバーは不要。
 Menu.setApplicationMenu(null);
