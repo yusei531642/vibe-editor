@@ -365,13 +365,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     return () => clearTimeout(t);
   }, [visible]);
 
-    return (
-      <div
-        className="terminal-view"
-        ref={containerRef}
-        style={visible ? undefined : { display: 'none' }}
-      />
-    );
+    return <div className="terminal-view" ref={containerRef} />;
   }
 );
 

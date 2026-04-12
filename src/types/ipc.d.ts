@@ -20,6 +20,8 @@ declare global {
         restart(): Promise<void>;
         setWindowTitle(title: string): Promise<void>;
         checkClaude(command: string): Promise<ClaudeCheckResult>;
+        setZoomLevel(level: number): Promise<void>;
+        getZoomLevel(): Promise<number>;
       };
       git: {
         status(projectRoot: string): Promise<GitStatus>;

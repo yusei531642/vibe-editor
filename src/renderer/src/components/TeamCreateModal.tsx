@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Plus, Trash2, Users, X } from 'lucide-react';
-import type { TeamMember, TeamPreset, TeamRole, TerminalAgent } from '../../../types/shared';
+import { Crown, Plus, Trash2, Users, X } from 'lucide-react';
+import type { Team, TeamMember, TeamPreset, TeamRole, TerminalAgent } from '../../../types/shared';
 import { useT } from '../lib/i18n';
 import { useAnimatedMount } from '../lib/use-animated-mount';
 
@@ -9,25 +9,28 @@ const AGENTS: { value: TerminalAgent; label: string }[] = [
   { value: 'codex', label: 'Codex' }
 ];
 
-const ROLES: { value: TeamRole; label: string; labelEn: string }[] = [
-  { value: 'planner', label: 'Planner', labelEn: 'Planner' },
-  { value: 'programmer', label: 'Programmer', labelEn: 'Programmer' },
-  { value: 'researcher', label: 'Researcher', labelEn: 'Researcher' },
-  { value: 'reviewer', label: 'Reviewer', labelEn: 'Reviewer' }
+/** Leader 以外のロール */
+const MEMBER_ROLES: { value: TeamRole; label: string }[] = [
+  { value: 'planner', label: 'Planner' },
+  { value: 'programmer', label: 'Programmer' },
+  { value: 'researcher', label: 'Researcher' },
+  { value: 'reviewer', label: 'Reviewer' }
 ];
 
-const BUILTIN_PRESETS: { name: string; nameEn: string; members: TeamMember[] }[] = [
+/** ビルトインプリセット（Leader + メンバー） */
+const BUILTIN_PRESETS: {
+  name: string;
+  leaderAgent: TerminalAgent;
+  members: TeamMember[];
+}[] = [
   {
     name: 'Dev Duo',
-    nameEn: 'Dev Duo',
-    members: [
-      { agent: 'claude', role: 'planner' },
-      { agent: 'claude', role: 'programmer' }
-    ]
+    leaderAgent: 'claude',
+    members: [{ agent: 'claude', role: 'programmer' }]
   },
   {
     name: 'Full Team',
-    nameEn: 'Full Team',
+    leaderAgent: 'claude',
     members: [
       { agent: 'claude', role: 'planner' },
       { agent: 'claude', role: 'programmer' },
@@ -36,12 +39,13 @@ const BUILTIN_PRESETS: { name: string; nameEn: string; members: TeamMember[] }[]
     ]
   },
   {
-    name: 'Mixed Team',
-    nameEn: 'Mixed Team',
+    name: 'Code Squad',
+    leaderAgent: 'claude',
     members: [
       { agent: 'claude', role: 'planner' },
       { agent: 'claude', role: 'programmer' },
-      { agent: 'codex', role: 'researcher' }
+      { agent: 'claude', role: 'programmer' },
+      { agent: 'codex', role: 'programmer' }
     ]
   }
 ];
@@ -49,12 +53,17 @@ const BUILTIN_PRESETS: { name: string; nameEn: string; members: TeamMember[] }[]
 interface TeamCreateModalProps {
   open: boolean;
   onClose: () => void;
-  onCreate: (members: TeamMember[]) => void;
+  onCreate: (
+    teamName: string,
+    leader: { agent: TerminalAgent },
+    members: TeamMember[]
+  ) => void;
   savedPresets: TeamPreset[];
   onSavePreset: (preset: TeamPreset) => void;
   onDeletePreset: (id: string) => void;
   maxTerminals: number;
   currentTabCount: number;
+  existingTeams: Team[];
 }
 
 export function TeamCreateModal({
@@ -70,8 +79,9 @@ export function TeamCreateModal({
   const t = useT();
   const { mounted, state } = useAnimatedMount(open, 260);
 
+  const [teamName, setTeamName] = useState('');
+  const [leaderAgent, setLeaderAgent] = useState<TerminalAgent>('claude');
   const [members, setMembers] = useState<TeamMember[]>([
-    { agent: 'claude', role: 'planner' },
     { agent: 'claude', role: 'programmer' }
   ]);
   const [saveAsPreset, setSaveAsPreset] = useState(false);
@@ -80,14 +90,14 @@ export function TeamCreateModal({
   if (!mounted) return null;
 
   const remaining = maxTerminals - currentTabCount;
+  const totalNeeded = 1 + members.length; // leader + members
 
   const addMember = (): void => {
-    if (members.length >= remaining) return;
+    if (totalNeeded >= remaining) return;
     setMembers((prev) => [...prev, { agent: 'claude', role: 'programmer' }]);
   };
 
   const removeMember = (idx: number): void => {
-    if (members.length <= 1) return;
     setMembers((prev) => prev.filter((_, i) => i !== idx));
   };
 
@@ -98,20 +108,36 @@ export function TeamCreateModal({
   };
 
   const handleCreate = (): void => {
+    const name = teamName.trim() || 'Team';
     if (saveAsPreset && presetName.trim()) {
       onSavePreset({
         id: `custom-${Date.now()}`,
         name: presetName.trim(),
-        members: [...members]
+        members: [{ agent: leaderAgent, role: 'leader' as TeamRole }, ...members]
       });
     }
-    onCreate(members);
+    onCreate(name, { agent: leaderAgent }, members);
     onClose();
   };
 
-  const handlePresetCreate = (presetMembers: TeamMember[]): void => {
-    if (presetMembers.length > remaining) return;
-    onCreate(presetMembers);
+  const handlePresetCreate = (
+    preset: { leaderAgent: TerminalAgent; members: TeamMember[]; name: string }
+  ): void => {
+    const needed = 1 + preset.members.length;
+    if (needed > remaining) return;
+    onCreate(preset.name, { agent: preset.leaderAgent }, preset.members);
+    onClose();
+  };
+
+  const handleSavedPresetCreate = (preset: TeamPreset): void => {
+    const leader = preset.members.find((m) => m.role === 'leader');
+    const others = preset.members.filter((m) => m.role !== 'leader');
+    if (preset.members.length > remaining) return;
+    onCreate(
+      preset.name,
+      { agent: leader?.agent ?? 'claude' },
+      others
+    );
     onClose();
   };
 
@@ -141,20 +167,20 @@ export function TeamCreateModal({
                 <button
                   key={p.name}
                   className="team-preset-card"
-                  onClick={() => handlePresetCreate(p.members)}
-                  disabled={p.members.length > remaining}
+                  onClick={() => handlePresetCreate(p)}
+                  disabled={1 + p.members.length > remaining}
                   title={
-                    p.members.length > remaining
-                      ? t('team.tooMany', { need: p.members.length, remaining })
+                    1 + p.members.length > remaining
+                      ? t('team.tooMany', { need: 1 + p.members.length, remaining })
                       : undefined
                   }
                 >
                   <strong>{p.name}</strong>
                   <span className="team-preset-card__members">
-                    {p.members.map((m) => `${m.role}`).join(' + ')}
+                    Leader + {p.members.map((m) => m.role).join(' + ')}
                   </span>
                   <span className="team-preset-card__count">
-                    {p.members.length} {t('team.members')}
+                    {1 + p.members.length} {t('team.members')}
                   </span>
                 </button>
               ))}
@@ -162,12 +188,12 @@ export function TeamCreateModal({
                 <div key={p.id} className="team-preset-card team-preset-card--saved">
                   <button
                     className="team-preset-card__main"
-                    onClick={() => handlePresetCreate(p.members)}
+                    onClick={() => handleSavedPresetCreate(p)}
                     disabled={p.members.length > remaining}
                   >
                     <strong>{p.name}</strong>
                     <span className="team-preset-card__members">
-                      {p.members.map((m) => `${m.role}`).join(' + ')}
+                      {p.members.map((m) => m.role).join(' + ')}
                     </span>
                     <span className="team-preset-card__count">
                       {p.members.length} {t('team.members')}
@@ -188,7 +214,36 @@ export function TeamCreateModal({
           {/* カスタムチーム */}
           <section className="modal__section">
             <h3>{t('team.custom')}</h3>
+
+            {/* チーム名 */}
+            <input
+              className="team-save-name"
+              type="text"
+              value={teamName}
+              onChange={(e) => setTeamName(e.target.value)}
+              placeholder={t('team.teamNamePlaceholder')}
+              spellCheck={false}
+              style={{ marginBottom: 10 }}
+            />
+
+            {/* Leader（常に1名、削除不可） */}
             <div className="team-builder">
+              <div className="team-builder__row team-builder__row--leader">
+                <Crown size={14} className="terminal-tab__leader-icon" />
+                <span className="team-builder__label">Leader</span>
+                <select
+                  value={leaderAgent}
+                  onChange={(e) => setLeaderAgent(e.target.value as TerminalAgent)}
+                >
+                  {AGENTS.map((a) => (
+                    <option key={a.value} value={a.value}>
+                      {a.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* メンバー */}
               {members.map((m, idx) => (
                 <div key={idx} className="team-builder__row">
                   <select
@@ -205,7 +260,7 @@ export function TeamCreateModal({
                     value={m.role}
                     onChange={(e) => updateMember(idx, 'role', e.target.value)}
                   >
-                    {ROLES.map((r) => (
+                    {MEMBER_ROLES.map((r) => (
                       <option key={r.value} value={r.value}>
                         {r.label}
                       </option>
@@ -214,17 +269,17 @@ export function TeamCreateModal({
                   <button
                     className="team-builder__remove"
                     onClick={() => removeMember(idx)}
-                    disabled={members.length <= 1}
                     title={t('team.removeMember')}
                   >
                     <X size={14} />
                   </button>
                 </div>
               ))}
+
               <button
                 className="team-builder__add"
                 onClick={addMember}
-                disabled={members.length >= remaining}
+                disabled={totalNeeded >= remaining}
               >
                 <Plus size={14} />
                 {t('team.addMember')}
@@ -269,9 +324,9 @@ export function TeamCreateModal({
               type="button"
               className="toolbar__btn toolbar__btn--primary"
               onClick={handleCreate}
-              disabled={members.length === 0 || members.length > remaining}
+              disabled={totalNeeded > remaining}
             >
-              {t('team.create')} ({members.length})
+              {t('team.create')} ({totalNeeded})
             </button>
           </div>
         </footer>

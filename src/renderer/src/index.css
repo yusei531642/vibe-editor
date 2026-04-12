@@ -181,6 +181,19 @@ body,
   gap: 0;
 }
 
+/* diff なし → メイン非表示、パネルがフル幅 */
+.layout--terminal-full {
+  grid-template-columns: 272px 0 0 minmax(0, 1fr);
+}
+
+.layout--terminal-full .main {
+  display: none;
+}
+
+.layout--terminal-full .resize-handle {
+  display: none;
+}
+
 /* ---------- 垂直リサイズハンドル（main ↔ Claude Code パネル） ---------- */
 
 .resize-handle {
@@ -226,6 +239,7 @@ body.is-resizing * {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  grid-column: 2;
 }
 
 /* ---------- サイドバー (Claude.ai風) ---------- */
@@ -1455,6 +1469,14 @@ body.is-resizing * {
   min-height: 0;
   min-width: 0;
   box-shadow: -1px 0 0 var(--border);
+  grid-column: 4;
+}
+
+/* diff なし → メインエリアを隠してパネルがフル幅を使う */
+.claude-code-panel--full {
+  width: 100% !important;
+  flex: 1;
+  box-shadow: none;
 }
 
 .claude-code-panel__header {
@@ -1529,22 +1551,30 @@ body.is-resizing * {
   gap: 6px;
 }
 
-.claude-code-panel__restart {
-  background: transparent;
+.claude-code-panel__add-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  background: var(--bg-hover);
   color: var(--text-dim);
-  border: none;
+  border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  font-size: 14px;
   cursor: pointer;
-  padding: 4px 8px;
-  line-height: 1;
-  font-family: inherit;
-  transition: background 0.1s;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
 }
 
-.claude-code-panel__restart:hover {
+.claude-code-panel__add-btn:hover {
   color: var(--accent);
-  background: var(--bg-hover);
+  background: var(--bg-active);
+  border-color: var(--accent);
+}
+
+.claude-code-panel__add-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 .claude-code-panel__status {
@@ -1574,10 +1604,105 @@ body.is-resizing * {
   flex: 1;
   min-height: 0;
   min-width: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr;
+  grid-auto-rows: 1fr;
+  gap: 2px;
   background: var(--bg);
-  padding: 12px 16px 16px;
   position: relative;
+}
+
+/* ペイン数に応じてグリッド列を自動調整 */
+.claude-code-panel__body[data-panes="2"],
+.claude-code-panel__body[data-panes="3"],
+.claude-code-panel__body[data-panes="4"] {
+  grid-template-columns: 1fr 1fr;
+}
+
+.claude-code-panel__body[data-panes="5"],
+.claude-code-panel__body[data-panes="6"],
+.claude-code-panel__body[data-panes="7"],
+.claude-code-panel__body[data-panes="8"],
+.claude-code-panel__body[data-panes="9"],
+.claude-code-panel__body[data-panes="10"] {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+/* ---------- ターミナルペイン ---------- */
+
+.terminal-pane {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+  padding: 4px 8px 8px;
+}
+
+.terminal-pane.is-active {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.terminal-pane__header {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  height: 22px;
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  font-size: 10px;
+  user-select: none;
+  cursor: grab;
+}
+
+.terminal-pane__header:active {
+  cursor: grabbing;
+}
+
+.terminal-pane.drag-over {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.terminal-pane__team-name {
+  font-size: 9px;
+  color: var(--text-mute);
+}
+
+.terminal-pane__close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: var(--text-mute);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+
+.terminal-pane:hover .terminal-pane__close,
+.terminal-pane.is-active .terminal-pane__close {
+  opacity: 1;
+}
+
+.terminal-pane__close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.terminal-pane .terminal-view {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
 }
 
 /* ---------- ターミナルタブバー ---------- */
@@ -1722,7 +1847,7 @@ body.is-resizing * {
   color: #10a37f;
 }
 
-/* ロールバッジ */
+/* ロールバッジ（基本） */
 .terminal-tab__role {
   font-size: 9px;
   font-weight: 500;
@@ -1732,6 +1857,85 @@ body.is-resizing * {
   color: var(--text-dim);
   text-transform: capitalize;
   letter-spacing: 0.02em;
+}
+
+/* ロール別カラー */
+.terminal-tab__role--leader { background: rgba(245, 158, 11, 0.18); color: #f59e0b; }
+.terminal-tab__role--planner { background: rgba(59, 130, 246, 0.18); color: #3b82f6; }
+.terminal-tab__role--programmer { background: rgba(16, 185, 129, 0.18); color: #10b981; }
+.terminal-tab__role--researcher { background: rgba(139, 92, 246, 0.18); color: #8b5cf6; }
+.terminal-tab__role--reviewer { background: rgba(236, 72, 153, 0.18); color: #ec4899; }
+
+/* Leader アイコン */
+.terminal-tab__leader-icon {
+  color: #f59e0b;
+  flex-shrink: 0;
+}
+
+/* ---------- チームグループ ---------- */
+
+.terminal-tabs__team-group {
+  display: flex;
+  align-items: stretch;
+  border-left: 2px solid rgba(245, 158, 11, 0.35);
+  margin-left: 4px;
+  padding-left: 2px;
+  gap: 0;
+}
+
+.terminal-tabs__team-name {
+  display: flex;
+  align-items: center;
+  padding: 0 6px;
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--text-mute);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* ---------- Leader 閉じ確認 ---------- */
+
+.team-close-confirm {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  padding: 10px 14px;
+  z-index: 600;
+  animation: app-menu-in var(--dur-base) var(--ease-out);
+}
+
+.team-close-confirm p {
+  font-size: 12px;
+  color: var(--text);
+  margin: 0 0 8px;
+}
+
+.team-close-confirm__actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* ---------- Team Builder Leader 行 ---------- */
+
+.team-builder__row--leader {
+  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.2);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+}
+
+.team-builder__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #f59e0b;
+  min-width: 50px;
 }
 
 /* ---------- タブ作成メニュー ---------- */

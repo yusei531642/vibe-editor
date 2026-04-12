@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { RotateCw, Users } from 'lucide-react';
+import { Crown, Plus, RotateCw, Users } from 'lucide-react';
 import type {
   GitDiffResult,
   GitFileChange,
   GitStatus,
   SessionInfo,
+  Team,
   TeamMember,
   TeamPreset,
   TeamRole,
@@ -51,23 +52,66 @@ interface TerminalTab {
   version: number;
   agent: TerminalAgent;
   role: TeamRole | null;
+  teamId: string | null;
   status: string;
   exited: boolean;
   resumeSessionId: string | null;
   hasActivity: boolean;
 }
 
-/** チームロールに対応するシステムプロンプト */
-const ROLE_PROMPTS: Record<TeamRole, string> = {
-  planner:
-    'あなたはチームの Planner です。実装計画の作成・タスク分解・アーキテクチャ設計に集中してくだ��い。コードは書かず、他メンバーへの指示と全体調整を行ってください。',
-  programmer:
-    'あなたはチームの Programmer です。Planner の計画に基づいて高品質なコードを実装してください。ベストプラクティスとクリーンコードを意識してください。',
-  researcher:
-    'あなたはチームの Researcher です。コードベースの調査・ド���ュメント確認・API調査を行い、チームに必要な情報を提供してください。',
-  reviewer:
-    'あなたはチームの Reviewer です。コードの変更をレビューし、バグ特定・改善提案・セキュリティチェックを行ってください。'
+/** ロール別の短い説明（チームプロンプト内で使用） */
+const ROLE_DESC: Record<TeamRole, string> = {
+  leader: '全体の調整・指示・タスク割り振り',
+  planner: '実装計画の作成・タスク分解・アーキテクチャ設計',
+  programmer: '計画に基づいた高品質なコード実装',
+  researcher: 'コードベース調査・ドキュメント確認・API調査',
+  reviewer: 'コードレビュー・バグ特定・改善提案'
 };
+
+/** チーム構成を含む動的プロンプトを生成 */
+function generateTeamPrompt(
+  tab: TerminalTab,
+  allTabs: TerminalTab[],
+  team: Team | null
+): string | undefined {
+  if (!tab.role) return undefined;
+
+  // スタンドアロン（チーム無し）
+  if (!tab.teamId || !team) {
+    if (tab.role === 'leader') return undefined;
+    return `あなたは ${tab.role} ロールです。${ROLE_DESC[tab.role]}に集中してください。`;
+  }
+
+  // チーム所属 → 構成情報付きプロンプト
+  const teamTabs = allTabs.filter((t) => t.teamId === tab.teamId);
+  const roster = teamTabs
+    .map((t) => {
+      const agent = t.agent === 'claude' ? 'Claude Code' : 'Codex';
+      const you = t.id === tab.id ? ' ← あなた' : '';
+      return `  - ${t.role ?? 'member'} (${agent})${you}`;
+    })
+    .join('\n');
+
+  if (tab.role === 'leader') {
+    return `あなたはチーム「${team.name}」の Leader です。
+
+チーム構成:
+${roster}
+
+Leader として:
+1. プロジェクトの全体像を把握し、作業計画を立ててください
+2. 各メンバーの役割に応じたタスクを具体的に指示してください
+3. 進捗を確認し、メンバー間の作業を調整してください
+※ メンバーとは直接通信できません。ユーザーが仲介します。`;
+  }
+
+  return `あなたはチーム「${team.name}」の ${tab.role} です。${ROLE_DESC[tab.role]}に集中してください。
+
+チーム構成:
+${roster}
+
+Leader の指示に従い、あなたの役割に集中してください。`;
+}
 
 export function App(): JSX.Element {
   const { settings, update: updateSettings, reset: resetSettings } = useSettings();
@@ -103,6 +147,13 @@ export function App(): JSX.Element {
   const terminalRefs = useRef(new Map<number, TerminalViewHandle>());
   const [tabCreateMenuOpen, setTabCreateMenuOpen] = useState(false);
   const [teamModalOpen, setTeamModalOpen] = useState(false);
+  const [teams, setTeams] = useState<Team[]>([]);
+  const [pendingTeamClose, setPendingTeamClose] = useState<{
+    tabId: number;
+    teamId: string;
+  } | null>(null);
+  const [dragTabId, setDragTabId] = useState<number | null>(null);
+  const [dragOverTabId, setDragOverTabId] = useState<number | null>(null);
 
   // Claude CLI 検査状態
   const [claudeCheck, setClaudeCheck] = useState<{
@@ -121,6 +172,7 @@ export function App(): JSX.Element {
     (opts?: {
       agent?: TerminalAgent;
       role?: TeamRole | null;
+      teamId?: string | null;
       resumeSessionId?: string | null;
     }): number => {
       const id = nextTerminalIdRef.current++;
@@ -129,6 +181,7 @@ export function App(): JSX.Element {
         version: 0,
         agent: opts?.agent ?? 'claude',
         role: opts?.role ?? null,
+        teamId: opts?.teamId ?? null,
         status: '',
         exited: false,
         resumeSessionId: opts?.resumeSessionId ?? null,
@@ -144,7 +197,7 @@ export function App(): JSX.Element {
     []
   );
 
-  const closeTerminalTab = useCallback((tabId: number) => {
+  const doCloseTab = useCallback((tabId: number) => {
     setTerminalTabs((prev) => {
       if (prev.length <= 1) return prev;
       const next = prev.filter((t) => t.id !== tabId);
@@ -157,6 +210,34 @@ export function App(): JSX.Element {
       return next;
     });
   }, []);
+
+  const doCloseTeam = useCallback(
+    (teamId: string) => {
+      setTerminalTabs((prev) => {
+        const next = prev.filter((t) => t.teamId !== teamId);
+        if (next.length === 0) return prev; // 全部消えるのを防止
+        setActiveTerminalTabId((active) => {
+          if (next.some((t) => t.id === active)) return active;
+          return next[next.length - 1].id;
+        });
+        return next;
+      });
+      setTeams((prev) => prev.filter((t) => t.id !== teamId));
+    },
+    []
+  );
+
+  const closeTerminalTab = useCallback(
+    (tabId: number) => {
+      const tab = terminalTabs.find((t) => t.id === tabId);
+      if (tab?.role === 'leader' && tab.teamId) {
+        setPendingTeamClose({ tabId, teamId: tab.teamId });
+        return;
+      }
+      doCloseTab(tabId);
+    },
+    [terminalTabs, doCloseTab]
+  );
 
   const restartTerminalTab = useCallback((tabId: number) => {
     setTerminalTabs((prev) =>
@@ -275,7 +356,8 @@ export function App(): JSX.Element {
         setRecentlyClosed([]);
         setActiveTabId(null);
         setActiveSessionId(null);
-        // ターミナルをリセット（全タブ閉じて新規1つ）
+        // ターミナル＆チームをリセット（全タブ閉じて新規1つ）
+        setTeams([]);
         const newId = nextTerminalIdRef.current++;
         setTerminalTabs([
           {
@@ -283,6 +365,7 @@ export function App(): JSX.Element {
             version: 0,
             agent: 'claude',
             role: null,
+            teamId: null,
             status: '起動中…',
             exited: false,
             resumeSessionId: null,
@@ -745,6 +828,22 @@ export function App(): JSX.Element {
     diffTabs.length
   ]);
 
+  // ---------- Shift+ホイールでアプリ全体のズーム ----------
+
+  useEffect(() => {
+    let zoomLevel = 0;
+    void window.api.app.getZoomLevel().then((l) => { zoomLevel = l; });
+    const handler = (e: WheelEvent): void => {
+      if (!e.shiftKey) return;
+      e.preventDefault();
+      const delta = e.deltaY > 0 ? -0.5 : 0.5;
+      zoomLevel = Math.max(-4, Math.min(4, zoomLevel + delta));
+      void window.api.app.setZoomLevel(zoomLevel);
+    };
+    window.addEventListener('wheel', handler, { passive: false });
+    return () => window.removeEventListener('wheel', handler);
+  }, []);
+
   // ---------- グローバルショートカット ----------
 
   useEffect(() => {
@@ -807,11 +906,14 @@ export function App(): JSX.Element {
     [settings.claudeArgs, settings.codexArgs]
   );
 
-  /** タブのロールに対応する初期メッセージ（起動後に自動送信） */
-  const getRolePrompt = useCallback((tab: TerminalTab): string | undefined => {
-    if (!tab.role) return undefined;
-    return ROLE_PROMPTS[tab.role];
-  }, []);
+  /** タブのロールに対応する初期メッセージ（起動後に���ーム構成情報付きで自動送信） */
+  const getRolePrompt = useCallback(
+    (tab: TerminalTab): string | undefined => {
+      const team = tab.teamId ? teams.find((t) => t.id === tab.teamId) ?? null : null;
+      return generateTeamPrompt(tab, terminalTabs, team);
+    },
+    [teams, terminalTabs]
+  );
 
   // 初回タブ作成: Claude OK かつ projectRoot 設定済みでタブなし
   useEffect(() => {
@@ -823,10 +925,18 @@ export function App(): JSX.Element {
   // ---------- チーム作成 ----------
 
   const handleCreateTeam = useCallback(
-    (members: TeamMember[]) => {
+    (teamName: string, leader: { agent: TerminalAgent }, members: TeamMember[]) => {
+      const totalNeeded = 1 + members.length;
+      if (terminalTabs.length + totalNeeded > MAX_TERMINALS) return;
+
+      const teamId = `team-${Date.now()}`;
+      setTeams((prev) => [...prev, { id: teamId, name: teamName }]);
+
+      // Leader を先に���成
+      addTerminalTab({ agent: leader.agent, role: 'leader' as TeamRole, teamId });
+      // ���ンバーを順次生成
       for (const m of members) {
-        if (terminalTabs.length + members.indexOf(m) >= MAX_TERMINALS) break;
-        addTerminalTab({ agent: m.agent, role: m.role });
+        addTerminalTab({ agent: m.agent, role: m.role, teamId });
       }
     },
     [addTerminalTab, terminalTabs.length]
@@ -848,6 +958,29 @@ export function App(): JSX.Element {
     [settings.teamPresets, updateSettings]
   );
 
+  // ---------- ターミナルタブのグループ化 ----------
+
+  const { standaloneTabList, teamGroupList } = useMemo(() => {
+    const standalone = terminalTabs.filter((t) => !t.teamId);
+    const teamMap = new Map<string, TerminalTab[]>();
+    for (const t of terminalTabs) {
+      if (t.teamId) {
+        const arr = teamMap.get(t.teamId) || [];
+        arr.push(t);
+        teamMap.set(t.teamId, arr);
+      }
+    }
+    const teamGroups = [...teamMap.entries()].map(([teamId, tabs]) => ({
+      team: teams.find((t) => t.id === teamId) ?? { id: teamId, name: 'Team' },
+      tabs: tabs.sort((a, b) => {
+        if (a.role === 'leader') return -1;
+        if (b.role === 'leader') return 1;
+        return a.id - b.id;
+      })
+    }));
+    return { standaloneTabList: standalone, teamGroupList: teamGroups };
+  }, [terminalTabs, teams]);
+
   // ---------- タブリスト ----------
 
   const tabs: TabItem[] = diffTabs.map((t) => ({
@@ -864,7 +997,7 @@ export function App(): JSX.Element {
   const activeTab = terminalTabs.find((t) => t.id === activeTerminalTabId) ?? null;
 
   return (
-    <div className="layout">
+    <div className={`layout${activeDiffTab ? '' : ' layout--terminal-full'}`}>
       <Sidebar
         view={sidebarView}
         onViewChange={setSidebarView}
@@ -913,162 +1046,97 @@ export function App(): JSX.Element {
                 onToggleSideBySide={() => setSideBySide((v) => !v)}
               />
             </div>
-          ) : (
-            <div className="pane">
-              <WelcomePane projectName={projectName} />
-            </div>
-          )}
+          ) : null}
         </div>
       </main>
 
-      <div
-        className="resize-handle"
-        onMouseDown={handleResizeStart}
-        title="ドラッグで Claude Code パネルの幅を調整"
-        role="separator"
-        aria-orientation="vertical"
-      />
-      <aside className="claude-code-panel">
+      {/* diff 表示中のみリサイズハンドルと右パネルを分離表示 */}
+      {activeDiffTab && (
+        <div
+          className="resize-handle"
+          onMouseDown={handleResizeStart}
+          title="ドラッグで Claude Code パネルの幅を調整"
+          role="separator"
+          aria-orientation="vertical"
+        />
+      )}
+      <aside className={`claude-code-panel${activeDiffTab ? '' : ' claude-code-panel--full'}`}>
         <header className="claude-code-panel__header">
           <div className="claude-code-panel__title-wrap">
-            <span
-              className={`claude-code-panel__dot${activeTab?.exited || claudeCheck.state === 'missing' ? ' is-exited' : ''}`}
-              style={{
-                background:
-                  claudeCheck.state === 'missing' ? 'var(--warning)' : undefined
-              }}
-            />
+            <span className="claude-code-panel__dot" />
             <span className="claude-code-panel__title">{t('claudePanel.title')}</span>
-            {activeTab?.resumeSessionId && (
-              <span className="claude-code-panel__resume">
-                {activeTab.resumeSessionId.slice(0, 8)}
-              </span>
-            )}
           </div>
           <div className="claude-code-panel__header-right">
-            <span
-              className={`claude-code-panel__status ${activeTab?.exited || claudeCheck.state === 'missing' ? 'is-exited' : 'is-running'}`}
-            >
-              {claudeCheck.state === 'missing'
-                ? t('claudePanel.notFound.title')
-                : claudeCheck.state === 'checking'
-                  ? t('claudePanel.checking')
-                  : activeTab?.exited
-                    ? t('claudePanel.exited')
-                    : activeTab?.status || t('claudePanel.starting')}
-            </span>
-            <button
-              type="button"
-              className="claude-code-panel__restart"
-              onClick={restartTerminal}
-              title={t('claudePanel.restartTitle')}
-              aria-label={t('claudePanel.restartTitle')}
-            >
-              <RotateCw size={14} strokeWidth={2} />
-            </button>
+            {/* + ボタン & 作成メニュー */}
+            <div style={{ position: 'relative' }}>
+              <button
+                type="button"
+                className="claude-code-panel__add-btn"
+                onClick={() => setTabCreateMenuOpen((v) => !v)}
+                disabled={terminalTabs.length >= MAX_TERMINALS}
+                title={t('claudePanel.newTab')}
+              >
+                <Plus size={16} strokeWidth={2} />
+              </button>
+              {tabCreateMenuOpen && (
+                <>
+                  <div
+                    style={{ position: 'fixed', inset: 0, zIndex: 499 }}
+                    onClick={() => setTabCreateMenuOpen(false)}
+                  />
+                  <div className="tab-create-menu" style={{ top: '100%', bottom: 'auto', right: 0, marginTop: 4 }}>
+                    <button
+                      className="tab-create-menu__item"
+                      onClick={() => { addTerminalTab({ agent: 'claude' }); setTabCreateMenuOpen(false); }}
+                    >
+                      <span className="terminal-tab__agent terminal-tab__agent--claude">C</span>
+                      {t('claudePanel.addClaude')}
+                    </button>
+                    <button
+                      className="tab-create-menu__item"
+                      onClick={() => { addTerminalTab({ agent: 'codex' }); setTabCreateMenuOpen(false); }}
+                    >
+                      <span className="terminal-tab__agent terminal-tab__agent--codex">X</span>
+                      {t('claudePanel.addCodex')}
+                    </button>
+                    <div className="tab-create-menu__divider" />
+                    <button
+                      className="tab-create-menu__item"
+                      onClick={() => { setTeamModalOpen(true); setTabCreateMenuOpen(false); }}
+                    >
+                      <Users size={14} />
+                      {t('claudePanel.createTeam')}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </header>
 
-        {/* ターミナルタブバー */}
-        <div className="terminal-tabs">
-          {terminalTabs.map((tab, idx) => (
-            <button
-              key={tab.id}
-              className={`terminal-tab${tab.id === activeTerminalTabId ? ' is-active' : ''}${tab.exited ? ' is-exited' : ''}`}
-              onClick={() => {
-                setActiveTerminalTabId(tab.id);
-                setTerminalTabs((prev) =>
-                  prev.map((t) =>
-                    t.id === tab.id ? { ...t, hasActivity: false } : t
-                  )
-                );
-              }}
-              title={`Terminal ${idx + 1}${tab.role ? ` (${tab.role})` : ''}`}
-            >
-              <span className={`terminal-tab__agent terminal-tab__agent--${tab.agent}`}>
-                {tab.agent === 'claude' ? 'C' : 'X'}
-              </span>
-              <span>{idx + 1}</span>
-              {tab.role && <span className="terminal-tab__role">{tab.role}</span>}
-              {tab.hasActivity && tab.id !== activeTerminalTabId && (
-                <span className="terminal-tab__activity" />
-              )}
-              {terminalTabs.length > 1 && (
-                <span
-                  className="terminal-tab__close"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    closeTerminalTab(tab.id);
-                  }}
-                  role="button"
-                  tabIndex={-1}
-                >
-                  &times;
-                </span>
-              )}
-            </button>
-          ))}
-          <div style={{ position: 'relative' }}>
-            <button
-              className="terminal-tabs__add"
-              onClick={() => setTabCreateMenuOpen((v) => !v)}
-              disabled={terminalTabs.length >= MAX_TERMINALS}
-              title={
-                terminalTabs.length >= MAX_TERMINALS
-                  ? t('claudePanel.tabLimit', { max: MAX_TERMINALS })
-                  : t('claudePanel.newTab')
-              }
-            >
-              +
-            </button>
-            {tabCreateMenuOpen && (
-              <>
-                <div
-                  style={{ position: 'fixed', inset: 0, zIndex: 499 }}
-                  onClick={() => setTabCreateMenuOpen(false)}
-                />
-                <div className="tab-create-menu">
-                  <button
-                    className="tab-create-menu__item"
-                    onClick={() => {
-                      addTerminalTab({ agent: 'claude' });
-                      setTabCreateMenuOpen(false);
-                    }}
-                    disabled={terminalTabs.length >= MAX_TERMINALS}
-                  >
-                    <span className="terminal-tab__agent terminal-tab__agent--claude">C</span>
-                    {t('claudePanel.addClaude')}
-                  </button>
-                  <button
-                    className="tab-create-menu__item"
-                    onClick={() => {
-                      addTerminalTab({ agent: 'codex' });
-                      setTabCreateMenuOpen(false);
-                    }}
-                    disabled={terminalTabs.length >= MAX_TERMINALS}
-                  >
-                    <span className="terminal-tab__agent terminal-tab__agent--codex">X</span>
-                    {t('claudePanel.addCodex')}
-                  </button>
-                  <div className="tab-create-menu__divider" />
-                  <button
-                    className="tab-create-menu__item"
-                    onClick={() => {
-                      setTeamModalOpen(true);
-                      setTabCreateMenuOpen(false);
-                    }}
-                    disabled={terminalTabs.length >= MAX_TERMINALS}
-                  >
-                    <Users size={14} />
-                    {t('claudePanel.createTeam')}
-                  </button>
-                </div>
-              </>
-            )}
+        {/* Leader 閉じ確認ダイアログ */}
+        {pendingTeamClose && (
+          <div className="team-close-confirm">
+            <p>{t('team.closeTeamConfirm')}</p>
+            <div className="team-close-confirm__actions">
+              <button className="toolbar__btn toolbar__btn--primary" onClick={() => { doCloseTeam(pendingTeamClose.teamId); setPendingTeamClose(null); }}>
+                {t('team.closeTeam')}
+              </button>
+              <button className="toolbar__btn" onClick={() => { doCloseTab(pendingTeamClose.tabId); setTerminalTabs((prev) => prev.map((t) => t.teamId === pendingTeamClose.teamId ? { ...t, teamId: null } : t)); setTeams((prev) => prev.filter((t) => t.id !== pendingTeamClose.teamId)); setPendingTeamClose(null); }}>
+                {t('team.closeLeaderOnly')}
+              </button>
+              <button className="toolbar__btn" onClick={() => setPendingTeamClose(null)}>
+                {t('settings.cancel')}
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
-        <div className="claude-code-panel__body">
+        {/* 分割ペイン表示 */}
+        <div
+          className="claude-code-panel__body"
+          data-panes={terminalTabs.length}
+        >
           {claudeCheck.state === 'checking' && (
             <div className="claude-not-found__body" style={{ padding: 40, textAlign: 'center' }}>
               {t('claudePanel.checking')}
@@ -1084,43 +1152,101 @@ export function App(): JSX.Element {
           {claudeCheck.state === 'ok' &&
             projectRoot &&
             terminalTabs.map((tab) => (
-              <TerminalView
-                key={`term-${tab.id}-v${tab.version}`}
-                ref={(el) => {
-                  if (el) terminalRefs.current.set(tab.id, el);
-                  else terminalRefs.current.delete(tab.id);
-                }}
-                cwd={settings.claudeCwd || projectRoot}
-                command={
-                  tab.agent === 'codex'
-                    ? settings.codexCommand || 'codex'
-                    : settings.claudeCommand || 'claude'
-                }
-                args={getTerminalArgs(tab)}
-                visible={tab.id === activeTerminalTabId}
-                initialMessage={getRolePrompt(tab)}
-                onStatus={(s) =>
-                  setTerminalTabs((prev) =>
-                    prev.map((t) => (t.id === tab.id ? { ...t, status: s } : t))
-                  )
-                }
-                onExit={() =>
-                  setTerminalTabs((prev) =>
-                    prev.map((t) => (t.id === tab.id ? { ...t, exited: true } : t))
-                  )
-                }
-                onActivity={() => {
-                  if (tab.id !== activeTerminalTabId) {
-                    setTerminalTabs((prev) =>
-                      prev.map((t) =>
-                        t.id === tab.id && !t.hasActivity
-                          ? { ...t, hasActivity: true }
-                          : t
-                      )
-                    );
+              <div
+                key={`pane-${tab.id}`}
+                className={`terminal-pane${tab.id === activeTerminalTabId ? ' is-active' : ''}${dragOverTabId === tab.id && dragTabId !== tab.id ? ' drag-over' : ''}`}
+                onClick={() => setActiveTerminalTabId(tab.id)}
+              >
+                {/* ペインヘッダー（エージェント + ロール + 閉じる） */}
+                {terminalTabs.length > 1 && (
+                  <div
+                    className="terminal-pane__header"
+                    draggable
+                    onDragStart={(e) => {
+                      setDragTabId(tab.id);
+                      e.dataTransfer.effectAllowed = 'move';
+                    }}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = 'move';
+                      setDragOverTabId(tab.id);
+                    }}
+                    onDragLeave={() => {
+                      if (dragOverTabId === tab.id) setDragOverTabId(null);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (dragTabId !== null && dragTabId !== tab.id) {
+                        setTerminalTabs((prev) => {
+                          const fromIdx = prev.findIndex((t) => t.id === dragTabId);
+                          const toIdx = prev.findIndex((t) => t.id === tab.id);
+                          if (fromIdx === -1 || toIdx === -1) return prev;
+                          const next = [...prev];
+                          const [moved] = next.splice(fromIdx, 1);
+                          next.splice(toIdx, 0, moved);
+                          return next;
+                        });
+                      }
+                      setDragTabId(null);
+                      setDragOverTabId(null);
+                    }}
+                    onDragEnd={() => {
+                      setDragTabId(null);
+                      setDragOverTabId(null);
+                    }}
+                  >
+                    <span className={`terminal-tab__agent terminal-tab__agent--${tab.agent}`}>
+                      {tab.agent === 'claude' ? 'C' : 'X'}
+                    </span>
+                    {tab.role === 'leader' && (
+                      <Crown size={10} strokeWidth={2.5} className="terminal-tab__leader-icon" />
+                    )}
+                    {tab.role && (
+                      <span className={`terminal-tab__role terminal-tab__role--${tab.role}`}>
+                        {tab.role}
+                      </span>
+                    )}
+                    {tab.teamId && (
+                      <span className="terminal-pane__team-name">
+                        {teams.find((t) => t.id === tab.teamId)?.name}
+                      </span>
+                    )}
+                    <span style={{ flex: 1 }} />
+                    <button
+                      className="terminal-pane__close"
+                      onClick={(e) => { e.stopPropagation(); closeTerminalTab(tab.id); }}
+                    >
+                      &times;
+                    </button>
+                  </div>
+                )}
+                <TerminalView
+                  key={`term-${tab.id}-v${tab.version}`}
+                  ref={(el) => {
+                    if (el) terminalRefs.current.set(tab.id, el);
+                    else terminalRefs.current.delete(tab.id);
+                  }}
+                  cwd={settings.claudeCwd || projectRoot}
+                  command={
+                    tab.agent === 'codex'
+                      ? settings.codexCommand || 'codex'
+                      : settings.claudeCommand || 'claude'
                   }
-                }}
-              />
+                  args={getTerminalArgs(tab)}
+                  visible={true}
+                  initialMessage={getRolePrompt(tab)}
+                  onStatus={(s) =>
+                    setTerminalTabs((prev) =>
+                      prev.map((t) => (t.id === tab.id ? { ...t, status: s } : t))
+                    )
+                  }
+                  onExit={() =>
+                    setTerminalTabs((prev) =>
+                      prev.map((t) => (t.id === tab.id ? { ...t, exited: true } : t))
+                    )
+                  }
+                />
+              </div>
             ))}
         </div>
       </aside>
@@ -1161,6 +1287,7 @@ export function App(): JSX.Element {
         onDeletePreset={handleDeletePreset}
         maxTerminals={MAX_TERMINALS}
         currentTabCount={terminalTabs.length}
+        existingTeams={teams}
       />
     </div>
   );

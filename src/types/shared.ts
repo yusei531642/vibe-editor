@@ -100,7 +100,13 @@ export interface SessionInfo {
 
 export type TerminalAgent = 'claude' | 'codex';
 
-export type TeamRole = 'planner' | 'programmer' | 'researcher' | 'reviewer';
+export type TeamRole = 'leader' | 'planner' | 'programmer' | 'researcher' | 'reviewer';
+
+/** ランタイムのみ（永続化不要）。チーム所属タブは teamId で紐付く */
+export interface Team {
+  id: string;
+  name: string;
+}
 
 export interface TeamMember {
   agent: TerminalAgent;

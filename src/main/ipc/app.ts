@@ -65,4 +65,12 @@ export function registerAppIpc(): void {
       return checkClaudeAvailable(command);
     }
   );
+
+  ipcMain.handle('app:setZoomLevel', (event, level: number) => {
+    event.sender.setZoomLevel(level);
+  });
+
+  ipcMain.handle('app:getZoomLevel', (event) => {
+    return event.sender.getZoomLevel();
+  });
 }

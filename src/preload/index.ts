@@ -19,7 +19,11 @@ const api = {
     setWindowTitle: (title: string): Promise<void> =>
       ipcRenderer.invoke('app:setWindowTitle', title),
     checkClaude: (command: string): Promise<ClaudeCheckResult> =>
-      ipcRenderer.invoke('app:checkClaude', command)
+      ipcRenderer.invoke('app:checkClaude', command),
+    setZoomLevel: (level: number): Promise<void> =>
+      ipcRenderer.invoke('app:setZoomLevel', level),
+    getZoomLevel: (): Promise<number> =>
+      ipcRenderer.invoke('app:getZoomLevel')
   },
 
   git: {
