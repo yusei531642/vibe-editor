@@ -1030,7 +1030,7 @@ export function App(): JSX.Element {
         }))
       ];
 
-      // MCP サーバーをセットアップ（.mcp.json 更新 + チームステートファイル作成）
+      // MCP サーバーをセットアップ（Claude Code / Codex MCP 設定 + チームステートファイル作成）
       if (projectRoot) {
         await window.api.app.setupTeamMcp(projectRoot, teamId, teamName, allMembers);
       }

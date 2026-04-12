@@ -121,6 +121,10 @@ export function initAutoUpdater(): void {
       ).catch(() => {});
     }
     setTimeout(() => {
+      if (updateWin && !updateWin.isDestroyed()) {
+        updateWin.destroy();
+        updateWin = null;
+      }
       autoUpdater.quitAndInstall(false, true);
     }, 500);
   });
