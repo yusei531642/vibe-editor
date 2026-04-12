@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import type { AppSettings, Density, Language, ThemeName } from '../../../types/shared';
 import { DEFAULT_SETTINGS } from '../../../types/shared';
 import { useT } from '../lib/i18n';
+import { useAnimatedMount } from '../lib/use-animated-mount';
 
 interface SettingsModalProps {
   open: boolean;
@@ -66,7 +67,8 @@ export function SettingsModal({
     if (open) setDraft(initial);
   }, [open, initial]);
 
-  if (!open) return null;
+  const { mounted, state } = useAnimatedMount(open, 260);
+  if (!mounted) return null;
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]): void => {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -83,8 +85,8 @@ export function SettingsModal({
   };
 
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-backdrop" data-state={state} onClick={onClose}>
+      <div className="modal" data-state={state} onClick={(e) => e.stopPropagation()}>
         <header className="modal__header">
           <h2>{t('settings.title')}</h2>
           <button

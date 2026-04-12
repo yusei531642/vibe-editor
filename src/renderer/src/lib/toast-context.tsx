@@ -38,9 +38,13 @@ export interface Toast {
   id: number;
   message: string;
   options: ToastOptions;
+  // true にセットしてから _EXIT_MS 後に配列から除去することで slide-out を見せる
+  exiting?: boolean;
   // timer はクリア用に保持
   _timer?: ReturnType<typeof setTimeout>;
 }
+
+const _EXIT_MS = 220;
 
 interface ToastContextValue {
   showToast: (message: string, options?: ToastOptions) => number;
@@ -53,20 +57,31 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
   const [toasts, setToasts] = useState<Toast[]>([]);
   const nextId = useRef(1);
 
+  // exit アニメ付きで配列から除去する
   const dismissToast = useCallback((id: number) => {
     setToasts((prev) => {
-      const t = prev.find((x) => x.id === id);
-      if (t?._timer) clearTimeout(t._timer);
-      return prev.filter((x) => x.id !== id);
+      const target = prev.find((x) => x.id === id);
+      if (!target || target.exiting) return prev;
+      if (target._timer) clearTimeout(target._timer);
+      return prev.map((x) => (x.id === id ? { ...x, exiting: true } : x));
     });
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((x) => x.id !== id));
+    }, _EXIT_MS);
   }, []);
 
   const showToast = useCallback(
     (message: string, options: ToastOptions = {}): number => {
       const id = nextId.current++;
       const duration = options.duration ?? 4000;
+      // 自動消滅時も exit アニメを通す
       const timer = setTimeout(() => {
-        setToasts((prev) => prev.filter((x) => x.id !== id));
+        setToasts((prev) =>
+          prev.map((x) => (x.id === id ? { ...x, exiting: true } : x))
+        );
+        setTimeout(() => {
+          setToasts((prev) => prev.filter((x) => x.id !== id));
+        }, _EXIT_MS);
       }, duration);
       setToasts((prev) => [
         ...prev,
@@ -131,7 +146,10 @@ function ToastItem({
 }): JSX.Element {
   const tone = toast.options.tone ?? 'info';
   return (
-    <div className={`toast toast--${tone}`}>
+    <div
+      className={`toast toast--${tone}`}
+      data-state={toast.exiting ? 'exiting' : 'open'}
+    >
       <span className="toast__message">{toast.message}</span>
       {toast.options.action && (
         <button

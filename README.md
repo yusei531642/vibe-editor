@@ -60,6 +60,17 @@ npm run dist             # Current platform installer (current OS)
 
 The built Windows installer lands at `release/vibe-editor Setup 0.3.0.exe` (~100 MB). A portable unpacked app is also produced at `release/win-unpacked/vibe-editor.exe`.
 
+### Windows blocks the installer?
+
+The installer is **not code-signed**, so Windows **Smart App Control** and **SmartScreen** may refuse to run it. Pick whichever works for you:
+
+- **SmartScreen "More info" → "Run anyway"** — the easiest path. You can also right-click the installer → Properties → tick "Unblock" at the bottom → OK.
+- **Switch Smart App Control to "Evaluation"** — Settings → Privacy & security → Windows Security → App & browser control → Smart App Control → **Evaluation**. Only known-bad apps get blocked.
+  - ⚠️ Don't pick "Off" — turning it back on requires a full Windows reinstall. "Evaluation" is the sweet spot.
+- **Use the portable build** — skip the installer entirely and run `release/win-unpacked/vibe-editor.exe` directly.
+
+vibe-editor is open source, so you can always build the binary yourself with `npm run dist:win` and verify it.
+
 ### Icon regeneration
 
 The app icon source lives at `build/icon.svg` (serif "V" on a warm dark square).

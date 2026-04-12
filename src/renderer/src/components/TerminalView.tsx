@@ -94,6 +94,34 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     term.loadAddon(fit);
     term.open(container);
 
+    // コピー＆ペーストのキーバインディング
+    // - Ctrl+C: 選択中ならクリップボードへコピー、選択なしは通常通り pty へ送り SIGINT
+    // - Ctrl+V / Ctrl+Shift+V: クリップボードのテキストをペースト
+    // - Ctrl+Shift+C: 常にコピー（選択なしなら何もしない）
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type !== 'keydown') return true;
+      const key = e.key.toLowerCase();
+
+      if (e.ctrlKey && !e.altKey && key === 'c') {
+        const selection = term.getSelection();
+        if (selection) {
+          void navigator.clipboard.writeText(selection);
+          term.clearSelection();
+          return false;
+        }
+        return true;
+      }
+
+      if (e.ctrlKey && !e.altKey && key === 'v') {
+        void navigator.clipboard.readText().then((text) => {
+          if (text) term.paste(text);
+        });
+        return false;
+      }
+
+      return true;
+    });
+
     termRef.current = term;
     fitRef.current = fit;
 

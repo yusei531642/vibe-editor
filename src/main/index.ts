@@ -6,6 +6,7 @@ import { registerTerminalIpc } from './ipc/terminal';
 import { registerSettingsIpc } from './ipc/settings';
 import { registerSessionsIpc } from './ipc/sessions';
 import { registerDialogIpc } from './ipc/dialog';
+import { initAutoUpdater } from './updater';
 
 const isDev = !app.isPackaged;
 
@@ -62,6 +63,7 @@ registerDialogIpc();
 
 app.whenReady().then(() => {
   createWindow();
+  initAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

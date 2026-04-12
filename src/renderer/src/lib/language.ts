@@ -18,7 +18,7 @@ const EXT_MAP: Record<string, string> = {
   less: 'less',
   yml: 'yaml',
   yaml: 'yaml',
-  toml: 'toml',
+  toml: 'plaintext',
   xml: 'xml',
   svg: 'xml',
   sh: 'shell',

@@ -56,7 +56,14 @@ export function SessionsPanel({
         </button>
       </header>
 
-      {loading && <p className="sidebar__note">{t('sidebar.loading')}</p>}
+      {loading && (
+        <div className="skeleton-list" aria-label={t('sidebar.loading')} aria-busy="true">
+          <div className="skeleton skeleton--session" />
+          <div className="skeleton skeleton--session" />
+          <div className="skeleton skeleton--session" />
+          <div className="skeleton skeleton--session" />
+        </div>
+      )}
 
       {!loading && sessions.length === 0 && (
         <p className="sidebar__note sidebar__note--dim">{t('sidebar.noSessions')}</p>

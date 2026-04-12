@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 import { filterCommands, type Command } from '../lib/commands';
+import { useAnimatedMount } from '../lib/use-animated-mount';
 
 interface CommandPaletteProps {
   open: boolean;
@@ -49,7 +50,8 @@ export function CommandPalette({
     el?.scrollIntoView({ block: 'nearest' });
   }, [selected]);
 
-  if (!open) return null;
+  const { mounted, state } = useAnimatedMount(open, 220);
+  if (!mounted) return null;
 
   const runSelected = (): void => {
     const cmd = filtered[selected];
@@ -78,12 +80,13 @@ export function CommandPalette({
   return (
     <div
       className="cmdp-backdrop"
+      data-state={state}
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label="コマンドパレット"
     >
-      <div className="cmdp" onClick={(e) => e.stopPropagation()}>
+      <div className="cmdp" data-state={state} onClick={(e) => e.stopPropagation()}>
         <div className="cmdp__header">
           <Search size={16} strokeWidth={2} className="cmdp__prompt" />
           <input

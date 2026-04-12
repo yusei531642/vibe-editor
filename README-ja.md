@@ -58,7 +58,18 @@ npm run dist:win         # Windows NSIS インストーラ → release/
 npm run dist             # 現在の OS 向けインストーラ
 ```
 
-Windows ビルドの成果物は `release/vibe-editor Setup 0.1.0.exe`（約 100 MB）。展開済みポータブル版は `release/win-unpacked/vibe-editor.exe`。
+Windows ビルドの成果物は `release/vibe-editor Setup 0.3.0.exe`（約 100 MB）。展開済みポータブル版は `release/win-unpacked/vibe-editor.exe`。
+
+### Windows でインストーラが起動しない場合
+
+このインストーラはコード署名をしていないため、Windows の **Smart App Control** や **SmartScreen** にブロックされることがあります。以下のいずれかで回避できます:
+
+- **SmartScreen の「詳細情報」→「実行」** — もっとも手軽。インストーラを右クリック →「プロパティ」→ 下部の「ブロックの解除」にチェックを入れて OK、でも同じです。
+- **Smart App Control を「評価」モードに変更** — 設定 → プライバシーとセキュリティ → Windows セキュリティ → アプリとブラウザー コントロール → スマート アプリ コントロール → 「評価」を選択。既知のマルウェアだけがブロックされます。
+  - ⚠️ 「オフ」を選ぶと再度オンにするには Windows の再インストールが必要なので、「評価」を推奨します。
+- **ポータブル版を使う** — インストーラを使わず `release/win-unpacked/vibe-editor.exe` をそのまま実行する選択肢もあります。
+
+本プロジェクトは OSS であり、配布バイナリを自分でビルドして確認することもできます（`npm run dist:win`）。
 
 ### アイコンの再生成
 

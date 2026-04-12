@@ -20,6 +20,13 @@
     "appId": "com.vibe-editor.app",
     "productName": "vibe-editor",
     "copyright": "Copyright © 2026 vibe-editor",
+    "compression": "maximum",
+    "removePackageScripts": true,
+    "removePackageKeywords": true,
+    "electronLanguages": [
+      "en-US",
+      "ja"
+    ],
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -29,7 +36,15 @@
       "package.json",
       "!**/*.map",
       "!**/*.ts",
-      "!**/*.tsx"
+      "!**/*.tsx",
+      "!node_modules/node-pty/build/**/*",
+      "!node_modules/node-pty/deps/**/*",
+      "!node_modules/node-pty/src/**/*",
+      "!node_modules/node-pty/scripts/**/*",
+      "!node_modules/node-pty/third_party/**/*",
+      "!node_modules/node-pty/prebuilds/darwin-arm64/**/*",
+      "!node_modules/node-pty/prebuilds/darwin-x64/**/*",
+      "!node_modules/node-pty/prebuilds/win32-arm64/**/*"
     ],
     "asarUnpack": [
       "**/node_modules/node-pty/**"
@@ -42,10 +57,19 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "yusei531642",
+        "repo": "vibe-editor"
+      }
+    ],
     "nsis": {
       "oneClick": false,
       "perMachine": false,
@@ -59,36 +83,42 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": [
+            "x64",
+            "arm64"
+          ]
         }
       ]
     },
     "linux": {
       "icon": "build/icon.png",
       "category": "Development",
-      "target": ["AppImage"]
+      "target": [
+        "AppImage"
+      ]
     }
   },
   "dependencies": {
-    "@monaco-editor/react": "^4.7.0",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0",
-    "lucide-react": "^1.8.0",
-    "monaco-editor": "^0.55.1",
-    "node-pty": "^1.1.0",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "electron-updater": "^6.8.3",
+    "node-pty": "^1.1.0"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.6.0",
+    "@monaco-editor/react": "^4.7.0",
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0",
     "electron-vite": "^2.3.0",
+    "lucide-react": "^1.8.0",
+    "monaco-editor": "^0.55.1",
     "png-to-ico": "^3.0.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "sharp": "^0.34.5",
     "typescript": "^5.6.0",
     "vite": "^5.4.0"

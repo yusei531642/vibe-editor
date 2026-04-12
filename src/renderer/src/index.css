@@ -28,6 +28,20 @@
   --text-dim: #a8a49a;
   --text-mute: #6e6a61;
 
+  /* ---------- モーショントークン (Raycast / Linear 風) ---------- */
+  /* duration */
+  --dur-instant: 80ms;
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 260ms;
+  --dur-slower: 380ms;
+  /* easing */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --ease-snap: cubic-bezier(0.22, 1, 0.36, 1);
+
   font-family: var(--ui-font);
   font-size: var(--ui-font-size);
   color-scheme: dark;
@@ -538,17 +552,18 @@ body.is-resizing * {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  animation: app-menu-in 120ms ease-out;
+  animation: app-menu-in var(--dur-base) var(--ease-out);
+  transform-origin: top left;
 }
 
 @keyframes app-menu-in {
   from {
     opacity: 0;
-    transform: translateY(-4px);
+    transform: translateY(-6px) scale(0.98);
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -1308,13 +1323,14 @@ body.is-resizing * {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  animation: context-menu-in 120ms ease-out;
+  animation: context-menu-in var(--dur-base) var(--ease-out);
+  transform-origin: top left;
 }
 
 @keyframes context-menu-in {
   from {
     opacity: 0;
-    transform: scale(0.97) translateY(-2px);
+    transform: scale(0.96) translateY(-4px);
   }
   to {
     opacity: 1;
@@ -1374,15 +1390,30 @@ body.is-resizing * {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: rgba(0, 0, 0, 0);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(0px);
+  transition:
+    background var(--dur-slow) var(--ease-out),
+    backdrop-filter var(--dur-slow) var(--ease-out);
+  will-change: backdrop-filter, background-color;
+}
+
+.modal-backdrop[data-state='open'] {
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
 }
 
 .modal {
+  opacity: 0;
+  transform: scale(0.96) translateY(8px);
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    transform var(--dur-slow) var(--ease-spring);
+  will-change: transform, opacity;
   background: var(--bg-panel);
   color: var(--text);
   border: 1px solid var(--border);
@@ -1393,6 +1424,11 @@ body.is-resizing * {
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.modal[data-state='open'] {
+  opacity: 1;
+  transform: scale(1) translateY(0);
 }
 
 .modal__header {
@@ -1804,37 +1840,39 @@ body.is-resizing * {
   }
 }
 
-/* タブ切替マイクロインタラクション: ペイン入替時に 80ms フェード */
+/* タブ切替マイクロインタラクション: ペイン入替時にフェード */
 .pane {
-  animation: pane-fade-in 80ms ease-out;
+  animation: pane-fade-in var(--dur-base) var(--ease-out);
 }
 
 @keyframes pane-fade-in {
   from {
-    opacity: 0.7;
+    opacity: 0;
+    transform: translateY(3px);
   }
   to {
     opacity: 1;
+    transform: translateY(0);
   }
 }
 
-/* 保存成功時パルス（150ms拡大 + コーラル光） */
+/* 保存成功時パルス（GPU 最適化: filter: drop-shadow を使用） */
 .toolbar__btn.is-pulse {
-  animation: save-pulse 600ms ease-out;
+  animation: save-pulse 560ms var(--ease-out);
 }
 
 @keyframes save-pulse {
   0% {
     transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(217, 119, 87, 0);
+    filter: drop-shadow(0 0 0 rgba(217, 119, 87, 0));
   }
   30% {
     transform: scale(1.08);
-    box-shadow: 0 0 0 6px rgba(217, 119, 87, 0.35);
+    filter: drop-shadow(0 0 8px rgba(217, 119, 87, 0.55));
   }
   100% {
     transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(217, 119, 87, 0);
+    filter: drop-shadow(0 0 0 rgba(217, 119, 87, 0));
   }
 }
 
@@ -1854,16 +1892,32 @@ body.is-resizing * {
 .cmdp-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0);
   display: flex;
   align-items: flex-start;
   justify-content: center;
   padding-top: 15vh;
   z-index: 2000;
-  backdrop-filter: blur(3px);
+  backdrop-filter: blur(0px);
+  transition:
+    background var(--dur-slow) var(--ease-out),
+    backdrop-filter var(--dur-slow) var(--ease-out);
+  will-change: backdrop-filter, background-color;
+}
+
+.cmdp-backdrop[data-state='open'] {
+  background: rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(5px);
 }
 
 .cmdp {
+  opacity: 0;
+  transform: scale(0.96) translateY(-8px);
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    transform var(--dur-slow) var(--ease-spring);
+  will-change: transform, opacity;
+  transform-origin: top center;
   background: var(--bg-panel);
   color: var(--text);
   border: 1px solid var(--border);
@@ -1876,6 +1930,11 @@ body.is-resizing * {
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5),
     0 2px 8px rgba(217, 119, 87, 0.1);
   overflow: hidden;
+}
+
+.cmdp[data-state='open'] {
+  opacity: 1;
+  transform: scale(1) translateY(0);
 }
 
 .cmdp__header {
@@ -1988,7 +2047,18 @@ body.is-resizing * {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
   font-size: 12px;
   pointer-events: auto;
-  animation: toast-in 200ms ease-out;
+  opacity: 1;
+  transform: translateX(0);
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out);
+  animation: toast-in var(--dur-slow) var(--ease-spring);
+}
+
+.toast[data-state='exiting'] {
+  opacity: 0;
+  transform: translateX(24px);
+  animation: none;
 }
 
 .toast--error {
@@ -2045,11 +2115,11 @@ body.is-resizing * {
 @keyframes toast-in {
   from {
     opacity: 0;
-    transform: translateX(20px);
+    transform: translateX(24px) scale(0.96);
   }
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
   }
 }
 
@@ -2149,4 +2219,169 @@ body.is-resizing * {
   width: 14px;
   height: 14px;
   cursor: pointer;
+}
+
+/* ---------- 共通マイクロインタラクション（press / hover） ---------- */
+/* Raycast / Linear 風: ボタン押下で scale(0.94)、プライマリは hover で軽く浮く */
+
+.toolbar__btn,
+.modal__btn,
+.app-menu__trigger,
+.app-menu__item,
+.context-menu__item,
+.sidebar-switcher__btn,
+.tabbar__close,
+.tabbar__pin-btn,
+.cmdp__item,
+.gitfile,
+.session,
+.theme-card,
+.lang-card,
+.density-card {
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    border-color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out),
+    opacity var(--dur-fast) var(--ease-out);
+}
+
+.toolbar__btn:active:not(:disabled),
+.modal__btn:active:not(:disabled),
+.app-menu__trigger:active,
+.app-menu__item:active,
+.context-menu__item:active,
+.sidebar-switcher__btn:active,
+.tabbar__close:active,
+.tabbar__pin-btn:active,
+.cmdp__item:active {
+  transform: scale(0.94);
+  transition-duration: var(--dur-instant);
+}
+
+.toolbar__btn--primary:hover:not(:disabled),
+.toolbar__btn--icon:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.toolbar__btn--primary:active:not(:disabled),
+.toolbar__btn--icon:active:not(:disabled) {
+  transform: translateY(0) scale(0.95);
+}
+
+.theme-card:active,
+.lang-card:active,
+.density-card:active {
+  transform: scale(0.98);
+  transition-duration: var(--dur-instant);
+}
+
+/* Close ボタン（モーダル）は小さいので scale のみ */
+.modal__close {
+  transition: background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.modal__close:hover {
+  transform: rotate(90deg);
+}
+.modal__close:active {
+  transform: rotate(90deg) scale(0.9);
+}
+
+/* ---------- リサイズハンドル強化 ---------- */
+.resize-handle {
+  position: relative;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  inset: 0 -2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-out);
+  pointer-events: none;
+}
+.resize-handle:hover::after,
+.resize-handle.is-dragging::after {
+  opacity: 0.45;
+}
+
+/* ---------- サイドバーパネル クロスフェード ---------- */
+.sidebar__body > * {
+  animation: sidebar-pane-in var(--dur-base) var(--ease-out);
+}
+
+@keyframes sidebar-pane-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---------- ロード中スケルトン ---------- */
+.skeleton-list {
+  padding: 8px 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-hover);
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+}
+.skeleton::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.07) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: skeleton-shimmer 1.5s var(--ease-in-out) infinite;
+}
+
+:root[data-theme='claude-light'] .skeleton::after,
+:root[data-theme='light'] .skeleton::after {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 0, 0, 0.06) 50%,
+    transparent 100%
+  );
+}
+
+@keyframes skeleton-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.skeleton--row {
+  height: 24px;
+  margin: 0 8px;
+}
+.skeleton-list .skeleton--row:nth-child(1) { width: 82%; }
+.skeleton-list .skeleton--row:nth-child(2) { width: 64%; }
+.skeleton-list .skeleton--row:nth-child(3) { width: 76%; }
+.skeleton-list .skeleton--row:nth-child(4) { width: 58%; }
+.skeleton-list .skeleton--row:nth-child(5) { width: 70%; }
+.skeleton-list .skeleton--row:nth-child(6) { width: 62%; }
+
+.skeleton--session {
+  height: 52px;
+  margin: 4px 8px;
+  width: auto;
 }

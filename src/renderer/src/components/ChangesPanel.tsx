@@ -67,7 +67,16 @@ export function ChangesPanel({
         </button>
       </header>
 
-      {loading && <p className="sidebar__note">{t('sidebar.loading')}</p>}
+      {loading && (
+        <div className="skeleton-list" aria-label={t('sidebar.loading')} aria-busy="true">
+          <div className="skeleton skeleton--row" />
+          <div className="skeleton skeleton--row" />
+          <div className="skeleton skeleton--row" />
+          <div className="skeleton skeleton--row" />
+          <div className="skeleton skeleton--row" />
+          <div className="skeleton skeleton--row" />
+        </div>
+      )}
 
       {!loading && status && !status.ok && (
         <p className="sidebar__note sidebar__note--error">

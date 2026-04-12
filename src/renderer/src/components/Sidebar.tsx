@@ -62,7 +62,7 @@ export function Sidebar(props: SidebarProps): JSX.Element {
         </button>
       </nav>
 
-      <div className="sidebar__body">
+      <div className="sidebar__body" key={props.view}>
         {props.view === 'changes' ? (
           <ChangesPanel
             status={props.gitStatus}

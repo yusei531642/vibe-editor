@@ -8,8 +8,8 @@ export default defineConfig({
       outDir: 'out/main',
       rollupOptions: {
         input: resolve(__dirname, 'src/main/index.ts'),
-        // native モジュールは require で解決させるため external に含める
-        external: ['node-pty']
+        // native / dynamic-require なモジュールは require で解決させるため external に含める
+        external: ['node-pty', 'electron-updater']
       }
     }
   },
