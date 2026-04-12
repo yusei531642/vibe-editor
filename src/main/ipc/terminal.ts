@@ -87,9 +87,8 @@ export function registerTerminalIpc(): void {
         sessions.set(id, { pty, webContentsId });
 
         pty.onData((data) => {
-          const wc = BrowserWindow.fromId(
-            BrowserWindow.getAllWindows().find((w) => w.webContents.id === webContentsId)?.id ??
-              -1
+          const wc = BrowserWindow.getAllWindows().find(
+            (w) => w.webContents.id === webContentsId
           )?.webContents;
           if (wc && !wc.isDestroyed()) {
             wc.send(`terminal:data:${id}`, data);

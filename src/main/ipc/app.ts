@@ -29,7 +29,7 @@ async function checkClaudeAvailable(command: string): Promise<ClaudeCheckResult>
   // PATH 上で探す
   const resolver = process.platform === 'win32' ? 'where' : 'which';
   try {
-    const { stdout } = await execFileAsync(resolver, [cmd], { windowsHide: true });
+    const { stdout } = await execFileAsync(resolver, [cmd], { windowsHide: true, timeout: 5000 });
     const first = stdout.trim().split(/\r?\n/)[0];
     if (!first) {
       return { ok: false, error: `${cmd} コマンドが見つかりません` };

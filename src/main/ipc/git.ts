@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron';
 import { execFile } from 'child_process';
 import { promises as fs } from 'fs';
-import { join } from 'path';
+import { join, normalize, resolve } from 'path';
 import { promisify } from 'util';
 import type { GitDiffResult, GitFileChange, GitStatus } from '../../types/shared';
 
@@ -152,7 +152,11 @@ async function getFileDiff(projectRoot: string, relPath: string): Promise<GitDif
     // 作業ツリー側の内容
     let modified = '';
     let isDeleted = false;
-    const absPath = join(repoRoot, relPath);
+    const absPath = normalize(resolve(repoRoot, relPath));
+    const normalizedRoot = normalize(resolve(repoRoot));
+    if (!absPath.startsWith(normalizedRoot)) {
+      throw new Error(`Path traversal detected: ${relPath}`);
+    }
     try {
       modified = await fs.readFile(absPath, 'utf-8');
     } catch (err) {

@@ -380,10 +380,12 @@ export function App(): JSX.Element {
       try {
         const [gs, sess] = await Promise.all([
           window.api.git.status(root),
-          window.api.sessions.list(root),
-          // 初回起動時に ~/.claude.json へ vive-team サーバーを登録
-          window.api.app.setupTeamMcp(root, '_init', '', [])
+          window.api.sessions.list(root)
         ]);
+        // MCP 初期化は失敗しても git/sessions 読み込みに影響させない
+        window.api.app.setupTeamMcp(root, '_init', '', []).catch((err) => {
+          console.warn('[loadProject] setupTeamMcp failed:', err);
+        });
 
         setGitStatus(gs);
         setSessions(sess);
@@ -435,10 +437,12 @@ export function App(): JSX.Element {
         setProjectRoot(root);
         const [gs, sess] = await Promise.all([
           window.api.git.status(root),
-          window.api.sessions.list(root),
-          // 初回起動時に ~/.claude.json へ vive-team サーバーを登録
-          window.api.app.setupTeamMcp(root, '_init', '', [])
+          window.api.sessions.list(root)
         ]);
+        // MCP 初期化は失敗しても git/sessions 読み込みに影響させない
+        window.api.app.setupTeamMcp(root, '_init', '', []).catch((err) => {
+          console.warn('[init] setupTeamMcp failed:', err);
+        });
         if (cancelled) return;
         setGitStatus(gs);
         setGitLoading(false);
