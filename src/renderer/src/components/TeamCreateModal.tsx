@@ -84,7 +84,9 @@ export function TeamCreateModal({
   const [members, setMembers] = useState<TeamMember[]>([
     { agent: 'claude', role: 'programmer' }
   ]);
-  const [saveAsPreset, setSaveAsPreset] = useState(false);
+  // デフォルトで保存する: 作成したチームが何もしないで消えてしまうと不便なので、
+  // 明示的にチェックを外したときだけ保存しない挙動にする
+  const [saveAsPreset, setSaveAsPreset] = useState(true);
   const [presetName, setPresetName] = useState('');
   /** 編集中のプリセットID（null = 新規） */
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null);
@@ -143,10 +145,12 @@ export function TeamCreateModal({
 
   const handleCreate = (): void => {
     const name = teamName.trim() || 'Team';
-    if (saveAsPreset && presetName.trim()) {
+    // preset 名は明示入力 → team 名 → 'Team' の順で解決
+    if (saveAsPreset) {
+      const pname = presetName.trim() || name;
       onSavePreset({
         id: editingPresetId ?? `custom-${Date.now()}`,
-        name: presetName.trim(),
+        name: pname,
         members: [{ agent: leaderAgent, role: 'leader' as TeamRole }, ...members]
       });
     }
@@ -353,9 +357,8 @@ export function TeamCreateModal({
                 type="text"
                 value={presetName}
                 onChange={(e) => setPresetName(e.target.value)}
-                placeholder={t('team.presetName')}
+                placeholder={teamName.trim() || t('team.presetName')}
                 spellCheck={false}
-                autoFocus
               />
             )}
           </section>

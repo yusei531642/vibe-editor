@@ -5,13 +5,19 @@ import type {
 } from '../../../types/shared';
 import { ChangesPanel } from './ChangesPanel';
 import { SessionsPanel } from './SessionsPanel';
+import { FileTreePanel } from './FileTreePanel';
 import { useT } from '../lib/i18n';
 
-export type SidebarView = 'changes' | 'sessions';
+export type SidebarView = 'files' | 'changes' | 'sessions';
 
 interface SidebarProps {
   view: SidebarView;
   onViewChange: (view: SidebarView) => void;
+
+  // files view
+  projectRoot: string;
+  activeFilePath: string | null;
+  onOpenFile: (relPath: string) => void;
 
   // changes view
   gitStatus: GitStatus | null;
@@ -37,6 +43,15 @@ export function Sidebar(props: SidebarProps): JSX.Element {
         <span className="sidebar__brand">vibe-editor</span>
       </div>
       <nav className="sidebar-switcher" role="tablist" aria-label="Sidebar view">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={props.view === 'files'}
+          className={`sidebar-switcher__btn ${props.view === 'files' ? 'is-active' : ''}`}
+          onClick={() => props.onViewChange('files')}
+        >
+          {t('sidebar.files')}
+        </button>
         <button
           type="button"
           role="tab"
@@ -66,7 +81,13 @@ export function Sidebar(props: SidebarProps): JSX.Element {
       </nav>
 
       <div className="sidebar__body" key={props.view}>
-        {props.view === 'changes' ? (
+        {props.view === 'files' ? (
+          <FileTreePanel
+            projectRoot={props.projectRoot}
+            activeFilePath={props.activeFilePath}
+            onOpenFile={props.onOpenFile}
+          />
+        ) : props.view === 'changes' ? (
           <ChangesPanel
             status={props.gitStatus}
             loading={props.gitLoading}

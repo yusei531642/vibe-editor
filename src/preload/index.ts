@@ -2,6 +2,9 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type {
   AppSettings,
   ClaudeCheckResult,
+  FileListResult,
+  FileReadResult,
+  FileWriteResult,
   GitDiffResult,
   GitStatus,
   SessionInfo,
@@ -29,7 +32,7 @@ const api = {
       teamId: string,
       teamName: string,
       members: { agentId: string; role: string; agent: string }[]
-    ): Promise<{ ok: boolean; teamFile?: string; error?: string }> =>
+    ): Promise<{ ok: boolean; socket?: string; error?: string; changed?: boolean }> =>
       ipcRenderer.invoke('app:setupTeamMcp', projectRoot, teamId, teamName, members),
     cleanupTeamMcp: (
       projectRoot: string,
@@ -39,7 +42,9 @@ const api = {
     getTeamFilePath: (teamId: string): Promise<string> =>
       ipcRenderer.invoke('app:getTeamFilePath', teamId),
     getMcpServerPath: (): Promise<string> =>
-      ipcRenderer.invoke('app:getMcpServerPath')
+      ipcRenderer.invoke('app:getMcpServerPath'),
+    getTeamHubInfo: (): Promise<{ socket: string; token: string; bridgePath: string }> =>
+      ipcRenderer.invoke('app:getTeamHubInfo')
   },
 
   git: {
@@ -47,6 +52,19 @@ const api = {
       ipcRenderer.invoke('git:status', projectRoot),
     diff: (projectRoot: string, relPath: string): Promise<GitDiffResult> =>
       ipcRenderer.invoke('git:diff', projectRoot, relPath)
+  },
+
+  files: {
+    list: (projectRoot: string, relPath: string): Promise<FileListResult> =>
+      ipcRenderer.invoke('files:list', projectRoot, relPath),
+    read: (projectRoot: string, relPath: string): Promise<FileReadResult> =>
+      ipcRenderer.invoke('files:read', projectRoot, relPath),
+    write: (
+      projectRoot: string,
+      relPath: string,
+      content: string
+    ): Promise<FileWriteResult> =>
+      ipcRenderer.invoke('files:write', projectRoot, relPath, content)
   },
 
   sessions: {

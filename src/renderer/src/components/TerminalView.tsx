@@ -26,6 +26,10 @@ interface TerminalViewProps {
   visible: boolean;
   /** 起動後に自動送信するメッセージ（配列なら順番に送信） */
   initialMessage?: string | string[];
+  /** TeamHub 用のエージェント識別子 */
+  agentId?: string;
+  /** TeamHub のメッセージ注入時に from として表示されるロール */
+  role?: string;
   /** 起動中 / エラー表示用のコールバック */
   onStatus?: (status: string) => void;
   /** 出力イベント（非可視時のバッジ表示用） */
@@ -41,7 +45,7 @@ interface TerminalViewProps {
  */
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
   function TerminalView(
-    { cwd, command, args, env, visible, initialMessage, onStatus, onActivity, onExit },
+    { cwd, command, args, env, visible, initialMessage, agentId, role, onStatus, onActivity, onExit },
     ref
   ): JSX.Element {
   const { settings } = useSettings();
@@ -53,6 +57,13 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
   // コールバックは毎レンダーで新しい関数になるので ref で安定化
   const callbacksRef = useRef({ onStatus, onActivity, onExit });
   callbacksRef.current = { onStatus, onActivity, onExit };
+
+  // args / env / agentId / role は spawn 時に一度だけ使う値。
+  // 以後プロパティが変わっても pty を再起動しないよう ref に退避しておく。
+  // （タブ並び替えでシステムプロンプトが再計算されるなどのケースで、
+  //   生きている Claude Code セッションを巻き添えで殺さないための防御）
+  const spawnPropsRef = useRef({ args, env, agentId, role, initialMessage });
+  spawnPropsRef.current = { args, env, agentId, role, initialMessage };
 
   // 外部から TerminalView を操作するためのハンドル
   useImperativeHandle(
@@ -98,9 +109,38 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     term.loadAddon(fit);
     term.open(container);
 
+    // 画像 Blob を一時ファイルに保存し、パスを pty に挿入する共通処理
+    const insertImageFromBlob = async (blob: Blob, mime: string): Promise<void> => {
+      const buffer = await blob.arrayBuffer();
+      let binary = '';
+      const bytes = new Uint8Array(buffer);
+      const chunkSize = 0x8000;
+      for (let i = 0; i < bytes.length; i += chunkSize) {
+        binary += String.fromCharCode.apply(
+          null,
+          Array.from(bytes.subarray(i, i + chunkSize))
+        );
+      }
+      const base64 = btoa(binary);
+
+      const res = await window.api.terminal.savePastedImage(base64, mime);
+      if (!res.ok || !res.path) {
+        term.writeln(`\r\n\x1b[31m[画像保存失敗] ${res.error ?? '不明なエラー'}\x1b[0m`);
+        return;
+      }
+
+      const p = res.path;
+      const needQuote = /\s/.test(p);
+      const inserted = (needQuote ? `"${p}"` : p) + ' ';
+
+      if (ptyIdRef.current) {
+        await window.api.terminal.write(ptyIdRef.current, inserted);
+      }
+    };
+
     // コピー＆ペーストのキーバインディング
     // - Ctrl+C: 選択中ならクリップボードへコピー、選択なしは通常通り pty へ送り SIGINT
-    // - Ctrl+V / Ctrl+Shift+V: クリップボードのテキストをペースト
+    // - Ctrl+V / Ctrl+Shift+V: クリップボードから画像またはテキストをペースト
     // - Ctrl+Shift+C: 常にコピー（選択なしなら何もしない）
     term.attachCustomKeyEventHandler((e) => {
       if (e.type !== 'keydown') return true;
@@ -119,9 +159,30 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
 
       if (e.ctrlKey && !e.altKey && key === 'v') {
         e.preventDefault();
-        void navigator.clipboard.readText().then((text) => {
-          if (text) term.paste(text);
-        });
+        void (async () => {
+          try {
+            // clipboard.read() で画像を含む全アイテムを取得
+            const clipboardItems = await navigator.clipboard.read();
+            for (const item of clipboardItems) {
+              for (const type of item.types) {
+                if (type.startsWith('image/')) {
+                  const blob = await item.getType(type);
+                  await insertImageFromBlob(blob, type);
+                  return;
+                }
+              }
+            }
+          } catch {
+            // clipboard.read() 非対応やパーミッション拒否時はフォールスルー
+          }
+          // 画像なし → テキストペースト
+          try {
+            const text = await navigator.clipboard.readText();
+            if (text) term.paste(text);
+          } catch {
+            /* noop */
+          }
+        })();
         return false;
       }
 
@@ -150,13 +211,17 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     (async () => {
       try {
         callbacksRef.current.onStatus?.(`${command} を起動中…`);
+        // 初回 spawn 時点のスナップショットを使う（以後の prop 変化は無視）
+        const snap = spawnPropsRef.current;
         const res = await window.api.terminal.create({
           cwd,
           command,
-          args,
+          args: snap.args,
           cols: initialCols,
           rows: initialRows,
-          env
+          env: snap.env,
+          agentId: snap.agentId,
+          role: snap.role
         });
 
         if (disposed) return;
@@ -171,8 +236,9 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         callbacksRef.current.onStatus?.(`実行中: ${res.command ?? command}`);
 
         // ロールプロンプト等の初期メッセージ: CLIが入力待ちになってから順次送信
-        const msgQueue = initialMessage
-          ? Array.isArray(initialMessage) ? [...initialMessage] : [initialMessage]
+        const initMsg = snap.initialMessage;
+        const msgQueue = initMsg
+          ? Array.isArray(initMsg) ? [...initMsg] : [initMsg]
           : [];
         let msgIndex = 0;
         let sendCooldown = false;
@@ -227,13 +293,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       }
     });
 
-    // ---------- 画像ペーストフック ----------
-    // クリップボードに画像があれば一時ファイルに書き出して、パスを pty に流し込む
+    // ---------- 画像ペーストフック（右クリックメニュー等のフォールバック） ----------
     const handlePaste = (e: ClipboardEvent): void => {
       const items = e.clipboardData?.items;
       if (!items) return;
 
-      // 画像アイテムを探す
       let imageItem: DataTransferItem | null = null;
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
@@ -242,52 +306,17 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           break;
         }
       }
-      if (!imageItem) {
-        // 画像なし → テキストペーストは xterm にそのまま任せる
-        return;
-      }
+      if (!imageItem) return;
 
-      // 画像あり: 既定のペースト（生のバイナリを textarea に投げ込み）を止める
       e.preventDefault();
       e.stopPropagation();
 
       const blob = imageItem.getAsFile();
       if (!blob) return;
-      const mime = imageItem.type;
 
-      (async () => {
-        try {
-          const buffer = await blob.arrayBuffer();
-          // ArrayBuffer → base64
-          let binary = '';
-          const bytes = new Uint8Array(buffer);
-          const chunkSize = 0x8000;
-          for (let i = 0; i < bytes.length; i += chunkSize) {
-            binary += String.fromCharCode.apply(
-              null,
-              Array.from(bytes.subarray(i, i + chunkSize))
-            );
-          }
-          const base64 = btoa(binary);
-
-          const res = await window.api.terminal.savePastedImage(base64, mime);
-          if (!res.ok || !res.path) {
-            term.writeln(`\r\n\x1b[31m[画像保存失敗] ${res.error ?? '不明なエラー'}\x1b[0m`);
-            return;
-          }
-
-          // 空白を含むパスは " で囲む。末尾に空白を付けて次の入力と区切る
-          const p = res.path;
-          const needQuote = /\s/.test(p);
-          const inserted = (needQuote ? `"${p}"` : p) + ' ';
-
-          if (ptyIdRef.current) {
-            await window.api.terminal.write(ptyIdRef.current, inserted);
-          }
-        } catch (err) {
-          term.writeln(`\r\n\x1b[31m[ペースト例外] ${String(err)}\x1b[0m`);
-        }
-      })();
+      void insertImageFromBlob(blob, imageItem.type).catch((err) => {
+        term.writeln(`\r\n\x1b[31m[ペースト例外] ${String(err)}\x1b[0m`);
+      });
     };
 
     // capture: true で xterm 内部の textarea より先にハンドリング
@@ -332,8 +361,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       termRef.current = null;
       fitRef.current = null;
     };
+    // args / env / initialMessage などの再生成は snap ref 経由で無視する。
+    // 並び替えや親コンポーネントの再レンダー経由で pty が巻き添え kill されるのを防ぐ。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cwd, command, (args ?? []).join(' ')]);
+  }, [cwd, command]);
 
   // フォント・テーマ変更時は既存インスタンスに反映（ptyは再起動しない）
   useEffect(() => {

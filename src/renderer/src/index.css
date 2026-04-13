@@ -302,7 +302,7 @@ body.is-resizing * {
 
 .sidebar-switcher {
   display: flex;
-  padding: 8px 16px 0;
+  padding: 8px 12px 0;
   gap: 2px;
   background: transparent;
   position: relative;
@@ -310,12 +310,13 @@ body.is-resizing * {
 
 .sidebar-switcher__btn {
   flex: 1;
+  min-width: 0;
   background: transparent;
   color: var(--text-mute);
   border: none;
   border-radius: 0;
-  padding: 8px 16px 12px;
-  font-size: 13px;
+  padding: 8px 6px 12px;
+  font-size: 12px;
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
@@ -323,16 +324,19 @@ body.is-resizing * {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 5px;
   position: relative;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar-switcher__btn::after {
   content: '';
   position: absolute;
   bottom: 0;
-  left: 16px;
-  right: 16px;
+  left: 8px;
+  right: 8px;
   height: 2px;
   border-radius: 1px;
   background: transparent;
@@ -362,15 +366,16 @@ body.is-resizing * {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 17px;
-  padding: 0 6px;
-  border-radius: 10px;
+  min-width: 16px;
+  height: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
   background: var(--bg-active);
   color: var(--accent);
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
   line-height: 1;
+  flex-shrink: 0;
 }
 
 .sidebar-switcher__btn.is-active .sidebar-switcher__badge {
@@ -1637,7 +1642,7 @@ body.is-resizing * {
   position: relative;
 }
 
-/* ペイン数に応じてグリッド列を自動調整 */
+/* ペイン数に応じてグリッド列を自動調整（2〜4:2列 / 5〜9:3列 / 10〜16:4列 / それ以上:5列） */
 .claude-code-panel__body[data-panes="2"],
 .claude-code-panel__body[data-panes="3"],
 .claude-code-panel__body[data-panes="4"] {
@@ -1648,9 +1653,24 @@ body.is-resizing * {
 .claude-code-panel__body[data-panes="6"],
 .claude-code-panel__body[data-panes="7"],
 .claude-code-panel__body[data-panes="8"],
-.claude-code-panel__body[data-panes="9"],
-.claude-code-panel__body[data-panes="10"] {
+.claude-code-panel__body[data-panes="9"] {
   grid-template-columns: 1fr 1fr 1fr;
+}
+
+.claude-code-panel__body[data-panes="10"],
+.claude-code-panel__body[data-panes="11"],
+.claude-code-panel__body[data-panes="12"],
+.claude-code-panel__body[data-panes="13"],
+.claude-code-panel__body[data-panes="14"],
+.claude-code-panel__body[data-panes="15"],
+.claude-code-panel__body[data-panes="16"] {
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+}
+
+/* 17+ は 5 列に。CSS セレクタで列挙しきれないので汎用 fallback を
+   data-panes-many 属性で受ける */
+.claude-code-panel__body[data-panes-many="true"] {
+  grid-template-columns: repeat(5, 1fr);
 }
 
 /* ---------- ターミナルペイン ---------- */
@@ -3324,4 +3344,122 @@ body.is-resizing * {
   height: 52px;
   margin: 4px 8px;
   width: auto;
+}
+
+/* ---------- ファイルツリー ---------- */
+
+.filetree {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  font-size: 12.5px;
+}
+
+.filetree__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 12px 6px 12px;
+  color: var(--text-mute);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.filetree__root {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filetree__refresh {
+  background: transparent;
+  color: var(--text-mute);
+  border: none;
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.filetree__refresh:hover {
+  color: var(--text);
+  background: var(--panel-alt, rgba(255, 255, 255, 0.04));
+}
+
+.filetree__body {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+
+.filetree__body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.filetree__row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  text-align: left;
+  padding: 3px 8px 3px 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.filetree__row:hover {
+  background: var(--panel-alt, rgba(255, 255, 255, 0.04));
+}
+
+.filetree__row.is-active {
+  background: var(--accent-soft, rgba(91, 141, 239, 0.18));
+  color: var(--text);
+}
+
+.filetree__chevron {
+  color: var(--text-mute);
+  transition: transform 120ms ease;
+  flex-shrink: 0;
+}
+
+.filetree__chevron.is-open {
+  transform: rotate(90deg);
+}
+
+.filetree__chevron-spacer {
+  display: inline-block;
+  width: 12px;
+  flex-shrink: 0;
+}
+
+.filetree__icon {
+  color: var(--text-mute);
+  flex-shrink: 0;
+}
+
+.filetree__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filetree__loading,
+.filetree__empty,
+.filetree__error {
+  font-size: 11px;
+  color: var(--text-mute);
+  padding: 2px 8px;
+}
+
+.filetree__error {
+  color: var(--danger, #f87171);
 }

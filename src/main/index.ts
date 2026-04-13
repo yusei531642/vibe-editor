@@ -6,7 +6,9 @@ import { registerTerminalIpc } from './ipc/terminal';
 import { registerSettingsIpc } from './ipc/settings';
 import { registerSessionsIpc } from './ipc/sessions';
 import { registerDialogIpc } from './ipc/dialog';
+import { registerFilesIpc } from './ipc/files';
 import { initAutoUpdater } from './updater';
+import { teamHub } from './team-hub';
 
 const isDev = !app.isPackaged;
 
@@ -64,14 +66,25 @@ registerTerminalIpc();
 registerSettingsIpc();
 registerSessionsIpc();
 registerDialogIpc();
+registerFilesIpc();
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  try {
+    await teamHub.start();
+  } catch (err) {
+    console.error('[TeamHub] failed to start:', err);
+  }
+
   createWindow();
   initAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+});
+
+app.on('will-quit', () => {
+  teamHub.stop();
 });
 
 app.on('web-contents-created', (_event, contents) => {

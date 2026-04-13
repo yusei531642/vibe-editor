@@ -26,6 +26,7 @@ const ja: Dict = {
   'appMenu.empty': '履歴なし',
 
   // ---------- Sidebar ----------
+  'sidebar.files': 'ファイル',
   'sidebar.changes': '変更',
   'sidebar.history': '履歴',
   'sidebar.loading': '読み込み中…',
@@ -35,6 +36,14 @@ const ja: Dict = {
   'sidebar.filesChanged': '{count} 変更',
   'sidebar.sessionCount': '{count} セッション',
   'sidebar.refresh': '更新',
+
+  // ---------- File tree / Editor ----------
+  'filetree.refresh': '再読込',
+  'editor.loading': 'ファイルを読み込み中…',
+  'editor.save': '保存 (Ctrl+S)',
+  'editor.binaryNotice': 'バイナリファイルは編集できません: {path}',
+  'editor.saved': '保存しました: {path}',
+  'editor.saveFailed': '保存失敗: {error}',
 
   // ---------- Welcome ----------
   'welcome.subtitle': 'vibe coding with Claude Code',
@@ -174,6 +183,7 @@ const en: Dict = {
   'appMenu.empty': 'No history',
 
   // ---------- Sidebar ----------
+  'sidebar.files': 'Files',
   'sidebar.changes': 'Changes',
   'sidebar.history': 'History',
   'sidebar.loading': 'Loading…',
@@ -183,6 +193,14 @@ const en: Dict = {
   'sidebar.filesChanged': '{count} changed',
   'sidebar.sessionCount': '{count} sessions',
   'sidebar.refresh': 'Refresh',
+
+  // ---------- File tree / Editor ----------
+  'filetree.refresh': 'Reload',
+  'editor.loading': 'Loading file…',
+  'editor.save': 'Save (Ctrl+S)',
+  'editor.binaryNotice': 'Binary file cannot be edited: {path}',
+  'editor.saved': 'Saved: {path}',
+  'editor.saveFailed': 'Save failed: {error}',
 
   // ---------- Welcome ----------
   'welcome.subtitle': 'vibe coding with Claude Code',
