@@ -119,6 +119,38 @@ export interface TeamPreset {
   members: TeamMember[];
 }
 
+// ---------- ファイルツリー / 簡易エディタ ----------
+
+export interface FileNode {
+  name: string;
+  /** projectRoot からの相対パス（POSIX区切り） */
+  path: string;
+  isDir: boolean;
+}
+
+export interface FileListResult {
+  ok: boolean;
+  error?: string;
+  /** 引数で渡されたディレクトリ（相対パス）。ルートなら '' */
+  dir: string;
+  entries: FileNode[];
+}
+
+export interface FileReadResult {
+  ok: boolean;
+  error?: string;
+  path: string;
+  content: string;
+  isBinary: boolean;
+  /** UTF-8以外で読み取った場合の警告用 */
+  encoding: string;
+}
+
+export interface FileWriteResult {
+  ok: boolean;
+  error?: string;
+}
+
 // ---------- ターミナル ----------
 
 export interface TerminalCreateOptions {
@@ -128,6 +160,12 @@ export interface TerminalCreateOptions {
   cols: number;
   rows: number;
   env?: Record<string, string>;
+  /** TeamHub 用のチーム識別子。設定すると同一 teamId のみ相互通信できる */
+  teamId?: string;
+  /** TeamHub 用のエージェント識別子。設定すると pty が TeamHub のレジストリに登録される */
+  agentId?: string;
+  /** TeamHub が注入したメッセージを判別するためのロール */
+  role?: string;
 }
 
 export interface TerminalCreateResult {

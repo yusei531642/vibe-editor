@@ -15,12 +15,19 @@ import type {
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const nodePty: typeof import('node-pty') = require('node-pty');
 
-interface Session {
+export interface Session {
   pty: IPty;
   webContentsId: number;
+  teamId?: string;
+  agentId?: string;
+  role?: string;
 }
 
-const sessions = new Map<string, Session>();
+/** 全アクティブ pty セッション。TeamHub からも参照する */
+export const sessions = new Map<string, Session>();
+
+/** agentId → pty セッションの逆引き。TeamHub が team_send 時に使う */
+export const agentSessions = new Map<string, Session>();
 
 /**
  * Windows では PATH 経由の .cmd ラッパー（例: C:\...\npm\claude.cmd）を
@@ -84,7 +91,17 @@ export function registerTerminalIpc(): void {
 
         const id = randomUUID();
         const webContentsId = event.sender.id;
-        sessions.set(id, { pty, webContentsId });
+        const session: Session = {
+          pty,
+          webContentsId,
+          teamId: opts.teamId,
+          agentId: opts.agentId,
+          role: opts.role
+        };
+        sessions.set(id, session);
+        if (opts.agentId) {
+          agentSessions.set(opts.agentId, session);
+        }
 
         pty.onData((data) => {
           const wc = BrowserWindow.getAllWindows().find(
@@ -104,6 +121,7 @@ export function registerTerminalIpc(): void {
             wc.send(`terminal:exit:${id}`, info);
           }
           sessions.delete(id);
+          if (session.agentId) agentSessions.delete(session.agentId);
         });
 
         return {
@@ -141,6 +159,7 @@ export function registerTerminalIpc(): void {
         // 既に終了している場合がある
       }
       sessions.delete(id);
+      if (s.agentId) agentSessions.delete(s.agentId);
     }
   });
 
@@ -216,5 +235,6 @@ export function registerTerminalIpc(): void {
       }
     }
     sessions.clear();
+    agentSessions.clear();
   });
 }

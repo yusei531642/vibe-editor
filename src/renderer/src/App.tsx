@@ -17,6 +17,7 @@ import { TabBar, type TabItem } from './components/TabBar';
 import { Toolbar } from './components/Toolbar';
 import { AppMenu } from './components/AppMenu';
 import { DiffView } from './components/DiffView';
+import { EditorView } from './components/EditorView';
 import { TerminalView, type TerminalViewHandle } from './components/TerminalView';
 import { SettingsModal } from './components/SettingsModal';
 import { CommandPalette } from './components/CommandPalette';
@@ -46,7 +47,19 @@ interface DiffTab {
   pinned: boolean;
 }
 
-const MAX_TERMINALS = 10;
+interface EditorTab {
+  id: string;
+  relPath: string;
+  content: string;
+  originalContent: string;
+  isBinary: boolean;
+  loading: boolean;
+  error: string | null;
+  pinned: boolean;
+}
+
+/** 理論上の上限（事実上無制限）。メモリ/レイアウト保護のための安全弁。 */
+const MAX_TERMINALS = 999;
 
 interface TerminalTab {
   id: number;
@@ -71,6 +84,15 @@ const ROLE_DESC: Record<TeamRole, string> = {
   reviewer: 'コードレビュー・バグ特定・改善提案'
 };
 
+/** ロスター表示用の固定順。並び替えの影響を受けないようにする */
+const ROLE_ORDER: Record<string, number> = {
+  leader: 0,
+  planner: 1,
+  programmer: 2,
+  researcher: 3,
+  reviewer: 4
+};
+
 /** チームのシステムプロンプト（--append-system-prompt 用） */
 function generateTeamSystemPrompt(
   tab: TerminalTab,
@@ -79,7 +101,15 @@ function generateTeamSystemPrompt(
 ): string | undefined {
   if (!tab.role || !tab.teamId || !team) return undefined;
 
-  const teamTabs = allTabs.filter((t) => t.teamId === tab.teamId);
+  const teamTabs = allTabs
+    .filter((t) => t.teamId === tab.teamId)
+    .slice()
+    .sort((a, b) => {
+      const ra = ROLE_ORDER[a.role ?? ''] ?? 99;
+      const rb = ROLE_ORDER[b.role ?? ''] ?? 99;
+      if (ra !== rb) return ra - rb;
+      return a.agentId.localeCompare(b.agentId);
+    });
   const roster = teamTabs
     .map((t) => {
       const agent = t.agent === 'claude' ? 'Claude Code' : 'Codex';
@@ -88,23 +118,22 @@ function generateTeamSystemPrompt(
     })
     .join(', ');
 
-  const mcpTools = 'MCP vive-team ツール: team_send(to,message), team_read(), team_assign_task(assignee,description), team_get_tasks(), team_update_task(task_id,status), team_status(status)';
+  const mcpTools =
+    'MCP vive-team ツール: team_send(to,message) / team_assign_task(assignee,description) / team_get_tasks() / team_update_task(task_id,status) / team_info() / team_status(status) / team_read(). ' +
+    'team_send/team_assign_task で送ったメッセージは相手のプロンプトにリアルタイム注入されるので、受信側はポーリング不要。受信時は [Team ← <role>] プレフィックス付きで入力に届く。';
 
   if (tab.role === 'leader') {
-    return `あなたはチーム「${team.name}」のLeader。構成: ${roster}。${mcpTools}。手順: 1)プロジェクト調査 2)計画立案 3)team_assign_taskでタスク割振 4)team_readで進捗確認・team_sendで指示`;
+    return `あなたはチーム「${team.name}」のLeader。構成: ${roster}。${mcpTools} 重要: ユーザーから最初の指示が来るまで何もせず待機してください。自分からプロジェクト調査やタスク割振を開始してはいけません。ユーザー指示を受け取ってから、1)必要に応じて調査 2)計画立案 3)team_assign_taskで割振 4)結果は [Team ← ...] で届くので都度レビューし team_send で追指示 の順で進めてください。`;
   }
 
-  return `あなたはチーム「${team.name}」の${tab.role}。役割:${ROLE_DESC[tab.role]}。構成: ${roster}。${mcpTools}。team_readでLeaderの指示を確認し、作業後team_sendで報告。`;
+  return `あなたはチーム「${team.name}」の${tab.role}。役割:${ROLE_DESC[tab.role]}。構成: ${roster}。${mcpTools} 重要: Leaderからの指示を受け取るまで何もせず待機してください。自分からプロジェクト調査やコード変更を始めてはいけません。Leaderからの指示は [Team ← leader] 形式で入力に届くので、それを受け取ってから作業を開始し、完了後は team_send('leader', ...) で報告してください。`;
 }
 
-/** 短いアクション指示（initialMessage 用） */
-function generateTeamAction(tab: TerminalTab): string | undefined {
-  if (!tab.role || !tab.teamId) return undefined;
-
-  if (tab.role === 'leader') {
-    return 'プロジェクトを調査し、チームメンバーにタスクを割り振ってください。';
-  }
-  return 'team_read()でLeaderからのタスク指示を確認して作業を開始してください。';
+/** 短いアクション指示（initialMessage 用）。
+ *  チーム所属タブは全員「待機」が基本方針なので何も送らない。
+ *  Leader はユーザーからの最初の指示を待ち、メンバーは Leader からの注入を待つ。 */
+function generateTeamAction(_tab: TerminalTab): string | undefined {
+  return undefined;
 }
 
 export function App(): JSX.Element {
@@ -128,9 +157,10 @@ export function App(): JSX.Element {
   const [sessionsLoading, setSessionsLoading] = useState<boolean>(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
-  // tabs (diff only — エディタタブは無し)
+  // tabs: diff タブと editor タブを並立させ、id プレフィックスで判別する
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [diffTabs, setDiffTabs] = useState<DiffTab[]>([]);
+  const [editorTabs, setEditorTabs] = useState<EditorTab[]>([]);
   const [recentlyClosed, setRecentlyClosed] = useState<DiffTab[]>([]);
   const [sideBySide, setSideBySide] = useState<boolean>(true);
 
@@ -258,7 +288,7 @@ export function App(): JSX.Element {
         void window.api.app.cleanupTeamMcp(projectRoot, teamId);
       }
     },
-    []
+    [projectRoot]
   );
 
   const closeTerminalTab = useCallback(
@@ -370,9 +400,32 @@ export function App(): JSX.Element {
     [settings.claudeCodePanelWidth, updateSettings]
   );
 
+  const dirtyEditorTabs = useMemo(
+    () => editorTabs.filter((tab) => !tab.isBinary && tab.content !== tab.originalContent),
+    [editorTabs]
+  );
+
+  const confirmDiscardEditorTabs = useCallback(
+    (tabIds?: string[]): boolean => {
+      const targets =
+        tabIds && tabIds.length > 0
+          ? dirtyEditorTabs.filter((tab) => tabIds.includes(tab.id))
+          : dirtyEditorTabs;
+      if (targets.length === 0) return true;
+      if (targets.length === 1) {
+        return window.confirm(t('editor.discardSingle', { path: targets[0].relPath }));
+      }
+      return window.confirm(t('editor.discardMultiple', { count: targets.length }));
+    },
+    [dirtyEditorTabs, t]
+  );
+
   /** 指定ルートでプロジェクトを読み込み直す */
   const loadProject = useCallback(
     async (root: string, options: { addToRecent?: boolean } = { addToRecent: true }) => {
+      if (projectRoot && projectRoot !== root && !confirmDiscardEditorTabs()) {
+        return false;
+      }
       setProjectRoot(root);
       setStatus('プロジェクト読み込み中…');
       setGitLoading(true);
@@ -382,15 +435,18 @@ export function App(): JSX.Element {
           window.api.git.status(root),
           window.api.sessions.list(root)
         ]);
-        // MCP 初期化は失敗しても git/sessions 読み込みに影響させない
-        window.api.app.setupTeamMcp(root, '_init', '', []).catch((err) => {
+        // MCP 初期化は await する（新規タブ spawn より前に claude.json を確定）
+        try {
+          await window.api.app.setupTeamMcp(root, '_init', '', []);
+        } catch (err) {
           console.warn('[loadProject] setupTeamMcp failed:', err);
-        });
+        }
 
         setGitStatus(gs);
         setSessions(sess);
         // タブ・セッション状態をリセット
         setDiffTabs([]);
+        setEditorTabs([]);
         setRecentlyClosed([]);
         setActiveTabId(null);
         setActiveSessionId(null);
@@ -418,13 +474,15 @@ export function App(): JSX.Element {
           const next = [root, ...rp.filter((p) => p !== root)].slice(0, 10);
           void updateSettings({ recentProjects: next });
         }
+        return true;
       } catch (err) {
         setStatus(`読み込みエラー: ${String(err)}`);
+        return false;
       } finally {
         setGitLoading(false);
       }
     },
-    [settings.recentProjects, updateSettings]
+    [projectRoot, confirmDiscardEditorTabs, settings.recentProjects, updateSettings]
   );
 
   // 初回ロード
@@ -439,10 +497,12 @@ export function App(): JSX.Element {
           window.api.git.status(root),
           window.api.sessions.list(root)
         ]);
-        // MCP 初期化は失敗しても git/sessions 読み込みに影響させない
-        window.api.app.setupTeamMcp(root, '_init', '', []).catch((err) => {
+        // MCP 初期化は await する（新規タブ spawn より前に claude.json を確定）
+        try {
+          await window.api.app.setupTeamMcp(root, '_init', '', []);
+        } catch (err) {
           console.warn('[init] setupTeamMcp failed:', err);
-        });
+        }
         if (cancelled) return;
         setGitStatus(gs);
         setGitLoading(false);
@@ -465,8 +525,11 @@ export function App(): JSX.Element {
   }, [projectRoot]);
 
   const handleRestart = useCallback(async () => {
+    if (dirtyEditorTabs.length > 0 && !window.confirm(t('editor.restartConfirm'))) {
+      return;
+    }
     await window.api.app.restart();
-  }, []);
+  }, [dirtyEditorTabs.length, t]);
 
   // ---------- データ更新 ----------
 
@@ -539,6 +602,129 @@ export function App(): JSX.Element {
     [projectRoot]
   );
 
+  const refreshDiffTabsForPath = useCallback(
+    async (relPath: string) => {
+      if (!projectRoot) return;
+      if (!diffTabs.some((tab) => tab.relPath === relPath)) return;
+      try {
+        const result = await window.api.git.diff(projectRoot, relPath);
+        setDiffTabs((prev) =>
+          prev.map((tab) =>
+            tab.relPath === relPath ? { ...tab, result, loading: false } : tab
+          )
+        );
+      } catch (err) {
+        setDiffTabs((prev) =>
+          prev.map((tab) =>
+            tab.relPath === relPath
+              ? {
+                  ...tab,
+                  loading: false,
+                  result: {
+                    ok: false,
+                    error: String(err),
+                    path: relPath,
+                    isNew: false,
+                    isDeleted: false,
+                    isBinary: false,
+                    original: '',
+                    modified: ''
+                  }
+                }
+              : tab
+          )
+        );
+      }
+    },
+    [projectRoot, diffTabs]
+  );
+
+  // ---------- エディタタブ ----------
+
+  const openEditorTab = useCallback(
+    async (relPath: string) => {
+      if (!projectRoot) return;
+      const id = `edit:${relPath}`;
+      setActiveTabId(id);
+      setEditorTabs((prev) => {
+        if (prev.some((t) => t.id === id)) return prev;
+        return [
+          ...prev,
+          {
+            id,
+            relPath,
+            content: '',
+            originalContent: '',
+            isBinary: false,
+            loading: true,
+            error: null,
+            pinned: false
+          }
+        ];
+      });
+      try {
+        const res = await window.api.files.read(projectRoot, relPath);
+        setEditorTabs((prev) =>
+          prev.map((t) =>
+            t.id === id
+              ? {
+                  ...t,
+                  loading: false,
+                  error: res.ok ? null : res.error ?? 'error',
+                  content: res.content,
+                  originalContent: res.content,
+                  isBinary: res.isBinary
+                }
+              : t
+          )
+        );
+      } catch (err) {
+        setEditorTabs((prev) =>
+          prev.map((t) =>
+            t.id === id ? { ...t, loading: false, error: String(err) } : t
+          )
+        );
+      }
+    },
+    [projectRoot]
+  );
+
+  const updateEditorContent = useCallback((id: string, content: string) => {
+    setEditorTabs((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, content } : t))
+    );
+  }, []);
+
+  const saveEditorTab = useCallback(
+    async (id: string) => {
+      if (!projectRoot) return;
+      const tab = editorTabs.find((t) => t.id === id);
+      if (!tab) return;
+      if (tab.isBinary) return;
+      if (tab.content === tab.originalContent) return;
+      try {
+        const res = await window.api.files.write(projectRoot, tab.relPath, tab.content);
+        if (res.ok) {
+          setEditorTabs((prev) =>
+            prev.map((t) =>
+              t.id === id ? { ...t, originalContent: t.content } : t
+            )
+          );
+          showToast(t('editor.saved', { path: tab.relPath }), { tone: 'success' });
+          void refreshGit();
+          void refreshDiffTabsForPath(tab.relPath);
+        } else {
+          showToast(t('editor.saveFailed', { error: res.error ?? 'error' }), {
+            tone: 'error'
+          });
+        }
+      } catch (err) {
+        showToast(t('editor.saveFailed', { error: String(err) }), { tone: 'error' });
+      }
+    },
+    [projectRoot, editorTabs, refreshDiffTabsForPath, refreshGit, showToast, t]
+  );
+
   // ---------- 差分レビュー依頼 ----------
 
   /** 指定ファイルの変更を Claude Code にレビュー依頼するプロンプトを生成して ターミナルに送信 */
@@ -601,6 +787,28 @@ export function App(): JSX.Element {
 
   const closeTab = useCallback(
     (id: string) => {
+      if (id.startsWith('edit:')) {
+        setEditorTabs((prev) => {
+          const target = prev.find((t) => t.id === id);
+          if (!target || target.pinned) return prev;
+          if (
+            !target.isBinary &&
+            target.content !== target.originalContent &&
+            !confirmDiscardEditorTabs([id])
+          ) {
+            return prev;
+          }
+          const next = prev.filter((t) => t.id !== id);
+          if (activeTabId === id) {
+            // 残ったエディタ or 差分タブのうち末尾を選択
+            const fallback =
+              next.length > 0 ? next[next.length - 1].id : diffTabs[diffTabs.length - 1]?.id ?? null;
+            setActiveTabId(fallback);
+          }
+          return next;
+        });
+        return;
+      }
       setDiffTabs((prev) => {
         const target = prev.find((t) => t.id === id);
         if (!target || target.pinned) return prev;
@@ -609,15 +817,23 @@ export function App(): JSX.Element {
         );
         const next = prev.filter((t) => t.id !== id);
         if (activeTabId === id) {
-          setActiveTabId(next.length > 0 ? next[next.length - 1].id : null);
+          const fallback =
+            next.length > 0 ? next[next.length - 1].id : editorTabs[editorTabs.length - 1]?.id ?? null;
+          setActiveTabId(fallback);
         }
         return next;
       });
     },
-    [activeTabId]
+    [activeTabId, confirmDiscardEditorTabs, diffTabs, editorTabs]
   );
 
   const togglePin = useCallback((id: string) => {
+    if (id.startsWith('edit:')) {
+      setEditorTabs((prev) =>
+        prev.map((t) => (t.id === id ? { ...t, pinned: !t.pinned } : t))
+      );
+      return;
+    }
     setDiffTabs((prev) =>
       prev.map((t) => (t.id === id ? { ...t, pinned: !t.pinned } : t))
     );
@@ -635,13 +851,16 @@ export function App(): JSX.Element {
 
   const cycleTab = useCallback(
     (direction: 1 | -1) => {
-      if (diffTabs.length === 0) return;
-      const ids = diffTabs.map((t) => t.id);
-      const idx = activeTabId ? ids.indexOf(activeTabId) : -1;
-      const next = ((idx < 0 ? 0 : idx) + direction + ids.length) % ids.length;
-      setActiveTabId(ids[next]);
+      const allIds = [
+        ...diffTabs.map((t) => t.id),
+        ...editorTabs.map((t) => t.id)
+      ];
+      if (allIds.length === 0) return;
+      const idx = activeTabId ? allIds.indexOf(activeTabId) : -1;
+      const next = ((idx < 0 ? 0 : idx) + direction + allIds.length) % allIds.length;
+      setActiveTabId(allIds[next]);
     },
-    [activeTabId, diffTabs]
+    [activeTabId, diffTabs, editorTabs]
   );
 
   // ---------- プロジェクトメニュー操作 ----------
@@ -650,12 +869,13 @@ export function App(): JSX.Element {
     const folder = await window.api.dialog.openFolder('新規プロジェクト: 空フォルダを選択/作成');
     if (!folder) return;
     const empty = await window.api.dialog.isFolderEmpty(folder);
+    const loaded = await loadProject(folder);
+    if (!loaded) return;
     if (!empty) {
       showToast('フォルダが空ではありません。既存として開きます', { tone: 'warning' });
     } else {
       showToast('新規プロジェクトを作成', { tone: 'success' });
     }
-    await loadProject(folder);
   }, [loadProject, showToast]);
 
   const handleOpenFolder = useCallback(async () => {
@@ -668,8 +888,10 @@ export function App(): JSX.Element {
     const file = await window.api.dialog.openFile('ファイルを開く');
     if (!file) return;
     const parent = file.replace(/[\\/][^\\/]+$/, '');
-    await loadProject(parent);
-    showToast(`${file} の親フォルダをプロジェクトとして読み込みました`, { tone: 'info' });
+    const loaded = await loadProject(parent);
+    if (loaded) {
+      showToast(`${file} の親フォルダをプロジェクトとして読み込みました`, { tone: 'info' });
+    }
   }, [loadProject, showToast]);
 
   const handleOpenRecent = useCallback(
@@ -905,6 +1127,14 @@ export function App(): JSX.Element {
         setPaletteOpen((v) => !v);
         return;
       }
+      if (!e.shiftKey && (e.key === 's' || e.key === 'S')) {
+        if (activeTabId && activeTabId.startsWith('edit:')) {
+          e.preventDefault();
+          e.stopPropagation();
+          void saveEditorTab(activeTabId);
+        }
+        return;
+      }
       if (e.key === ',') {
         e.preventDefault();
         setSettingsOpen(true);
@@ -931,7 +1161,7 @@ export function App(): JSX.Element {
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [paletteOpen, settingsOpen, activeTabId, cycleTab, closeTab, reopenLastClosed]);
+  }, [paletteOpen, settingsOpen, activeTabId, cycleTab, closeTab, reopenLastClosed, saveEditorTab]);
 
   // ---------- 起動引数合成 ----------
 
@@ -957,41 +1187,26 @@ export function App(): JSX.Element {
     [settings.claudeArgs, settings.codexArgs, teams, terminalTabs]
   );
 
-  /** チームタブ用の環境変数を構築（MCP サーバーが読み取る） */
-  const [teamFilePaths, setTeamFilePaths] = useState<Record<string, string>>({});
-
-  // チーム作成時にファイルパスを解決してキャッシュ
+  /** TeamHub 接続情報（アプリ起動時に1回だけ解決） */
+  const [teamHubInfo, setTeamHubInfo] = useState<{ socket: string; token: string } | null>(null);
   useEffect(() => {
-    const teamIds = teams.map((t) => t.id);
-    for (const tid of teamIds) {
-      if (!teamFilePaths[tid]) {
-        void window.api.app.getTeamFilePath(tid).then((p) => {
-          setTeamFilePaths((prev) => ({ ...prev, [tid]: p }));
-        });
-      }
-    }
-  }, [teams, teamFilePaths]);
+    void window.api.app.getTeamHubInfo().then((info) => setTeamHubInfo(info));
+  }, []);
 
   const getTerminalEnv = useCallback(
     (tab: TerminalTab): Record<string, string> | undefined => {
       if (!tab.teamId || !tab.role) return undefined;
-      const teamFile = teamFilePaths[tab.teamId];
-      if (!teamFile) return undefined;
+      if (!teamHubInfo) return undefined;
       return {
         VIVE_TEAM_ID: tab.teamId,
         VIVE_TEAM_ROLE: tab.role,
         VIVE_AGENT_ID: tab.agentId,
-        VIVE_TEAM_FILE: teamFile
+        VIVE_TEAM_SOCKET: teamHubInfo.socket,
+        VIVE_TEAM_TOKEN: teamHubInfo.token
       };
     },
-    [teamFilePaths]
+    [teamHubInfo]
   );
-
-  /** MCP サーバースクリプトのパス（チーム初回セットアップ用） */
-  const [mcpServerPath, setMcpServerPath] = useState<string>('');
-  useEffect(() => {
-    void window.api.app.getMcpServerPath().then(setMcpServerPath);
-  }, []);
 
   /** タブのロールに対応する初期メッセージ（短いアクション指示のみ） */
   const getRolePrompt = useCallback(
@@ -1034,9 +1249,23 @@ export function App(): JSX.Element {
         }))
       ];
 
-      // MCP サーバーをセットアップ（Claude Code / Codex MCP 設定 + チームステートファイル作成）
+      // MCP サーバーをセットアップ（Claude Code / Codex MCP 設定）
+      let mcpChanged = false;
       if (projectRoot) {
-        await window.api.app.setupTeamMcp(projectRoot, teamId, teamName, allMembers);
+        const res = await window.api.app.setupTeamMcp(projectRoot, teamId, teamName, allMembers);
+        mcpChanged = res.changed === true;
+      }
+
+      // claude.json が更新された場合、既存の Claude タブは古い MCP 情報で起動しているので
+      // サイレントに再起動して新しいポート/トークンを読み直させる
+      if (mcpChanged) {
+        setTerminalTabs((prev) =>
+          prev.map((tab) =>
+            tab.agent === 'claude' && !tab.exited
+              ? { ...tab, version: tab.version + 1, status: '', hasActivity: false }
+              : tab
+          )
+        );
       }
 
       // Leader を先に生成
@@ -1108,24 +1337,39 @@ export function App(): JSX.Element {
 
   // ---------- タブリスト ----------
 
-  const tabs: TabItem[] = diffTabs.map((t) => ({
-    id: t.id,
-    title: t.relPath.split('/').pop() ?? t.relPath,
-    closable: true as const,
-    pinned: t.pinned
-  }));
+  const tabs: TabItem[] = [
+    ...diffTabs.map((t) => ({
+      id: t.id,
+      title: t.relPath.split('/').pop() ?? t.relPath,
+      closable: true as const,
+      pinned: t.pinned
+    })),
+    ...editorTabs.map((t) => ({
+      id: t.id,
+      title: t.relPath.split('/').pop() ?? t.relPath,
+      closable: true as const,
+      pinned: t.pinned,
+      dirty: t.content !== t.originalContent
+    }))
+  ];
 
   const activeDiffTab = diffTabs.find((t) => t.id === activeTabId) ?? null;
+  const activeEditorTab = editorTabs.find((t) => t.id === activeTabId) ?? null;
   const activeDiffPath = activeDiffTab?.relPath ?? null;
+  const activeFilePath = activeEditorTab?.relPath ?? null;
+  const hasActiveContent = activeDiffTab !== null || activeEditorTab !== null;
 
   const projectName = projectRoot.split(/[\\/]/).pop() || 'no project';
   const activeTab = terminalTabs.find((t) => t.id === activeTerminalTabId) ?? null;
 
   return (
-    <div className={`layout${activeDiffTab ? '' : ' layout--terminal-full'}`}>
+    <div className={`layout${hasActiveContent ? '' : ' layout--terminal-full'}`}>
       <Sidebar
         view={sidebarView}
         onViewChange={setSidebarView}
+        projectRoot={projectRoot}
+        activeFilePath={activeFilePath}
+        onOpenFile={(p) => void openEditorTab(p)}
         gitStatus={gitStatus}
         gitLoading={gitLoading}
         onRefreshGit={refreshGit}
@@ -1162,7 +1406,20 @@ export function App(): JSX.Element {
           />
         )}
         <div className="content-area">
-          {activeDiffTab ? (
+          {activeEditorTab ? (
+            <div className="pane">
+              <EditorView
+                path={activeEditorTab.relPath}
+                content={activeEditorTab.content}
+                dirty={activeEditorTab.content !== activeEditorTab.originalContent}
+                isBinary={activeEditorTab.isBinary}
+                loading={activeEditorTab.loading}
+                error={activeEditorTab.error}
+                onChange={(v) => updateEditorContent(activeEditorTab.id, v)}
+                onSave={() => void saveEditorTab(activeEditorTab.id)}
+              />
+            </div>
+          ) : activeDiffTab ? (
             <div className="pane">
               <DiffView
                 result={activeDiffTab.result}
@@ -1175,8 +1432,8 @@ export function App(): JSX.Element {
         </div>
       </main>
 
-      {/* diff 表示中のみリサイズハンドルと右パネルを分離表示 */}
-      {activeDiffTab && (
+      {/* diff / editor 表示中のみリサイズハンドルと右パネルを分離表示 */}
+      {hasActiveContent && (
         <div
           className="resize-handle"
           onMouseDown={handleResizeStart}
@@ -1185,7 +1442,7 @@ export function App(): JSX.Element {
           aria-orientation="vertical"
         />
       )}
-      <aside className={`claude-code-panel${activeDiffTab ? '' : ' claude-code-panel--full'}`}>
+      <aside className={`claude-code-panel${hasActiveContent ? '' : ' claude-code-panel--full'}`}>
         <header className="claude-code-panel__header">
           <div className="claude-code-panel__title-wrap">
             <AppMenu
@@ -1286,6 +1543,7 @@ export function App(): JSX.Element {
         <div
           className="claude-code-panel__body"
           data-panes={terminalTabs.length}
+          data-panes-many={terminalTabs.length > 16 ? 'true' : undefined}
         >
           {claudeCheck.state === 'checking' && (
             <div className="claude-not-found__body" style={{ padding: 40, textAlign: 'center' }}>
@@ -1384,8 +1642,11 @@ export function App(): JSX.Element {
                   }
                   args={getTerminalArgs(tab)}
                   env={getTerminalEnv(tab)}
+                  teamId={tab.teamId ?? undefined}
                   visible={true}
                   initialMessage={getRolePrompt(tab)}
+                  agentId={tab.agentId}
+                  role={tab.role ?? undefined}
                   onStatus={(s) =>
                     setTerminalTabs((prev) =>
                       prev.map((t) => (t.id === tab.id ? { ...t, status: s } : t))
