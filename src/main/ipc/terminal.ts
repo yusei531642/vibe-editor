@@ -18,6 +18,7 @@ const nodePty: typeof import('node-pty') = require('node-pty');
 export interface Session {
   pty: IPty;
   webContentsId: number;
+  teamId?: string;
   agentId?: string;
   role?: string;
 }
@@ -93,6 +94,7 @@ export function registerTerminalIpc(): void {
         const session: Session = {
           pty,
           webContentsId,
+          teamId: opts.teamId,
           agentId: opts.agentId,
           role: opts.role
         };

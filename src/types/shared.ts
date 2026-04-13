@@ -160,6 +160,8 @@ export interface TerminalCreateOptions {
   cols: number;
   rows: number;
   env?: Record<string, string>;
+  /** TeamHub 用のチーム識別子。設定すると同一 teamId のみ相互通信できる */
+  teamId?: string;
   /** TeamHub 用のエージェント識別子。設定すると pty が TeamHub のレジストリに登録される */
   agentId?: string;
   /** TeamHub が注入したメッセージを判別するためのロール */

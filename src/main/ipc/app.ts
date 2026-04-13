@@ -242,14 +242,16 @@ export function registerAppIpc(): void {
     async (
       _e,
       projectRoot: string,
-      _teamId: string,
-      _teamName: string,
+      teamId: string,
+      teamName: string,
       _members: { agentId: string; role: string; agent: string }[]
     ) => {
       try {
         if (!teamHub.isRunning) {
           return { ok: false, error: 'TeamHub is not running' };
         }
+
+        teamHub.registerTeam(teamId, teamName);
 
         const [claudeChanged] = await Promise.all([
           setupClaudeMcp(projectRoot),

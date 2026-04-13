@@ -53,6 +53,14 @@ function getOrCreateTeam(teamId: string): TeamInfo {
   return t;
 }
 
+function updateTeamName(teamId: string, name: string): void {
+  if (!teamId || teamId === '_init') return;
+  const team = getOrCreateTeam(teamId);
+  if (name) {
+    team.name = name;
+  }
+}
+
 /** pty へメッセージを直接注入する。Claude Code/Codex のプロンプトに「入力」として届く */
 function injectIntoPty(agentId: string, fromRole: string, text: string): boolean {
   const session = agentSessions.get(agentId);
@@ -97,6 +105,7 @@ function teamSend(ctx: CallContext, args: Record<string, unknown>): unknown {
   const delivered: string[] = [];
   for (const [aid, session] of agentSessions) {
     if (aid === ctx.agentId) continue; // 自分には送らない
+    if (session.teamId !== ctx.teamId) continue;
     const targetRole = session.role ?? '';
     if (to === 'all' || to === targetRole) {
       if (injectIntoPty(aid, ctx.role, message)) {
@@ -148,6 +157,7 @@ function teamInfo(ctx: CallContext): unknown {
   const team = getOrCreateTeam(ctx.teamId);
   const members: { role: string; agentId: string; online: boolean }[] = [];
   for (const [aid, session] of agentSessions) {
+    if (session.teamId !== ctx.teamId) continue;
     members.push({
       role: session.role ?? 'unknown',
       agentId: aid,
@@ -571,6 +581,10 @@ class TeamHub {
   /** チーム破棄時に履歴をクリーンアップ */
   clearTeam(teamId: string): void {
     teams.delete(teamId);
+  }
+
+  registerTeam(teamId: string, name: string): void {
+    updateTeamName(teamId, name);
   }
 
   private handleClient(socket: Socket): void {

@@ -22,6 +22,8 @@ interface TerminalViewProps {
   args?: string[];
   /** pty に渡す追加の環境変数 */
   env?: Record<string, string>;
+  /** TeamHub 用のチーム識別子 */
+  teamId?: string;
   /** 現在このペインが表示されているか（非表示時は fit をスキップ） */
   visible: boolean;
   /** 起動後に自動送信するメッセージ（配列なら順番に送信） */
@@ -45,7 +47,7 @@ interface TerminalViewProps {
  */
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
   function TerminalView(
-    { cwd, command, args, env, visible, initialMessage, agentId, role, onStatus, onActivity, onExit },
+    { cwd, command, args, env, teamId, visible, initialMessage, agentId, role, onStatus, onActivity, onExit },
     ref
   ): JSX.Element {
   const { settings } = useSettings();
@@ -58,12 +60,12 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
   const callbacksRef = useRef({ onStatus, onActivity, onExit });
   callbacksRef.current = { onStatus, onActivity, onExit };
 
-  // args / env / agentId / role は spawn 時に一度だけ使う値。
+  // args / env / teamId / agentId / role は spawn 時に一度だけ使う値。
   // 以後プロパティが変わっても pty を再起動しないよう ref に退避しておく。
   // （タブ並び替えでシステムプロンプトが再計算されるなどのケースで、
   //   生きている Claude Code セッションを巻き添えで殺さないための防御）
-  const spawnPropsRef = useRef({ args, env, agentId, role, initialMessage });
-  spawnPropsRef.current = { args, env, agentId, role, initialMessage };
+  const spawnPropsRef = useRef({ args, env, teamId, agentId, role, initialMessage });
+  spawnPropsRef.current = { args, env, teamId, agentId, role, initialMessage };
 
   // 外部から TerminalView を操作するためのハンドル
   useImperativeHandle(
@@ -220,6 +222,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           cols: initialCols,
           rows: initialRows,
           env: snap.env,
+          teamId: snap.teamId,
           agentId: snap.agentId,
           role: snap.role
         });
@@ -426,4 +429,3 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     return <div className="terminal-view" ref={containerRef} />;
   }
 );
-

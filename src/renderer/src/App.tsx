@@ -288,7 +288,7 @@ export function App(): JSX.Element {
         void window.api.app.cleanupTeamMcp(projectRoot, teamId);
       }
     },
-    []
+    [projectRoot]
   );
 
   const closeTerminalTab = useCallback(
@@ -400,9 +400,32 @@ export function App(): JSX.Element {
     [settings.claudeCodePanelWidth, updateSettings]
   );
 
+  const dirtyEditorTabs = useMemo(
+    () => editorTabs.filter((tab) => !tab.isBinary && tab.content !== tab.originalContent),
+    [editorTabs]
+  );
+
+  const confirmDiscardEditorTabs = useCallback(
+    (tabIds?: string[]): boolean => {
+      const targets =
+        tabIds && tabIds.length > 0
+          ? dirtyEditorTabs.filter((tab) => tabIds.includes(tab.id))
+          : dirtyEditorTabs;
+      if (targets.length === 0) return true;
+      if (targets.length === 1) {
+        return window.confirm(t('editor.discardSingle', { path: targets[0].relPath }));
+      }
+      return window.confirm(t('editor.discardMultiple', { count: targets.length }));
+    },
+    [dirtyEditorTabs, t]
+  );
+
   /** 指定ルートでプロジェクトを読み込み直す */
   const loadProject = useCallback(
     async (root: string, options: { addToRecent?: boolean } = { addToRecent: true }) => {
+      if (projectRoot && projectRoot !== root && !confirmDiscardEditorTabs()) {
+        return false;
+      }
       setProjectRoot(root);
       setStatus('プロジェクト読み込み中…');
       setGitLoading(true);
@@ -423,6 +446,7 @@ export function App(): JSX.Element {
         setSessions(sess);
         // タブ・セッション状態をリセット
         setDiffTabs([]);
+        setEditorTabs([]);
         setRecentlyClosed([]);
         setActiveTabId(null);
         setActiveSessionId(null);
@@ -450,13 +474,15 @@ export function App(): JSX.Element {
           const next = [root, ...rp.filter((p) => p !== root)].slice(0, 10);
           void updateSettings({ recentProjects: next });
         }
+        return true;
       } catch (err) {
         setStatus(`読み込みエラー: ${String(err)}`);
+        return false;
       } finally {
         setGitLoading(false);
       }
     },
-    [settings.recentProjects, updateSettings]
+    [projectRoot, confirmDiscardEditorTabs, settings.recentProjects, updateSettings]
   );
 
   // 初回ロード
@@ -499,8 +525,11 @@ export function App(): JSX.Element {
   }, [projectRoot]);
 
   const handleRestart = useCallback(async () => {
+    if (dirtyEditorTabs.length > 0 && !window.confirm(t('editor.restartConfirm'))) {
+      return;
+    }
     await window.api.app.restart();
-  }, []);
+  }, [dirtyEditorTabs.length, t]);
 
   // ---------- データ更新 ----------
 
@@ -571,6 +600,43 @@ export function App(): JSX.Element {
       }
     },
     [projectRoot]
+  );
+
+  const refreshDiffTabsForPath = useCallback(
+    async (relPath: string) => {
+      if (!projectRoot) return;
+      if (!diffTabs.some((tab) => tab.relPath === relPath)) return;
+      try {
+        const result = await window.api.git.diff(projectRoot, relPath);
+        setDiffTabs((prev) =>
+          prev.map((tab) =>
+            tab.relPath === relPath ? { ...tab, result, loading: false } : tab
+          )
+        );
+      } catch (err) {
+        setDiffTabs((prev) =>
+          prev.map((tab) =>
+            tab.relPath === relPath
+              ? {
+                  ...tab,
+                  loading: false,
+                  result: {
+                    ok: false,
+                    error: String(err),
+                    path: relPath,
+                    isNew: false,
+                    isDeleted: false,
+                    isBinary: false,
+                    original: '',
+                    modified: ''
+                  }
+                }
+              : tab
+          )
+        );
+      }
+    },
+    [projectRoot, diffTabs]
   );
 
   // ---------- エディタタブ ----------
@@ -645,6 +711,8 @@ export function App(): JSX.Element {
             )
           );
           showToast(t('editor.saved', { path: tab.relPath }), { tone: 'success' });
+          void refreshGit();
+          void refreshDiffTabsForPath(tab.relPath);
         } else {
           showToast(t('editor.saveFailed', { error: res.error ?? 'error' }), {
             tone: 'error'
@@ -654,7 +722,7 @@ export function App(): JSX.Element {
         showToast(t('editor.saveFailed', { error: String(err) }), { tone: 'error' });
       }
     },
-    [projectRoot, editorTabs, showToast, t]
+    [projectRoot, editorTabs, refreshDiffTabsForPath, refreshGit, showToast, t]
   );
 
   // ---------- 差分レビュー依頼 ----------
@@ -723,6 +791,13 @@ export function App(): JSX.Element {
         setEditorTabs((prev) => {
           const target = prev.find((t) => t.id === id);
           if (!target || target.pinned) return prev;
+          if (
+            !target.isBinary &&
+            target.content !== target.originalContent &&
+            !confirmDiscardEditorTabs([id])
+          ) {
+            return prev;
+          }
           const next = prev.filter((t) => t.id !== id);
           if (activeTabId === id) {
             // 残ったエディタ or 差分タブのうち末尾を選択
@@ -749,7 +824,7 @@ export function App(): JSX.Element {
         return next;
       });
     },
-    [activeTabId, diffTabs, editorTabs]
+    [activeTabId, confirmDiscardEditorTabs, diffTabs, editorTabs]
   );
 
   const togglePin = useCallback((id: string) => {
@@ -794,12 +869,13 @@ export function App(): JSX.Element {
     const folder = await window.api.dialog.openFolder('新規プロジェクト: 空フォルダを選択/作成');
     if (!folder) return;
     const empty = await window.api.dialog.isFolderEmpty(folder);
+    const loaded = await loadProject(folder);
+    if (!loaded) return;
     if (!empty) {
       showToast('フォルダが空ではありません。既存として開きます', { tone: 'warning' });
     } else {
       showToast('新規プロジェクトを作成', { tone: 'success' });
     }
-    await loadProject(folder);
   }, [loadProject, showToast]);
 
   const handleOpenFolder = useCallback(async () => {
@@ -812,8 +888,10 @@ export function App(): JSX.Element {
     const file = await window.api.dialog.openFile('ファイルを開く');
     if (!file) return;
     const parent = file.replace(/[\\/][^\\/]+$/, '');
-    await loadProject(parent);
-    showToast(`${file} の親フォルダをプロジェクトとして読み込みました`, { tone: 'info' });
+    const loaded = await loadProject(parent);
+    if (loaded) {
+      showToast(`${file} の親フォルダをプロジェクトとして読み込みました`, { tone: 'info' });
+    }
   }, [loadProject, showToast]);
 
   const handleOpenRecent = useCallback(
@@ -1564,6 +1642,7 @@ export function App(): JSX.Element {
                   }
                   args={getTerminalArgs(tab)}
                   env={getTerminalEnv(tab)}
+                  teamId={tab.teamId ?? undefined}
                   visible={true}
                   initialMessage={getRolePrompt(tab)}
                   agentId={tab.agentId}

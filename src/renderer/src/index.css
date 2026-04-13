@@ -3387,7 +3387,7 @@ body.is-resizing * {
 
 .filetree__refresh:hover {
   color: var(--text);
-  background: var(--panel-alt, rgba(255, 255, 255, 0.04));
+  background: var(--bg-hover);
 }
 
 .filetree__body {
@@ -3418,11 +3418,11 @@ body.is-resizing * {
 }
 
 .filetree__row:hover {
-  background: var(--panel-alt, rgba(255, 255, 255, 0.04));
+  background: var(--bg-hover);
 }
 
 .filetree__row.is-active {
-  background: var(--accent-soft, rgba(91, 141, 239, 0.18));
+  background: var(--bg-active);
   color: var(--text);
 }
 
@@ -3461,5 +3461,5 @@ body.is-resizing * {
 }
 
 .filetree__error {
-  color: var(--danger, #f87171);
+  color: #e09090;
 }
