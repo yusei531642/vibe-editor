@@ -99,25 +99,15 @@ export function registerAppIpc(): void {
     };
   }
 
-  function ensureObject(parent: Record<string, unknown>, key: string): Record<string, unknown> {
-    const cur = parent[key];
-    if (cur && typeof cur === 'object' && !Array.isArray(cur)) {
-      return cur as Record<string, unknown>;
-    }
-    const next: Record<string, unknown> = {};
-    parent[key] = next;
-    return next;
-  }
-
-  // ---- Claude Code: ~/.claude.json ----
+  // ---- Claude Code: ~/.claude.json (ユーザースコープのみ) ----
   //
-  // Claude Code は MCP サーバーを「ユーザースコープ（トップレベル mcpServers）」と
-  // 「プロジェクトスコープ（projects[path].mcpServers）」の両方で管理している。
-  // ユーザースコープだけでは現行バージョンで認識されないケースを確認したので、
-  // projectRoot が渡されている場合は両方に書き込む。
+  // Claude Code の MCP 設定はユーザースコープ (top-level mcpServers) と
+  // プロジェクトスコープ (projects[path].mcpServers) の2層があるが、後者は
+  // キー正規化仕様がバージョン依存で不確実なため、確実に読まれる
+  // ユーザースコープのみを使う。`claude mcp list` で接続確認済み。
 
   /** @returns true if config was actually changed */
-  async function setupClaudeMcp(projectRoot?: string): Promise<boolean> {
+  async function setupClaudeMcp(): Promise<boolean> {
     const claudeConfigPath = join(homedir(), '.claude.json');
     let config: Record<string, unknown> = {};
     try {
@@ -127,49 +117,28 @@ export function registerAppIpc(): void {
       /* noop */
     }
 
+    if (!config.mcpServers || typeof config.mcpServers !== 'object') {
+      config.mcpServers = {};
+    }
+    const servers = config.mcpServers as Record<string, unknown>;
     const desired = bridgeDesired();
-    let changed = false;
 
-    // (1) ユーザースコープ
-    const userServers = ensureObject(config, 'mcpServers');
-    if (JSON.stringify(userServers['vive-team']) !== JSON.stringify(desired)) {
-      userServers['vive-team'] = desired;
-      changed = true;
+    if (JSON.stringify(servers['vive-team']) === JSON.stringify(desired)) {
+      return false;
     }
 
-    // (2) プロジェクトスコープ（当該プロジェクトのエントリが存在する場合のみ追加）
-    if (projectRoot) {
-      const projects = ensureObject(config, 'projects');
-      // Claude Code が内部で使う正規化済みキーで引く。無ければ新規作成する
-      const projectEntry = ensureObject(projects, projectRoot);
-      const projServers = ensureObject(projectEntry, 'mcpServers');
-      if (JSON.stringify(projServers['vive-team']) !== JSON.stringify(desired)) {
-        projServers['vive-team'] = desired;
-        changed = true;
-      }
-    }
-
-    if (changed) {
-      await fs.writeFile(claudeConfigPath, JSON.stringify(config, null, 2), 'utf-8');
-    }
-    return changed;
+    servers['vive-team'] = desired;
+    await fs.writeFile(claudeConfigPath, JSON.stringify(config, null, 2), 'utf-8');
+    return true;
   }
 
-  async function cleanupClaudeMcp(projectRoot?: string): Promise<void> {
+  async function cleanupClaudeMcp(): Promise<void> {
     const claudeConfigPath = join(homedir(), '.claude.json');
     try {
       const raw = await fs.readFile(claudeConfigPath, 'utf-8');
       const config = JSON.parse(raw);
-      let changed = false;
       if (config.mcpServers?.['vive-team']) {
         delete config.mcpServers['vive-team'];
-        changed = true;
-      }
-      if (projectRoot && config.projects?.[projectRoot]?.mcpServers?.['vive-team']) {
-        delete config.projects[projectRoot].mcpServers['vive-team'];
-        changed = true;
-      }
-      if (changed) {
         await fs.writeFile(claudeConfigPath, JSON.stringify(config, null, 2), 'utf-8');
       }
     } catch {
@@ -254,7 +223,7 @@ export function registerAppIpc(): void {
         teamHub.registerTeam(teamId, teamName);
 
         const [claudeChanged] = await Promise.all([
-          setupClaudeMcp(projectRoot),
+          setupClaudeMcp(),
           setupCodexMcp()
         ]);
 
@@ -271,12 +240,12 @@ export function registerAppIpc(): void {
     }
   );
 
-  ipcMain.handle('app:cleanupTeamMcp', async (_e, projectRoot: string, teamId: string) => {
+  ipcMain.handle('app:cleanupTeamMcp', async (_e, _projectRoot: string, teamId: string) => {
     try {
       if (teamId && teamId !== '_init') {
         teamHub.clearTeam(teamId);
       }
-      await Promise.all([cleanupClaudeMcp(projectRoot), cleanupCodexMcp()]);
+      await Promise.all([cleanupClaudeMcp(), cleanupCodexMcp()]);
       return { ok: true };
     } catch (err) {
       return { ok: false, error: (err as Error).message };

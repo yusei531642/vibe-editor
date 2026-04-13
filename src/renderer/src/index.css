@@ -1473,10 +1473,22 @@ body.is-resizing * {
   padding: 0;
   background: var(--bg);
   overflow: hidden;
+  /* 複数ペイン並列時に xterm の DOM レンダリングで起きる位置ずれを
+     隔離。contain は layout のみ（paint を付けると将来の tooltip/
+     context menu がペイン境界で切られる恐れがあるため）。位置決めの
+     基点を自分に固定して xterm 内部要素が外へ漏れないようにする。 */
+  position: relative;
+  contain: layout;
 }
 
 .terminal-view .xterm {
   height: 100%;
+  width: 100%;
+  /* 親の (position: relative) に対して絶対配置。サイズ計算が他ペインから
+     影響を受けない。 */
+  position: absolute;
+  top: 0;
+  left: 0;
 }
 
 .terminal-view .xterm-viewport {
@@ -1684,6 +1696,8 @@ body.is-resizing * {
   overflow: hidden;
   position: relative;
   padding: 4px 8px 8px;
+  /* 隣接ペインへのレイアウト干渉を遮断（paint は付けない） */
+  contain: layout;
 }
 
 .terminal-pane.is-active {

@@ -9,6 +9,8 @@ import type {
   TerminalCreateResult,
   TerminalExitInfo
 } from '../../types/shared';
+import { cancelInjectTimers } from '../team-hub';
+import { listClaudeSessionIds } from './sessions';
 
 // node-pty は external にしているため動的require。
 // main プロセスは CommonJS にバンドルされるので require で解決される。
@@ -67,6 +69,51 @@ function resolveCommand(
   return { command, args: args ?? [] };
 }
 
+/**
+ * Claude Code が生成する新しい jsonl ファイルを検出して renderer に通知する。
+ *
+ * - spawn 直前の session id 集合をスナップショット
+ * - 400ms 間隔で差分を見る（最大 20 秒）
+ * - 新規ファイルが1つでも現れたら最も新しい mtime のものを採用
+ * - pty がすでに終わっているなら諦める
+ */
+async function watchClaudeSession(
+  ptyId: string,
+  webContentsId: number,
+  projectRoot: string
+): Promise<void> {
+  // 他の pty が同時にウォッチ中なら、それらの発見は別ウォッチャーに委ねる
+  const before = await listClaudeSessionIds(projectRoot);
+  const started = Date.now();
+  const MAX_MS = 20_000;
+  const INTERVAL_MS = 400;
+
+  while (Date.now() - started < MAX_MS) {
+    // pty が既に消えていたら早期終了
+    if (!sessions.has(ptyId)) return;
+    await new Promise((r) => setTimeout(r, INTERVAL_MS));
+    const now = await listClaudeSessionIds(projectRoot);
+    const newIds: string[] = [];
+    for (const id of now) {
+      if (!before.has(id)) newIds.push(id);
+    }
+    if (newIds.length > 0) {
+      // 複数新規が見つかった場合はこのウォッチャーに該当しそうなものを
+      // 選ぶ必要がある。単純に先頭を採用し、他は before に追加して
+      // 他のウォッチャー（より後発のもの）が拾えるようにする。
+      const sessionId = newIds[0];
+      const wc = BrowserWindow.getAllWindows().find(
+        (w) => w.webContents.id === webContentsId
+      )?.webContents;
+      if (wc && !wc.isDestroyed()) {
+        wc.send(`terminal:sessionId:${ptyId}`, sessionId);
+      }
+      return;
+    }
+  }
+  // タイムアウト。静かに諦める
+}
+
 export function registerTerminalIpc(): void {
   ipcMain.handle(
     'terminal:create',
@@ -103,12 +150,28 @@ export function registerTerminalIpc(): void {
           agentSessions.set(opts.agentId, session);
         }
 
-        pty.onData((data) => {
+        // 小刻みな pty.onData を 8ms 窓でバッチ化する。
+        // 3 つ以上の Claude Code が同時に走るとき、IPC 経由の send 数が
+        // 線形に増えてレンダラ負荷が跳ね上がるため、できるだけまとめて送る。
+        let pendingChunks: string[] = [];
+        let flushScheduled = false;
+        const flushData = (): void => {
+          flushScheduled = false;
+          if (pendingChunks.length === 0) return;
+          const payload = pendingChunks.join('');
+          pendingChunks = [];
           const wc = BrowserWindow.getAllWindows().find(
             (w) => w.webContents.id === webContentsId
           )?.webContents;
           if (wc && !wc.isDestroyed()) {
-            wc.send(`terminal:data:${id}`, data);
+            wc.send(`terminal:data:${id}`, payload);
+          }
+        };
+        pty.onData((data) => {
+          pendingChunks.push(data);
+          if (!flushScheduled) {
+            flushScheduled = true;
+            setTimeout(flushData, 8);
           }
         });
 
@@ -121,8 +184,26 @@ export function registerTerminalIpc(): void {
             wc.send(`terminal:exit:${id}`, info);
           }
           sessions.delete(id);
-          if (session.agentId) agentSessions.delete(session.agentId);
+          if (session.agentId) {
+            agentSessions.delete(session.agentId);
+            cancelInjectTimers(session.agentId);
+          }
         });
+
+        // Claude Code のセッション ID を検出するウォッチャー。
+        // resume 用には `~/.claude/projects/<encoded>/*.jsonl` の**ファイル名**
+        // （URL 形式ではなく UUID）が必要なので、spawn 前の snapshot と比較して
+        // 新しく現れたエントリをこの pty の session id とする。
+        // Claude Code 以外（codex 等）は jsonl を作らないのでウォッチしない。
+        if (
+          opts.agentId &&
+          opts.cwd &&
+          /claude/i.test(command)
+        ) {
+          watchClaudeSession(id, webContentsId, opts.cwd).catch((err) => {
+            console.warn('[terminal] session watcher failed:', err);
+          });
+        }
 
         return {
           ok: true,
@@ -159,7 +240,10 @@ export function registerTerminalIpc(): void {
         // 既に終了している場合がある
       }
       sessions.delete(id);
-      if (s.agentId) agentSessions.delete(s.agentId);
+      if (s.agentId) {
+        agentSessions.delete(s.agentId);
+        cancelInjectTimers(s.agentId);
+      }
     }
   });
 

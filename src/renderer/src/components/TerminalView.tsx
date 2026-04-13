@@ -209,6 +209,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
 
     let offData: (() => void) | null = null;
     let offExit: (() => void) | null = null;
+    let offSessionId: (() => void) | null = null;
     let disposed = false;
     const cleanupTimers: ReturnType<typeof setTimeout>[] = [];
 
@@ -247,27 +248,21 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           : [];
         let msgIndex = 0;
         let sendCooldown = false;
-        let sessionIdCaptured = false;
-        // Claude Code の起動バナーに含まれる `session_<token>` を初回だけ抽出
-        const sessionIdRegex = /session_([A-Za-z0-9_-]{10,})/;
+
+        // セッション id は main プロセスが `~/.claude/projects/.../*.jsonl` の
+        // 差分から検出し、`terminal:sessionId:<id>` で通知してくる。
+        // URL 形式ではなく resume に使える UUID ファイル名を受け取れる。
+        offSessionId = window.api.terminal.onSessionId(res.id, (sessionId) => {
+          try {
+            callbacksRef.current.onSessionId?.(sessionId);
+          } catch {
+            /* noop */
+          }
+        });
 
         offData = window.api.terminal.onData(res.id, (data) => {
           term.write(data);
           callbacksRef.current.onActivity?.();
-
-          // session id の抽出（起動直後のみ興味があるので1回抜けたら諦める）
-          if (!sessionIdCaptured) {
-            const m = sessionIdRegex.exec(data);
-            if (m) {
-              sessionIdCaptured = true;
-              const sid = `session_${m[1]}`;
-              try {
-                callbacksRef.current.onSessionId?.(sid);
-              } catch {
-                /* noop */
-              }
-            }
-          }
 
           // キューにメッセージが残っていてCLIが入力待ち状態を検出
           if (msgIndex < msgQueue.length && ptyIdRef.current && !disposed && !sendCooldown) {
@@ -345,21 +340,27 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     const pasteTarget = term.element ?? container;
     pasteTarget.addEventListener('paste', handlePaste, true);
 
-    // コンテナサイズ変化に追従
+    // コンテナサイズ変化に追従。rAF スロットルでフレーム当たり1回だけ fit
+    let resizePending = false;
     const ro = new ResizeObserver(() => {
       if (!visible) return;
-      try {
-        fit.fit();
-        if (ptyIdRef.current) {
-          void window.api.terminal.resize(
-            ptyIdRef.current,
-            term.cols,
-            term.rows
-          );
+      if (resizePending) return;
+      resizePending = true;
+      requestAnimationFrame(() => {
+        resizePending = false;
+        try {
+          fit.fit();
+          if (ptyIdRef.current) {
+            void window.api.terminal.resize(
+              ptyIdRef.current,
+              term.cols,
+              term.rows
+            );
+          }
+        } catch {
+          /* 非表示状態などでの失敗は無視 */
         }
-      } catch {
-        /* 非表示状態などでの失敗は無視 */
-      }
+      });
     });
     ro.observe(container);
 
@@ -370,6 +371,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       dataSub.dispose();
       offData?.();
       offExit?.();
+      offSessionId?.();
       try {
         pasteTarget.removeEventListener('paste', handlePaste, true);
       } catch {

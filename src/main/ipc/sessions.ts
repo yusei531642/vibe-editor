@@ -8,8 +8,28 @@ import type { SessionInfo } from '../../types/shared';
  * 例: `D:\my-project` → `D--my-project`
  * Claude Code は非英数を `-` に置換するルール（観測ベース）。
  */
-function encodeProjectPath(absPath: string): string {
+export function encodeProjectPath(absPath: string): string {
   return absPath.replace(/[^a-zA-Z0-9-]/g, '-');
+}
+
+/** Claude Code のプロジェクト別セッションディレクトリの絶対パス */
+export function getClaudeSessionsDir(projectRoot: string): string {
+  return join(app.getPath('home'), '.claude', 'projects', encodeProjectPath(projectRoot));
+}
+
+/** ディレクトリ内の session jsonl ファイル名集合（拡張子なし）を返す */
+export async function listClaudeSessionIds(projectRoot: string): Promise<Set<string>> {
+  const dir = getClaudeSessionsDir(projectRoot);
+  try {
+    const entries = await fs.readdir(dir);
+    const out = new Set<string>();
+    for (const e of entries) {
+      if (e.endsWith('.jsonl')) out.add(basename(e, '.jsonl'));
+    }
+    return out;
+  } catch {
+    return new Set();
+  }
 }
 
 /**

@@ -61,15 +61,98 @@ function updateTeamName(teamId: string, name: string): void {
   }
 }
 
-/** pty へメッセージを直接注入する。Claude Code/Codex のプロンプトに「入力」として届く */
+/**
+ * 各 agentId に対して送信中のチャンクタイマーを保持する。
+ * agent セッションが unregister されたら cancelInjectTimers(agentId) で全キャンセル。
+ * これにより pty が kill された後も空 write を続けてしまう問題を防ぐ。
+ */
+const pendingInjectTimers = new Map<string, Set<ReturnType<typeof setTimeout>>>();
+
+export function cancelInjectTimers(agentId: string): void {
+  const timers = pendingInjectTimers.get(agentId);
+  if (!timers) return;
+  for (const t of timers) clearTimeout(t);
+  pendingInjectTimers.delete(agentId);
+}
+
+function trackTimer(agentId: string, timer: ReturnType<typeof setTimeout>): void {
+  let set = pendingInjectTimers.get(agentId);
+  if (!set) {
+    set = new Set();
+    pendingInjectTimers.set(agentId, set);
+  }
+  set.add(timer);
+}
+
+function untrackTimer(agentId: string, timer: ReturnType<typeof setTimeout>): void {
+  const set = pendingInjectTimers.get(agentId);
+  if (!set) return;
+  set.delete(timer);
+  if (set.size === 0) pendingInjectTimers.delete(agentId);
+}
+
+/**
+ * pty へメッセージを直接注入する。Claude Code/Codex のプロンプトに「入力」として届く。
+ *
+ * ConPTY (Windows の node-pty) の stdin バッファは小さく、一度に長文を write すると
+ * 途中で欠落するため、UTF-8 バイトベースで 64B チャンクに分割して ~15ms 間隔で流す。
+ * 最後に \r を送って Claude Code に送信させる。
+ *
+ * 全チャンクタイマーは pendingInjectTimers に登録し、agent が消えたら cancelInjectTimers で一括解除。
+ */
 function injectIntoPty(agentId: string, fromRole: string, text: string): boolean {
   const session = agentSessions.get(agentId);
   if (!session) return false;
   const banner = `[Team ← ${fromRole}] `;
-  // 複数行はスペース連結（ブラケットペーストは Claude Code では送信不可）
+  // 改行は1行に整形（ブラケットペーストは Claude Code では送信不可のため）
   const flat = text.replace(/\n{2,}/g, ' | ').replace(/\n/g, ' ');
+  const payload = banner + flat;
+
+  // バイト長で分割しないとマルチバイト文字の途中で切れる可能性があるので、
+  // Buffer で一旦変換してから UTF-8 として安全な境界を探す。
+  const bytes = Buffer.from(payload, 'utf-8');
+  const CHUNK_SIZE = 64;
+  const CHUNK_DELAY_MS = 15;
+
+  const chunks: Buffer[] = [];
+  let i = 0;
+  while (i < bytes.length) {
+    let end = Math.min(i + CHUNK_SIZE, bytes.length);
+    // UTF-8 マルチバイト途中で切らないよう後退: 0b10xxxxxx が先頭なら戻る
+    while (end < bytes.length && (bytes[end] & 0xc0) === 0x80) end--;
+    chunks.push(bytes.subarray(i, end));
+    i = end;
+  }
+
   try {
-    session.pty.write(banner + flat + '\r');
+    // 最初のチャンクは即時書き込み、以降は少しずつ遅延
+    session.pty.write(chunks[0].toString('utf-8'));
+    for (let k = 1; k < chunks.length; k++) {
+      const chunk = chunks[k];
+      const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
+        untrackTimer(agentId, timer);
+        try {
+          if (agentSessions.get(agentId) === session) {
+            session.pty.write(chunk.toString('utf-8'));
+          }
+        } catch {
+          /* 既に破棄されている等 */
+        }
+      }, k * CHUNK_DELAY_MS);
+      trackTimer(agentId, timer);
+    }
+    // 全チャンク送信完了後に Enter を送る
+    const enterTimer: ReturnType<typeof setTimeout> = setTimeout(() => {
+      untrackTimer(agentId, enterTimer);
+      try {
+        if (agentSessions.get(agentId) === session) {
+          session.pty.write('\r');
+        }
+      } catch {
+        /* noop */
+      }
+    }, chunks.length * CHUNK_DELAY_MS);
+    trackTimer(agentId, enterTimer);
     return true;
   } catch {
     return false;

@@ -124,6 +124,14 @@ const api = {
         cb(info);
       ipcRenderer.on(ch, listener);
       return () => ipcRenderer.off(ch, listener);
+    },
+
+    onSessionId: (id: string, cb: (sessionId: string) => void): (() => void) => {
+      const ch = `terminal:sessionId:${id}`;
+      const listener = (_e: Electron.IpcRendererEvent, sessionId: string): void =>
+        cb(sessionId);
+      ipcRenderer.on(ch, listener);
+      return () => ipcRenderer.off(ch, listener);
     }
   }
 };

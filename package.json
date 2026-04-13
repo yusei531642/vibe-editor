@@ -1,6 +1,6 @@
 {
   "name": "vibe-editor",
-  "version": "0.4.7",
+  "version": "1.0.0",
   "private": true,
   "description": "Electronベースの Claude Code 専用エディタ",
   "main": "out/main/index.js",
@@ -88,7 +88,6 @@
       "multiLanguageInstaller": true,
       "displayLanguageSelector": false,
       "unicode": true,
-      "language": "1041",
       "removeDefaultUninstallWelcomePage": true,
       "warningsAsErrors": false,
       "artifactName": "${productName}-Setup-${version}.${ext}",

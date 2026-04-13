@@ -59,8 +59,10 @@ interface EditorTab {
   pinned: boolean;
 }
 
-/** 理論上の上限（事実上無制限）。メモリ/レイアウト保護のための安全弁。 */
-const MAX_TERMINALS = 999;
+/** 同時に立てられるターミナルの上限。メモリ/レイアウト保護の安全弁 */
+const MAX_TERMINALS = 30;
+/** この数を超えたら警告トーストを出す */
+const TERMINAL_WARN_THRESHOLD = 25;
 
 interface TerminalTab {
   id: number;
@@ -163,6 +165,32 @@ export function App(): JSX.Element {
   // team history（プロジェクト単位で永続化）
   const [teamHistoryEntries, setTeamHistoryEntries] = useState<TeamHistoryEntry[]>([]);
 
+  /** チーム作成時のメンバースポーン遅延タイマー。破棄時にクリアできるよう保持 */
+  const spawnStaggerTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const clearSpawnTimers = useCallback(() => {
+    for (const t of spawnStaggerTimers.current) clearTimeout(t);
+    spawnStaggerTimers.current = [];
+  }, []);
+  /**
+   * team history save のデバウンス。sessionId が順次取れてくるときに
+   * N 回ファイルに書き出すのを避ける。entryId ごとに最新値を 500ms 後に flush。
+   */
+  const teamHistoryPending = useRef(new Map<string, TeamHistoryEntry>());
+  const teamHistoryFlushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const saveTeamHistory = useCallback((entry: TeamHistoryEntry) => {
+    if (!window.api.teamHistory) return;
+    teamHistoryPending.current.set(entry.id, entry);
+    if (teamHistoryFlushTimer.current) return;
+    teamHistoryFlushTimer.current = setTimeout(() => {
+      teamHistoryFlushTimer.current = null;
+      const entries = Array.from(teamHistoryPending.current.values());
+      teamHistoryPending.current.clear();
+      for (const e of entries) {
+        void window.api.teamHistory.save(e);
+      }
+    }, 500);
+  }, []);
+
   // tabs: diff タブと editor タブを並立させ、id プレフィックスで判別する
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [diffTabs, setDiffTabs] = useState<DiffTab[]>([]);
@@ -206,7 +234,7 @@ export function App(): JSX.Element {
       resumeSessionId?: string | null;
       agentId?: string;
       teamHistoryMemberIdx?: number | null;
-    }): number => {
+    }): number | null => {
       const id = nextTerminalIdRef.current++;
       const tab: TerminalTab = {
         id,
@@ -221,14 +249,27 @@ export function App(): JSX.Element {
         hasActivity: false,
         teamHistoryMemberIdx: opts?.teamHistoryMemberIdx ?? null
       };
+      let accepted = false;
       setTerminalTabs((prev) => {
-        if (prev.length >= MAX_TERMINALS) return prev;
+        if (prev.length >= MAX_TERMINALS) {
+          showToast(`ターミナル上限（${MAX_TERMINALS}）に達しました`, { tone: 'warning' });
+          return prev;
+        }
+        // 閾値を超えそうなら軽く警告
+        if (prev.length + 1 === TERMINAL_WARN_THRESHOLD) {
+          showToast(
+            `ターミナル数が ${TERMINAL_WARN_THRESHOLD} に達しました（上限 ${MAX_TERMINALS}）`,
+            { tone: 'info' }
+          );
+        }
+        accepted = true;
         return [...prev, tab];
       });
+      if (!accepted) return null;
       setActiveTerminalTabId(id);
       return id;
     },
-    []
+    [showToast]
   );
 
   const doCloseTab = useCallback((tabId: number) => {
@@ -265,6 +306,8 @@ export function App(): JSX.Element {
 
   const doCloseTeam = useCallback(
     (teamId: string) => {
+      // チーム作成進行中ならスタガー spawn を止める（同じチームかは問わない）
+      clearSpawnTimers();
       setTerminalTabs((prev) => {
         const next = prev.filter((t) => t.teamId !== teamId);
         if (next.length === 0) {
@@ -298,7 +341,7 @@ export function App(): JSX.Element {
         void window.api.app.cleanupTeamMcp(projectRoot, teamId);
       }
     },
-    [projectRoot]
+    [projectRoot, clearSpawnTimers]
   );
 
   const closeTerminalTab = useCallback(
@@ -557,6 +600,7 @@ export function App(): JSX.Element {
 
   const refreshTeamHistory = useCallback(async () => {
     if (!projectRoot) return;
+    if (!window.api.teamHistory) return; // preload が古い場合はスキップ
     try {
       const entries = await window.api.teamHistory.list(projectRoot);
       setTeamHistoryEntries(entries);
@@ -1317,7 +1361,7 @@ export function App(): JSX.Element {
           entry,
           ...prev.filter((e) => e.id !== entry.id)
         ]);
-        void window.api.teamHistory.save(entry);
+        saveTeamHistory(entry);
       }
 
       // Leader を先に生成（teamHistoryMemberIdx=0）
@@ -1328,18 +1372,32 @@ export function App(): JSX.Element {
         agentId: allMembers[0].agentId,
         teamHistoryMemberIdx: 0
       });
-      // メンバーを順次生成（teamHistoryMemberIdx は 1 始まり）
+      // メンバーは少しずつ間隔を空けて生成する（レイアウト確定前に N 個一気に
+      // マウントすると、ResizeObserver と fit.fit() の衝突で謎のスペースや
+      // 位置ズレが起きることがある。80ms 間隔だとほぼ問題なく落ち着く）
+      const SPAWN_STAGGER_MS = 80;
+      // 既存の pending タイマーはキャンセル（連続作成対策）
+      clearSpawnTimers();
       for (let i = 0; i < members.length; i++) {
-        addTerminalTab({
-          agent: members[i].agent,
-          role: members[i].role,
-          teamId,
-          agentId: allMembers[i + 1].agentId,
-          teamHistoryMemberIdx: i + 1
-        });
+        const memberIdx = i + 1;
+        const m = members[i];
+        const timer = setTimeout(() => {
+          addTerminalTab({
+            agent: m.agent,
+            role: m.role,
+            teamId,
+            agentId: allMembers[memberIdx].agentId,
+            teamHistoryMemberIdx: memberIdx
+          });
+          // 自分自身を spawnStaggerTimers からも落とす
+          spawnStaggerTimers.current = spawnStaggerTimers.current.filter(
+            (t) => t !== timer
+          );
+        }, (i + 1) * SPAWN_STAGGER_MS);
+        spawnStaggerTimers.current.push(timer);
       }
     },
-    [addTerminalTab, terminalTabs.length, projectRoot]
+    [addTerminalTab, terminalTabs.length, projectRoot, saveTeamHistory, clearSpawnTimers]
   );
 
   // ---------- チーム履歴の resume / 削除 ----------
@@ -1357,7 +1415,7 @@ export function App(): JSX.Element {
         updated,
         ...prev.filter((e) => e.id !== entry.id)
       ]);
-      void window.api.teamHistory.save(updated);
+      saveTeamHistory(updated);
 
       // ランタイム Team として登録（既に同じ teamId があればそのまま）
       setTeams((prev) =>
@@ -1404,12 +1462,13 @@ export function App(): JSX.Element {
 
       showToast(t('teamHistory.resumed', { name: entry.name }), { tone: 'info' });
     },
-    [projectRoot, addTerminalTab, showToast, t]
+    [projectRoot, addTerminalTab, showToast, t, saveTeamHistory]
   );
 
   const handleDeleteTeamHistory = useCallback(
     async (entryId: string) => {
       setTeamHistoryEntries((prev) => prev.filter((e) => e.id !== entryId));
+      if (!window.api.teamHistory) return;
       try {
         await window.api.teamHistory.delete(entryId);
       } catch (err) {
@@ -1438,13 +1497,13 @@ export function App(): JSX.Element {
           members: nextMembers,
           lastUsedAt: new Date().toISOString()
         };
-        void window.api.teamHistory.save(nextEntry);
+        saveTeamHistory(nextEntry);
         const copy = [...prev];
         copy[idx] = nextEntry;
         return copy;
       });
     },
-    []
+    [saveTeamHistory]
   );
 
   const handleSavePreset = useCallback(
