@@ -77,8 +77,22 @@
       "shortcutName": "vibe-editor",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
+      "menuCategory": "vibe-editor",
       "runAfterFinish": true,
-      "artifactName": "${productName}-Setup-${version}.${ext}"
+      "publisherName": "vibe-editor",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "installerSidebar": "build/installerSidebar.bmp",
+      "uninstallerSidebar": "build/installerSidebar.bmp",
+      "multiLanguageInstaller": true,
+      "displayLanguageSelector": false,
+      "unicode": true,
+      "language": "1041",
+      "removeDefaultUninstallWelcomePage": true,
+      "warningsAsErrors": false,
+      "artifactName": "${productName}-Setup-${version}.${ext}",
+      "include": "build/installer.nsh"
     },
     "mac": {
       "icon": "build/icon.png",

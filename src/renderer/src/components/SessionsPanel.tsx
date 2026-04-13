@@ -1,5 +1,5 @@
-import { RefreshCw } from 'lucide-react';
-import type { SessionInfo } from '../../../types/shared';
+import { RefreshCw, Users, X } from 'lucide-react';
+import type { SessionInfo, TeamHistoryEntry } from '../../../types/shared';
 import { useT } from '../lib/i18n';
 
 interface SessionsPanelProps {
@@ -8,11 +8,14 @@ interface SessionsPanelProps {
   activeSessionId: string | null;
   onRefresh: () => void;
   onResume: (session: SessionInfo) => void;
+
+  /** チーム履歴。空なら Teams セクション自体を出さない */
+  teamHistory: TeamHistoryEntry[];
+  onResumeTeam: (entry: TeamHistoryEntry) => void;
+  onDeleteTeamHistory: (id: string) => void;
 }
 
-/**
- * 相対時刻表示（例: "3分前", "2時間前", "昨日", "2026/03/01"）
- */
+/** 相対時刻表示（例: "3分前", "2時間前", "昨日", "2026/03/01"） */
 function relativeTime(iso: string): string {
   const then = new Date(iso).getTime();
   if (!Number.isFinite(then)) return '';
@@ -34,7 +37,10 @@ export function SessionsPanel({
   loading,
   activeSessionId,
   onRefresh,
-  onResume
+  onResume,
+  teamHistory,
+  onResumeTeam,
+  onDeleteTeamHistory
 }: SessionsPanelProps): JSX.Element {
   const t = useT();
   return (
@@ -55,6 +61,66 @@ export function SessionsPanel({
           <RefreshCw size={13} strokeWidth={2} />
         </button>
       </header>
+
+      {/* Teams セクション: チーム履歴 */}
+      {teamHistory.length > 0 && (
+        <>
+          <div className="sidebar-section-label">
+            <Users size={11} strokeWidth={2} />
+            <span>{t('sidebar.teams')}</span>
+            <span className="sidebar-section-label__count">{teamHistory.length}</span>
+          </div>
+          <ul className="team-history-list">
+            {teamHistory.map((entry) => {
+              const memberSummary = entry.members
+                .map((m) => m.role)
+                .slice(0, 5)
+                .join(' · ');
+              return (
+                <li key={entry.id} className="team-history-item">
+                  <button
+                    type="button"
+                    className="team-history-item__main"
+                    onClick={() => onResumeTeam(entry)}
+                    title={t('teamHistory.resume', { name: entry.name })}
+                  >
+                    <div className="team-history-item__top">
+                      <span className="team-history-item__name">{entry.name}</span>
+                      <span className="team-history-item__time">
+                        {relativeTime(entry.lastUsedAt)}
+                      </span>
+                    </div>
+                    <div className="team-history-item__roles">
+                      {memberSummary}
+                      {entry.members.length > 5 ? ` +${entry.members.length - 5}` : ''}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    className="team-history-item__delete"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onDeleteTeamHistory(entry.id);
+                    }}
+                    title={t('teamHistory.delete')}
+                    aria-label={t('teamHistory.delete')}
+                  >
+                    <X size={11} strokeWidth={2} />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
+      )}
+
+      {/* Single セッションセクション: 既存の Claude Code セッション履歴 */}
+      {teamHistory.length > 0 && (
+        <div className="sidebar-section-label">
+          <span>{t('sidebar.singleSessions')}</span>
+          <span className="sidebar-section-label__count">{sessions.length}</span>
+        </div>
+      )}
 
       {loading && (
         <div className="skeleton-list" aria-label={t('sidebar.loading')} aria-busy="true">

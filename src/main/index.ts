@@ -7,6 +7,7 @@ import { registerSettingsIpc } from './ipc/settings';
 import { registerSessionsIpc } from './ipc/sessions';
 import { registerDialogIpc } from './ipc/dialog';
 import { registerFilesIpc } from './ipc/files';
+import { registerTeamHistoryIpc } from './ipc/team-history';
 import { initAutoUpdater } from './updater';
 import { teamHub } from './team-hub';
 
@@ -67,6 +68,7 @@ registerSettingsIpc();
 registerSessionsIpc();
 registerDialogIpc();
 registerFilesIpc();
+registerTeamHistoryIpc();
 
 app.whenReady().then(async () => {
   try {

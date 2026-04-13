@@ -38,6 +38,8 @@ interface TerminalViewProps {
   onActivity?: () => void;
   /** プロセス終了通知 */
   onExit?: () => void;
+  /** Claude Code の起動ログから session id を抽出したとき（初回1回のみ） */
+  onSessionId?: (sessionId: string) => void;
 }
 
 /**
@@ -47,7 +49,7 @@ interface TerminalViewProps {
  */
 export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
   function TerminalView(
-    { cwd, command, args, env, teamId, visible, initialMessage, agentId, role, onStatus, onActivity, onExit },
+    { cwd, command, args, env, teamId, visible, initialMessage, agentId, role, onStatus, onActivity, onExit, onSessionId },
     ref
   ): JSX.Element {
   const { settings } = useSettings();
@@ -57,8 +59,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
   const ptyIdRef = useRef<string | null>(null);
 
   // コールバックは毎レンダーで新しい関数になるので ref で安定化
-  const callbacksRef = useRef({ onStatus, onActivity, onExit });
-  callbacksRef.current = { onStatus, onActivity, onExit };
+  const callbacksRef = useRef({ onStatus, onActivity, onExit, onSessionId });
+  callbacksRef.current = { onStatus, onActivity, onExit, onSessionId };
 
   // args / env / teamId / agentId / role は spawn 時に一度だけ使う値。
   // 以後プロパティが変わっても pty を再起動しないよう ref に退避しておく。
@@ -245,10 +247,27 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           : [];
         let msgIndex = 0;
         let sendCooldown = false;
+        let sessionIdCaptured = false;
+        // Claude Code の起動バナーに含まれる `session_<token>` を初回だけ抽出
+        const sessionIdRegex = /session_([A-Za-z0-9_-]{10,})/;
 
         offData = window.api.terminal.onData(res.id, (data) => {
           term.write(data);
           callbacksRef.current.onActivity?.();
+
+          // session id の抽出（起動直後のみ興味があるので1回抜けたら諦める）
+          if (!sessionIdCaptured) {
+            const m = sessionIdRegex.exec(data);
+            if (m) {
+              sessionIdCaptured = true;
+              const sid = `session_${m[1]}`;
+              try {
+                callbacksRef.current.onSessionId?.(sid);
+              } catch {
+                /* noop */
+              }
+            }
+          }
 
           // キューにメッセージが残っていてCLIが入力待ち状態を検出
           if (msgIndex < msgQueue.length && ptyIdRef.current && !disposed && !sendCooldown) {
@@ -368,6 +387,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     // 並び替えや親コンポーネントの再レンダー経由で pty が巻き添え kill されるのを防ぐ。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cwd, command]);
+
+  // onSessionId / onStatus / onExit は ref 経由で参照しているので deps から除外
 
   // フォント・テーマ変更時は既存インスタンスに反映（ptyは再起動しない）
   useEffect(() => {

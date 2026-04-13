@@ -8,6 +8,7 @@ import type {
   GitDiffResult,
   GitStatus,
   SessionInfo,
+  TeamHistoryEntry,
   TerminalCreateOptions,
   TerminalCreateResult,
   TerminalExitInfo
@@ -70,6 +71,15 @@ const api = {
   sessions: {
     list: (projectRoot: string): Promise<SessionInfo[]> =>
       ipcRenderer.invoke('sessions:list', projectRoot)
+  },
+
+  teamHistory: {
+    list: (projectRoot: string): Promise<TeamHistoryEntry[]> =>
+      ipcRenderer.invoke('teamHistory:list', projectRoot),
+    save: (entry: TeamHistoryEntry): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('teamHistory:save', entry),
+    delete: (id: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('teamHistory:delete', id)
   },
 
   dialog: {

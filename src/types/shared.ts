@@ -119,6 +119,24 @@ export interface TeamPreset {
   members: TeamMember[];
 }
 
+/** 保存されるチーム履歴メンバー。sessionId は Claude Code の --resume に渡す */
+export interface TeamHistoryMember {
+  role: TeamRole;
+  agent: TerminalAgent;
+  /** Claude Code の出力から抽出したセッションID。Codex や未キャプチャは null */
+  sessionId: string | null;
+}
+
+/** 保存されるチーム履歴エントリ。プロジェクト単位で格納 */
+export interface TeamHistoryEntry {
+  id: string;
+  name: string;
+  projectRoot: string;
+  createdAt: string;
+  lastUsedAt: string;
+  members: TeamHistoryMember[];
+}
+
 // ---------- ファイルツリー / 簡易エディタ ----------
 
 export interface FileNode {

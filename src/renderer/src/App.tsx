@@ -6,6 +6,7 @@ import type {
   GitStatus,
   SessionInfo,
   Team,
+  TeamHistoryEntry,
   TeamMember,
   TeamPreset,
   TeamRole,
@@ -73,6 +74,8 @@ interface TerminalTab {
   exited: boolean;
   resumeSessionId: string | null;
   hasActivity: boolean;
+  /** チーム履歴で使う member インデックス。未所属タブは null */
+  teamHistoryMemberIdx: number | null;
 }
 
 /** ロール別の短い説明（チームプロンプト内で使用） */
@@ -157,6 +160,9 @@ export function App(): JSX.Element {
   const [sessionsLoading, setSessionsLoading] = useState<boolean>(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
+  // team history（プロジェクト単位で永続化）
+  const [teamHistoryEntries, setTeamHistoryEntries] = useState<TeamHistoryEntry[]>([]);
+
   // tabs: diff タブと editor タブを並立させ、id プレフィックスで判別する
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [diffTabs, setDiffTabs] = useState<DiffTab[]>([]);
@@ -199,6 +205,7 @@ export function App(): JSX.Element {
       teamId?: string | null;
       resumeSessionId?: string | null;
       agentId?: string;
+      teamHistoryMemberIdx?: number | null;
     }): number => {
       const id = nextTerminalIdRef.current++;
       const tab: TerminalTab = {
@@ -211,7 +218,8 @@ export function App(): JSX.Element {
         status: '',
         exited: false,
         resumeSessionId: opts?.resumeSessionId ?? null,
-        hasActivity: false
+        hasActivity: false,
+        teamHistoryMemberIdx: opts?.teamHistoryMemberIdx ?? null
       };
       setTerminalTabs((prev) => {
         if (prev.length >= MAX_TERMINALS) return prev;
@@ -239,7 +247,8 @@ export function App(): JSX.Element {
           status: '',
           exited: false,
           resumeSessionId: null,
-          hasActivity: false
+          hasActivity: false,
+          teamHistoryMemberIdx: null
         };
         setActiveTerminalTabId(newId);
         return [fresh];
@@ -271,7 +280,8 @@ export function App(): JSX.Element {
             status: '',
             exited: false,
             resumeSessionId: null,
-            hasActivity: false
+            hasActivity: false,
+            teamHistoryMemberIdx: null
           };
           setActiveTerminalTabId(newId);
           return [fresh];
@@ -464,7 +474,8 @@ export function App(): JSX.Element {
             status: '起動中…',
             exited: false,
             resumeSessionId: null,
-            hasActivity: false
+            hasActivity: false,
+            teamHistoryMemberIdx: null
           }
         ]);
         setActiveTerminalTabId(newId);
@@ -543,6 +554,21 @@ export function App(): JSX.Element {
       setGitLoading(false);
     }
   }, [projectRoot]);
+
+  const refreshTeamHistory = useCallback(async () => {
+    if (!projectRoot) return;
+    try {
+      const entries = await window.api.teamHistory.list(projectRoot);
+      setTeamHistoryEntries(entries);
+    } catch (err) {
+      console.warn('[teamHistory] list failed:', err);
+    }
+  }, [projectRoot]);
+
+  // プロジェクト変更時にチーム履歴もロード
+  useEffect(() => {
+    void refreshTeamHistory();
+  }, [refreshTeamHistory]);
 
   const refreshSessions = useCallback(async () => {
     if (!projectRoot) return;
@@ -1268,24 +1294,157 @@ export function App(): JSX.Element {
         );
       }
 
-      // Leader を先に生成
+      // チーム履歴エントリを先に作って保存。teamId とレコード ID を一致させ、
+      // あとで sessionId が取れたら差分更新する。
+      if (projectRoot) {
+        const now = new Date().toISOString();
+        const entry: TeamHistoryEntry = {
+          id: teamId,
+          name: teamName,
+          projectRoot,
+          createdAt: now,
+          lastUsedAt: now,
+          members: [
+            { role: 'leader' as TeamRole, agent: leader.agent, sessionId: null },
+            ...members.map((m) => ({
+              role: m.role,
+              agent: m.agent,
+              sessionId: null as string | null
+            }))
+          ]
+        };
+        setTeamHistoryEntries((prev) => [
+          entry,
+          ...prev.filter((e) => e.id !== entry.id)
+        ]);
+        void window.api.teamHistory.save(entry);
+      }
+
+      // Leader を先に生成（teamHistoryMemberIdx=0）
       addTerminalTab({
         agent: leader.agent,
         role: 'leader' as TeamRole,
         teamId,
-        agentId: allMembers[0].agentId
+        agentId: allMembers[0].agentId,
+        teamHistoryMemberIdx: 0
       });
-      // メンバーを順次生成
+      // メンバーを順次生成（teamHistoryMemberIdx は 1 始まり）
       for (let i = 0; i < members.length; i++) {
         addTerminalTab({
           agent: members[i].agent,
           role: members[i].role,
           teamId,
-          agentId: allMembers[i + 1].agentId
+          agentId: allMembers[i + 1].agentId,
+          teamHistoryMemberIdx: i + 1
         });
       }
     },
     [addTerminalTab, terminalTabs.length, projectRoot]
+  );
+
+  // ---------- チーム履歴の resume / 削除 ----------
+
+  const handleResumeTeam = useCallback(
+    async (entry: TeamHistoryEntry) => {
+      if (!projectRoot) return;
+
+      // 再利用時刻を更新
+      const updated: TeamHistoryEntry = {
+        ...entry,
+        lastUsedAt: new Date().toISOString()
+      };
+      setTeamHistoryEntries((prev) => [
+        updated,
+        ...prev.filter((e) => e.id !== entry.id)
+      ]);
+      void window.api.teamHistory.save(updated);
+
+      // ランタイム Team として登録（既に同じ teamId があればそのまま）
+      setTeams((prev) =>
+        prev.some((t) => t.id === entry.id)
+          ? prev
+          : [...prev, { id: entry.id, name: entry.name }]
+      );
+
+      // MCP は現行の TeamHub 情報で確実に再登録する
+      const allMembers = entry.members.map((m, i) => ({
+        agentId: `${entry.id}-${m.role}-${i}`,
+        role: m.role,
+        agent: m.agent
+      }));
+      let mcpChanged = false;
+      try {
+        const res = await window.api.app.setupTeamMcp(projectRoot, entry.id, entry.name, allMembers);
+        mcpChanged = res.changed === true;
+      } catch (err) {
+        console.warn('[resume team] setupTeamMcp failed:', err);
+      }
+      if (mcpChanged) {
+        setTerminalTabs((prev) =>
+          prev.map((tab) =>
+            tab.agent === 'claude' && !tab.exited
+              ? { ...tab, version: tab.version + 1, status: '', hasActivity: false }
+              : tab
+          )
+        );
+      }
+
+      // 各メンバーをタブとしてスポーン（sessionId があれば --resume 付き）
+      for (let i = 0; i < entry.members.length; i++) {
+        const m = entry.members[i];
+        addTerminalTab({
+          agent: m.agent,
+          role: m.role,
+          teamId: entry.id,
+          agentId: allMembers[i].agentId,
+          resumeSessionId: m.sessionId ?? null,
+          teamHistoryMemberIdx: i
+        });
+      }
+
+      showToast(t('teamHistory.resumed', { name: entry.name }), { tone: 'info' });
+    },
+    [projectRoot, addTerminalTab, showToast, t]
+  );
+
+  const handleDeleteTeamHistory = useCallback(
+    async (entryId: string) => {
+      setTeamHistoryEntries((prev) => prev.filter((e) => e.id !== entryId));
+      try {
+        await window.api.teamHistory.delete(entryId);
+      } catch (err) {
+        console.warn('[teamHistory] delete failed:', err);
+      }
+    },
+    []
+  );
+
+  /** Claude Code 起動ログから session id が取れたときに、該当タブのチーム履歴を更新 */
+  const handleTerminalSessionId = useCallback(
+    (tab: TerminalTab, sessionId: string) => {
+      if (!tab.teamId || tab.teamHistoryMemberIdx == null) return;
+      setTeamHistoryEntries((prev) => {
+        const idx = prev.findIndex((e) => e.id === tab.teamId);
+        if (idx < 0) return prev;
+        const entry = prev[idx];
+        const memberIdx = tab.teamHistoryMemberIdx!;
+        if (memberIdx < 0 || memberIdx >= entry.members.length) return prev;
+        if (entry.members[memberIdx].sessionId === sessionId) return prev;
+        const nextMembers = entry.members.map((m, i) =>
+          i === memberIdx ? { ...m, sessionId } : m
+        );
+        const nextEntry: TeamHistoryEntry = {
+          ...entry,
+          members: nextMembers,
+          lastUsedAt: new Date().toISOString()
+        };
+        void window.api.teamHistory.save(nextEntry);
+        const copy = [...prev];
+        copy[idx] = nextEntry;
+        return copy;
+      });
+    },
+    []
   );
 
   const handleSavePreset = useCallback(
@@ -1381,6 +1540,9 @@ export function App(): JSX.Element {
         activeSessionId={activeSessionId}
         onRefreshSessions={refreshSessions}
         onResumeSession={handleResumeSession}
+        teamHistory={teamHistoryEntries}
+        onResumeTeam={(entry) => void handleResumeTeam(entry)}
+        onDeleteTeamHistory={(id) => void handleDeleteTeamHistory(id)}
       />
       <main className="main">
         <Toolbar
@@ -1657,6 +1819,7 @@ export function App(): JSX.Element {
                       prev.map((t) => (t.id === tab.id ? { ...t, exited: true } : t))
                     )
                   }
+                  onSessionId={(sid) => handleTerminalSessionId(tab, sid)}
                 />
               </div>
             ))}

@@ -1,7 +1,8 @@
 import type {
   GitFileChange,
   GitStatus,
-  SessionInfo
+  SessionInfo,
+  TeamHistoryEntry
 } from '../../../types/shared';
 import { ChangesPanel } from './ChangesPanel';
 import { SessionsPanel } from './SessionsPanel';
@@ -33,6 +34,11 @@ interface SidebarProps {
   activeSessionId: string | null;
   onRefreshSessions: () => void;
   onResumeSession: (session: SessionInfo) => void;
+
+  // team history (sessions view 内)
+  teamHistory: TeamHistoryEntry[];
+  onResumeTeam: (entry: TeamHistoryEntry) => void;
+  onDeleteTeamHistory: (id: string) => void;
 }
 
 export function Sidebar(props: SidebarProps): JSX.Element {
@@ -74,8 +80,10 @@ export function Sidebar(props: SidebarProps): JSX.Element {
           onClick={() => props.onViewChange('sessions')}
         >
           {t('sidebar.history')}
-          {props.sessions.length > 0 && (
-            <span className="sidebar-switcher__badge">{props.sessions.length}</span>
+          {(props.sessions.length + props.teamHistory.length) > 0 && (
+            <span className="sidebar-switcher__badge">
+              {props.sessions.length + props.teamHistory.length}
+            </span>
           )}
         </button>
       </nav>
@@ -103,6 +111,9 @@ export function Sidebar(props: SidebarProps): JSX.Element {
             activeSessionId={props.activeSessionId}
             onRefresh={props.onRefreshSessions}
             onResume={props.onResumeSession}
+            teamHistory={props.teamHistory}
+            onResumeTeam={props.onResumeTeam}
+            onDeleteTeamHistory={props.onDeleteTeamHistory}
           />
         )}
       </div>

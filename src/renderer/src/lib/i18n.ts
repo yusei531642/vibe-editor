@@ -36,6 +36,13 @@ const ja: Dict = {
   'sidebar.filesChanged': '{count} 変更',
   'sidebar.sessionCount': '{count} セッション',
   'sidebar.refresh': '更新',
+  'sidebar.teams': 'チーム',
+  'sidebar.singleSessions': '個別セッション',
+
+  // ---------- Team history ----------
+  'teamHistory.resume': 'チーム「{name}」を復元',
+  'teamHistory.resumed': 'チーム「{name}」を復元しました',
+  'teamHistory.delete': '履歴から削除',
 
   // ---------- File tree / Editor ----------
   'filetree.refresh': '再読込',
@@ -196,6 +203,13 @@ const en: Dict = {
   'sidebar.filesChanged': '{count} changed',
   'sidebar.sessionCount': '{count} sessions',
   'sidebar.refresh': 'Refresh',
+  'sidebar.teams': 'Teams',
+  'sidebar.singleSessions': 'Single sessions',
+
+  // ---------- Team history ----------
+  'teamHistory.resume': 'Resume team "{name}"',
+  'teamHistory.resumed': 'Resumed team "{name}"',
+  'teamHistory.delete': 'Remove from history',
 
   // ---------- File tree / Editor ----------
   'filetree.refresh': 'Reload',
