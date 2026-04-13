@@ -132,7 +132,10 @@ export function initAutoUpdater(): void {
         updateWin.destroy();
         updateWin = null;
       }
-      autoUpdater.quitAndInstall(false, true);
+      // (isSilent=true, isForceRunAfter=true):
+      //   NSIS インストーラの UI を出さずに即時上書き→自動で新版を起動。
+      //   package.json の nsis.oneClick=true と合わせて初めてサイレントになる。
+      autoUpdater.quitAndInstall(true, true);
     }, 500);
   });
 

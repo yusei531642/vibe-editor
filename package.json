@@ -71,11 +71,13 @@
       }
     ],
     "nsis": {
-      "oneClick": false,
+      "oneClick": true,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true,
       "deleteAppDataOnUninstall": false,
       "shortcutName": "vibe-editor",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "mac": {
