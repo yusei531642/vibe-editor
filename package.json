@@ -54,6 +54,7 @@
     "nodeGypRebuild": false,
     "win": {
       "icon": "build/icon.ico",
+      "publisherName": "vibe-editor",
       "target": [
         {
           "target": "nsis",
@@ -79,7 +80,6 @@
       "createStartMenuShortcut": true,
       "menuCategory": "vibe-editor",
       "runAfterFinish": true,
-      "publisherName": "vibe-editor",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico",
