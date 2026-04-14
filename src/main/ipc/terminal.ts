@@ -2,7 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron';
 import { randomUUID } from 'crypto';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
+import { homedir, tmpdir } from 'os';
 import type { IPty } from 'node-pty';
 import type {
   TerminalCreateOptions,
@@ -30,6 +30,29 @@ export const sessions = new Map<string, Session>();
 
 /** agentId → pty セッションの逆引き。TeamHub が team_send 時に使う */
 export const agentSessions = new Map<string, Session>();
+
+/**
+ * Claude Code を --dangerously-skip-permissions で起動する場合、
+ * ~/.claude/settings.json に skipDangerousModePermissionPrompt: true を
+ * 事前設定しておかないと毎回 WARNING ダイアログが表示される。
+ * (anthropics/claude-code#25503)
+ */
+async function ensureBypassPermissionPromptSetting(args: string[] | undefined): Promise<void> {
+  if (!args?.includes('--dangerously-skip-permissions')) return;
+  const claudeDir = join(homedir(), '.claude');
+  const settingsPath = join(claudeDir, 'settings.json');
+  let settings: Record<string, unknown> = {};
+  try {
+    const raw = await fs.readFile(settingsPath, 'utf-8');
+    settings = JSON.parse(raw);
+  } catch {
+    // ファイルが存在しない or パースエラー → 新規作成
+  }
+  if (settings.skipDangerousModePermissionPrompt === true) return;
+  settings.skipDangerousModePermissionPrompt = true;
+  await fs.mkdir(claudeDir, { recursive: true });
+  await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+}
 
 /**
  * Windows では PATH 経由の .cmd ラッパー（例: C:\...\npm\claude.cmd）を
@@ -117,8 +140,11 @@ async function watchClaudeSession(
 export function registerTerminalIpc(): void {
   ipcMain.handle(
     'terminal:create',
-    (event, opts: TerminalCreateOptions): TerminalCreateResult => {
+    async (event, opts: TerminalCreateOptions): Promise<TerminalCreateResult> => {
       try {
+        // --dangerously-skip-permissions 使用時のプリフライト
+        await ensureBypassPermissionPromptSetting(opts.args);
+
         const { command, args } = resolveCommand(opts.command, opts.args);
 
         const pty = nodePty.spawn(command, args, {
