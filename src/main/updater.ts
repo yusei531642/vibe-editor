@@ -63,6 +63,12 @@ export function initAutoUpdater(): void {
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
 
+  // 未署名ビルドのため、インストーラの Authenticode 署名検証を無効化する。
+  // これをしないと古い app-update.yml に publisherName が残っている場合に
+  // Get-AuthenticodeSignature が Status=2 (NotSigned) を返してアップデートが失敗する。
+  (autoUpdater as unknown as { verifyUpdateCodeSignature: () => Promise<string | null> })
+    .verifyUpdateCodeSignature = async () => null;
+
   autoUpdater.on('error', (err) => {
     console.error('[auto-updater] error:', err);
     if (updateWin && !updateWin.isDestroyed()) {
