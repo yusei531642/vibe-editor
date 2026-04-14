@@ -3,7 +3,7 @@ import { createServer, type Server, type Socket } from 'net';
 import { promises as fs } from 'fs';
 import { randomBytes } from 'crypto';
 import { join } from 'path';
-import { agentSessions, sessions } from './ipc/terminal';
+import { agentSessions, sessions } from './lib/session-registry';
 
 /**
  * TeamHub — メインプロセス内でホストするチーム連携用 JSON-RPC サーバー。

@@ -1,9 +1,16 @@
 import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
-import type { AppSettings, Density, Language, ThemeName } from '../../../types/shared';
+import type { AppSettings } from '../../../types/shared';
 import { DEFAULT_SETTINGS } from '../../../types/shared';
 import { useT } from '../lib/i18n';
 import { useAnimatedMount } from '../lib/use-animated-mount';
+import { EDITOR_FONT_PRESETS, UI_FONT_PRESETS } from '../lib/settings-options';
+import { LanguageSection } from './settings/LanguageSection';
+import { ThemeSection } from './settings/ThemeSection';
+import { FontFamilySection } from './settings/FontFamilySection';
+import { TerminalSection } from './settings/TerminalSection';
+import { DensitySection } from './settings/DensitySection';
+import { CommandOptionsSection } from './settings/CommandOptionsSection';
 
 interface SettingsModalProps {
   open: boolean;
@@ -12,45 +19,6 @@ interface SettingsModalProps {
   onApply: (next: AppSettings) => void;
   onReset: () => void;
 }
-
-const THEME_OPTIONS: { value: ThemeName; label: string; desc: string }[] = [
-  {
-    value: 'claude-dark',
-    label: 'Claude Dark',
-    desc: 'Anthropic公式カラー準拠。ウォームダークブラウン + コーラル #D97757（既定）'
-  },
-  {
-    value: 'claude-light',
-    label: 'Claude Light',
-    desc: 'claude.ai のクリーム背景と温かい差し色を再現'
-  },
-  { value: 'dark', label: 'Dark', desc: 'VS Code系のクラシックダーク' },
-  { value: 'midnight', label: 'Midnight', desc: '深い青紫ベース、紫アクセント' },
-  { value: 'light', label: 'Light', desc: '明るい背景、暗い文字' }
-];
-
-const UI_FONT_PRESETS = [
-  {
-    label: 'System',
-    value:
-      "'Segoe UI', -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Yu Gothic UI', sans-serif"
-  },
-  { label: 'Inter', value: "'Inter', 'Segoe UI', sans-serif" },
-  { label: 'Noto Sans JP', value: "'Noto Sans JP', 'Yu Gothic UI', sans-serif" }
-];
-
-const EDITOR_FONT_PRESETS = [
-  { label: 'Cascadia Code', value: "'Cascadia Code', 'Consolas', monospace" },
-  { label: 'JetBrains Mono', value: "'JetBrains Mono', 'Consolas', monospace" },
-  { label: 'Fira Code', value: "'Fira Code', 'Consolas', monospace" },
-  { label: 'Consolas', value: "Consolas, 'Courier New', monospace" }
-];
-
-const DENSITY_OPTIONS: { value: Density; label: string; desc: string }[] = [
-  { value: 'compact', label: 'Compact', desc: '14"以下の画面向け、余白小' },
-  { value: 'normal', label: 'Normal', desc: '既定' },
-  { value: 'comfortable', label: 'Comfortable', desc: '大画面向け、ゆったり' }
-];
 
 export function SettingsModal({
   open,
@@ -100,261 +68,50 @@ export function SettingsModal({
         </header>
 
         <div className="modal__body">
-          {/* 言語 */}
-          <section className="modal__section">
-            <h3>{t('settings.language')}</h3>
-            <div className="lang-grid">
-              {(['ja', 'en'] as Language[]).map((lang) => (
-                <label
-                  key={lang}
-                  className={`lang-card ${draft.language === lang ? 'is-selected' : ''}`}
-                >
-                  <input
-                    type="radio"
-                    name="language"
-                    value={lang}
-                    checked={draft.language === lang}
-                    onChange={() => update('language', lang)}
-                  />
-                  <strong>{lang === 'ja' ? '日本語' : 'English'}</strong>
-                  <span>{lang === 'ja' ? 'Japanese' : 'English'}</span>
-                </label>
-              ))}
-            </div>
-            <p className="modal__note">{t('settings.language.desc')}</p>
-          </section>
-
-          {/* テーマ */}
-          <section className="modal__section">
-            <h3>{t('settings.theme')}</h3>
-            <div className="modal__theme-grid">
-              {THEME_OPTIONS.map((opt) => (
-                <label
-                  key={opt.value}
-                  className={`theme-card ${draft.theme === opt.value ? 'is-selected' : ''}`}
-                >
-                  <input
-                    type="radio"
-                    name="theme"
-                    value={opt.value}
-                    checked={draft.theme === opt.value}
-                    onChange={() => update('theme', opt.value)}
-                  />
-                  <div className={`theme-card__preview theme-preview--${opt.value}`}>
-                    <div className="theme-preview__sidebar" />
-                    <div className="theme-preview__main">
-                      <div className="theme-preview__bar" />
-                      <div className="theme-preview__content" />
-                    </div>
-                  </div>
-                  <div className="theme-card__meta">
-                    <strong>{opt.label}</strong>
-                    <span>{opt.desc}</span>
-                  </div>
-                </label>
-              ))}
-            </div>
-          </section>
-
-          {/* UIフォント */}
-          <section className="modal__section">
-            <h3>UI フォント</h3>
-            <div className="modal__row">
-              <label className="modal__label">
-                <span>フォントファミリ</span>
-                <select
-                  value={
-                    UI_FONT_PRESETS.find((p) => p.value === draft.uiFontFamily)?.value ??
-                    '__custom__'
-                  }
-                  onChange={(e) => {
-                    if (e.target.value !== '__custom__') {
-                      update('uiFontFamily', e.target.value);
-                    }
-                  }}
-                >
-                  {UI_FONT_PRESETS.map((p) => (
-                    <option key={p.label} value={p.value}>
-                      {p.label}
-                    </option>
-                  ))}
-                  <option value="__custom__">（カスタム）</option>
-                </select>
-              </label>
-              <label className="modal__label">
-                <span>サイズ (px)</span>
-                <input
-                  type="number"
-                  min={10}
-                  max={24}
-                  value={draft.uiFontSize}
-                  onChange={(e) => update('uiFontSize', Number(e.target.value) || 13)}
-                />
-              </label>
-            </div>
-            <label className="modal__label modal__label--full">
-              <span>カスタム CSS font-family</span>
-              <input
-                type="text"
-                value={draft.uiFontFamily}
-                onChange={(e) => update('uiFontFamily', e.target.value)}
-                spellCheck={false}
-              />
-            </label>
-          </section>
-
-          {/* エディタフォント */}
-          <section className="modal__section">
-            <h3>エディタフォント (Monaco)</h3>
-            <div className="modal__row">
-              <label className="modal__label">
-                <span>フォントファミリ</span>
-                <select
-                  value={
-                    EDITOR_FONT_PRESETS.find((p) => p.value === draft.editorFontFamily)
-                      ?.value ?? '__custom__'
-                  }
-                  onChange={(e) => {
-                    if (e.target.value !== '__custom__') {
-                      update('editorFontFamily', e.target.value);
-                    }
-                  }}
-                >
-                  {EDITOR_FONT_PRESETS.map((p) => (
-                    <option key={p.label} value={p.value}>
-                      {p.label}
-                    </option>
-                  ))}
-                  <option value="__custom__">（カスタム）</option>
-                </select>
-              </label>
-              <label className="modal__label">
-                <span>サイズ (px)</span>
-                <input
-                  type="number"
-                  min={10}
-                  max={24}
-                  value={draft.editorFontSize}
-                  onChange={(e) => update('editorFontSize', Number(e.target.value) || 13)}
-                />
-              </label>
-            </div>
-            <label className="modal__label modal__label--full">
-              <span>カスタム CSS font-family</span>
-              <input
-                type="text"
-                value={draft.editorFontFamily}
-                onChange={(e) => update('editorFontFamily', e.target.value)}
-                spellCheck={false}
-              />
-            </label>
-          </section>
-
-          {/* ターミナル */}
-          <section className="modal__section">
-            <h3>ターミナル</h3>
-            <div className="modal__row">
-              <label className="modal__label">
-                <span>フォントサイズ (px)</span>
-                <input
-                  type="number"
-                  min={10}
-                  max={24}
-                  value={draft.terminalFontSize}
-                  onChange={(e) => update('terminalFontSize', Number(e.target.value) || 13)}
-                />
-              </label>
-            </div>
-            <p className="modal__note">
-              ターミナルフォントファミリはエディタフォントと同じものを使用します。
-            </p>
-          </section>
-
-          {/* 情報密度 */}
-          <section className="modal__section">
-            <h3>情報密度</h3>
-            <div className="density-grid">
-              {DENSITY_OPTIONS.map((opt) => (
-                <label
-                  key={opt.value}
-                  className={`density-card ${draft.density === opt.value ? 'is-selected' : ''}`}
-                >
-                  <input
-                    type="radio"
-                    name="density"
-                    value={opt.value}
-                    checked={draft.density === opt.value}
-                    onChange={() => update('density', opt.value)}
-                  />
-                  <strong>{opt.label}</strong>
-                  <span>{opt.desc}</span>
-                </label>
-              ))}
-            </div>
-          </section>
-
-          {/* Claude Code 起動オプション */}
-          <section className="modal__section">
-            <h3>Claude Code 起動オプション</h3>
-            <label className="modal__label modal__label--full">
-              <span>コマンド</span>
-              <input
-                type="text"
-                value={draft.claudeCommand}
-                onChange={(e) => update('claudeCommand', e.target.value)}
-                placeholder="claude"
-                spellCheck={false}
-              />
-            </label>
-            <label className="modal__label modal__label--full">
-              <span>引数（空白区切り、ダブルクォートで空白を含む値）</span>
-              <input
-                type="text"
-                value={draft.claudeArgs}
-                onChange={(e) => update('claudeArgs', e.target.value)}
-                placeholder='--model opus --add-dir "D:/other project"'
-                spellCheck={false}
-              />
-            </label>
-            <label className="modal__label modal__label--full">
-              <span>作業ディレクトリ（空なら現在のプロジェクトルート）</span>
-              <input
-                type="text"
-                value={draft.claudeCwd}
-                onChange={(e) => update('claudeCwd', e.target.value)}
-                placeholder="（未設定）"
-                spellCheck={false}
-              />
-            </label>
-            <p className="modal__note">
-              変更後は右パネルの「再起動」ボタンでターミナルを再起動すると反映されます。
-            </p>
-          </section>
-
-          {/* Codex 起動オプション */}
-          <section className="modal__section">
-            <h3>Codex 起動オプション</h3>
-            <label className="modal__label modal__label--full">
-              <span>コマンド</span>
-              <input
-                type="text"
-                value={draft.codexCommand}
-                onChange={(e) => update('codexCommand', e.target.value)}
-                placeholder="codex"
-                spellCheck={false}
-              />
-            </label>
-            <label className="modal__label modal__label--full">
-              <span>引数（空白区切り）</span>
-              <input
-                type="text"
-                value={draft.codexArgs}
-                onChange={(e) => update('codexArgs', e.target.value)}
-                placeholder="--model o3"
-                spellCheck={false}
-              />
-            </label>
-          </section>
+          <LanguageSection draft={draft} update={update} />
+          <ThemeSection draft={draft} update={update} />
+          <FontFamilySection
+            title="UI フォント"
+            familyKey="uiFontFamily"
+            sizeKey="uiFontSize"
+            presets={UI_FONT_PRESETS}
+            draft={draft}
+            update={update}
+          />
+          <FontFamilySection
+            title="エディタフォント (Monaco)"
+            familyKey="editorFontFamily"
+            sizeKey="editorFontSize"
+            presets={EDITOR_FONT_PRESETS}
+            draft={draft}
+            update={update}
+          />
+          <TerminalSection draft={draft} update={update} />
+          <DensitySection draft={draft} update={update} />
+          <CommandOptionsSection
+            title="Claude Code 起動オプション"
+            commandKey="claudeCommand"
+            commandPlaceholder="claude"
+            argsKey="claudeArgs"
+            argsLabel="引数（空白区切り、ダブルクォートで空白を含む値）"
+            argsPlaceholder='--model opus --add-dir "D:/other project"'
+            cwdKey="claudeCwd"
+            cwdLabel="作業ディレクトリ（空なら現在のプロジェクトルート）"
+            cwdPlaceholder="（未設定）"
+            note="変更後は右パネルの「再起動」ボタンでターミナルを再起動すると反映されます。"
+            draft={draft}
+            update={update}
+          />
+          <CommandOptionsSection
+            title="Codex 起動オプション"
+            commandKey="codexCommand"
+            commandPlaceholder="codex"
+            argsKey="codexArgs"
+            argsLabel="引数（空白区切り）"
+            argsPlaceholder="--model o3"
+            draft={draft}
+            update={update}
+          />
         </div>
 
         <footer className="modal__footer">
