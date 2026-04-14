@@ -1244,7 +1244,7 @@ export function App(): JSX.Element {
       if (tab.resumeSessionId && !isCodex) {
         base.push('--resume', tab.resumeSessionId);
       }
-      // チームのコンテキストをシステムプロンプトとして注入
+      // Claude のチーム指示は --append-system-prompt で直接渡す。
       if (!isCodex && tab.teamId) {
         const team = teams.find((t) => t.id === tab.teamId) ?? null;
         const sysPrompt = generateTeamSystemPrompt(tab, terminalTabs, team);
@@ -1252,9 +1252,31 @@ export function App(): JSX.Element {
           base.push('--append-system-prompt', sysPrompt);
         }
       }
+      // Codex の paste_burst 検出を無効化する。
+      // チーム通信では team_send が chat_composer に文字列を直接流し込むが、
+      // Codex は高速連続入力を「ペースト扱い」にバッファしてしまい、
+      // 末尾の Enter が送信ではなく確定として飲み込まれて返信できなくなる。
+      // ユーザが codexArgs で明示的に設定している場合はそちらを尊重する。
+      const userCodexArgs = settings.codexArgs || '';
+      if (isCodex && tab.teamId && !userCodexArgs.includes('disable_paste_burst')) {
+        base.push('-c', 'disable_paste_burst=true');
+      }
       return base;
     },
     [settings.claudeArgs, settings.codexArgs, teams, terminalTabs]
+  );
+
+  /**
+   * Codex 向けのシステム指示。main 側で一時ファイルに書き出されて
+   * `-c model_instructions_file=<path>` として渡される。
+   */
+  const getCodexInstructions = useCallback(
+    (tab: TerminalTab): string | undefined => {
+      if (tab.agent !== 'codex' || !tab.teamId) return undefined;
+      const team = teams.find((t) => t.id === tab.teamId) ?? null;
+      return generateTeamSystemPrompt(tab, terminalTabs, team);
+    },
+    [teams, terminalTabs]
   );
 
   /** TeamHub 接続情報（アプリ起動時に1回だけ解決） */
@@ -1863,6 +1885,7 @@ export function App(): JSX.Element {
                   }
                   args={getTerminalArgs(tab)}
                   env={getTerminalEnv(tab)}
+                  codexInstructions={getCodexInstructions(tab)}
                   teamId={tab.teamId ?? undefined}
                   visible={true}
                   initialMessage={getRolePrompt(tab)}

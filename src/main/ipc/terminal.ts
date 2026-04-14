@@ -1,5 +1,7 @@
 import { app, ipcMain } from 'electron';
 import { randomUUID } from 'crypto';
+import { writeFileSync, mkdirSync } from 'fs';
+import { join } from 'path';
 import type {
   TerminalCreateOptions,
   TerminalCreateResult,
@@ -32,6 +34,23 @@ export function registerTerminalIpc(): void {
     (event, opts: TerminalCreateOptions): TerminalCreateResult => {
       try {
         const { command, args } = resolveCommand(opts.command, opts.args);
+
+        // Codex 用のチーム指示文が渡されていれば一時ファイルに書き出して
+        // -c model_instructions_file=<path> を args に差し込む。
+        // Claude の --append-system-prompt と同じ役割を果たす。
+        if (opts.codexInstructions && /codex/i.test(command)) {
+          try {
+            const dir = join(app.getPath('userData'), 'codex-instructions');
+            mkdirSync(dir, { recursive: true });
+            const filePath = join(dir, `${randomUUID()}.md`);
+            writeFileSync(filePath, opts.codexInstructions, 'utf-8');
+            // TOML 文字列としてパスを渡す。バックスラッシュと二重引用符をエスケープ。
+            const tomlStr = `"${filePath.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+            args.push('-c', `model_instructions_file=${tomlStr}`);
+          } catch (err) {
+            console.warn('[terminal] failed to write codex instructions file:', err);
+          }
+        }
 
         const pty = nodePty.spawn(command, args, {
           name: 'xterm-256color',

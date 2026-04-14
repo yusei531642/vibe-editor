@@ -184,6 +184,12 @@ export interface TerminalCreateOptions {
   agentId?: string;
   /** TeamHub が注入したメッセージを判別するためのロール */
   role?: string;
+  /**
+   * Codex 用のシステム指示文。Claude の --append-system-prompt と同等の役割を
+   * 果たし、main プロセス側で一時ファイルに書き出して
+   * `-c model_instructions_file=<path>` を args に差し込む。
+   */
+  codexInstructions?: string;
 }
 
 export interface TerminalCreateResult {

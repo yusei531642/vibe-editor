@@ -36,21 +36,21 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
    * 背景は温かみのあるダークブラウン、アクセントはシグネチャコーラル #D97757。
    */
   'claude-dark': {
-    // Claude.ai 夜のノートブックを参考にしたウォームダーク
-    bg: '#2B2A27',         // 本文領域。温かい茶褐色
-    bgPanel: '#32312E',    // 軽く浮かせた面
-    bgSidebar: '#262523',  // 本体よりほんのり沈んだ面（ハードボーダー不要）
-    bgToolbar: '#2B2A27',  // 本文と同化してクロームが溶ける
-    border: 'rgba(255, 247, 232, 0.06)',  // ほぼ見えない仕切り
-    bgHover: 'rgba(255, 247, 232, 0.045)',
-    bgActive: 'rgba(217, 119, 87, 0.14)',
-    accent: '#D97757',
-    accentHover: '#E18A6F',
-    warning: '#D4A27F',
-    warningHover: '#E0B592',
-    text: '#F3EEE3',   // クリーム
-    textDim: '#A8A49A',
-    textMute: '#6E6A61',
+    // claude.ai の夜の editorial 配色。warm charcoal + coral accent
+    bg: '#2c2c2a',
+    bgPanel: '#1f1e1d',
+    bgSidebar: '#1f1e1d',
+    bgToolbar: '#2c2c2a',
+    border: 'rgba(241, 239, 232, 0.10)',
+    bgHover: 'rgba(241, 239, 232, 0.05)',
+    bgActive: 'rgba(216, 90, 48, 0.14)',
+    accent: '#d85a30',
+    accentHover: '#993c1d',
+    warning: '#d4a27f',
+    warningHover: '#e0b592',
+    text: '#f1efe8',
+    textDim: '#d3d1c7',
+    textMute: '#8a8880',
     monacoTheme: 'vs-dark'
   },
 
@@ -59,20 +59,20 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
    * 温かみのあるダークテキストを再現。アクセントは同じくコーラル #D97757。
    */
   'claude-light': {
-    bg: '#FAF9F5',
-    bgPanel: '#FFFFFF',
-    bgSidebar: '#F4F2EA',
-    bgToolbar: '#FAF9F5',
-    border: 'rgba(55, 53, 47, 0.09)',
-    bgHover: 'rgba(55, 53, 47, 0.05)',
-    bgActive: 'rgba(217, 119, 87, 0.1)',
-    accent: '#D97757',
-    accentHover: '#C66647',
-    warning: '#B06A3B',
-    warningHover: '#C4774A',
-    text: '#37352F',
-    textDim: '#787774',
-    textMute: '#9B9A97',
+    bg: '#faf9f5',
+    bgPanel: '#ffffff',
+    bgSidebar: '#eeece2',
+    bgToolbar: '#faf9f5',
+    border: 'rgba(20, 20, 19, 0.08)',
+    bgHover: 'rgba(20, 20, 19, 0.05)',
+    bgActive: 'rgba(216, 90, 48, 0.10)',
+    accent: '#d85a30',
+    accentHover: '#993c1d',
+    warning: '#b06a3b',
+    warningHover: '#c4774a',
+    text: '#141413',
+    textDim: '#3d3929',
+    textMute: '#7a7669',
     monacoTheme: 'vs'
   },
 
@@ -136,7 +136,7 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
  * 入手可能な代替（Source Serif, Georgia, Yu Mincho 等）にフォールバック。
  */
 const HEADING_FONT_SERIF =
-  "'Source Serif Pro', 'Source Serif 4', Georgia, 'Times New Roman', 'Yu Mincho', serif";
+  "'Source Serif 4', 'Source Serif Pro', Georgia, 'Times New Roman', 'Yu Mincho', serif";
 const HEADING_FONT_SANS =
   "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic UI', sans-serif";
 
@@ -171,8 +171,8 @@ export function applyTheme(name: ThemeName, uiFontFamily: string, uiFontSize: nu
   );
 
   // Claude テーマは角丸を少し大きめ（ペーパー/カード感）
-  root.style.setProperty('--radius', isClaudeTheme(name) ? '8px' : '4px');
-  root.style.setProperty('--radius-sm', isClaudeTheme(name) ? '6px' : '4px');
+  root.style.setProperty('--radius', isClaudeTheme(name) ? '10px' : '4px');
+  root.style.setProperty('--radius-sm', isClaudeTheme(name) ? '8px' : '4px');
 
   // body に data-theme を仕込んでおくと条件付きCSSが書ける
   root.dataset.theme = name;

@@ -37,6 +37,8 @@ interface TerminalViewProps {
   agentId?: string;
   /** TeamHub のメッセージ注入時に from として表示されるロール */
   role?: string;
+  /** Codex 起動時にシステム指示として渡す文字列（main で一時ファイル化） */
+  codexInstructions?: string;
   /** 起動中 / エラー表示用のコールバック */
   onStatus?: (status: string) => void;
   /** 出力イベント（非可視時のバッジ表示用） */
@@ -69,6 +71,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       initialMessage,
       agentId,
       role,
+      codexInstructions,
       onStatus,
       onActivity,
       onExit,
@@ -93,9 +96,18 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       teamId,
       agentId,
       role,
-      initialMessage
+      initialMessage,
+      codexInstructions
     });
-    snapRef.current = { args, env, teamId, agentId, role, initialMessage };
+    snapRef.current = {
+      args,
+      env,
+      teamId,
+      agentId,
+      role,
+      initialMessage,
+      codexInstructions
+    };
 
     // useAutoInitialMessage は snap とは別に initialMessage を再参照するので ref を渡す
     const initialMessageRef = useRef(initialMessage);

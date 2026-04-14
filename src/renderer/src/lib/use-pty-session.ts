@@ -10,6 +10,7 @@ export interface PtySpawnSnapshot {
   agentId?: string;
   role?: string;
   initialMessage?: string | string[];
+  codexInstructions?: string;
 }
 
 export interface PtySessionCallbacks {
@@ -99,7 +100,8 @@ export function usePtySession(options: UsePtySessionOptions): void {
           env: snap.env,
           teamId: snap.teamId,
           agentId: snap.agentId,
-          role: snap.role
+          role: snap.role,
+          codexInstructions: snap.codexInstructions
         });
 
         if (disposedRef.current) return;

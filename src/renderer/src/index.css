@@ -10,50 +10,69 @@
   --ui-font-size: 14px;
   --radius: 10px;
   --radius-sm: 6px;
+  /* Claude 公式寄せ: 拡張 radius スケール */
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-pill: 9999px;
   /* 情報密度 */
   --pad: 8px;
   --gap: 8px;
   --row-h: 32px;
   --toolbar-h: 52px;
   /* テーマ変数 (applyTheme で上書き) */
-  --bg: #2b2a27;
-  --bg-panel: #32312e;
-  --bg-sidebar: #262523;
-  --bg-toolbar: #2b2a27;
-  --border: rgba(255, 247, 232, 0.06);
-  --bg-hover: rgba(255, 247, 232, 0.045);
-  --bg-active: rgba(217, 119, 87, 0.14);
-  --accent: #d97757;
-  --accent-hover: #e18a6f;
+  --bg: #2c2c2a;
+  --bg-panel: #1f1e1d;
+  --bg-sidebar: #1f1e1d;
+  --bg-toolbar: #2c2c2a;
+  --border: rgba(241, 239, 232, 0.10);
+  --bg-hover: rgba(241, 239, 232, 0.05);
+  --bg-active: rgba(216, 90, 48, 0.14);
+  --accent: #d85a30;
+  --accent-hover: #993c1d;
   --warning: #d4a27f;
   --warning-hover: #e0b592;
-  --text: #f3eee3;
-  --text-dim: #a8a49a;
-  --text-mute: #6e6a61;
+  --text: #f1efe8;
+  --text-dim: #d3d1c7;
+  --text-mute: #8a8880;
+
+  /* ---------- Coral ランプ (claude 主色) ---------- */
+  --coral-50: #faece7;
+  --coral-100: #f5c4b3;
+  --coral-200: #efa488;
+  --coral-400: #d85a30;
+  --coral-600: #993c1d;
+  --coral-800: #712b13;
+
+  /* ---------- フォーカスリング (Claude coral glow) ---------- */
+  --focus-ring: 0 0 0 3px rgba(216, 90, 48, 0.30);
 
   /* ---------- モーショントークン (Raycast / Linear 風) ---------- */
   /* duration */
   --dur-instant: 80ms;
-  --dur-fast: 120ms;
+  --dur-fast: 150ms;
   --dur-base: 180ms;
-  --dur-slow: 260ms;
+  --dur-normal: 250ms;
+  --dur-slow: 400ms;
   --dur-slower: 380ms;
   /* easing */
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out-soft: cubic-bezier(0.165, 0.85, 0.45, 1);
   --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
   --ease-snap: cubic-bezier(0.22, 1, 0.36, 1);
 
-  /* ---------- Depth / Shadow トークン ---------- */
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-  --shadow-accent: 0 0 20px rgba(217, 119, 87, 0.15);
-  --shadow-popover: 0 0 0 1px var(--border), 0 4px 12px rgba(0, 0, 0, 0.15),
-    0 16px 40px rgba(0, 0, 0, 0.2);
+  /* ---------- Depth / Shadow トークン (warm-tinted, layered) ---------- */
+  --shadow-xs: 0 1px 2px rgba(20, 20, 19, 0.04);
+  --shadow-sm: 0 1px 3px rgba(20, 20, 19, 0.06), 0 1px 2px rgba(20, 20, 19, 0.04);
+  --shadow-md: 0 4px 12px rgba(20, 20, 19, 0.08), 0 2px 4px rgba(20, 20, 19, 0.04);
+  --shadow-lg: 0 12px 24px rgba(20, 20, 19, 0.10), 0 4px 8px rgba(20, 20, 19, 0.06);
+  --shadow-xl: 0 20px 40px rgba(20, 20, 19, 0.14), 0 8px 16px rgba(20, 20, 19, 0.08);
+  --shadow-modal: 0 24px 48px rgba(20, 20, 19, 0.18), 0 2px 8px rgba(20, 20, 19, 0.08);
+  --shadow-accent: 0 0 24px rgba(216, 90, 48, 0.18);
+  --shadow-popover: 0 0 0 1px var(--border), 0 12px 24px rgba(20, 20, 19, 0.14),
+    0 4px 8px rgba(20, 20, 19, 0.08);
 
   /* ---------- ノイズオーバーレイ ---------- */
   --noise-opacity: 0.03;
@@ -359,7 +378,10 @@ body.is-resizing * {
 
 /* Claude テーマ: サイドバーにウォームグラデーション */
 :root[data-theme='claude-dark'] .sidebar {
-  background: linear-gradient(180deg, #2a2826 0%, var(--bg-sidebar) 100%);
+  background: linear-gradient(180deg, #252422 0%, var(--bg-sidebar) 100%);
+}
+:root[data-theme='claude-light'] .sidebar {
+  background: linear-gradient(180deg, #f1efe5 0%, var(--bg-sidebar) 100%);
 }
 
 .sidebar-switcher__badge {
@@ -595,13 +617,16 @@ body.is-resizing * {
   background: transparent;
   color: var(--text);
   border: none;
-  border-radius: var(--radius-sm);
-  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  padding: 7px 14px;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   font-family: inherit;
-  transition: background 0.1s;
+  transition: background var(--dur-fast) var(--ease-out-soft),
+    color var(--dur-fast) var(--ease-out-soft),
+    box-shadow var(--dur-fast) var(--ease-out-soft),
+    transform var(--dur-fast) var(--ease-out-soft);
   white-space: nowrap;
   line-height: 1;
 }
@@ -614,6 +639,10 @@ body.is-resizing * {
   background: var(--bg-hover);
 }
 
+.toolbar__btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
 .toolbar__btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;
@@ -623,10 +652,12 @@ body.is-resizing * {
   background: var(--accent);
   color: #fffdf7;
   font-weight: 600;
+  box-shadow: var(--shadow-xs);
 }
 
 .toolbar__btn--primary:hover:not(:disabled) {
   background: var(--accent-hover);
+  box-shadow: var(--shadow-sm);
 }
 
 .toolbar__btn--warning {
@@ -669,10 +700,11 @@ body.is-resizing * {
   background: transparent;
   color: var(--text);
   border: none;
-  border-radius: var(--radius-sm);
-  padding: 7px 8px;
+  border-radius: var(--radius-md);
+  padding: 7px 10px;
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background var(--dur-fast) var(--ease-out-soft),
+    color var(--dur-fast) var(--ease-out-soft);
   white-space: nowrap;
   height: 30px;
 }
@@ -694,27 +726,27 @@ body.is-resizing * {
 
 .app-menu__dropdown {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + 8px);
   left: 0;
   min-width: 320px;
   max-width: 480px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-popover), 0 2px 8px rgba(217, 119, 87, 0.06);
-  padding: 6px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 8px;
   z-index: 1500;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  animation: app-menu-in var(--dur-base) var(--ease-out);
+  animation: app-menu-in var(--dur-normal) var(--ease-spring);
   transform-origin: top left;
 }
 
 @keyframes app-menu-in {
   from {
     opacity: 0;
-    transform: translateY(-6px) scale(0.98);
+    transform: translateY(-8px) scale(0.96);
   }
   to {
     opacity: 1;
@@ -728,7 +760,7 @@ body.is-resizing * {
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 8px 12px;
+  padding: 9px 12px;
   background: transparent;
   color: var(--text);
   border: none;
@@ -737,10 +769,11 @@ body.is-resizing * {
   font-size: 13px;
   cursor: pointer;
   text-align: left;
+  transition: background var(--dur-fast) var(--ease-out-soft);
 }
 
 .app-menu__item:hover {
-  background: var(--bg-toolbar);
+  background: var(--bg-hover);
 }
 
 .app-menu__item-icon {
@@ -889,8 +922,9 @@ body.is-resizing * {
   letter-spacing: 0.01em;
   z-index: 1;
   transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
+    color var(--dur-fast) var(--ease-out-soft),
+    background var(--dur-fast) var(--ease-out-soft),
+    box-shadow var(--dur-normal) var(--ease-spring);
 }
 
 .tabbar__tab:focus-visible {
@@ -1264,19 +1298,20 @@ body.is-resizing * {
   margin: 0 0 8px 0;
   font-family: var(--heading-font);
   font-size: clamp(32px, 5vw, var(--text-3xl));
-  font-weight: 400;
-  letter-spacing: var(--tracking-tight);
+  font-weight: 600;
+  letter-spacing: -0.02em;
   color: var(--text);
-  line-height: 1.1;
+  line-height: 1.15;
 }
 
-/* Claude テーマ: グラデーションテキスト */
+/* Claude テーマ: coral ランプでウォームグラデーション */
 :root[data-theme='claude-dark'] .welcome__title,
 :root[data-theme='claude-light'] .welcome__title {
-  background: linear-gradient(135deg, var(--text) 0%, var(--accent) 100%);
+  background: linear-gradient(135deg, var(--text) 0%, var(--coral-400) 60%, var(--coral-600) 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  font-weight: 400;
 }
 
 .welcome__subtitle {
@@ -1316,24 +1351,25 @@ body.is-resizing * {
   font-size: var(--text-base);
   color: var(--text-dim);
   line-height: 1.6;
-  padding: 10px 16px;
+  padding: 12px 18px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   display: flex;
   align-items: center;
   gap: 12px;
   position: relative;
+  box-shadow: var(--shadow-xs);
   transition:
-    border-color var(--dur-fast) var(--ease-out),
-    transform var(--dur-fast) var(--ease-out),
-    box-shadow var(--dur-fast) var(--ease-out);
+    border-color var(--dur-normal) var(--ease-out-soft),
+    transform var(--dur-normal) var(--ease-out-soft),
+    box-shadow var(--dur-normal) var(--ease-out-soft);
 }
 
 .welcome__hints li:hover {
   border-color: var(--accent);
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-sm);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
 }
 
 .welcome__hints li::before {
@@ -1414,10 +1450,11 @@ body.is-resizing * {
 .claude-not-found__title {
   margin: 0;
   font-family: var(--heading-font);
-  font-size: 22px;
-  font-weight: 500;
-  letter-spacing: -0.015em;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
   color: var(--text);
+  line-height: 1.2;
 }
 
 .claude-not-found__body {
@@ -1786,20 +1823,22 @@ body.is-resizing * {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 0 10px;
+  padding: 0 12px;
   font-size: 11px;
   font-weight: 500;
   color: var(--text-mute);
   background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   cursor: pointer;
   white-space: nowrap;
   position: relative;
   user-select: none;
   transition:
-    color var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out);
+    color var(--dur-fast) var(--ease-out-soft),
+    background var(--dur-fast) var(--ease-out-soft),
+    border-color var(--dur-normal) var(--ease-out-soft);
 }
 
 .terminal-tab:hover {
@@ -2257,13 +2296,13 @@ body.is-resizing * {
   max-width: 320px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow-popover), 0 2px 8px rgba(217, 119, 87, 0.06);
-  padding: 5px;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  padding: 6px;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  animation: context-menu-in var(--dur-base) var(--ease-out);
+  animation: context-menu-in var(--dur-normal) var(--ease-spring);
   transform-origin: top left;
 }
 
@@ -2283,7 +2322,7 @@ body.is-resizing * {
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 8px 12px;
+  padding: 9px 12px;
   background: transparent;
   color: var(--text);
   border: none;
@@ -2292,11 +2331,13 @@ body.is-resizing * {
   font-size: 13px;
   cursor: pointer;
   text-align: left;
-  transition: background 0.1s;
+  transition: background var(--dur-fast) var(--ease-out-soft),
+    color var(--dur-fast) var(--ease-out-soft);
 }
 
 .context-menu__item:hover {
   background: var(--bg-hover);
+  color: var(--text);
 }
 
 .context-menu__item:disabled {
@@ -2330,46 +2371,45 @@ body.is-resizing * {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0);
+  background: rgba(20, 20, 19, 0);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
   backdrop-filter: blur(0px);
   transition:
-    background var(--dur-slow) var(--ease-out),
-    backdrop-filter var(--dur-slow) var(--ease-out);
+    background var(--dur-slow) var(--ease-out-soft),
+    backdrop-filter var(--dur-slow) var(--ease-out-soft);
   will-change: backdrop-filter, background-color;
 }
 
 .modal-backdrop[data-state='open'] {
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(4px);
+  background: rgba(20, 20, 19, 0.45);
+  backdrop-filter: blur(8px);
 }
 
 .modal {
   opacity: 0;
-  transform: scale(0.95) translateY(12px);
+  transform: translateY(8px) scale(0.98);
   transition:
-    opacity var(--dur-base) var(--ease-out),
+    opacity var(--dur-slow) var(--ease-out-soft),
     transform var(--dur-slow) var(--ease-spring);
   will-change: transform, opacity;
   background: var(--bg-panel);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 16px;
   width: 720px;
   max-width: 90vw;
   max-height: 85vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 0 0 1px var(--border), 0 24px 60px rgba(0, 0, 0, 0.35),
-    0 8px 20px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-modal);
 }
 
 .modal[data-state='open'] {
   opacity: 1;
-  transform: scale(1) translateY(0);
+  transform: translateY(0) scale(1);
 }
 
 .modal__header {
@@ -2835,7 +2875,7 @@ body.is-resizing * {
 .cmdp-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0);
+  background: rgba(20, 20, 19, 0);
   display: flex;
   align-items: flex-start;
   justify-content: center;
@@ -2843,35 +2883,34 @@ body.is-resizing * {
   z-index: 2000;
   backdrop-filter: blur(0px);
   transition:
-    background var(--dur-slow) var(--ease-out),
-    backdrop-filter var(--dur-slow) var(--ease-out);
+    background var(--dur-slow) var(--ease-out-soft),
+    backdrop-filter var(--dur-slow) var(--ease-out-soft);
   will-change: backdrop-filter, background-color;
 }
 
 .cmdp-backdrop[data-state='open'] {
-  background: rgba(0, 0, 0, 0.45);
-  backdrop-filter: blur(5px);
+  background: rgba(20, 20, 19, 0.38);
+  backdrop-filter: blur(8px);
 }
 
 .cmdp {
   opacity: 0;
-  transform: scale(0.96) translateY(-8px);
+  transform: translateY(-8px) scale(0.98);
   transition:
-    opacity var(--dur-base) var(--ease-out),
+    opacity var(--dur-slow) var(--ease-out-soft),
     transform var(--dur-slow) var(--ease-spring);
   will-change: transform, opacity;
   transform-origin: top center;
   background: var(--bg-panel);
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   width: 640px;
   max-width: 90vw;
   max-height: 60vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 0 0 1px var(--border), 0 30px 80px rgba(0, 0, 0, 0.35),
-    0 8px 20px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-modal);
   overflow: hidden;
 }
 
@@ -2924,15 +2963,21 @@ body.is-resizing * {
   grid-template-columns: 90px 1fr auto;
   align-items: center;
   gap: 10px;
-  padding: 8px 14px;
+  padding: 9px 14px;
+  margin: 0 6px;
   cursor: pointer;
   font-size: 13px;
   border-left: 2px solid transparent;
+  border-radius: var(--radius-sm);
 }
 
 .cmdp__item.is-selected {
-  background: var(--bg-toolbar);
+  background: var(--bg-hover);
   border-left-color: var(--accent);
+}
+
+:root[data-theme^='claude'] .cmdp__item.is-selected {
+  background: var(--bg-active);
 }
 
 .cmdp__category {
@@ -2986,7 +3031,7 @@ body.is-resizing * {
   color: var(--text);
   border: 1px solid var(--border);
   border-left: 3px solid var(--accent);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
   font-size: var(--text-base);
   font-weight: 500;
@@ -2995,9 +3040,9 @@ body.is-resizing * {
   opacity: 1;
   transform: translateX(0);
   transition:
-    opacity var(--dur-base) var(--ease-out),
-    transform var(--dur-base) var(--ease-out);
-  animation: toast-in var(--dur-slow) var(--ease-spring);
+    opacity var(--dur-normal) var(--ease-out-soft),
+    transform var(--dur-normal) var(--ease-out-soft);
+  animation: toast-in var(--dur-normal) var(--ease-spring);
 }
 
 .toast[data-state='exiting'] {
@@ -3170,7 +3215,7 @@ body.is-resizing * {
 }
 
 /* ---------- 共通マイクロインタラクション（press / hover） ---------- */
-/* Raycast / Linear 風: ボタン押下で scale(0.94)、プライマリは hover で軽く浮く */
+/* Claude / Linear 風: ボタン押下で scale(0.98)、プライマリは hover で軽く浮く */
 
 .toolbar__btn,
 .modal__btn,
@@ -3187,11 +3232,12 @@ body.is-resizing * {
 .lang-card,
 .density-card {
   transition:
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out),
-    border-color var(--dur-fast) var(--ease-out),
-    transform var(--dur-fast) var(--ease-out),
-    opacity var(--dur-fast) var(--ease-out);
+    background var(--dur-fast) var(--ease-out-soft),
+    color var(--dur-fast) var(--ease-out-soft),
+    border-color var(--dur-fast) var(--ease-out-soft),
+    transform var(--dur-fast) var(--ease-out-soft),
+    box-shadow var(--dur-fast) var(--ease-out-soft),
+    opacity var(--dur-fast) var(--ease-out-soft);
 }
 
 .toolbar__btn:active:not(:disabled),
@@ -3203,7 +3249,7 @@ body.is-resizing * {
 .tabbar__close:active,
 .tabbar__pin-btn:active,
 .cmdp__item:active {
-  transform: scale(0.94);
+  transform: scale(0.98);
   transition-duration: var(--dur-instant);
 }
 
@@ -3214,7 +3260,7 @@ body.is-resizing * {
 
 .toolbar__btn--primary:active:not(:disabled),
 .toolbar__btn--icon:active:not(:disabled) {
-  transform: translateY(0) scale(0.95);
+  transform: translateY(0) scale(0.98);
 }
 
 .theme-card:active,
@@ -3415,6 +3461,7 @@ body.is-resizing * {
 }
 
 .filetree__row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -3426,9 +3473,11 @@ body.is-resizing * {
   padding: 3px 8px 3px 6px;
   font-size: 12.5px;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-sm);
   white-space: nowrap;
   overflow: hidden;
+  transition: background var(--dur-fast) var(--ease-out-soft),
+    color var(--dur-fast) var(--ease-out-soft);
 }
 
 .filetree__row:hover {
@@ -3438,6 +3487,7 @@ body.is-resizing * {
 .filetree__row.is-active {
   background: var(--bg-active);
   color: var(--text);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .filetree__chevron {
@@ -3584,4 +3634,34 @@ body.is-resizing * {
 
 .team-history-item__delete:hover {
   color: var(--text);
+}
+
+/* ---------- Claude テーマ: パネル/セクション見出しの serif 化 ---------- */
+:root[data-theme^='claude'] .sidebar__section-header h2,
+:root[data-theme^='claude'] .sidebar-view__header h2,
+:root[data-theme^='claude'] .modal__section h3,
+:root[data-theme^='claude'] .welcome__subtitle {
+  font-family: var(--heading-font);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* Claude テーマ: サイドバーアクティブ切替タブに太字アクセント */
+:root[data-theme^='claude'] .sidebar-switcher__btn::after {
+  transition:
+    background var(--dur-normal) var(--ease-spring),
+    transform var(--dur-normal) var(--ease-spring);
+  height: 2px;
+}
+
+/* prefers-reduced-motion: spring アニメを無効化 */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
