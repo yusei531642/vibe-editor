@@ -236,6 +236,7 @@ export function App(): JSX.Element {
       resumeSessionId?: string | null;
       agentId?: string;
       teamHistoryMemberIdx?: number | null;
+      autoMode?: boolean;
     }): number | null => {
       const id = nextTerminalIdRef.current++;
       const tab: TerminalTab = {
@@ -249,7 +250,8 @@ export function App(): JSX.Element {
         exited: false,
         resumeSessionId: opts?.resumeSessionId ?? null,
         hasActivity: false,
-        teamHistoryMemberIdx: opts?.teamHistoryMemberIdx ?? null
+        teamHistoryMemberIdx: opts?.teamHistoryMemberIdx ?? null,
+        autoMode: opts?.autoMode ?? false
       };
       let accepted = false;
       setTerminalTabs((prev) => {
@@ -1079,12 +1081,28 @@ export function App(): JSX.Element {
         run: () => { addTerminalTab({ agent: 'claude' }); }
       },
       {
+        id: 'terminal.addClaudeAuto',
+        title: 'Claude Code (Auto) タブを追加',
+        subtitle: `${terminalTabs.length}/${MAX_TERMINALS}`,
+        category: 'ターミナル',
+        when: () => terminalTabs.length < MAX_TERMINALS,
+        run: () => { addTerminalTab({ agent: 'claude', autoMode: true }); }
+      },
+      {
         id: 'terminal.addCodex',
         title: 'Codex タブを追加',
         subtitle: `${terminalTabs.length}/${MAX_TERMINALS}`,
         category: 'ターミナル',
         when: () => terminalTabs.length < MAX_TERMINALS,
         run: () => { addTerminalTab({ agent: 'codex' }); }
+      },
+      {
+        id: 'terminal.addCodexAuto',
+        title: 'Codex (Auto) タブを追加',
+        subtitle: `${terminalTabs.length}/${MAX_TERMINALS}`,
+        category: 'ターミナル',
+        when: () => terminalTabs.length < MAX_TERMINALS,
+        run: () => { addTerminalTab({ agent: 'codex', autoMode: true }); }
       },
       {
         id: 'terminal.createTeam',
@@ -1243,6 +1261,14 @@ export function App(): JSX.Element {
       const base = parseShellArgs(
         isCodex ? settings.codexArgs || '' : settings.claudeArgs || ''
       );
+      // Auto モード: エージェント別のフラグを付与
+      if (tab.autoMode) {
+        if (isCodex) {
+          if (!base.includes('--full-auto')) base.push('--full-auto');
+        } else {
+          if (!base.includes('--dangerously-skip-permissions')) base.push('--dangerously-skip-permissions');
+        }
+      }
       if (tab.resumeSessionId && !isCodex) {
         base.push('--resume', tab.resumeSessionId);
       }
@@ -1724,10 +1750,24 @@ export function App(): JSX.Element {
                     </button>
                     <button
                       className="tab-create-menu__item"
+                      onClick={() => { addTerminalTab({ agent: 'claude', autoMode: true }); setTabCreateMenuOpen(false); }}
+                    >
+                      <span className="terminal-tab__agent terminal-tab__agent--claude">C</span>
+                      {t('claudePanel.addClaudeAuto')}
+                    </button>
+                    <button
+                      className="tab-create-menu__item"
                       onClick={() => { addTerminalTab({ agent: 'codex' }); setTabCreateMenuOpen(false); }}
                     >
                       <span className="terminal-tab__agent terminal-tab__agent--codex">X</span>
                       {t('claudePanel.addCodex')}
+                    </button>
+                    <button
+                      className="tab-create-menu__item"
+                      onClick={() => { addTerminalTab({ agent: 'codex', autoMode: true }); setTabCreateMenuOpen(false); }}
+                    >
+                      <span className="terminal-tab__agent terminal-tab__agent--codex">X</span>
+                      {t('claudePanel.addCodexAuto')}
                     </button>
                     <div className="tab-create-menu__divider" />
                     <button
