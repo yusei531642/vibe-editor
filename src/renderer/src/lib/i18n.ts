@@ -87,7 +87,9 @@ const ja: Dict = {
   'claudePanel.closeTab': 'タブを閉じる',
   'claudePanel.tabLimit': '上限に達しています（最大{max}）',
   'claudePanel.addClaude': 'Claude Code を追加',
+  'claudePanel.addClaudeAuto': 'Claude Code (Auto) を追加',
   'claudePanel.addCodex': 'Codex を追加',
+  'claudePanel.addCodexAuto': 'Codex (Auto) を追加',
   'claudePanel.createTeam': 'Team を作成…',
 
   // ---------- Team ----------
@@ -254,7 +256,9 @@ const en: Dict = {
   'claudePanel.closeTab': 'Close tab',
   'claudePanel.tabLimit': 'Limit reached (max {max})',
   'claudePanel.addClaude': 'Add Claude Code',
+  'claudePanel.addClaudeAuto': 'Add Claude Code (Auto)',
   'claudePanel.addCodex': 'Add Codex',
+  'claudePanel.addCodexAuto': 'Add Codex (Auto)',
   'claudePanel.createTeam': 'Create Team…',
 
   // ---------- Team ----------

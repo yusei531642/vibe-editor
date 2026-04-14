@@ -78,6 +78,8 @@ interface TerminalTab {
   hasActivity: boolean;
   /** チーム履歴で使う member インデックス。未所属タブは null */
   teamHistoryMemberIdx: number | null;
+  /** Auto モード（Claude: --dangerously-skip-permissions / Codex: --full-auto） */
+  autoMode?: boolean;
 }
 
 /** ロール別の短い説明（チームプロンプト内で使用） */
