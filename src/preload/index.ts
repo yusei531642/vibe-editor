@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import type {
   AppSettings,
+  AppUserInfo,
   ClaudeCheckResult,
   FileListResult,
   FileReadResult,
@@ -45,7 +46,10 @@ const api = {
     getMcpServerPath: (): Promise<string> =>
       ipcRenderer.invoke('app:getMcpServerPath'),
     getTeamHubInfo: (): Promise<{ socket: string; token: string; bridgePath: string }> =>
-      ipcRenderer.invoke('app:getTeamHubInfo')
+      ipcRenderer.invoke('app:getTeamHubInfo'),
+    getUserInfo: (): Promise<AppUserInfo> => ipcRenderer.invoke('app:getUserInfo'),
+    openExternal: (url: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('app:openExternal', url)
   },
 
   git: {

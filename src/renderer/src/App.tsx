@@ -1813,6 +1813,7 @@ export function App(): JSX.Element {
         onOpenFileDialog={handleOpenFile}
         onOpenRecent={handleOpenRecent}
         onClearRecent={handleClearRecent}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
       <main className="main">
         <Toolbar

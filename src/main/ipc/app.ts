@@ -1,7 +1,7 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
 import { join } from 'path';
-import { homedir } from 'os';
-import type { ClaudeCheckResult } from '../../types/shared';
+import { homedir, userInfo } from 'os';
+import type { AppUserInfo, ClaudeCheckResult } from '../../types/shared';
 import { teamHub } from '../team-hub';
 import { checkCommandAvailable } from '../lib/check-command';
 import { setupClaudeMcp, cleanupClaudeMcp } from '../lib/mcp-config/claude-mcp';
@@ -35,6 +35,36 @@ export function registerAppIpc(): void {
 
   ipcMain.handle('app:getZoomLevel', (event) => {
     return event.sender.getZoomLevel();
+  });
+
+  // ---------- ユーザー情報 / アプリ情報 ----------
+  ipcMain.handle('app:getUserInfo', (): AppUserInfo => {
+    let username = 'user';
+    try {
+      username = userInfo().username || process.env.USERNAME || process.env.USER || 'user';
+    } catch {
+      username = process.env.USERNAME || process.env.USER || 'user';
+    }
+    return {
+      username,
+      version: app.getVersion(),
+      platform: process.platform,
+      electronVersion: process.versions.electron,
+      nodeVersion: process.versions.node,
+      chromeVersion: process.versions.chrome
+    };
+  });
+
+  ipcMain.handle('app:openExternal', async (_e, url: string) => {
+    // 外部リンク(リリースページ等)は shell.openExternal で既定ブラウザへ。
+    // セキュリティ的に https:// のみ許可する。
+    if (!/^https?:\/\//i.test(url)) return { ok: false, error: 'invalid url' };
+    try {
+      await shell.openExternal(url);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
   });
 
   // ---------- Team MCP (TeamHub bridge 方式) ----------

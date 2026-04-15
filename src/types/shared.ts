@@ -48,6 +48,19 @@ export interface ClaudeCheckResult {
   error?: string;
 }
 
+/**
+ * サイドバー左下のユーザーメニューで表示する情報。
+ * main プロセスで os.userInfo() と app.getVersion() を使って集める。
+ */
+export interface AppUserInfo {
+  username: string;
+  version: string;
+  platform: NodeJS.Platform;
+  electronVersion: string;
+  nodeVersion: string;
+  chromeVersion: string;
+}
+
 export const DEFAULT_SETTINGS: AppSettings = {
   language: 'ja',
   theme: 'claude-dark',

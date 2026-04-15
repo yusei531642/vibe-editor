@@ -26,6 +26,11 @@ const ja: Dict = {
   'appMenu.recent': '最近のプロジェクト',
   'appMenu.clear': 'クリア',
   'appMenu.empty': '履歴なし',
+  // ---------- UserMenu (サイドバー左下) ----------
+  'userMenu.settings': '設定',
+  'userMenu.language': '言語',
+  'userMenu.theme': 'テーマ',
+  'userMenu.releases': 'GitHub でリリースを見る',
   // ---------- ワークスペース (Issue #4) ----------
   'workspace.roots': 'ワークスペース',
   'workspace.add': 'フォルダを追加',
@@ -202,6 +207,11 @@ const en: Dict = {
   'appMenu.recent': 'Recent projects',
   'appMenu.clear': 'Clear',
   'appMenu.empty': 'No history',
+  // ---------- UserMenu (sidebar footer) ----------
+  'userMenu.settings': 'Settings',
+  'userMenu.language': 'Language',
+  'userMenu.theme': 'Theme',
+  'userMenu.releases': 'View releases on GitHub',
   // ---------- Workspace (Issue #4) ----------
   'workspace.roots': 'Workspace',
   'workspace.add': 'Add folder',

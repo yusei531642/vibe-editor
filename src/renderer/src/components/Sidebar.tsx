@@ -8,6 +8,7 @@ import { ChangesPanel } from './ChangesPanel';
 import { SessionsPanel } from './SessionsPanel';
 import { FileTreePanel } from './FileTreePanel';
 import { AppMenu } from './AppMenu';
+import { UserMenu } from './UserMenu';
 import { useT } from '../lib/i18n';
 
 export type SidebarView = 'files' | 'changes' | 'sessions';
@@ -55,6 +56,9 @@ interface SidebarProps {
   onOpenFileDialog: () => void;
   onOpenRecent: (path: string) => void;
   onClearRecent: () => void;
+
+  // サイドバー左下の UserMenu 用
+  onOpenSettings: () => void;
 }
 
 export function Sidebar(props: SidebarProps): JSX.Element {
@@ -146,6 +150,8 @@ export function Sidebar(props: SidebarProps): JSX.Element {
           />
         )}
       </div>
+
+      <UserMenu onOpenSettings={props.onOpenSettings} />
     </aside>
   );
 }
