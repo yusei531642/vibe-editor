@@ -19,7 +19,9 @@
   --pad: 8px;
   --gap: 8px;
   --row-h: 32px;
-  --toolbar-h: 52px;
+  /* Issue #5: 以前は 52px でメイン表示(Claude/Codex ターミナル)を圧迫していた。
+     アイコンサイズ(16px)+ padding 8px 程度で収まるように薄くする。 */
+  --toolbar-h: 34px;
   /* テーマ変数 (applyTheme で上書き) */
   --bg: #2c2c2a;
   --bg-panel: #1f1e1d;
@@ -292,11 +294,19 @@ body.is-resizing * {
 
 /* サイドバーブランドヘッダー */
 .sidebar__header {
-  padding: 16px 20px 4px;
+  padding: 4px 10px;
+  min-height: var(--toolbar-h);
+  height: var(--toolbar-h);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   -webkit-app-region: drag;
+}
+
+.sidebar__header .app-menu,
+.sidebar__header .app-menu__trigger,
+.sidebar__header .sidebar__brand {
+  -webkit-app-region: no-drag;
 }
 
 .sidebar__brand {
@@ -576,10 +586,11 @@ body.is-resizing * {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 20px;
+  padding: 0 10px;
   background: var(--bg);
-  gap: 12px;
+  gap: 8px;
   min-height: var(--toolbar-h);
+  height: var(--toolbar-h);
   box-shadow: 0 1px 0 var(--border);
   position: relative;
   z-index: 1;
@@ -617,9 +628,9 @@ body.is-resizing * {
   background: transparent;
   color: var(--text);
   border: none;
-  border-radius: var(--radius-md);
-  padding: 7px 14px;
-  font-size: 13px;
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   font-family: inherit;
@@ -670,10 +681,10 @@ body.is-resizing * {
 }
 
 .toolbar__btn--icon {
-  padding: 7px;
+  padding: 4px;
   color: var(--text-dim);
-  width: 30px;
-  height: 30px;
+  width: 26px;
+  height: 26px;
 }
 
 .toolbar__btn--icon:hover:not(:disabled) {
@@ -1555,10 +1566,11 @@ body.is-resizing * {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 14px 24px;
+  padding: 4px 12px;
   background: var(--bg);
   min-height: var(--toolbar-h);
-  gap: 10px;
+  height: var(--toolbar-h);
+  gap: 8px;
   box-shadow: 0 1px 0 var(--border);
   -webkit-app-region: drag;
 }
@@ -1572,12 +1584,14 @@ body.is-resizing * {
 .claude-code-panel__title-wrap {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   font-family: var(--heading-font);
-  font-size: 17px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text);
-  letter-spacing: -0.015em;
+  letter-spacing: -0.01em;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .claude-code-panel__dot {
@@ -1634,8 +1648,8 @@ body.is-resizing * {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   background: var(--bg-hover);
   color: var(--text-dim);
@@ -3418,7 +3432,7 @@ body.is-resizing * {
 .filetree__header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 4px;
   padding: 4px 12px 6px 12px;
   color: var(--text-mute);
   font-size: 11px;
@@ -3427,10 +3441,93 @@ body.is-resizing * {
   letter-spacing: 0.04em;
 }
 
+.filetree__header .filetree__root {
+  flex: 1;
+}
+
 .filetree__root {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ---------- Issue #4: ワークスペース複数ルート ---------- */
+
+.filetree__root-group {
+  padding-bottom: 4px;
+}
+
+.filetree__root-header {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 8px 4px 4px;
+  margin: 2px 0 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-top: 1px solid transparent;
+}
+
+.filetree__root-group:not(:first-child) .filetree__root-header {
+  border-top-color: var(--border);
+}
+
+.filetree__root-header.is-primary {
+  color: var(--text);
+}
+
+.filetree__root-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  color: inherit;
+  border: none;
+  padding: 3px 2px;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.filetree__root-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.filetree__root-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filetree__root-remove {
+  background: transparent;
+  color: var(--text-mute);
+  border: none;
+  border-radius: 4px;
+  padding: 2px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.filetree__root-header:hover .filetree__root-remove {
+  opacity: 1;
+}
+
+.filetree__root-remove:hover {
+  color: var(--warning);
+  background: var(--bg-hover);
 }
 
 .filetree__refresh {

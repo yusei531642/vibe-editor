@@ -1,6 +1,6 @@
 import { app, ipcMain } from 'electron';
 import { randomUUID } from 'crypto';
-import { writeFileSync, mkdirSync } from 'fs';
+import { writeFileSync, mkdirSync, statSync } from 'fs';
 import { join } from 'path';
 import type {
   TerminalCreateOptions,
@@ -28,6 +28,38 @@ import { createBatchedDataSender } from '../lib/pty-data-batcher';
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const nodePty: typeof import('node-pty') = require('node-pty');
 
+/**
+ * ConPTY は存在しない / ディレクトリでない cwd を渡されると
+ * `CreateProcess` が Windows error 267 (ERROR_DIRECTORY) で失敗し、
+ * 利用者に意味のないエラーを返してしまう。spawn 前に cwd を検証し、
+ * 無効なら fallback → process.cwd() の順で救済する。戻り値の
+ * `warning` は呼び出し元に「元の cwd は無効だった」旨を伝えるため。
+ */
+function resolveValidCwd(
+  requested: string | undefined,
+  fallback: string | undefined
+): { cwd: string; warning: string | null } {
+  const isValid = (p: string | undefined): p is string => {
+    if (!p) return false;
+    try {
+      return statSync(p).isDirectory();
+    } catch {
+      return false;
+    }
+  };
+  if (isValid(requested)) return { cwd: requested, warning: null };
+  if (isValid(fallback)) {
+    return {
+      cwd: fallback,
+      warning: `指定された作業ディレクトリが無効です: ${requested || '(未設定)'} → ${fallback} で起動します`
+    };
+  }
+  return {
+    cwd: process.cwd(),
+    warning: `作業ディレクトリが無効です: ${requested || '(未設定)'} → プロセス既定の ${process.cwd()} で起動します`
+  };
+}
+
 export function registerTerminalIpc(): void {
   ipcMain.handle(
     'terminal:create',
@@ -52,11 +84,16 @@ export function registerTerminalIpc(): void {
           }
         }
 
+        const resolvedCwd = resolveValidCwd(opts.cwd, opts.fallbackCwd);
+        if (resolvedCwd.warning) {
+          console.warn('[terminal]', resolvedCwd.warning);
+        }
+
         const pty = nodePty.spawn(command, args, {
           name: 'xterm-256color',
           cols: Math.max(20, opts.cols || 80),
           rows: Math.max(5, opts.rows || 24),
-          cwd: opts.cwd,
+          cwd: resolvedCwd.cwd,
           env: {
             ...(process.env as Record<string, string>),
             ...(opts.env ?? {}),
@@ -99,15 +136,22 @@ export function registerTerminalIpc(): void {
         // （URL 形式ではなく UUID）が必要なので、spawn 前の snapshot と比較して
         // 新しく現れたエントリをこの pty の session id とする。
         // Claude Code 以外（codex 等）は jsonl を作らないのでウォッチしない。
-        if (opts.agentId && opts.cwd && /claude/i.test(command)) {
+        if (opts.agentId && resolvedCwd.cwd && /claude/i.test(command)) {
           watchClaudeSession({
-            projectRoot: opts.cwd,
+            projectRoot: resolvedCwd.cwd,
             listClaudeSessionIds,
             isAlive: () => sessions.has(id),
             onSessionFound: (sessionId) => {
+              // 注意: このコールバックは PTY 寿命外(ウォッチャー経由の非同期)で呼ばれ得る。
+              // セッションが既に消えている / webContents が破棄されている可能性があるので
+              // 二重に検証する。これがないと "dead target" への send で例外が出る。
+              if (!sessions.has(id)) return;
               const wc = findWebContentsById(webContentsId);
-              if (wc) {
+              if (!wc || wc.isDestroyed()) return;
+              try {
                 wc.send(`terminal:sessionId:${id}`, sessionId);
+              } catch (err) {
+                console.warn('[terminal] sessionId dispatch failed:', err);
               }
             }
           }).catch((err) => {
@@ -118,7 +162,8 @@ export function registerTerminalIpc(): void {
         return {
           ok: true,
           id,
-          command: [command, ...args].join(' ')
+          command: [command, ...args].join(' '),
+          warning: resolvedCwd.warning ?? undefined
         };
       } catch (err) {
         return {

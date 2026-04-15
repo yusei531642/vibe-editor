@@ -1,5 +1,4 @@
 import { Command as CommandIcon, RotateCw, Settings as SettingsIcon } from 'lucide-react';
-import { AppMenu } from './AppMenu';
 import { useT } from '../lib/i18n';
 
 interface ToolbarProps {
@@ -8,40 +7,24 @@ interface ToolbarProps {
   onOpenSettings: () => void;
   onOpenPalette: () => void;
   status: string;
-  recentProjects: string[];
-  onNewProject: () => void;
-  onOpenFolder: () => void;
-  onOpenFile: () => void;
-  onOpenRecent: (path: string) => void;
-  onClearRecent: () => void;
 }
 
+/**
+ * メインヘッダー。Issue #6 により AppMenu(ハンバーガー) は Sidebar 側に移動したため、
+ * ここには Restart・パレット・設定などの軽量アクションと、現在のプロジェクトパス
+ * だけを残している。Issue #5 の指示どおり高さは極力切り詰める。
+ */
 export function Toolbar({
   projectRoot,
   onRestart,
   onOpenSettings,
   onOpenPalette,
-  status,
-  recentProjects,
-  onNewProject,
-  onOpenFolder,
-  onOpenFile,
-  onOpenRecent,
-  onClearRecent
+  status
 }: ToolbarProps): JSX.Element {
   const t = useT();
   return (
     <div className="toolbar">
       <div className="toolbar__left">
-        <AppMenu
-          recentProjects={recentProjects}
-          onNewProject={onNewProject}
-          onOpenFolder={onOpenFolder}
-          onOpenFile={onOpenFile}
-          onOpenRecent={onOpenRecent}
-          onClearRecent={onClearRecent}
-        />
-        <div className="toolbar__divider" />
         <button
           type="button"
           className="toolbar__btn toolbar__btn--icon"
@@ -49,7 +32,7 @@ export function Toolbar({
           title={t('toolbar.restart.title')}
           aria-label={t('toolbar.restart.title')}
         >
-          <RotateCw size={16} strokeWidth={1.75} />
+          <RotateCw size={14} strokeWidth={1.75} />
         </button>
       </div>
       <div className="toolbar__right">
@@ -62,7 +45,7 @@ export function Toolbar({
           title={t('toolbar.palette.title')}
           aria-label={t('toolbar.palette.title')}
         >
-          <CommandIcon size={16} strokeWidth={1.75} />
+          <CommandIcon size={14} strokeWidth={1.75} />
         </button>
         <button
           type="button"
@@ -71,7 +54,7 @@ export function Toolbar({
           title={t('toolbar.settings.title')}
           aria-label={t('toolbar.settings.title')}
         >
-          <SettingsIcon size={16} strokeWidth={1.75} />
+          <SettingsIcon size={14} strokeWidth={1.75} />
         </button>
       </div>
     </div>

@@ -43,6 +43,13 @@ interface TeamInfo {
 }
 
 const teams = new Map<string, TeamInfo>();
+/**
+ * 現在 "アクティブ" とみなす teamId 集合。`registerTeam` で追加、
+ * `clearTeam` で削除する。renderer 側の setup/cleanup と対応し、
+ * MCP 設定の参照カウントとして機能する(空になるまで claude.json の
+ * `vive-team` エントリを消さない)。
+ */
+const activeTeamIds = new Set<string>();
 
 function getOrCreateTeam(teamId: string): TeamInfo {
   let t = teams.get(teamId);
@@ -100,17 +107,38 @@ function untrackTimer(agentId: string, timer: ReturnType<typeof setTimeout>): vo
  *
  * 全チャンクタイマーは pendingInjectTimers に登録し、agent が消えたら cancelInjectTimers で一括解除。
  */
+/**
+ * 1 エージェントあたりで保持を許容するチャンクタイマー数の上限。
+ * これを超えるような高速な team_send 連打が発生すると、前回の注入が
+ * 終わる前に次が被さり、最後の Enter が正しい順で届かなくなる。
+ * 上限に達したら新規注入を拒否してレート制限する(安全サイド倒し)。
+ */
+const MAX_PENDING_INJECT_TIMERS_PER_AGENT = 256;
+
 function injectIntoPty(agentId: string, fromRole: string, text: string): boolean {
   const session = agentSessions.get(agentId);
   if (!session) return false;
+  // PTY 側が直前に死んでいても agentSessions に一瞬残っているケースがあるので、
+  // sessions 側のハードな生存状態もチェック(二重の安全装置)。
+  if (!session.pty) return false;
+  // 高負荷時の上限チェック
+  const current = pendingInjectTimers.get(agentId)?.size ?? 0;
+  if (current >= MAX_PENDING_INJECT_TIMERS_PER_AGENT) {
+    return false;
+  }
   const banner = `[Team ← ${fromRole}] `;
   // 改行は1行に整形（ブラケットペーストは Claude Code では送信不可のため）
   const flat = text.replace(/\n{2,}/g, ' | ').replace(/\n/g, ' ');
-  const payload = banner + flat;
+  // 過大な注入を避けるため、1 メッセージ 4 KB で切り詰める
+  const MAX_PAYLOAD = 4096;
+  const truncated =
+    flat.length > MAX_PAYLOAD ? flat.slice(0, MAX_PAYLOAD) + ' …(truncated)' : flat;
+  const payload = banner + truncated;
 
   // バイト長で分割しないとマルチバイト文字の途中で切れる可能性があるので、
   // Buffer で一旦変換してから UTF-8 として安全な境界を探す。
   const bytes = Buffer.from(payload, 'utf-8');
+  if (bytes.length === 0) return false;
   const CHUNK_SIZE = 64;
   const CHUNK_DELAY_MS = 15;
 
@@ -124,39 +152,53 @@ function injectIntoPty(agentId: string, fromRole: string, text: string): boolean
     i = end;
   }
 
+  // 書き込み先セッションが途中で死んでも、残りタイマーが "別のエージェント" に
+  // 化けた同じ agentId に書き込んでしまわないよう、必ず同じ session オブジェクトを
+  // 参照して送る(agentSessions.get(agentId) === session のチェックで担保)。
+  const writeIfSame = (data: string): void => {
+    if (agentSessions.get(agentId) !== session) return;
+    if (!sessions.has(findSessionIdByPty(session))) return;
+    try {
+      session.pty.write(data);
+    } catch {
+      /* 既に破棄されている */
+    }
+  };
+
   try {
     // 最初のチャンクは即時書き込み、以降は少しずつ遅延
-    session.pty.write(chunks[0].toString('utf-8'));
+    writeIfSame(chunks[0].toString('utf-8'));
     for (let k = 1; k < chunks.length; k++) {
       const chunk = chunks[k];
       const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
         untrackTimer(agentId, timer);
-        try {
-          if (agentSessions.get(agentId) === session) {
-            session.pty.write(chunk.toString('utf-8'));
-          }
-        } catch {
-          /* 既に破棄されている等 */
-        }
+        writeIfSame(chunk.toString('utf-8'));
       }, k * CHUNK_DELAY_MS);
       trackTimer(agentId, timer);
     }
     // 全チャンク送信完了後に Enter を送る
     const enterTimer: ReturnType<typeof setTimeout> = setTimeout(() => {
       untrackTimer(agentId, enterTimer);
-      try {
-        if (agentSessions.get(agentId) === session) {
-          session.pty.write('\r');
-        }
-      } catch {
-        /* noop */
-      }
+      writeIfSame('\r');
     }, chunks.length * CHUNK_DELAY_MS);
     trackTimer(agentId, enterTimer);
     return true;
   } catch {
     return false;
   }
+}
+
+/**
+ * Session オブジェクトから現在の sessions テーブルでの id を逆引きする。
+ * O(n) だがセッション数は多くて十数個程度なので実害はない。
+ * 見つからなければ空文字を返し、呼び出し側は `sessions.has('')` が false に
+ * なることを期待して送信を諦める。
+ */
+function findSessionIdByPty(session: { pty: unknown }): string {
+  for (const [id, s] of sessions) {
+    if (s === session) return id;
+  }
+  return '';
 }
 
 // ---------- ツール実装 ----------
@@ -661,13 +703,27 @@ class TeamHub {
     /* TeamHub は agentSessions を直接参照するだけなので特にやることなし */
   }
 
-  /** チーム破棄時に履歴をクリーンアップ */
-  clearTeam(teamId: string): void {
+  /**
+   * チーム破棄時に履歴と参照カウントをクリーンアップ。
+   * @returns `true` ならこれでアクティブチームが 0 になったので、
+   *          呼び出し側は MCP 設定も実際に削除してよい。
+   */
+  clearTeam(teamId: string): boolean {
     teams.delete(teamId);
+    activeTeamIds.delete(teamId);
+    return activeTeamIds.size === 0;
   }
 
   registerTeam(teamId: string, name: string): void {
+    if (teamId && teamId !== '_init') {
+      activeTeamIds.add(teamId);
+    }
     updateTeamName(teamId, name);
+  }
+
+  /** 現在アクティブなチーム数。参照カウント用 */
+  get activeTeamCount(): number {
+    return activeTeamIds.size;
   }
 
   private handleClient(socket: Socket): void {

@@ -14,6 +14,7 @@ export interface AppMenuProps {
   onNewProject: () => void;
   onOpenFolder: () => void;
   onOpenFile: () => void;
+  onAddToWorkspace: () => void;
   onOpenRecent: (path: string) => void;
   onClearRecent: () => void;
 }
@@ -26,6 +27,7 @@ export function AppMenu({
   onNewProject,
   onOpenFolder,
   onOpenFile,
+  onAddToWorkspace,
   onOpenRecent,
   onClearRecent
 }: AppMenuProps): JSX.Element {
@@ -106,6 +108,16 @@ export function AppMenu({
             <File size={16} strokeWidth={1.75} className="app-menu__item-icon" />
             <span className="app-menu__item-label">{t('appMenu.openFile')}</span>
             <span className="app-menu__item-hint">{t('appMenu.openFileHint')}</span>
+          </button>
+          <button
+            type="button"
+            className="app-menu__item"
+            role="menuitem"
+            onClick={pickAndClose(onAddToWorkspace)}
+          >
+            <FolderPlus size={16} strokeWidth={1.75} className="app-menu__item-icon" />
+            <span className="app-menu__item-label">{t('appMenu.addToWorkspace')}</span>
+            <span className="app-menu__item-hint">{t('appMenu.addToWorkspaceHint')}</span>
           </button>
 
           <div className="app-menu__divider" />

@@ -21,9 +21,18 @@ const ja: Dict = {
   'appMenu.openFolderHint': '既存のプロジェクト',
   'appMenu.openFile': 'ファイルを開く…',
   'appMenu.openFileHint': '単独ファイル',
+  'appMenu.addToWorkspace': 'フォルダをワークスペースに追加…',
+  'appMenu.addToWorkspaceHint': 'サイドバーに別ルートを並べる',
   'appMenu.recent': '最近のプロジェクト',
   'appMenu.clear': 'クリア',
   'appMenu.empty': '履歴なし',
+  // ---------- ワークスペース (Issue #4) ----------
+  'workspace.roots': 'ワークスペース',
+  'workspace.add': 'フォルダを追加',
+  'workspace.remove': 'ワークスペースから外す',
+  'workspace.removed': '{name} をワークスペースから外しました',
+  'workspace.added': '{name} をワークスペースに追加しました',
+  'workspace.alreadyAdded': '{name} は既に追加されています',
 
   // ---------- Sidebar ----------
   'sidebar.files': 'ファイル',
@@ -188,9 +197,18 @@ const en: Dict = {
   'appMenu.openFolderHint': 'Existing project',
   'appMenu.openFile': 'Open file…',
   'appMenu.openFileHint': 'Single file',
+  'appMenu.addToWorkspace': 'Add folder to workspace…',
+  'appMenu.addToWorkspaceHint': 'Show another root in the sidebar',
   'appMenu.recent': 'Recent projects',
   'appMenu.clear': 'Clear',
   'appMenu.empty': 'No history',
+  // ---------- Workspace (Issue #4) ----------
+  'workspace.roots': 'Workspace',
+  'workspace.add': 'Add folder',
+  'workspace.remove': 'Remove from workspace',
+  'workspace.removed': 'Removed {name} from the workspace',
+  'workspace.added': 'Added {name} to the workspace',
+  'workspace.alreadyAdded': '{name} is already in the workspace',
 
   // ---------- Sidebar ----------
   'sidebar.files': 'Files',

@@ -23,6 +23,8 @@ export interface TerminalViewHandle {
 
 interface TerminalViewProps {
   cwd: string;
+  /** `cwd` が無効な場合のフォールバック(通常はプロジェクトルートを渡す) */
+  fallbackCwd?: string;
   command: string;
   args?: string[];
   /** pty に渡す追加の環境変数 */
@@ -63,6 +65,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
   function TerminalView(
     {
       cwd,
+      fallbackCwd,
       command,
       args,
       env,
@@ -140,6 +143,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     // --- pty spawn / onData / onExit (不変式 #1: deps は cwd/command のみ) ---
     usePtySession({
       cwd,
+      fallbackCwd,
       command,
       termRef,
       fitRef,

@@ -16,7 +16,6 @@ import type {
 import { Sidebar, type SidebarView } from './components/Sidebar';
 import { TabBar, type TabItem } from './components/TabBar';
 import { Toolbar } from './components/Toolbar';
-import { AppMenu } from './components/AppMenu';
 import { DiffView } from './components/DiffView';
 import { EditorView } from './components/EditorView';
 import { TerminalView, type TerminalViewHandle } from './components/TerminalView';
@@ -50,6 +49,11 @@ interface DiffTab {
 
 interface EditorTab {
   id: string;
+  /**
+   * Issue #4: 開いているファイルがどのワークスペースルート配下かを記憶する。
+   * 同名の相対パスが別ルートに存在し得るので、read/write や ID 衝突回避に必須。
+   */
+  rootPath: string;
   relPath: string;
   content: string;
   originalContent: string;
@@ -177,6 +181,21 @@ export function App(): JSX.Element {
    */
   const teamHistoryPending = useRef(new Map<string, TeamHistoryEntry>());
   const teamHistoryFlushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const flushTeamHistoryNow = useCallback((): void => {
+    if (teamHistoryFlushTimer.current) {
+      clearTimeout(teamHistoryFlushTimer.current);
+      teamHistoryFlushTimer.current = null;
+    }
+    if (!window.api.teamHistory) {
+      teamHistoryPending.current.clear();
+      return;
+    }
+    const entries = Array.from(teamHistoryPending.current.values());
+    teamHistoryPending.current.clear();
+    for (const e of entries) {
+      void window.api.teamHistory.save(e);
+    }
+  }, []);
   const saveTeamHistory = useCallback((entry: TeamHistoryEntry) => {
     if (!window.api.teamHistory) return;
     teamHistoryPending.current.set(entry.id, entry);
@@ -190,6 +209,12 @@ export function App(): JSX.Element {
       }
     }, 500);
   }, []);
+  // アンマウント(アプリ終了直前)で pending を即 flush
+  useEffect(() => {
+    return () => {
+      flushTeamHistoryNow();
+    };
+  }, [flushTeamHistoryNow]);
 
   // tabs: diff タブと editor タブを並立させ、id プレフィックスで判別する
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
@@ -336,9 +361,11 @@ export function App(): JSX.Element {
         return next;
       });
       setTeams((prev) => prev.filter((t) => t.id !== teamId));
-      // MCP クリーンアップ
+      // MCP クリーンアップ(失敗しても UI 側は続行。catch で unhandled rejection を抑止)
       if (projectRoot) {
-        void window.api.app.cleanupTeamMcp(projectRoot, teamId);
+        window.api.app
+          .cleanupTeamMcp(projectRoot, teamId)
+          .catch((err) => console.warn('[team] cleanupTeamMcp failed:', err));
       }
     },
     [projectRoot, clearSpawnTimers]
@@ -348,12 +375,20 @@ export function App(): JSX.Element {
     (tabId: number) => {
       const tab = terminalTabs.find((t) => t.id === tabId);
       if (tab?.role === 'leader' && tab.teamId) {
+        // Leader 1 人しか居ない "empty team" は確認ダイアログ不要。即チーム終了。
+        const otherMembers = terminalTabs.filter(
+          (t) => t.teamId === tab.teamId && t.id !== tabId
+        );
+        if (otherMembers.length === 0) {
+          doCloseTeam(tab.teamId);
+          return;
+        }
         setPendingTeamClose({ tabId, teamId: tab.teamId });
         return;
       }
       doCloseTab(tabId);
     },
-    [terminalTabs, doCloseTab]
+    [terminalTabs, doCloseTab, doCloseTeam]
   );
 
   const restartTerminalTab = useCallback((tabId: number) => {
@@ -712,9 +747,11 @@ export function App(): JSX.Element {
   // ---------- エディタタブ ----------
 
   const openEditorTab = useCallback(
-    async (relPath: string) => {
-      if (!projectRoot) return;
-      const id = `edit:${relPath}`;
+    async (rootPath: string, relPath: string) => {
+      const effectiveRoot = rootPath || projectRoot;
+      if (!effectiveRoot) return;
+      // Issue #4: 同じ相対パスが別ルートに存在しうるので id に root も混ぜる
+      const id = `edit:${effectiveRoot}\u0001${relPath}`;
       setActiveTabId(id);
       setEditorTabs((prev) => {
         if (prev.some((t) => t.id === id)) return prev;
@@ -722,6 +759,7 @@ export function App(): JSX.Element {
           ...prev,
           {
             id,
+            rootPath: effectiveRoot,
             relPath,
             content: '',
             originalContent: '',
@@ -733,7 +771,7 @@ export function App(): JSX.Element {
         ];
       });
       try {
-        const res = await window.api.files.read(projectRoot, relPath);
+        const res = await window.api.files.read(effectiveRoot, relPath);
         setEditorTabs((prev) =>
           prev.map((t) =>
             t.id === id
@@ -767,13 +805,14 @@ export function App(): JSX.Element {
 
   const saveEditorTab = useCallback(
     async (id: string) => {
-      if (!projectRoot) return;
       const tab = editorTabs.find((t) => t.id === id);
       if (!tab) return;
+      const targetRoot = tab.rootPath || projectRoot;
+      if (!targetRoot) return;
       if (tab.isBinary) return;
       if (tab.content === tab.originalContent) return;
       try {
-        const res = await window.api.files.write(projectRoot, tab.relPath, tab.content);
+        const res = await window.api.files.write(targetRoot, tab.relPath, tab.content);
         if (res.ok) {
           setEditorTabs((prev) =>
             prev.map((t) =>
@@ -976,6 +1015,56 @@ export function App(): JSX.Element {
     showToast('最近のプロジェクト履歴をクリアしました', { tone: 'info' });
   }, [updateSettings, showToast]);
 
+  // ---------- Issue #4: ワークスペースフォルダ管理 ----------
+
+  const workspaceFolders = useMemo(
+    () => (settings.workspaceFolders ?? []).filter((p) => p && p !== projectRoot),
+    [settings.workspaceFolders, projectRoot]
+  );
+
+  const handleAddWorkspaceFolder = useCallback(async () => {
+    const folder = await window.api.dialog.openFolder('ワークスペースに追加するフォルダを選択');
+    if (!folder) return;
+    const name = folder.split(/[\\/]/).pop() ?? folder;
+    if (folder === projectRoot) {
+      showToast(t('workspace.alreadyAdded', { name }), { tone: 'info' });
+      return;
+    }
+    const current = settings.workspaceFolders ?? [];
+    if (current.includes(folder)) {
+      showToast(t('workspace.alreadyAdded', { name }), { tone: 'info' });
+      return;
+    }
+    await updateSettings({ workspaceFolders: [...current, folder] });
+    showToast(t('workspace.added', { name }), { tone: 'success' });
+  }, [settings.workspaceFolders, projectRoot, updateSettings, showToast, t]);
+
+  const handleRemoveWorkspaceFolder = useCallback(
+    (path: string) => {
+      const current = settings.workspaceFolders ?? [];
+      if (!current.includes(path)) return;
+      const name = path.split(/[\\/]/).pop() ?? path;
+      void updateSettings({ workspaceFolders: current.filter((p) => p !== path) });
+      // 該当ルート配下のエディタタブを閉じる(未保存はユーザー操作なしで捨てる前に確認)
+      setEditorTabs((prev) => {
+        const closing = prev.filter((t) => t.rootPath === path);
+        if (closing.length === 0) return prev;
+        const dirty = closing.filter(
+          (t) => !t.isBinary && t.content !== t.originalContent
+        );
+        if (
+          dirty.length > 0 &&
+          !confirmDiscardEditorTabs(closing.map((t) => t.id))
+        ) {
+          return prev;
+        }
+        return prev.filter((t) => t.rootPath !== path);
+      });
+      showToast(t('workspace.removed', { name }), { tone: 'info' });
+    },
+    [settings.workspaceFolders, updateSettings, showToast, t, confirmDiscardEditorTabs]
+  );
+
   // ---------- コマンドパレット ----------
 
   const commands = useMemo<Command[]>(() => {
@@ -997,6 +1086,12 @@ export function App(): JSX.Element {
         title: 'ファイルを開く…',
         category: 'プロジェクト',
         run: () => void handleOpenFile()
+      },
+      {
+        id: 'workspace.addFolder',
+        title: 'フォルダをワークスペースに追加…',
+        category: 'ワークスペース',
+        run: () => void handleAddWorkspaceFolder()
       },
       ...(settings.recentProjects ?? []).slice(0, 5).map<Command>((p) => ({
         id: `project.recent.${p}`,
@@ -1142,6 +1237,7 @@ export function App(): JSX.Element {
     handleOpenFolder,
     handleOpenFile,
     handleOpenRecent,
+    handleAddWorkspaceFolder,
     cycleTab,
     activeTabId,
     closeTab,
@@ -1326,9 +1422,15 @@ export function App(): JSX.Element {
   const handleCreateTeam = useCallback(
     async (teamName: string, leader: { agent: TerminalAgent }, members: TeamMember[]) => {
       const totalNeeded = 1 + members.length;
-      if (terminalTabs.length + totalNeeded > MAX_TERMINALS) return;
+      if (terminalTabs.length + totalNeeded > MAX_TERMINALS) {
+        showToast(`チームは上限 ${MAX_TERMINALS} を超えます`, { tone: 'warning' });
+        return;
+      }
 
       const teamId = `team-${Date.now()}`;
+      // 同時作成レース対策: これ以前の staggered spawn 予約は全て中断する
+      clearSpawnTimers();
+
       setTeams((prev) => [...prev, { id: teamId, name: teamName }]);
 
       // MCP 用のメンバー一覧を事前構築
@@ -1344,8 +1446,28 @@ export function App(): JSX.Element {
       // MCP サーバーをセットアップ（Claude Code / Codex MCP 設定）
       let mcpChanged = false;
       if (projectRoot) {
-        const res = await window.api.app.setupTeamMcp(projectRoot, teamId, teamName, allMembers);
-        mcpChanged = res.changed === true;
+        try {
+          const res = await window.api.app.setupTeamMcp(
+            projectRoot,
+            teamId,
+            teamName,
+            allMembers
+          );
+          if (!res?.ok) {
+            throw new Error(res?.error || 'setupTeamMcp failed');
+          }
+          mcpChanged = res.changed === true;
+        } catch (err) {
+          // 失敗時は予約した状態を全部ロールバックする。
+          // ここで続行すると TeamHub 無しでタブだけ生えて "ゾンビチーム" になる。
+          console.warn('[team] setupTeamMcp failed:', err);
+          setTeams((prev) => prev.filter((t) => t.id !== teamId));
+          showToast(
+            `チーム作成に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
+            { tone: 'error' }
+          );
+          return;
+        }
       }
 
       // claude.json が更新された場合、既存の Claude タブは古い MCP 情報で起動しているので
@@ -1398,8 +1520,6 @@ export function App(): JSX.Element {
       // マウントすると、ResizeObserver と fit.fit() の衝突で謎のスペースや
       // 位置ズレが起きることがある。80ms 間隔だとほぼ問題なく落ち着く）
       const SPAWN_STAGGER_MS = 80;
-      // 既存の pending タイマーはキャンセル（連続作成対策）
-      clearSpawnTimers();
       for (let i = 0; i < members.length; i++) {
         const memberIdx = i + 1;
         const m = members[i];
@@ -1419,7 +1539,14 @@ export function App(): JSX.Element {
         spawnStaggerTimers.current.push(timer);
       }
     },
-    [addTerminalTab, terminalTabs.length, projectRoot, saveTeamHistory, clearSpawnTimers]
+    [
+      addTerminalTab,
+      terminalTabs.length,
+      projectRoot,
+      saveTeamHistory,
+      clearSpawnTimers,
+      showToast
+    ]
   );
 
   // ---------- チーム履歴の resume / 削除 ----------
@@ -1427,6 +1554,24 @@ export function App(): JSX.Element {
   const handleResumeTeam = useCallback(
     async (entry: TeamHistoryEntry) => {
       if (!projectRoot) return;
+      if (!entry.members || entry.members.length === 0) {
+        showToast('チームメンバー情報が空のため復元できません', { tone: 'warning' });
+        return;
+      }
+      if (entry.projectRoot && entry.projectRoot !== projectRoot) {
+        showToast(
+          `このチームは別プロジェクト(${entry.projectRoot.split(/[\\/]/).pop()})の履歴です`,
+          { tone: 'warning' }
+        );
+        return;
+      }
+      // 容量チェック: 既存タブ + メンバー数 が上限を超えるなら断念
+      if (terminalTabs.length + entry.members.length > MAX_TERMINALS) {
+        showToast(`ターミナル上限(${MAX_TERMINALS})を超えるため復元できません`, {
+          tone: 'warning'
+        });
+        return;
+      }
 
       // 再利用時刻を更新
       const updated: TeamHistoryEntry = {
@@ -1484,7 +1629,7 @@ export function App(): JSX.Element {
 
       showToast(t('teamHistory.resumed', { name: entry.name }), { tone: 'info' });
     },
-    [projectRoot, addTerminalTab, showToast, t, saveTeamHistory]
+    [projectRoot, terminalTabs.length, addTerminalTab, showToast, t, saveTeamHistory]
   );
 
   const handleDeleteTeamHistory = useCallback(
@@ -1500,10 +1645,45 @@ export function App(): JSX.Element {
     []
   );
 
-  /** Claude Code 起動ログから session id が取れたときに、該当タブのチーム履歴を更新 */
+  /**
+   * Leader だけ閉じる(メンバーはチーム無しタブとして残す)パス。
+   * doCloseTeam() と違って tabs は保持するが、"チームは終了" という意味で
+   * MCP の参照カウントは減らす必要がある。
+   */
+  const handleCloseLeaderOnly = useCallback(
+    (tabId: number, teamId: string) => {
+      // 1) Leader タブだけ閉じる
+      doCloseTab(tabId);
+      // 2) 残りメンバーは通常タブへ降格(teamId/role を外す)
+      setTerminalTabs((prev) =>
+        prev.map((tab) =>
+          tab.teamId === teamId
+            ? { ...tab, teamId: null, role: null, teamHistoryMemberIdx: null }
+            : tab
+        )
+      );
+      // 3) runtime チームを削除
+      setTeams((prev) => prev.filter((x) => x.id !== teamId));
+      // 4) MCP 参照カウントを減らす(doCloseTeam 相当だが spawnStaggerTimers は触らない)
+      if (projectRoot) {
+        void window.api.app
+          .cleanupTeamMcp(projectRoot, teamId)
+          .catch((err) => console.warn('[team] cleanup after closeLeaderOnly failed:', err));
+      }
+    },
+    [doCloseTab, projectRoot]
+  );
+
+  /**
+   * Claude Code 起動ログから session id が取れたときに該当タブのチーム履歴を更新。
+   * NOTE: このコールバックは watcher 由来の非同期で、タブが既に閉じられた後に
+   * 発火することがある。その場合 tab.teamId は残っているが entry 側は削除済みで
+   * findIndex が -1 を返すので no-op。setEditorTabs などに波及しない。
+   */
   const handleTerminalSessionId = useCallback(
     (tab: TerminalTab, sessionId: string) => {
       if (!tab.teamId || tab.teamHistoryMemberIdx == null) return;
+      if (!sessionId) return;
       setTeamHistoryEntries((prev) => {
         const idx = prev.findIndex((e) => e.id === tab.teamId);
         if (idx < 0) return prev;
@@ -1608,8 +1788,11 @@ export function App(): JSX.Element {
         view={sidebarView}
         onViewChange={setSidebarView}
         projectRoot={projectRoot}
+        workspaceFolders={workspaceFolders}
+        onAddWorkspaceFolder={() => void handleAddWorkspaceFolder()}
+        onRemoveWorkspaceFolder={handleRemoveWorkspaceFolder}
         activeFilePath={activeFilePath}
-        onOpenFile={(p) => void openEditorTab(p)}
+        onOpenFile={(rootPath, relPath) => void openEditorTab(rootPath, relPath)}
         gitStatus={gitStatus}
         gitLoading={gitLoading}
         onRefreshGit={refreshGit}
@@ -1624,6 +1807,12 @@ export function App(): JSX.Element {
         teamHistory={teamHistoryEntries}
         onResumeTeam={(entry) => void handleResumeTeam(entry)}
         onDeleteTeamHistory={(id) => void handleDeleteTeamHistory(id)}
+        recentProjects={settings.recentProjects ?? []}
+        onNewProject={handleNewProject}
+        onOpenFolder={handleOpenFolder}
+        onOpenFileDialog={handleOpenFile}
+        onOpenRecent={handleOpenRecent}
+        onClearRecent={handleClearRecent}
       />
       <main className="main">
         <Toolbar
@@ -1632,12 +1821,6 @@ export function App(): JSX.Element {
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenPalette={() => setPaletteOpen(true)}
           status={status}
-          recentProjects={settings.recentProjects ?? []}
-          onNewProject={handleNewProject}
-          onOpenFolder={handleOpenFolder}
-          onOpenFile={handleOpenFile}
-          onOpenRecent={handleOpenRecent}
-          onClearRecent={handleClearRecent}
         />
         {tabs.length > 0 && (
           <TabBar
@@ -1688,14 +1871,6 @@ export function App(): JSX.Element {
       <aside className={`claude-code-panel${hasActiveContent ? '' : ' claude-code-panel--full'}`}>
         <header className="claude-code-panel__header">
           <div className="claude-code-panel__title-wrap">
-            <AppMenu
-              recentProjects={settings.recentProjects ?? []}
-              onNewProject={handleNewProject}
-              onOpenFolder={handleOpenFolder}
-              onOpenFile={handleOpenFile}
-              onOpenRecent={handleOpenRecent}
-              onClearRecent={handleClearRecent}
-            />
             <span className="claude-code-panel__dot" />
             <span className="claude-code-panel__title">{t('claudePanel.title')}</span>
           </div>
@@ -1772,7 +1947,16 @@ export function App(): JSX.Element {
               <button className="toolbar__btn toolbar__btn--primary" onClick={() => { doCloseTeam(pendingTeamClose.teamId); setPendingTeamClose(null); }}>
                 {t('team.closeTeam')}
               </button>
-              <button className="toolbar__btn" onClick={() => { doCloseTab(pendingTeamClose.tabId); setTerminalTabs((prev) => prev.map((t) => t.teamId === pendingTeamClose.teamId ? { ...t, teamId: null } : t)); setTeams((prev) => prev.filter((t) => t.id !== pendingTeamClose.teamId)); setPendingTeamClose(null); }}>
+              <button
+                className="toolbar__btn"
+                onClick={() => {
+                  handleCloseLeaderOnly(
+                    pendingTeamClose.tabId,
+                    pendingTeamClose.teamId
+                  );
+                  setPendingTeamClose(null);
+                }}
+              >
                 {t('team.closeLeaderOnly')}
               </button>
               <button className="toolbar__btn" onClick={() => setPendingTeamClose(null)}>
@@ -1878,6 +2062,7 @@ export function App(): JSX.Element {
                     else terminalRefs.current.delete(tab.id);
                   }}
                   cwd={settings.claudeCwd || projectRoot}
+                  fallbackCwd={projectRoot}
                   command={
                     tab.agent === 'codex'
                       ? settings.codexCommand || 'codex'

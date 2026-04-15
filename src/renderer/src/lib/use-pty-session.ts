@@ -22,6 +22,8 @@ export interface PtySessionCallbacks {
 
 export interface UsePtySessionOptions {
   cwd: string;
+  /** `cwd` が無効だったときに main 側でフォールバックに使うパス */
+  fallbackCwd?: string;
   command: string;
   termRef: MutableRefObject<Terminal | null>;
   fitRef: MutableRefObject<FitAddon | null>;
@@ -51,6 +53,7 @@ export interface UsePtySessionOptions {
 export function usePtySession(options: UsePtySessionOptions): void {
   const {
     cwd,
+    fallbackCwd,
     command,
     termRef,
     fitRef,
@@ -93,6 +96,7 @@ export function usePtySession(options: UsePtySessionOptions): void {
         const snap = snapRef.current;
         const res = await window.api.terminal.create({
           cwd,
+          fallbackCwd,
           command,
           args: snap.args,
           cols: initialCols,
@@ -113,6 +117,9 @@ export function usePtySession(options: UsePtySessionOptions): void {
         }
 
         ptyIdRef.current = res.id;
+        if (res.warning) {
+          term.writeln(`\x1b[33m[警告] ${res.warning}\x1b[0m`);
+        }
         callbacksRef.current.onStatus?.(`実行中: ${res.command ?? command}`);
 
         // セッション id は main プロセスが `~/.claude/projects/.../*.jsonl` の

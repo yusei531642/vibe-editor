@@ -57,6 +57,7 @@ export function registerAppIpc(): void {
           return { ok: false, error: 'TeamHub is not running' };
         }
 
+        // _init は起動時のウォームアップ呼び出し。activeTeamIds には追加しない。
         teamHub.registerTeam(teamId, teamName);
 
         const [claudeChanged] = await Promise.all([
@@ -79,11 +80,17 @@ export function registerAppIpc(): void {
 
   ipcMain.handle('app:cleanupTeamMcp', async (_e, _projectRoot: string, teamId: string) => {
     try {
-      if (teamId && teamId !== '_init') {
-        teamHub.clearTeam(teamId);
+      if (!teamId || teamId === '_init') {
+        return { ok: true, removed: false };
       }
-      await Promise.all([cleanupClaudeMcp(), cleanupCodexMcp()]);
-      return { ok: true };
+      // 参照カウント: アクティブチームが 0 になったときだけ claude.json / codex から消す。
+      // 他のチームがまだ生きている最中にグローバルな vive-team エントリを消すと、
+      // そのチームの Claude/Codex が次回再スポーン時に MCP ブリッジを失う。
+      const shouldRemoveMcp = teamHub.clearTeam(teamId);
+      if (shouldRemoveMcp) {
+        await Promise.all([cleanupClaudeMcp(), cleanupCodexMcp()]);
+      }
+      return { ok: true, removed: shouldRemoveMcp };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }

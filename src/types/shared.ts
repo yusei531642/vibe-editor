@@ -26,6 +26,13 @@ export interface AppSettings {
   claudeArgs: string;
   claudeCwd: string;
   recentProjects: string[];
+  /**
+   * VSCode の "フォルダーをワークスペースに追加" 相当。
+   * メインの `projectRoot` とは別に、サイドバーのファイルツリーで
+   * 複数ルートを並べて表示するためのパス配列。git/terminal/MCP は
+   * 引き続き `projectRoot` を基準に動作する。
+   */
+  workspaceFolders: string[];
   /** 右側 Claude Code パネルの幅 (px) */
   claudeCodePanelWidth: number;
   // ---------- Codex ----------
@@ -55,6 +62,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   claudeArgs: '',
   claudeCwd: '',
   recentProjects: [],
+  workspaceFolders: [],
   claudeCodePanelWidth: 460,
   codexCommand: 'codex',
   codexArgs: '',
@@ -173,6 +181,13 @@ export interface FileWriteResult {
 
 export interface TerminalCreateOptions {
   cwd: string;
+  /**
+   * `cwd` が無効(存在しない or ディレクトリでない)だった場合に
+   * main プロセス側で代替に使うフォールバックパス。通常は
+   * 現在開いているプロジェクトルートを渡す。これが無効な場合は
+   * 更に `process.cwd()` にフォールバックする。
+   */
+  fallbackCwd?: string;
   command?: string;
   args?: string[];
   cols: number;
@@ -197,6 +212,11 @@ export interface TerminalCreateResult {
   id?: string;
   error?: string;
   command?: string;
+  /**
+   * 致命的ではない警告メッセージ(例: 設定された cwd が無効でフォールバックした、等)。
+   * UI 側で status ライン / トースト / terminal に表示する用途。
+   */
+  warning?: string;
 }
 
 export interface TerminalExitInfo {

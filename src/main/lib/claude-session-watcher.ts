@@ -34,10 +34,32 @@ export async function watchClaudeSession(opts: WatchClaudeSessionOptions): Promi
   const before = await listClaudeSessionIds(projectRoot);
   const started = Date.now();
 
+  // 長い intervalMs をそのまま待つと、PTY が死んでも最大 intervalMs 後まで
+  // 抜けられず、ウォッチャーが死んだセッションへコールバックを投げる窓が生まれる。
+  // 小さなステップに刻んで isAlive() を頻繁にチェックする。
+  const CHECK_STEP_MS = 100;
+  const sleepResponsive = async (totalMs: number): Promise<boolean> => {
+    const end = Date.now() + totalMs;
+    while (Date.now() < end) {
+      if (!isAlive()) return false;
+      const wait = Math.min(CHECK_STEP_MS, end - Date.now());
+      await new Promise((r) => setTimeout(r, wait));
+    }
+    return isAlive();
+  };
+
   while (Date.now() - started < maxMs) {
     if (!isAlive()) return;
-    await new Promise((r) => setTimeout(r, intervalMs));
-    const now = await listClaudeSessionIds(projectRoot);
+    if (!(await sleepResponsive(intervalMs))) return;
+    if (!isAlive()) return;
+    let now: Set<string>;
+    try {
+      now = await listClaudeSessionIds(projectRoot);
+    } catch {
+      // ディレクトリ列挙に失敗 → 次の周期で再試行
+      continue;
+    }
+    if (!isAlive()) return;
     const newIds: string[] = [];
     for (const id of now) {
       if (!before.has(id)) newIds.push(id);
