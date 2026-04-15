@@ -289,7 +289,9 @@ body.is-resizing * {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  overflow: hidden;
+  /* overflow は子要素側で制御する。ここに hidden を付けると
+     AppMenu のドロップダウンが親の境界で切り取られてしまう。
+     ファイルツリー本体のスクロールは .sidebar__body の overflow-y: auto が担当。 */
   box-shadow: inset -1px 0 0 var(--border);
 }
 
@@ -302,7 +304,9 @@ body.is-resizing * {
   align-items: center;
   gap: 4px;
   -webkit-app-region: drag;
-  overflow: hidden;
+  /* NOTE: ここに overflow: hidden を付けると AppMenu のドロップダウンが
+     親の境界で切り取られて表示されなくなる。ブランド文字列の省略は
+     .sidebar__header .sidebar__brand の自前の overflow で処理する。 */
 }
 
 .sidebar__header .app-menu,

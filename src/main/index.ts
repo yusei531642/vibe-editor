@@ -63,13 +63,35 @@ function showMainWindow(): void {
 function setupTray(): void {
   if (tray) return;
   // ICO は Windows ネイティブ、macOS/Linux は PNG を使う
-  const iconPath = resolveIconPath(process.platform === 'win32' ? 'icon.ico' : 'icon-32.png');
-  let image = nativeImage.createFromPath(iconPath);
-  if (image.isEmpty()) {
-    // フォールバック: 32x32 PNG
-    image = nativeImage.createFromPath(resolveIconPath('icon-32.png'));
+  const candidates = [
+    resolveIconPath(process.platform === 'win32' ? 'icon.ico' : 'icon-32.png'),
+    resolveIconPath('icon-32.png'),
+    resolveIconPath('icon.png')
+  ];
+  let image: Electron.NativeImage | null = null;
+  for (const p of candidates) {
+    try {
+      const img = nativeImage.createFromPath(p);
+      if (!img.isEmpty()) {
+        image = img;
+        break;
+      }
+    } catch {
+      /* 次の候補へ */
+    }
   }
-  tray = new Tray(image);
+  if (!image) {
+    // 最終フォールバック: 空の 1x1 画像。これでも Tray 自体は生成できる。
+    image = nativeImage.createEmpty();
+  }
+  try {
+    tray = new Tray(image);
+  } catch (err) {
+    // 空画像で Tray 生成が失敗するプラットフォームもあり得る。
+    // ここで投げると app.whenReady 後続処理が止まるので握りつぶす。
+    console.warn('[tray] failed to create tray icon, continuing without it:', err);
+    return;
+  }
   tray.setToolTip('vibe-editor');
 
   const menu = Menu.buildFromTemplate([
@@ -199,8 +221,16 @@ app.whenReady().then(async () => {
   }
 
   createWindow();
-  setupTray();
-  initAutoUpdater();
+  try {
+    setupTray();
+  } catch (err) {
+    console.warn('[tray] setup failed, continuing without tray:', err);
+  }
+  try {
+    initAutoUpdater();
+  } catch (err) {
+    console.warn('[updater] init failed, continuing without auto-update:', err);
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
