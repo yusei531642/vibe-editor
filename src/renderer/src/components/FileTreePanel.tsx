@@ -199,21 +199,21 @@ export function FileTreePanel({
     if (!state) return null;
     if (state.loading && state.entries.length === 0) {
       return (
-        <div className="filetree__loading" style={{ paddingLeft: 12 + depth * 14 }}>
+        <div className="filetree__loading" style={{ paddingLeft: 10 + depth * 12 }}>
           …
         </div>
       );
     }
     if (state.error) {
       return (
-        <div className="filetree__error" style={{ paddingLeft: 12 + depth * 14 }}>
+        <div className="filetree__error" style={{ paddingLeft: 10 + depth * 12 }}>
           {state.error}
         </div>
       );
     }
     if (state.entries.length === 0) {
       return (
-        <div className="filetree__empty" style={{ paddingLeft: 12 + depth * 14 }}>
+        <div className="filetree__empty" style={{ paddingLeft: 10 + depth * 12 }}>
           —
         </div>
       );
@@ -349,7 +349,7 @@ function FileTreeNode({
       <button
         type="button"
         className={`filetree__row${isActive ? ' is-active' : ''}`}
-        style={{ paddingLeft: 6 + depth * 14 }}
+        style={{ paddingLeft: 4 + depth * 12 }}
         onClick={handleClick}
       >
         {node.isDir ? (

@@ -1,6 +1,6 @@
 {
   "name": "vibe-editor",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "private": true,
   "description": "Electronベースの Claude Code 専用エディタ",
   "main": "out/main/index.js",
@@ -48,6 +48,22 @@
     ],
     "asarUnpack": [
       "**/node_modules/node-pty/**"
+    ],
+    "extraResources": [
+      {
+        "from": "build",
+        "to": "build",
+        "filter": [
+          "icon.ico",
+          "icon.png",
+          "icon-16.png",
+          "icon-32.png",
+          "icon-48.png",
+          "icon-64.png",
+          "icon-128.png",
+          "icon-256.png"
+        ]
+      }
     ],
     "npmRebuild": false,
     "buildDependenciesFromSource": false,

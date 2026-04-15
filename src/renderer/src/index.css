@@ -20,8 +20,9 @@
   --gap: 8px;
   --row-h: 32px;
   /* Issue #5: 以前は 52px でメイン表示(Claude/Codex ターミナル)を圧迫していた。
-     アイコンサイズ(16px)+ padding 8px 程度で収まるように薄くする。 */
-  --toolbar-h: 34px;
+     薄くしつつも内部要素(ハンバーガーメニューや path 表示)が見切れないよう
+     38px に落ち着かせる。52 → 38 で 14px 稼いで主表示面積を広げる。 */
+  --toolbar-h: 38px;
   /* テーマ変数 (applyTheme で上書き) */
   --bg: #2c2c2a;
   --bg-panel: #1f1e1d;
@@ -294,13 +295,14 @@ body.is-resizing * {
 
 /* サイドバーブランドヘッダー */
 .sidebar__header {
-  padding: 4px 10px;
+  padding: 0 10px 0 6px;
   min-height: var(--toolbar-h);
   height: var(--toolbar-h);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   -webkit-app-region: drag;
+  overflow: hidden;
 }
 
 .sidebar__header .app-menu,
@@ -309,9 +311,16 @@ body.is-resizing * {
   -webkit-app-region: no-drag;
 }
 
+.sidebar__header .sidebar__brand {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .sidebar__brand {
   font-family: var(--heading-font);
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text);
   letter-spacing: -0.01em;
@@ -611,6 +620,7 @@ body.is-resizing * {
   display: flex;
   gap: 4px;
   align-items: center;
+  flex-shrink: 0;
 }
 
 .toolbar__right {
@@ -618,6 +628,8 @@ body.is-resizing * {
   gap: 6px;
   align-items: center;
   min-width: 0;
+  flex: 1 1 auto;
+  justify-content: flex-end;
 }
 
 .toolbar__btn {
@@ -711,13 +723,14 @@ body.is-resizing * {
   background: transparent;
   color: var(--text);
   border: none;
-  border-radius: var(--radius-md);
-  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-out-soft),
     color var(--dur-fast) var(--ease-out-soft);
   white-space: nowrap;
-  height: 30px;
+  height: 28px;
+  flex-shrink: 0;
 }
 
 .app-menu__caret {
@@ -862,19 +875,24 @@ body.is-resizing * {
 
 .toolbar__path {
   font-family: var(--mono-font);
-  font-size: var(--text-sm);
+  font-size: 11px;
   color: var(--text-mute);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 340px;
-  padding: 4px 12px;
+  /* 薄いツールバーでは path が過剰に幅を食うと status/settings が押し出される。
+     最大 280px、min-width 0 で flex 収縮も許可する。 */
+  max-width: 280px;
+  min-width: 0;
+  flex-shrink: 1;
+  padding: 2px 10px;
   background: var(--bg-hover);
   border: 1px solid var(--border);
   border-radius: 999px;
   letter-spacing: 0.01em;
   font-feature-settings: 'liga' 1, 'calt' 1;
   transition: border-color var(--dur-fast) var(--ease-out);
+  line-height: 1.6;
 }
 
 .toolbar__path:hover {
@@ -1566,7 +1584,7 @@ body.is-resizing * {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 12px;
+  padding: 0 12px;
   background: var(--bg);
   min-height: var(--toolbar-h);
   height: var(--toolbar-h);
@@ -1592,6 +1610,13 @@ body.is-resizing * {
   letter-spacing: -0.01em;
   min-width: 0;
   overflow: hidden;
+  flex: 1 1 auto;
+}
+
+.claude-code-panel__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .claude-code-panel__dot {
@@ -1641,16 +1666,18 @@ body.is-resizing * {
 .claude-code-panel__header-right {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  flex-shrink: 0;
 }
 
 .claude-code-panel__add-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   padding: 0;
+  flex-shrink: 0;
   background: var(--bg-hover);
   color: var(--text-dim);
   border: 1px solid var(--border);
@@ -3461,7 +3488,7 @@ body.is-resizing * {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 4px 8px 4px 4px;
+  padding: 4px 6px 4px 4px;
   margin: 2px 0 0 0;
   color: var(--text-dim);
   font-size: 11px;
@@ -3469,6 +3496,7 @@ body.is-resizing * {
   text-transform: uppercase;
   letter-spacing: 0.04em;
   border-top: 1px solid transparent;
+  min-width: 0;
 }
 
 .filetree__root-group:not(:first-child) .filetree__root-header {
@@ -3483,7 +3511,7 @@ body.is-resizing * {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   background: transparent;
   color: inherit;
@@ -3495,6 +3523,11 @@ body.is-resizing * {
   text-transform: inherit;
   cursor: pointer;
   border-radius: 4px;
+  text-align: left;
+}
+
+.filetree__root-toggle > svg {
+  flex-shrink: 0;
 }
 
 .filetree__root-toggle:hover {
@@ -3611,6 +3644,8 @@ body.is-resizing * {
 .filetree__name {
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .filetree__loading,
