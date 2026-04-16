@@ -1,0 +1,119 @@
+.toast-container {
+  top: 18px;
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  width: min(540px, calc(100vw - 24px));
+  transform: translateX(-50%);
+  align-items: center;
+  gap: 10px;
+  z-index: 3200;
+}
+
+.toast {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 12px 14px;
+  border-left: none;
+  border-radius: 16px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 94%, white 6%) 0%, var(--bg-panel) 100%);
+  box-shadow: var(--shadow-popover);
+  backdrop-filter: blur(18px);
+  opacity: 0;
+  transform: translateY(-10px) scale(0.98);
+  transition:
+    opacity 320ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 320ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 180ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.toast[data-state='open'] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.toast[data-state='exiting'] {
+  opacity: 0;
+  transform: translateY(-8px) scale(0.985);
+}
+
+.toast__indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.toast__body {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.toast__label {
+  color: var(--text-mute);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.toast__message {
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.toast__action,
+.toast__close {
+  border-radius: 10px;
+}
+
+.toast__action {
+  min-height: 30px;
+  padding: 0 10px;
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--border));
+  background: color-mix(in srgb, var(--bg-hover) 70%, transparent);
+}
+
+.toast__action:hover {
+  transform: translateY(-1px);
+}
+
+.toast__close {
+  min-width: 30px;
+  min-height: 30px;
+}
+
+.toast--success .toast__indicator {
+  background: #0ecb81;
+  box-shadow: 0 0 0 4px rgba(14, 203, 129, 0.18);
+}
+
+.toast--warning .toast__indicator {
+  background: var(--warning);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warning) 18%, transparent);
+}
+
+.toast--error .toast__indicator {
+  background: #ff4c4c;
+  box-shadow: 0 0 0 4px rgba(255, 76, 76, 0.16);
+}
+
+@media (max-width: 640px) {
+  .toast-container {
+    top: 12px;
+    width: calc(100vw - 16px);
+  }
+
+  .toast {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}

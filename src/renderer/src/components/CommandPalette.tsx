@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 import { filterCommands, type Command } from '../lib/commands';
-import { useAnimatedMount } from '../lib/use-animated-mount';
+import { useSpringMount } from '../lib/use-animated-mount';
 
 interface CommandPaletteProps {
   open: boolean;
@@ -50,7 +50,7 @@ export function CommandPalette({
     el?.scrollIntoView({ block: 'nearest' });
   }, [selected]);
 
-  const { mounted, state } = useAnimatedMount(open, 220);
+  const { mounted, dataState, motion } = useSpringMount(open, 160);
   if (!mounted) return null;
 
   const runSelected = (): void => {
@@ -80,39 +80,59 @@ export function CommandPalette({
   return (
     <div
       className="cmdp-backdrop"
-      data-state={state}
+      data-state={dataState}
+      data-motion={motion}
       onClick={onClose}
       role="dialog"
       aria-modal="true"
       aria-label="コマンドパレット"
     >
-      <div className="cmdp" data-state={state} onClick={(e) => e.stopPropagation()}>
+      <div
+        className="cmdp"
+        data-state={dataState}
+        data-motion={motion}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="cmdp__header">
-          <Search size={16} strokeWidth={2} className="cmdp__prompt" />
-          <input
-            ref={inputRef}
-            className="cmdp__input"
-            type="text"
-            placeholder="コマンドを検索…"
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              setSelected(0);
-            }}
-            onKeyDown={handleKeyDown}
-            spellCheck={false}
-            autoComplete="off"
-          />
-          <span className="cmdp__hint">↑↓ で選択 · Enter で実行 · Esc で閉じる</span>
+          <div className="cmdp__search">
+            <Search size={16} strokeWidth={2} className="cmdp__prompt" />
+            <input
+              ref={inputRef}
+              className="cmdp__input"
+              type="text"
+              placeholder="コマンドを検索…"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setSelected(0);
+              }}
+              onKeyDown={handleKeyDown}
+              spellCheck={false}
+              autoComplete="off"
+              role="combobox"
+              aria-controls="cmdp-listbox"
+              aria-activedescendant={
+                filtered[selected] ? `cmdp-option-${filtered[selected].id}` : undefined
+              }
+              aria-expanded={filtered.length > 0}
+            />
+          </div>
+          <div className="cmdp__meta">
+            <span className="cmdp__hint">↑↓ で選択 · Enter で実行 · Esc で閉じる</span>
+            <span className="cmdp__count">{filtered.length} 件</span>
+          </div>
         </div>
-        <ul ref={listRef} className="cmdp__list">
+        <ul ref={listRef} className="cmdp__list" role="listbox" id="cmdp-listbox">
           {filtered.length === 0 ? (
             <li className="cmdp__empty">一致するコマンドがありません</li>
           ) : (
             filtered.map((cmd, i) => (
               <li
                 key={cmd.id}
+                id={`cmdp-option-${cmd.id}`}
                 className={`cmdp__item ${i === selected ? 'is-selected' : ''}`}
+                role="option"
+                aria-selected={i === selected}
                 onClick={() => {
                   setSelected(i);
                   onClose();
@@ -120,8 +140,10 @@ export function CommandPalette({
                 }}
                 onMouseEnter={() => setSelected(i)}
               >
-                <span className="cmdp__category">{cmd.category}</span>
-                <span className="cmdp__title">{cmd.title}</span>
+                <span className="cmdp__item-main">
+                  <span className="cmdp__category">{cmd.category}</span>
+                  <span className="cmdp__title">{cmd.title}</span>
+                </span>
                 {cmd.subtitle && (
                   <span className="cmdp__subtitle">{cmd.subtitle}</span>
                 )}

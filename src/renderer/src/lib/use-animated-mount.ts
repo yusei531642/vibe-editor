@@ -1,5 +1,19 @@
 import { useEffect, useState } from 'react';
 
+export type AnimatedMountPreset = 'spring' | 'fade' | 'scale';
+
+export interface AnimatedMountOptions {
+  exitMs?: number;
+  preset?: AnimatedMountPreset;
+}
+
+export interface AnimatedMountResult {
+  mounted: boolean;
+  state: 'open' | 'closed';
+  dataState: 'opening' | 'open' | 'closing' | 'closed';
+  motion: AnimatedMountPreset;
+}
+
 /**
  * モーダル等の enter / exit アニメーションを扱う共通フック。
  *
@@ -13,29 +27,68 @@ import { useEffect, useState } from 'react';
  */
 export function useAnimatedMount(
   open: boolean,
-  exitMs = 220
-): { mounted: boolean; state: 'open' | 'closed' } {
+  options: number | AnimatedMountOptions = 160
+): AnimatedMountResult {
+  return useDataState(open, options);
+}
+
+export function useDataState(
+  open: boolean,
+  options: number | AnimatedMountOptions = 160
+): AnimatedMountResult {
+  const normalized =
+    typeof options === 'number' ? { exitMs: options } : options;
+  const motion = normalized.preset ?? 'spring';
+  const exitMs =
+    normalized.exitMs ?? (motion === 'fade' ? 140 : 160);
   const [mounted, setMounted] = useState(open);
-  const [state, setState] = useState<'open' | 'closed'>(open ? 'open' : 'closed');
+  const [dataState, setDataState] = useState<'opening' | 'open' | 'closing' | 'closed'>(
+    open ? 'open' : 'closed'
+  );
 
   useEffect(() => {
     if (open) {
       setMounted(true);
+      setDataState('opening');
       // 2 フレーム待って state を open に切り替えることで
       // "初期スタイル → open スタイル" の transition を確実に発火させる
       let raf2 = 0;
       const raf1 = requestAnimationFrame(() => {
-        raf2 = requestAnimationFrame(() => setState('open'));
+        raf2 = requestAnimationFrame(() => setDataState('open'));
       });
       return () => {
         cancelAnimationFrame(raf1);
         if (raf2) cancelAnimationFrame(raf2);
       };
     }
-    setState('closed');
-    const t = setTimeout(() => setMounted(false), exitMs);
+    if (!mounted) {
+      setDataState('closed');
+      return undefined;
+    }
+    setDataState('closing');
+    const t = setTimeout(() => {
+      setMounted(false);
+      setDataState('closed');
+    }, exitMs);
     return () => clearTimeout(t);
-  }, [open, exitMs]);
+  }, [mounted, open, exitMs]);
 
-  return { mounted, state };
+  return {
+    mounted,
+    state: dataState === 'opening' || dataState === 'open' ? 'open' : 'closed',
+    dataState,
+    motion
+  };
+}
+
+export function useSpringMount(open: boolean, exitMs = 160): AnimatedMountResult {
+  return useAnimatedMount(open, { exitMs, preset: 'spring' });
+}
+
+export function useFadeMount(open: boolean, exitMs = 160): AnimatedMountResult {
+  return useAnimatedMount(open, { exitMs, preset: 'fade' });
+}
+
+export function useScaleMount(open: boolean, exitMs = 160): AnimatedMountResult {
+  return useAnimatedMount(open, { exitMs, preset: 'scale' });
 }

@@ -8,6 +8,7 @@ import {
   Menu
 } from 'lucide-react';
 import { useT } from '../lib/i18n';
+import { useScaleMount } from '../lib/use-animated-mount';
 
 export interface AppMenuProps {
   recentProjects: string[];
@@ -34,6 +35,7 @@ export function AppMenu({
   const t = useT();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
+  const { mounted, dataState, motion } = useScaleMount(open, 160);
 
   useEffect(() => {
     if (!open) return;
@@ -77,8 +79,21 @@ export function AppMenu({
         <ChevronDown size={12} strokeWidth={2} className="app-menu__caret" />
       </button>
 
-      {open && (
-        <div className="app-menu__dropdown" role="menu">
+      {mounted && (
+        <div
+          className="app-menu__dropdown"
+          data-state={dataState}
+          data-motion={motion}
+          role="menu"
+        >
+          <div className="app-menu__section-label app-menu__section-label--intro">
+            <span>{t('appMenu.title')}</span>
+            <span className="app-menu__section-meta">
+              {recentProjects.length > 0
+                ? t('appMenu.recentCount', { count: recentProjects.length })
+                : t('appMenu.workspace')}
+            </span>
+          </div>
           <button
             type="button"
             className="app-menu__item"

@@ -14,6 +14,7 @@ import {
 import type { AppUserInfo, Language, ThemeName } from '../../../types/shared';
 import { useT } from '../lib/i18n';
 import { useSettings } from '../lib/settings-context';
+import { useScaleMount } from '../lib/use-animated-mount';
 
 interface UserMenuProps {
   onOpenSettings: () => void;
@@ -91,6 +92,7 @@ export function UserMenu({ onOpenSettings }: UserMenuProps): JSX.Element {
   }, [open]);
 
   const isLight = LIGHT_THEMES.has(settings.theme);
+  const { mounted, dataState, motion } = useScaleMount(open, 160);
 
   const toggleLight = (): void => {
     // 明 ↔ 暗 をワンタップで切り替える。Claude テーマは対になっているので
@@ -126,36 +128,43 @@ export function UserMenu({ onOpenSettings }: UserMenuProps): JSX.Element {
 
   return (
     <div className="user-menu" ref={rootRef}>
-      <button
-        type="button"
-        className={`user-menu__trigger${open ? ' is-open' : ''}`}
-        onClick={() => setOpen((v) => !v)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        title={info?.username ?? ''}
-      >
-        <span className="user-menu__avatar" aria-hidden="true">
-          <User size={12} strokeWidth={2.25} />
-        </span>
-        <span className="user-menu__name">{info?.username ?? '…'}</span>
-        <span
-          className="user-menu__theme-icon"
-          onClick={(e) => {
-            // 行全体のクリックではメニューを開き、右端の太陽/月アイコンは
-            // メニューを開かずにトグルだけ行う。
-            e.stopPropagation();
-            toggleLight();
-          }}
-          role="button"
+      <div className="user-menu__trigger-wrap">
+        <button
+          type="button"
+          className={`user-menu__trigger${open ? ' is-open' : ''}`}
+          onClick={() => setOpen((v) => !v)}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          title={info?.username ?? ''}
+        >
+          <span className="user-menu__avatar" aria-hidden="true">
+            <User size={12} strokeWidth={2.25} />
+          </span>
+          <span className="user-menu__identity">
+            <span className="user-menu__name">{info?.username ?? '…'}</span>
+            <span className="user-menu__meta">
+              {LANG_LABELS[settings.language]} · {THEME_LABELS[settings.theme]}
+            </span>
+          </span>
+        </button>
+        <button
+          type="button"
+          className="user-menu__theme-toggle"
+          onClick={toggleLight}
           aria-label={isLight ? 'Dark mode' : 'Light mode'}
           title={isLight ? 'Dark mode' : 'Light mode'}
         >
           {isLight ? <Sun size={14} strokeWidth={1.75} /> : <Moon size={14} strokeWidth={1.75} />}
-        </span>
-      </button>
+        </button>
+      </div>
 
-      {open && (
-        <div className="user-menu__dropdown" role="menu">
+      {mounted && (
+        <div
+          className="user-menu__dropdown"
+          data-state={dataState}
+          data-motion={motion}
+          role="menu"
+        >
           <div className="user-menu__header">
             <div className="user-menu__avatar user-menu__avatar--lg" aria-hidden="true">
               <User size={16} strokeWidth={2.25} />
@@ -185,10 +194,10 @@ export function UserMenu({ onOpenSettings }: UserMenuProps): JSX.Element {
           </button>
 
           {/* 言語: サブメニューを展開 */}
-          <div
+          <button
+            type="button"
             className={`user-menu__item user-menu__item--sub${langOpen ? ' is-open' : ''}`}
             role="menuitem"
-            tabIndex={0}
             onClick={() => {
               setLangOpen((v) => !v);
               setThemeOpen(false);
@@ -202,7 +211,7 @@ export function UserMenu({ onOpenSettings }: UserMenuProps): JSX.Element {
               strokeWidth={2}
               className={`user-menu__sub-caret${langOpen ? ' is-open' : ''}`}
             />
-          </div>
+          </button>
           {langOpen && (
             <div className="user-menu__sub">
               {(['ja', 'en'] as Language[]).map((lang) => (
@@ -221,10 +230,10 @@ export function UserMenu({ onOpenSettings }: UserMenuProps): JSX.Element {
           )}
 
           {/* テーマ: サブメニュー */}
-          <div
+          <button
+            type="button"
             className={`user-menu__item user-menu__item--sub${themeOpen ? ' is-open' : ''}`}
             role="menuitem"
-            tabIndex={0}
             onClick={() => {
               setThemeOpen((v) => !v);
               setLangOpen(false);
@@ -238,7 +247,7 @@ export function UserMenu({ onOpenSettings }: UserMenuProps): JSX.Element {
               strokeWidth={2}
               className={`user-menu__sub-caret${themeOpen ? ' is-open' : ''}`}
             />
-          </div>
+          </button>
           {themeOpen && (
             <div className="user-menu__sub">
               {(Object.keys(THEME_LABELS) as ThemeName[]).map((theme) => (

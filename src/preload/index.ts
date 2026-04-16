@@ -14,126 +14,126 @@ import type {
   TerminalCreateResult,
   TerminalExitInfo
 } from '../types/shared';
+import {
+  IPC_CHANNELS,
+  terminalDataChannel,
+  terminalExitChannel,
+  terminalSessionIdChannel,
+  type TeamMcpMember,
+  type SetupTeamMcpResult,
+  type CleanupTeamMcpResult,
+  type OpenExternalResult,
+  type TeamHubInfo,
+  type SavePastedImageResult,
+  type MutationResult
+} from '../types/ipc';
 
 const api = {
-  ping: (): Promise<string> => ipcRenderer.invoke('ping'),
+  ping: (): Promise<string> => ipcRenderer.invoke(IPC_CHANNELS.PING),
 
   app: {
-    getProjectRoot: (): Promise<string> => ipcRenderer.invoke('app:getProjectRoot'),
-    restart: (): Promise<void> => ipcRenderer.invoke('app:restart'),
+    getProjectRoot: (): Promise<string> => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_PROJECT_ROOT),
+    restart: (): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.APP_RESTART),
     setWindowTitle: (title: string): Promise<void> =>
-      ipcRenderer.invoke('app:setWindowTitle', title),
+      ipcRenderer.invoke(IPC_CHANNELS.APP_SET_WINDOW_TITLE, title),
     checkClaude: (command: string): Promise<ClaudeCheckResult> =>
-      ipcRenderer.invoke('app:checkClaude', command),
+      ipcRenderer.invoke(IPC_CHANNELS.APP_CHECK_CLAUDE, command),
     setZoomLevel: (level: number): Promise<void> =>
-      ipcRenderer.invoke('app:setZoomLevel', level),
-    getZoomLevel: (): Promise<number> =>
-      ipcRenderer.invoke('app:getZoomLevel'),
+      ipcRenderer.invoke(IPC_CHANNELS.APP_SET_ZOOM_LEVEL, level),
+    getZoomLevel: (): Promise<number> => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_ZOOM_LEVEL),
     setupTeamMcp: (
       projectRoot: string,
       teamId: string,
       teamName: string,
-      members: { agentId: string; role: string; agent: string }[]
-    ): Promise<{ ok: boolean; socket?: string; error?: string; changed?: boolean }> =>
-      ipcRenderer.invoke('app:setupTeamMcp', projectRoot, teamId, teamName, members),
-    cleanupTeamMcp: (
-      projectRoot: string,
-      teamId: string
-    ): Promise<{ ok: boolean; error?: string }> =>
-      ipcRenderer.invoke('app:cleanupTeamMcp', projectRoot, teamId),
+      members: TeamMcpMember[]
+    ): Promise<SetupTeamMcpResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.APP_SETUP_TEAM_MCP, projectRoot, teamId, teamName, members),
+    cleanupTeamMcp: (projectRoot: string, teamId: string): Promise<CleanupTeamMcpResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.APP_CLEANUP_TEAM_MCP, projectRoot, teamId),
     getTeamFilePath: (teamId: string): Promise<string> =>
-      ipcRenderer.invoke('app:getTeamFilePath', teamId),
+      ipcRenderer.invoke(IPC_CHANNELS.APP_GET_TEAM_FILE_PATH, teamId),
     getMcpServerPath: (): Promise<string> =>
-      ipcRenderer.invoke('app:getMcpServerPath'),
-    getTeamHubInfo: (): Promise<{ socket: string; token: string; bridgePath: string }> =>
-      ipcRenderer.invoke('app:getTeamHubInfo'),
-    getUserInfo: (): Promise<AppUserInfo> => ipcRenderer.invoke('app:getUserInfo'),
-    openExternal: (url: string): Promise<{ ok: boolean; error?: string }> =>
-      ipcRenderer.invoke('app:openExternal', url)
+      ipcRenderer.invoke(IPC_CHANNELS.APP_GET_MCP_SERVER_PATH),
+    getTeamHubInfo: (): Promise<TeamHubInfo> =>
+      ipcRenderer.invoke(IPC_CHANNELS.APP_GET_TEAM_HUB_INFO),
+    getUserInfo: (): Promise<AppUserInfo> => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_USER_INFO),
+    openExternal: (url: string): Promise<OpenExternalResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.APP_OPEN_EXTERNAL, url)
   },
 
   git: {
     status: (projectRoot: string): Promise<GitStatus> =>
-      ipcRenderer.invoke('git:status', projectRoot),
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_STATUS, projectRoot),
     diff: (projectRoot: string, relPath: string): Promise<GitDiffResult> =>
-      ipcRenderer.invoke('git:diff', projectRoot, relPath)
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_DIFF, projectRoot, relPath)
   },
 
   files: {
     list: (projectRoot: string, relPath: string): Promise<FileListResult> =>
-      ipcRenderer.invoke('files:list', projectRoot, relPath),
+      ipcRenderer.invoke(IPC_CHANNELS.FILES_LIST, projectRoot, relPath),
     read: (projectRoot: string, relPath: string): Promise<FileReadResult> =>
-      ipcRenderer.invoke('files:read', projectRoot, relPath),
-    write: (
-      projectRoot: string,
-      relPath: string,
-      content: string
-    ): Promise<FileWriteResult> =>
-      ipcRenderer.invoke('files:write', projectRoot, relPath, content)
+      ipcRenderer.invoke(IPC_CHANNELS.FILES_READ, projectRoot, relPath),
+    write: (projectRoot: string, relPath: string, content: string): Promise<FileWriteResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.FILES_WRITE, projectRoot, relPath, content)
   },
 
   sessions: {
     list: (projectRoot: string): Promise<SessionInfo[]> =>
-      ipcRenderer.invoke('sessions:list', projectRoot)
+      ipcRenderer.invoke(IPC_CHANNELS.SESSIONS_LIST, projectRoot)
   },
 
   teamHistory: {
     list: (projectRoot: string): Promise<TeamHistoryEntry[]> =>
-      ipcRenderer.invoke('teamHistory:list', projectRoot),
-    save: (entry: TeamHistoryEntry): Promise<{ ok: boolean; error?: string }> =>
-      ipcRenderer.invoke('teamHistory:save', entry),
-    delete: (id: string): Promise<{ ok: boolean; error?: string }> =>
-      ipcRenderer.invoke('teamHistory:delete', id)
+      ipcRenderer.invoke(IPC_CHANNELS.TEAM_HISTORY_LIST, projectRoot),
+    save: (entry: TeamHistoryEntry): Promise<MutationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.TEAM_HISTORY_SAVE, entry),
+    delete: (id: string): Promise<MutationResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.TEAM_HISTORY_DELETE, id)
   },
 
   dialog: {
     openFolder: (title?: string): Promise<string | null> =>
-      ipcRenderer.invoke('dialog:openFolder', title),
+      ipcRenderer.invoke(IPC_CHANNELS.DIALOG_OPEN_FOLDER, title),
     openFile: (title?: string): Promise<string | null> =>
-      ipcRenderer.invoke('dialog:openFile', title),
+      ipcRenderer.invoke(IPC_CHANNELS.DIALOG_OPEN_FILE, title),
     isFolderEmpty: (folderPath: string): Promise<boolean> =>
-      ipcRenderer.invoke('dialog:isFolderEmpty', folderPath)
+      ipcRenderer.invoke(IPC_CHANNELS.DIALOG_IS_FOLDER_EMPTY, folderPath)
   },
 
   settings: {
-    load: (): Promise<AppSettings> => ipcRenderer.invoke('settings:load'),
+    load: (): Promise<AppSettings> => ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_LOAD),
     save: (settings: AppSettings): Promise<void> =>
-      ipcRenderer.invoke('settings:save', settings)
+      ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_SAVE, settings)
   },
 
   terminal: {
     create: (opts: TerminalCreateOptions): Promise<TerminalCreateResult> =>
-      ipcRenderer.invoke('terminal:create', opts),
+      ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_CREATE, opts),
     write: (id: string, data: string): Promise<void> =>
-      ipcRenderer.invoke('terminal:write', id, data),
+      ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_WRITE, id, data),
     resize: (id: string, cols: number, rows: number): Promise<void> =>
-      ipcRenderer.invoke('terminal:resize', id, cols, rows),
-    kill: (id: string): Promise<void> => ipcRenderer.invoke('terminal:kill', id),
-    savePastedImage: (
-      base64: string,
-      mimeType: string
-    ): Promise<{ ok: boolean; path?: string; error?: string }> =>
-      ipcRenderer.invoke('terminal:savePastedImage', base64, mimeType),
+      ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_RESIZE, id, cols, rows),
+    kill: (id: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_KILL, id),
+    savePastedImage: (base64: string, mimeType: string): Promise<SavePastedImageResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_SAVE_PASTED_IMAGE, base64, mimeType),
 
     onData: (id: string, cb: (data: string) => void): (() => void) => {
-      const ch = `terminal:data:${id}`;
+      const ch = terminalDataChannel(id);
       const listener = (_e: Electron.IpcRendererEvent, data: string): void => cb(data);
       ipcRenderer.on(ch, listener);
       return () => ipcRenderer.off(ch, listener);
     },
 
     onExit: (id: string, cb: (info: TerminalExitInfo) => void): (() => void) => {
-      const ch = `terminal:exit:${id}`;
-      const listener = (_e: Electron.IpcRendererEvent, info: TerminalExitInfo): void =>
-        cb(info);
+      const ch = terminalExitChannel(id);
+      const listener = (_e: Electron.IpcRendererEvent, info: TerminalExitInfo): void => cb(info);
       ipcRenderer.on(ch, listener);
       return () => ipcRenderer.off(ch, listener);
     },
 
     onSessionId: (id: string, cb: (sessionId: string) => void): (() => void) => {
-      const ch = `terminal:sessionId:${id}`;
-      const listener = (_e: Electron.IpcRendererEvent, sessionId: string): void =>
-        cb(sessionId);
+      const ch = terminalSessionIdChannel(id);
+      const listener = (_e: Electron.IpcRendererEvent, sessionId: string): void => cb(sessionId);
       ipcRenderer.on(ch, listener);
       return () => ipcRenderer.off(ch, listener);
     }

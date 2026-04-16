@@ -25,6 +25,7 @@ interface ContextMenuProps {
 export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Element {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
+  const [state, setState] = useState<'open' | 'closed'>('closed');
 
   // マウント直後にサイズを測って画面外はみ出しを補正
   useLayoutEffect(() => {
@@ -42,6 +43,11 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Ele
     }
     setPos({ x: nx, y: ny });
   }, [x, y]);
+
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setState('open'));
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent): void => {
@@ -64,6 +70,8 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Ele
     <div
       ref={ref}
       className="context-menu"
+      data-state={state}
+      data-motion="scale"
       style={{ left: pos.x, top: pos.y }}
       role="menu"
       onContextMenu={(e) => e.preventDefault()}
@@ -79,6 +87,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Ele
               item.action();
             }}
             disabled={item.disabled}
+            aria-disabled={item.disabled}
             role="menuitem"
           >
             {item.icon && <span className="context-menu__icon">{item.icon}</span>}

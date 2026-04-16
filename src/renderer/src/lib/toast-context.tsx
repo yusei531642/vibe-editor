@@ -52,6 +52,12 @@ interface ToastContextValue {
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
+const TOAST_LABELS = {
+  info: '情報',
+  success: '完了',
+  warning: '注意',
+  error: 'エラー'
+} as const;
 
 export function ToastProvider({ children }: { children: ReactNode }): JSX.Element {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -150,7 +156,11 @@ function ToastItem({
       className={`toast toast--${tone}`}
       data-state={toast.exiting ? 'exiting' : 'open'}
     >
-      <span className="toast__message">{toast.message}</span>
+      <span className="toast__indicator" aria-hidden="true" />
+      <div className="toast__body">
+        <span className="toast__label">{TOAST_LABELS[tone]}</span>
+        <span className="toast__message">{toast.message}</span>
+      </div>
       {toast.options.action && (
         <button
           type="button"

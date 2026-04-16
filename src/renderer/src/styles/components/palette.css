@@ -1,0 +1,190 @@
+.cmdp-backdrop {
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(12vh, 72px) 20px 24px;
+  background: rgba(6, 8, 12, 0);
+  backdrop-filter: blur(0px);
+  transition:
+    background 180ms cubic-bezier(0.25, 1, 0.5, 1),
+    backdrop-filter 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.cmdp-backdrop[data-state='opening'],
+.cmdp-backdrop[data-state='open'] {
+  background: rgba(6, 8, 12, 0.5);
+  backdrop-filter: blur(20px);
+}
+
+.cmdp-backdrop[data-state='closing'] {
+  background: rgba(6, 8, 12, 0);
+  backdrop-filter: blur(0px);
+}
+
+.cmdp {
+  width: min(640px, calc(100vw - 32px));
+  max-height: min(72vh, 760px);
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 96%, white 4%) 0%, var(--bg-panel) 100%);
+  box-shadow: var(--shadow-modal);
+  opacity: 0;
+  transform: translateY(16px) scale(0.98);
+  transform-origin: top center;
+  transition:
+    opacity 240ms cubic-bezier(0.16, 1, 0.3, 1),
+    transform 240ms cubic-bezier(0.16, 1, 0.3, 1),
+    box-shadow 180ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.cmdp[data-state='opening'],
+.cmdp[data-state='open'] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.cmdp[data-state='closing'] {
+  opacity: 0;
+  transform: translateY(8px) scale(0.985);
+}
+
+.cmdp__header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 14px;
+  border-bottom: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-toolbar) 92%, transparent) 0%, transparent 100%);
+}
+
+.cmdp__search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 0 14px;
+  border: 1px solid color-mix(in srgb, var(--border) 92%, transparent);
+  border-radius: 14px;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg) 90%, white 10%) 0%, color-mix(in srgb, var(--bg) 96%, transparent) 100%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--text) 8%, transparent),
+    0 1px 0 color-mix(in srgb, var(--text) 3%, transparent);
+}
+
+.cmdp__prompt {
+  color: var(--text-mute);
+}
+
+.cmdp__input {
+  min-width: 0;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.cmdp__meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.cmdp__hint,
+.cmdp__count {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg) 84%, transparent);
+  color: var(--text-mute);
+  font-size: 11px;
+  letter-spacing: -0.01em;
+}
+
+.cmdp__count {
+  color: var(--text-dim);
+}
+
+.cmdp__list {
+  padding: 8px;
+}
+
+.cmdp__item {
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  margin: 0;
+  padding: 12px 14px;
+  border-left: none;
+  border-radius: 12px;
+  border: 1px solid transparent;
+  transition:
+    background-color 120ms cubic-bezier(0.25, 1, 0.5, 1),
+    border-color 120ms cubic-bezier(0.25, 1, 0.5, 1),
+    transform 180ms cubic-bezier(0.34, 1.26, 0.64, 1),
+    box-shadow 180ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.cmdp__item:hover,
+.cmdp__item.is-selected {
+  background: color-mix(in srgb, var(--bg-active) 70%, var(--bg-hover) 30%);
+  border-color: color-mix(in srgb, var(--accent) 18%, var(--border));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent),
+    0 10px 24px color-mix(in srgb, black 16%, transparent);
+  transform: translateY(-1px);
+}
+
+.cmdp__item-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cmdp__category {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.cmdp__title {
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+
+.cmdp__subtitle {
+  max-width: 220px;
+  padding-left: 12px;
+  border-left: 1px solid var(--border);
+  color: var(--text-mute);
+}
+
+.cmdp__empty {
+  padding: 32px 24px;
+  border: 1px dashed var(--border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-hover) 70%, transparent);
+}
+
+@media (max-width: 720px) {
+  .cmdp__header {
+    grid-template-columns: 1fr;
+  }
+
+  .cmdp__meta {
+    justify-content: space-between;
+    flex-wrap: wrap;
+  }
+
+  .cmdp__item {
+    grid-template-columns: 1fr;
+  }
+
+  .cmdp__subtitle {
+    max-width: none;
+    padding-left: 0;
+    border-left: none;
+  }
+}

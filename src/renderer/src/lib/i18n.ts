@@ -24,6 +24,8 @@ const ja: Dict = {
   'appMenu.addToWorkspace': 'フォルダをワークスペースに追加…',
   'appMenu.addToWorkspaceHint': 'サイドバーに別ルートを並べる',
   'appMenu.recent': '最近のプロジェクト',
+  'appMenu.recentCount': '{count} 件の履歴',
+  'appMenu.workspace': 'ワークスペース',
   'appMenu.clear': 'クリア',
   'appMenu.empty': '履歴なし',
   // ---------- UserMenu (サイドバー左下) ----------
@@ -93,6 +95,10 @@ const ja: Dict = {
   'claudePanel.notFound.title': 'Claude Code が見つかりません',
   'claudePanel.notFound.body':
     '`claude` コマンドが PATH 上に見つかりませんでした。Claude Code をインストールするか、設定で起動コマンドのパスを指定してください。',
+  'claudePanel.notFound.step1Title': 'CLI をインストール',
+  'claudePanel.notFound.step1Desc': '`claude` コマンドがターミナルから実行できる状態にします。',
+  'claudePanel.notFound.step2Title': '設定を確認',
+  'claudePanel.notFound.step2Desc': 'カスタムコマンドを使う場合は Settings から起動コマンドを見直します。',
   'claudePanel.notFound.installLink': 'Claude Code をインストール',
   'claudePanel.notFound.retry': '再検出',
   'claudePanel.notFound.settings': '設定で指定',
@@ -205,6 +211,8 @@ const en: Dict = {
   'appMenu.addToWorkspace': 'Add folder to workspace…',
   'appMenu.addToWorkspaceHint': 'Show another root in the sidebar',
   'appMenu.recent': 'Recent projects',
+  'appMenu.recentCount': '{count} recent',
+  'appMenu.workspace': 'Workspace',
   'appMenu.clear': 'Clear',
   'appMenu.empty': 'No history',
   // ---------- UserMenu (sidebar footer) ----------
@@ -274,6 +282,10 @@ const en: Dict = {
   'claudePanel.notFound.title': 'Claude Code not found',
   'claudePanel.notFound.body':
     'The `claude` command was not found on your PATH. Install Claude Code, or specify the launch command in Settings.',
+  'claudePanel.notFound.step1Title': 'Install the CLI',
+  'claudePanel.notFound.step1Desc': 'Make sure the `claude` command is available from your terminal.',
+  'claudePanel.notFound.step2Title': 'Check settings',
+  'claudePanel.notFound.step2Desc': 'If using a custom command, review the launch command in Settings.',
   'claudePanel.notFound.installLink': 'Install Claude Code',
   'claudePanel.notFound.retry': 'Retry detection',
   'claudePanel.notFound.settings': 'Open settings',

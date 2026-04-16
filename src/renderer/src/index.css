@@ -1,114 +1,4 @@
-:root {
-  /* 下記変数は SettingsProvider の applyTheme() により動的に上書きされる */
-  --ui-font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic UI',
-    'Noto Sans JP', sans-serif;
-  --heading-font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    'Hiragino Kaku Gothic ProN', 'Hiragino Sans', 'Yu Gothic UI', sans-serif;
-  --mono-font: 'Cascadia Code', 'SFMono-Regular', 'Consolas', 'Liberation Mono',
-    'Menlo', monospace;
-  --ui-font-size: 14px;
-  --radius: 10px;
-  --radius-sm: 6px;
-  /* Claude 公式寄せ: 拡張 radius スケール */
-  --radius-md: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 20px;
-  --radius-pill: 9999px;
-  /* 情報密度 */
-  --pad: 8px;
-  --gap: 8px;
-  --row-h: 32px;
-  /* Issue #5: 以前は 52px でメイン表示(Claude/Codex ターミナル)を圧迫していた。
-     薄くしつつも内部要素(ハンバーガーメニューや path 表示)が見切れないよう
-     38px に落ち着かせる。52 → 38 で 14px 稼いで主表示面積を広げる。 */
-  --toolbar-h: 38px;
-  /* テーマ変数 (applyTheme で上書き) */
-  --bg: #2c2c2a;
-  --bg-panel: #1f1e1d;
-  --bg-sidebar: #1f1e1d;
-  --bg-toolbar: #2c2c2a;
-  --border: rgba(241, 239, 232, 0.10);
-  --bg-hover: rgba(241, 239, 232, 0.05);
-  --bg-active: rgba(216, 90, 48, 0.14);
-  --accent: #d85a30;
-  --accent-hover: #993c1d;
-  --warning: #d4a27f;
-  --warning-hover: #e0b592;
-  --text: #f1efe8;
-  --text-dim: #d3d1c7;
-  --text-mute: #8a8880;
-
-  /* ---------- Coral ランプ (claude 主色) ---------- */
-  --coral-50: #faece7;
-  --coral-100: #f5c4b3;
-  --coral-200: #efa488;
-  --coral-400: #d85a30;
-  --coral-600: #993c1d;
-  --coral-800: #712b13;
-
-  /* ---------- フォーカスリング (Claude coral glow) ---------- */
-  --focus-ring: 0 0 0 3px rgba(216, 90, 48, 0.30);
-
-  /* ---------- モーショントークン (Raycast / Linear 風) ---------- */
-  /* duration */
-  --dur-instant: 80ms;
-  --dur-fast: 150ms;
-  --dur-base: 180ms;
-  --dur-normal: 250ms;
-  --dur-slow: 400ms;
-  --dur-slower: 380ms;
-  /* easing */
-  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-out-soft: cubic-bezier(0.165, 0.85, 0.45, 1);
-  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
-  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --ease-snap: cubic-bezier(0.22, 1, 0.36, 1);
-
-  /* ---------- Depth / Shadow トークン (warm-tinted, layered) ---------- */
-  --shadow-xs: 0 1px 2px rgba(20, 20, 19, 0.04);
-  --shadow-sm: 0 1px 3px rgba(20, 20, 19, 0.06), 0 1px 2px rgba(20, 20, 19, 0.04);
-  --shadow-md: 0 4px 12px rgba(20, 20, 19, 0.08), 0 2px 4px rgba(20, 20, 19, 0.04);
-  --shadow-lg: 0 12px 24px rgba(20, 20, 19, 0.10), 0 4px 8px rgba(20, 20, 19, 0.06);
-  --shadow-xl: 0 20px 40px rgba(20, 20, 19, 0.14), 0 8px 16px rgba(20, 20, 19, 0.08);
-  --shadow-modal: 0 24px 48px rgba(20, 20, 19, 0.18), 0 2px 8px rgba(20, 20, 19, 0.08);
-  --shadow-accent: 0 0 24px rgba(216, 90, 48, 0.18);
-  --shadow-popover: 0 0 0 1px var(--border), 0 12px 24px rgba(20, 20, 19, 0.14),
-    0 4px 8px rgba(20, 20, 19, 0.08);
-
-  /* ---------- ノイズオーバーレイ ---------- */
-  --noise-opacity: 0.03;
-
-  /* ---------- タイポグラフィスケール ---------- */
-  --text-xs: 10px;
-  --text-sm: 11px;
-  --text-base: 13px;
-  --text-md: 14px;
-  --text-lg: 17px;
-  --text-xl: 22px;
-  --text-2xl: 32px;
-  --text-3xl: 44px;
-  --tracking-tight: -0.025em;
-  --tracking-normal: 0;
-  --tracking-wide: 0.08em;
-
-  font-family: var(--ui-font);
-  font-size: var(--ui-font-size);
-  color-scheme: dark;
-  background-color: var(--bg);
-  color: var(--text);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
-  font-feature-settings: "lnum", "kern";
-  line-height: 1.5;
-}
-
-:root[data-theme='light'],
-:root[data-theme='claude-light'] {
-  color-scheme: light;
-}
+@import './styles/tokens.css';
 
 * {
   box-sizing: border-box;
@@ -182,10 +72,6 @@ body,
   background-size: 128px 128px;
   mix-blend-mode: overlay;
 }
-
-:root[data-theme='light'] { --noise-opacity: 0.02; }
-:root[data-theme='claude-light'] { --noise-opacity: 0.025; }
-:root[data-theme='midnight'] { --noise-opacity: 0.04; }
 
 /* ---------- カスタムスクロールバー ---------- */
 ::-webkit-scrollbar {
@@ -297,12 +183,12 @@ body.is-resizing * {
 
 /* サイドバーブランドヘッダー */
 .sidebar__header {
-  padding: 0 10px 0 6px;
+  padding: 0 10px 0 8px;
   min-height: var(--toolbar-h);
   height: var(--toolbar-h);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   -webkit-app-region: drag;
   /* NOTE: ここに overflow: hidden を付けると AppMenu のドロップダウンが
      親の境界で切り取られて表示されなくなる。ブランド文字列の省略は
@@ -323,12 +209,30 @@ body.is-resizing * {
 }
 
 .sidebar__brand {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  line-height: 1.1;
   font-family: var(--heading-font);
   font-size: 13px;
   font-weight: 500;
   color: var(--text);
   letter-spacing: -0.01em;
   -webkit-app-region: no-drag;
+}
+
+.sidebar__brand-project {
+  font-family: var(--mono-font);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--text-mute);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar__body {
@@ -344,45 +248,58 @@ body.is-resizing * {
 
 .sidebar-switcher {
   display: flex;
-  padding: 8px 12px 0;
-  gap: 2px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 10px 0;
   background: transparent;
   position: relative;
 }
 
 .sidebar-switcher__btn {
-  flex: 1;
+  flex: 0 0 auto;
   min-width: 0;
   background: transparent;
-  color: var(--text-mute);
+  color: var(--text-dim);
   border: none;
-  border-radius: 0;
-  padding: 8px 6px 12px;
-  font-size: 12px;
-  font-weight: 500;
+  border-radius: 12px;
+  padding: 10px 12px 10px 16px;
+  font-size: 12.5px;
+  font-weight: 550;
   font-family: inherit;
   cursor: pointer;
-  transition: color var(--dur-fast) var(--ease-out);
+  transition:
+    background-color var(--dur-instant) var(--ease-out-soft),
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-spring),
+    box-shadow var(--dur-fast) var(--ease-out-soft),
+    border-color var(--dur-fast) var(--ease-out-soft);
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 5px;
+  justify-content: flex-start;
+  gap: 10px;
   position: relative;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  box-shadow: inset 0 0 0 1px transparent;
 }
 
-.sidebar-switcher__btn::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 8px;
-  right: 8px;
-  height: 2px;
-  border-radius: 1px;
-  background: transparent;
-  transition: background var(--dur-base) var(--ease-out);
+.sidebar-switcher__btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--text-mute);
+  flex-shrink: 0;
+}
+
+.sidebar-switcher__btn-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  letter-spacing: var(--tracking-tight);
 }
 
 .sidebar-switcher__btn:hover {
@@ -390,13 +307,14 @@ body.is-resizing * {
 }
 
 .sidebar-switcher__btn.is-active {
-  background: transparent;
+  background: var(--bg-active);
   color: var(--text);
   font-weight: 600;
+  box-shadow: inset 2px 0 0 var(--accent), var(--shadow-xs);
 }
 
-.sidebar-switcher__btn.is-active::after {
-  background: var(--accent);
+.sidebar-switcher__btn.is-active .sidebar-switcher__btn-icon {
+  color: var(--accent);
 }
 
 /* Claude テーマ: サイドバーにウォームグラデーション */
@@ -414,8 +332,9 @@ body.is-resizing * {
   min-width: 16px;
   height: 15px;
   padding: 0 4px;
+  margin-left: auto;
   border-radius: 8px;
-  background: var(--bg-active);
+  background: var(--bg-hover);
   color: var(--accent);
   font-size: 9px;
   font-weight: 600;
@@ -426,6 +345,7 @@ body.is-resizing * {
 .sidebar-switcher__btn.is-active .sidebar-switcher__badge {
   background: var(--accent);
   color: #fffdf7;
+  box-shadow: var(--shadow-xs);
 }
 
 /* サイドバー個別ビュー */
@@ -600,11 +520,14 @@ body.is-resizing * {
   align-items: center;
   justify-content: space-between;
   padding: 0 10px;
-  background: var(--bg);
+  background: var(--surface-glass);
+  backdrop-filter: saturate(160%) blur(12px);
+  -webkit-backdrop-filter: saturate(160%) blur(12px);
+  border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
   gap: 8px;
   min-height: var(--toolbar-h);
   height: var(--toolbar-h);
-  box-shadow: 0 1px 0 var(--border);
   position: relative;
   z-index: 1;
   -webkit-app-region: drag;
@@ -622,17 +545,17 @@ body.is-resizing * {
 
 .toolbar__left {
   display: flex;
-  gap: 4px;
+  gap: 8px;
   align-items: center;
-  flex-shrink: 0;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .toolbar__right {
   display: flex;
-  gap: 6px;
+  gap: 8px;
   align-items: center;
-  min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   justify-content: flex-end;
 }
 
@@ -699,8 +622,9 @@ body.is-resizing * {
 .toolbar__btn--icon {
   padding: 4px;
   color: var(--text-dim);
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
 }
 
 .toolbar__btn--icon:hover:not(:disabled) {
@@ -712,6 +636,16 @@ body.is-resizing * {
   height: 20px;
   background: var(--border);
   margin: 0 4px;
+}
+
+.toolbar__control-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-hover);
+  box-shadow: inset 0 0 0 1px var(--border);
 }
 
 /* ---------- 左上プロジェクトメニュー ---------- */
@@ -878,25 +812,43 @@ body.is-resizing * {
 }
 
 .toolbar__path {
-  font-family: var(--mono-font);
-  font-size: 11px;
-  color: var(--text-mute);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  /* 薄いツールバーでは path が過剰に幅を食うと status/settings が押し出される。
-     最大 280px、min-width 0 で flex 収縮も許可する。 */
-  max-width: 280px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(44vw, 420px);
   min-width: 0;
   flex-shrink: 1;
-  padding: 2px 10px;
-  background: var(--bg-hover);
-  border: 1px solid var(--border);
+  padding: 6px 12px;
+  background: var(--surface-glass);
+  box-shadow: inset 0 0 0 1px var(--border), var(--shadow-xs);
   border-radius: 999px;
-  letter-spacing: 0.01em;
   font-feature-settings: 'liga' 1, 'calt' 1;
   transition: border-color var(--dur-fast) var(--ease-out);
   line-height: 1.6;
+}
+
+.toolbar__path-icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.toolbar__path-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--heading-font);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.toolbar__path-parent {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--text-mute);
 }
 
 .toolbar__path:hover {
@@ -904,14 +856,36 @@ body.is-resizing * {
 }
 
 .toolbar__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 240px;
+  padding: 5px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
   font-size: 12px;
+  font-style: normal;
+  font-family: var(--ui-font);
   color: var(--text-mute);
-  font-family: var(--heading-font);
-  font-style: italic;
   white-space: nowrap;
-  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.toolbar__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  box-shadow: 0 0 0 4px var(--bg-hover);
+  flex-shrink: 0;
+}
+
+.toolbar__status-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---------- タブバー ---------- */
@@ -938,26 +912,28 @@ body.is-resizing * {
 
 .tabbar__tab {
   background: transparent;
-  color: var(--text-mute);
+  color: var(--text-dim);
   border: none;
-  padding: 8px 16px;
+  padding: 9px 14px 8px 12px;
   font-family: var(--ui-font);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   user-select: none;
   position: relative;
-  border-radius: 8px 8px 0 0;
+  border-radius: 10px 10px 0 0;
   margin-bottom: -1px;
   letter-spacing: 0.01em;
   z-index: 1;
+  box-shadow: inset 0 -2px 0 transparent;
   transition:
     color var(--dur-fast) var(--ease-out-soft),
     background var(--dur-fast) var(--ease-out-soft),
-    box-shadow var(--dur-normal) var(--ease-spring);
+    box-shadow var(--dur-normal) var(--ease-spring),
+    transform var(--dur-fast) var(--ease-spring);
 }
 
 .tabbar__tab:focus-visible {
@@ -967,15 +943,57 @@ body.is-resizing * {
 
 .tabbar__tab:hover {
   color: var(--text-dim);
-  background: var(--bg-hover);
+  transform: translateY(-1px);
 }
 
 .tabbar__tab.is-active {
   color: var(--text);
-  background: var(--bg-panel);
+  background: var(--bg-hover);
   font-weight: 600;
   z-index: 2;
-  box-shadow: 0 1px 0 var(--bg-panel);
+  box-shadow: inset 0 -2px 0 var(--accent);
+  transform: translateY(0);
+}
+
+.tabbar__tab.is-active:hover {
+  transform: translateY(0);
+}
+
+/* タブ内アイコンエリア */
+.tabbar__indicators {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  color: var(--text-mute);
+}
+
+.tabbar__tab.is-pinned .tabbar__indicators {
+  color: var(--accent);
+}
+
+/* ピン留め/閉じるボタン: ホバーまたはアクティブで表示 */
+.tabbar__pin-btn,
+.tabbar__close {
+  border-radius: 999px;
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-spring),
+    background-color var(--dur-instant) var(--ease-out),
+    color var(--dur-instant) var(--ease-out);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.84);
+}
+
+.tabbar__tab:hover .tabbar__pin-btn,
+.tabbar__tab:hover .tabbar__close,
+.tabbar__tab.is-active .tabbar__pin-btn,
+.tabbar__tab.is-active .tabbar__close,
+.tabbar__tab.is-pinned .tabbar__pin-btn {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
 }
 
 /* Claude テーマ: アクティブタブにアクセントアンダーライン */
@@ -3782,13 +3800,6 @@ body.is-resizing * {
   letter-spacing: -0.01em;
 }
 
-/* Claude テーマ: サイドバーアクティブ切替タブに太字アクセント */
-:root[data-theme^='claude'] .sidebar-switcher__btn::after {
-  transition:
-    background var(--dur-normal) var(--ease-spring),
-    transform var(--dur-normal) var(--ease-spring);
-  height: 2px;
-}
 
 /* prefers-reduced-motion: spring アニメを無効化 */
 @media (prefers-reduced-motion: reduce) {

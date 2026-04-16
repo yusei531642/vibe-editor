@@ -1,3 +1,4 @@
+import { Files, GitBranch, History } from 'lucide-react';
 import type {
   GitFileChange,
   GitStatus,
@@ -16,57 +17,69 @@ export type SidebarView = 'files' | 'changes' | 'sessions';
 interface SidebarProps {
   view: SidebarView;
   onViewChange: (view: SidebarView) => void;
-
-  // files view
   projectRoot: string;
-  /**
-   * Issue #4: プライマリの `projectRoot` に加えて並べて表示するセカンダリルート。
-   * VSCode の "フォルダーをワークスペースに追加" 相当。
-   */
   workspaceFolders: string[];
   onRemoveWorkspaceFolder: (path: string) => void;
   onAddWorkspaceFolder: () => void;
   activeFilePath: string | null;
   onOpenFile: (rootPath: string, relPath: string) => void;
-
-  // changes view
   gitStatus: GitStatus | null;
   gitLoading: boolean;
   onRefreshGit: () => void;
   onOpenDiff: (file: GitFileChange) => void;
   onFileContextMenu: (e: React.MouseEvent, file: GitFileChange) => void;
   activeDiffPath: string | null;
-
-  // sessions view
   sessions: SessionInfo[];
   sessionsLoading: boolean;
   activeSessionId: string | null;
   onRefreshSessions: () => void;
   onResumeSession: (session: SessionInfo) => void;
-
-  // team history (sessions view 内)
   teamHistory: TeamHistoryEntry[];
   onResumeTeam: (entry: TeamHistoryEntry) => void;
   onDeleteTeamHistory: (id: string) => void;
-
-  // Issue #6: ハンバーガーメニュー(AppMenu)をサイドバーに配置するために渡す
   recentProjects: string[];
   onNewProject: () => void;
   onOpenFolder: () => void;
   onOpenFileDialog: () => void;
   onOpenRecent: (path: string) => void;
   onClearRecent: () => void;
-
-  // サイドバー左下の UserMenu 用
   onOpenSettings: () => void;
 }
 
 export function Sidebar(props: SidebarProps): JSX.Element {
   const t = useT();
+  const projectName = props.projectRoot.split(/[\\/]/).filter(Boolean).pop() ?? t('appMenu.title');
+  const totalHistory = props.sessions.length + props.teamHistory.length;
+  const changeCount = props.gitStatus?.ok ? props.gitStatus.files.length : 0;
+
+  const navItems: Array<{
+    view: SidebarView;
+    label: string;
+    count?: number;
+    icon: JSX.Element;
+  }> = [
+    {
+      view: 'files',
+      label: t('sidebar.files'),
+      icon: <Files size={15} strokeWidth={1.85} />
+    },
+    {
+      view: 'changes',
+      label: t('sidebar.changes'),
+      count: changeCount > 0 ? changeCount : undefined,
+      icon: <GitBranch size={15} strokeWidth={1.85} />
+    },
+    {
+      view: 'sessions',
+      label: t('sidebar.history'),
+      count: totalHistory > 0 ? totalHistory : undefined,
+      icon: <History size={15} strokeWidth={1.85} />
+    }
+  ];
+
   return (
     <aside className="sidebar">
       <div className="sidebar__header">
-        {/* Issue #6: ハンバーガー(AppMenu)はメインヘッダーからこちらへ移動 */}
         <AppMenu
           recentProjects={props.recentProjects}
           onNewProject={props.onNewProject}
@@ -76,46 +89,37 @@ export function Sidebar(props: SidebarProps): JSX.Element {
           onOpenRecent={props.onOpenRecent}
           onClearRecent={props.onClearRecent}
         />
-        <span className="sidebar__brand">vibe-editor</span>
+        <div className="sidebar__brand" title={props.projectRoot || projectName}>
+          <span>vibe-editor</span>
+          <span className="sidebar__brand-project">{projectName}</span>
+        </div>
       </div>
+
       <nav className="sidebar-switcher" role="tablist" aria-label="Sidebar view">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={props.view === 'files'}
-          className={`sidebar-switcher__btn ${props.view === 'files' ? 'is-active' : ''}`}
-          onClick={() => props.onViewChange('files')}
-        >
-          {t('sidebar.files')}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={props.view === 'changes'}
-          className={`sidebar-switcher__btn ${props.view === 'changes' ? 'is-active' : ''}`}
-          onClick={() => props.onViewChange('changes')}
-        >
-          {t('sidebar.changes')}
-          {props.gitStatus?.ok && props.gitStatus.files.length > 0 && (
-            <span className="sidebar-switcher__badge">
-              {props.gitStatus.files.length}
-            </span>
-          )}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={props.view === 'sessions'}
-          className={`sidebar-switcher__btn ${props.view === 'sessions' ? 'is-active' : ''}`}
-          onClick={() => props.onViewChange('sessions')}
-        >
-          {t('sidebar.history')}
-          {(props.sessions.length + props.teamHistory.length) > 0 && (
-            <span className="sidebar-switcher__badge">
-              {props.sessions.length + props.teamHistory.length}
-            </span>
-          )}
-        </button>
+        {navItems.map((item) => {
+          const active = props.view === item.view;
+          return (
+            <button
+              key={item.view}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              aria-current={active ? 'page' : undefined}
+              className={`sidebar-switcher__btn ${active ? 'is-active' : ''}`}
+              onClick={() => props.onViewChange(item.view)}
+            >
+              <span className="sidebar-switcher__btn-icon" aria-hidden="true">
+                {item.icon}
+              </span>
+              <span className="sidebar-switcher__btn-label">{item.label}</span>
+              {item.count ? (
+                <span className="sidebar-switcher__badge">
+                  {item.count > 99 ? '99+' : item.count}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
       </nav>
 
       <div className="sidebar__body" key={props.view}>

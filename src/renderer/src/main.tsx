@@ -9,6 +9,12 @@ import { App } from './App';
 import { SettingsProvider } from './lib/settings-context';
 import { ToastProvider } from './lib/toast-context';
 import './index.css';
+import './styles/components/palette.css';
+import './styles/components/modal.css';
+import './styles/components/welcome.css';
+import './styles/components/menu.css';
+import './styles/components/toast.css';
+import './styles/components/claude-not-found.css';
 
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('#root が見つかりません');
