@@ -55,7 +55,7 @@
   --bg: #141413;
   --bg-panel: #1f1e1d;
   --bg-sidebar: #191817;
-  --bg-toolbar: rgba(20, 20, 19, 0.72);
+  --bg-toolbar: rgba(20, 20, 19, 0.62);
   --bg-elev: #2a2826;
   --bg-hover: rgba(241, 239, 232, 0.05);
   --bg-active: rgba(217, 119, 87, 0.14);
@@ -68,8 +68,14 @@
   --surface-elev: var(--bg-elev);
   --surface-hover: var(--bg-hover);
   --surface-active: var(--bg-active);
-  --surface-glass: rgba(20, 20, 19, 0.72);
+  --surface-glass: rgba(20, 20, 19, 0.62);
   --surface-overlay: rgba(6, 6, 7, 0.48);
+
+  /* ---------- Glass Effect ---------- */
+  --glass-blur: 16px;
+  --glass-saturate: 180%;
+  --glass-border: rgba(255, 255, 255, 0.06);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
   /* ---------- Content ---------- */
   --text: #f1efe8;
@@ -156,6 +162,8 @@
 :root[data-theme='light'],
 :root[data-theme='claude-light'] {
   color-scheme: light;
+  --glass-border: rgba(0, 0, 0, 0.06);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.5);
   --shadow-xs: 0 1px 2px rgba(17, 17, 17, 0.04);
   --shadow-sm: 0 1px 3px rgba(17, 17, 17, 0.06), 0 1px 2px rgba(17, 17, 17, 0.04);
   --shadow-md: 0 4px 12px rgba(17, 17, 17, 0.08), 0 2px 4px rgba(17, 17, 17, 0.04);

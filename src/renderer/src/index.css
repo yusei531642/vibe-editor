@@ -171,14 +171,16 @@ body.is-resizing * {
 /* ---------- サイドバー (Claude.ai風) ---------- */
 
 .sidebar {
-  background: var(--bg-sidebar);
+  background: var(--surface-glass);
+  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
   display: flex;
   flex-direction: column;
   min-height: 0;
   /* overflow は子要素側で制御する。ここに hidden を付けると
      AppMenu のドロップダウンが親の境界で切り取られてしまう。
      ファイルツリー本体のスクロールは .sidebar__body の overflow-y: auto が担当。 */
-  box-shadow: inset -1px 0 0 var(--border);
+  box-shadow: inset -1px 0 0 var(--glass-border), var(--glass-highlight);
 }
 
 /* サイドバーブランドヘッダー */
@@ -190,6 +192,7 @@ body.is-resizing * {
   align-items: center;
   gap: 8px;
   -webkit-app-region: drag;
+  border-bottom: 1px solid var(--glass-border);
   /* NOTE: ここに overflow: hidden を付けると AppMenu のドロップダウンが
      親の境界で切り取られて表示されなくなる。ブランド文字列の省略は
      .sidebar__header .sidebar__brand の自前の overflow で処理する。 */
@@ -319,10 +322,10 @@ body.is-resizing * {
 
 /* Claude テーマ: サイドバーにウォームグラデーション */
 :root[data-theme='claude-dark'] .sidebar {
-  background: linear-gradient(180deg, #252422 0%, var(--bg-sidebar) 100%);
+  background: linear-gradient(180deg, rgba(37, 36, 34, 0.72) 0%, var(--surface-glass) 100%);
 }
 :root[data-theme='claude-light'] .sidebar {
-  background: linear-gradient(180deg, #f1efe5 0%, var(--bg-sidebar) 100%);
+  background: linear-gradient(180deg, rgba(241, 239, 229, 0.72) 0%, var(--surface-glass) 100%);
 }
 
 .sidebar-switcher__badge {
@@ -521,10 +524,10 @@ body.is-resizing * {
   justify-content: space-between;
   padding: 0 10px;
   background: var(--surface-glass);
-  backdrop-filter: saturate(160%) blur(12px);
-  -webkit-backdrop-filter: saturate(160%) blur(12px);
-  border-bottom: 1px solid var(--border);
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+  border-bottom: 1px solid var(--glass-border);
+  box-shadow: var(--glass-highlight);
   gap: 8px;
   min-height: var(--toolbar-h);
   height: var(--toolbar-h);
@@ -892,7 +895,9 @@ body.is-resizing * {
 
 .tabbar {
   display: flex;
-  background: var(--bg);
+  background: var(--surface-glass);
+  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
   padding: 6px 16px 0;
   gap: 2px;
   position: relative;
@@ -1586,10 +1591,12 @@ body.is-resizing * {
 .claude-code-panel {
   display: flex;
   flex-direction: column;
-  background: var(--bg);
+  background: var(--surface-glass);
+  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
   min-height: 0;
   min-width: 0;
-  box-shadow: -1px 0 0 var(--border);
+  box-shadow: inset 1px 0 0 var(--glass-border);
   grid-column: 4;
 }
 
@@ -1605,11 +1612,13 @@ body.is-resizing * {
   align-items: center;
   justify-content: space-between;
   padding: 0 12px;
-  background: var(--bg);
+  background: var(--surface-glass);
+  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
   min-height: var(--toolbar-h);
   height: var(--toolbar-h);
   gap: 8px;
-  box-shadow: 0 1px 0 var(--border);
+  box-shadow: 0 1px 0 var(--glass-border), var(--glass-highlight);
   -webkit-app-region: drag;
 }
 
@@ -1810,7 +1819,9 @@ body.is-resizing * {
   padding: 2px 6px;
   height: 26px;
   flex-shrink: 0;
-  background: var(--bg-panel);
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   font-size: 11px;
   user-select: none;
   cursor: grab;
