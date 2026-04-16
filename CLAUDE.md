@@ -1,6 +1,6 @@
 # vibe-editor
 
-Electronベースの Claude Code / Codex 専用エディタ (v0.3.x)
+Electronベースの Claude Code / Codex 専用エディタ (v1.2.x)
 
 ## アーキテクチャ原則
 - メインプロセス: ファイルI/O、git操作、node-pty、設定永続化のみ
