@@ -646,6 +646,7 @@ class TeamHub {
   private _port = 0;
   private _token = '';
   private _bridgePath = '';
+  private clients = new Set<Socket>();
 
   get port(): number {
     return this._port;
@@ -687,6 +688,10 @@ class TeamHub {
   }
 
   stop(): void {
+    for (const socket of this.clients) {
+      try { socket.destroy(); } catch { /* noop */ }
+    }
+    this.clients.clear();
     if (this.server) {
       try {
         this.server.close();
@@ -727,6 +732,9 @@ class TeamHub {
   }
 
   private handleClient(socket: Socket): void {
+    this.clients.add(socket);
+    socket.on('close', () => { this.clients.delete(socket); });
+
     const state: ClientState = { authed: false, ctx: null, buffer: '' };
     socket.setEncoding('utf-8');
 

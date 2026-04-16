@@ -82,6 +82,8 @@ interface TerminalTab {
   hasActivity: boolean;
   /** チーム履歴で使う member インデックス。未所属タブは null */
   teamHistoryMemberIdx: number | null;
+  /** ユーザー向け表示ラベル（自動生成 or 手動リネーム） */
+  label: string;
 }
 
 /** ロール別の短い説明（チームプロンプト内で使用） */
@@ -101,6 +103,18 @@ const ROLE_ORDER: Record<string, number> = {
   researcher: 3,
   reviewer: 4
 };
+
+/** 重複ロールにレター接尾辞を付けた表示名を返す (例: "programmer A") */
+function getRoleDisplayLabel(tab: TerminalTab, allTabs: TerminalTab[]): string {
+  if (!tab.role) return '';
+  if (!tab.teamId) return tab.role;
+  const sameRole = allTabs
+    .filter((t) => t.teamId === tab.teamId && t.role === tab.role)
+    .sort((a, b) => a.agentId.localeCompare(b.agentId));
+  if (sameRole.length <= 1) return tab.role;
+  const idx = sameRole.findIndex((t) => t.id === tab.id);
+  return `${tab.role} ${String.fromCharCode(65 + idx)}`;
+}
 
 /** チームのシステムプロンプト（--append-system-prompt 用） */
 function generateTeamSystemPrompt(
@@ -123,7 +137,8 @@ function generateTeamSystemPrompt(
     .map((t) => {
       const agent = t.agent === 'claude' ? 'Claude Code' : 'Codex';
       const you = t.id === tab.id ? ' ← あなた' : '';
-      return `${t.role ?? 'member'}(${agent})${you}`;
+      const roleLabel = getRoleDisplayLabel(t, allTabs);
+      return `${roleLabel || 'member'}(${agent})${you}`;
     })
     .join(', ');
 
@@ -237,6 +252,7 @@ export function App(): JSX.Element {
   } | null>(null);
   const [dragTabId, setDragTabId] = useState<number | null>(null);
   const [dragOverTabId, setDragOverTabId] = useState<number | null>(null);
+  const [editingLabelTabId, setEditingLabelTabId] = useState<number | null>(null);
 
   // Claude CLI 検査状態
   const [claudeCheck, setClaudeCheck] = useState<{
@@ -261,21 +277,36 @@ export function App(): JSX.Element {
       teamHistoryMemberIdx?: number | null;
     }): number | null => {
       const id = nextTerminalIdRef.current++;
-      const tab: TerminalTab = {
-        id,
-        version: 0,
-        agent: opts?.agent ?? 'claude',
-        role: opts?.role ?? null,
-        teamId: opts?.teamId ?? null,
-        agentId: opts?.agentId ?? `agent-${id}`,
-        status: '',
-        exited: false,
-        resumeSessionId: opts?.resumeSessionId ?? null,
-        hasActivity: false,
-        teamHistoryMemberIdx: opts?.teamHistoryMemberIdx ?? null
-      };
+      const agentType = opts?.agent ?? 'claude';
       let accepted = false;
       setTerminalTabs((prev) => {
+        // ラベル自動生成: チームロール or 連番
+        let label: string;
+        if (opts?.role) {
+          const sameRole = prev.filter(
+            (t) => t.teamId === opts.teamId && t.role === opts.role
+          );
+          const roleName = opts.role.charAt(0).toUpperCase() + opts.role.slice(1);
+          label = sameRole.length > 0 ? `${roleName} ${String.fromCharCode(65 + sameRole.length)}` : roleName;
+        } else {
+          const agentLabel = agentType === 'claude' ? 'Claude' : 'Codex';
+          const sameAgent = prev.filter((t) => t.agent === agentType && !t.role);
+          label = `${agentLabel} #${sameAgent.length + 1}`;
+        }
+        const tab: TerminalTab = {
+          id,
+          version: 0,
+          agent: agentType,
+          role: opts?.role ?? null,
+          teamId: opts?.teamId ?? null,
+          agentId: opts?.agentId ?? `agent-${id}`,
+          status: '',
+          exited: false,
+          resumeSessionId: opts?.resumeSessionId ?? null,
+          hasActivity: false,
+          teamHistoryMemberIdx: opts?.teamHistoryMemberIdx ?? null,
+          label
+        };
         if (prev.length >= MAX_TERMINALS) {
           showToast(`ターミナル上限（${MAX_TERMINALS}）に達しました`, { tone: 'warning' });
           return prev;
@@ -314,7 +345,8 @@ export function App(): JSX.Element {
           exited: false,
           resumeSessionId: null,
           hasActivity: false,
-          teamHistoryMemberIdx: null
+          teamHistoryMemberIdx: null,
+          label: 'Claude #1'
         };
         setActiveTerminalTabId(newId);
         return [fresh];
@@ -349,7 +381,8 @@ export function App(): JSX.Element {
             exited: false,
             resumeSessionId: null,
             hasActivity: false,
-            teamHistoryMemberIdx: null
+            teamHistoryMemberIdx: null,
+            label: 'Claude #1'
           };
           setActiveTerminalTabId(newId);
           return [fresh];
@@ -553,7 +586,8 @@ export function App(): JSX.Element {
             exited: false,
             resumeSessionId: null,
             hasActivity: false,
-            teamHistoryMemberIdx: null
+            teamHistoryMemberIdx: null,
+            label: 'Claude #1'
           }
         ]);
         setActiveTerminalTabId(newId);
@@ -1994,7 +2028,7 @@ export function App(): JSX.Element {
                 onClick={() => setActiveTerminalTabId(tab.id)}
               >
                 {/* ペインヘッダー（エージェント + ロール + 閉じる） */}
-                {terminalTabs.length > 1 && (
+                {(terminalTabs.length > 1 || tab.teamId) && (
                   <div
                     className="terminal-pane__header"
                     draggable
@@ -2039,12 +2073,37 @@ export function App(): JSX.Element {
                     )}
                     {tab.role && (
                       <span className={`terminal-tab__role terminal-tab__role--${tab.role}`}>
-                        {tab.role}
+                        {getRoleDisplayLabel(tab, terminalTabs)}
                       </span>
                     )}
                     {tab.teamId && (
                       <span className="terminal-pane__team-name">
                         {teams.find((t) => t.id === tab.teamId)?.name}
+                      </span>
+                    )}
+                    {editingLabelTabId === tab.id ? (
+                      <input
+                        className="terminal-pane__label-input"
+                        defaultValue={tab.label}
+                        autoFocus
+                        onClick={(e) => e.stopPropagation()}
+                        onBlur={(e) => {
+                          const v = e.currentTarget.value.trim() || tab.label;
+                          setTerminalTabs((prev) => prev.map((t) => t.id === tab.id ? { ...t, label: v } : t));
+                          setEditingLabelTabId(null);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') e.currentTarget.blur();
+                          if (e.key === 'Escape') setEditingLabelTabId(null);
+                        }}
+                      />
+                    ) : (
+                      <span
+                        className="terminal-pane__label"
+                        onDoubleClick={(e) => { e.stopPropagation(); setEditingLabelTabId(tab.id); }}
+                        title={tab.label}
+                      >
+                        {tab.label}
                       </span>
                     )}
                     <span style={{ flex: 1 }} />

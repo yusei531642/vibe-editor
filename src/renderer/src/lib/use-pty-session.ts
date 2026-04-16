@@ -152,8 +152,17 @@ export function usePtySession(options: UsePtySessionOptions): void {
       }
     })();
 
+    // IME composition 中は onData を抑制して候補ウィンドウの位置ジャンプを防ぐ
+    let composing = false;
+    const textarea = term.textarea;
+    const onCompStart = (): void => { composing = true; };
+    const onCompEnd = (): void => { composing = false; };
+    textarea?.addEventListener('compositionstart', onCompStart);
+    textarea?.addEventListener('compositionend', onCompEnd);
+
     // キー入力 → pty へ
     const dataSub = term.onData((data) => {
+      if (composing) return;
       if (ptyIdRef.current) {
         void window.api.terminal.write(ptyIdRef.current, data);
       }
@@ -162,6 +171,8 @@ export function usePtySession(options: UsePtySessionOptions): void {
     return () => {
       disposedRef.current = true;
       dataSub.dispose();
+      textarea?.removeEventListener('compositionstart', onCompStart);
+      textarea?.removeEventListener('compositionend', onCompEnd);
       offData?.();
       offExit?.();
       offSessionId?.();
