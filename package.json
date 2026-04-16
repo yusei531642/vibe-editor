@@ -1,6 +1,6 @@
 {
   "name": "vibe-editor",
-  "version": "1.2.2",
+  "version": "1.1.4",
   "private": true,
   "description": "Electronベースの Claude Code 専用エディタ",
   "main": "out/main/index.js",
