@@ -181,6 +181,10 @@ body.is-resizing * {
      AppMenu のドロップダウンが親の境界で切り取られてしまう。
      ファイルツリー本体のスクロールは .sidebar__body の overflow-y: auto が担当。 */
   box-shadow: inset -1px 0 0 var(--glass-border), var(--glass-highlight);
+  /* backdrop-filter がスタッキングコンテキストを生成するため、
+     ドロップダウンが他のグリッド列の後ろに隠れてしまう。
+     z-index で sidebar を前面に持ち上げる。 */
+  z-index: 10;
 }
 
 /* サイドバーブランドヘッダー */
@@ -1620,6 +1624,11 @@ body.is-resizing * {
   gap: 8px;
   box-shadow: 0 1px 0 var(--glass-border), var(--glass-highlight);
   -webkit-app-region: drag;
+  /* backdrop-filter がスタッキングコンテキストを生成するため、
+     +ボタンのドロップダウンがターミナル本体の後ろに隠れる。
+     z-index でヘッダーをターミナルより前面にする。 */
+  position: relative;
+  z-index: 2;
 }
 
 .claude-code-panel__header .app-menu,
