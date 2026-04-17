@@ -161,7 +161,12 @@ function generateTeamAction(_tab: TerminalTab): string | undefined {
 }
 
 export function App(): JSX.Element {
-  const { settings, update: updateSettings, reset: resetSettings } = useSettings();
+  const {
+    settings,
+    loading: settingsLoading,
+    update: updateSettings,
+    reset: resetSettings
+  } = useSettings();
   const { showToast } = useToast();
   const t = useT();
   const [projectRoot, setProjectRoot] = useState<string>('');
@@ -592,10 +597,14 @@ export function App(): JSX.Element {
         ]);
         setActiveTerminalTabId(newId);
         setStatus(`${root.split(/[\\/]/).pop()}`);
+        // ここでは runtime の「最後に開いたルート」のみ永続化する。
+        // `claudeCwd` は SettingsModal で設定されるユーザー設定のため上書き厳禁。
         if (options.addToRecent !== false) {
           const rp = settings.recentProjects ?? [];
           const next = [root, ...rp.filter((p) => p !== root)].slice(0, 10);
-          void updateSettings({ recentProjects: next });
+          void updateSettings({ recentProjects: next, lastOpenedRoot: root });
+        } else {
+          void updateSettings({ lastOpenedRoot: root });
         }
         return true;
       } catch (err) {
@@ -608,14 +617,26 @@ export function App(): JSX.Element {
     [projectRoot, confirmDiscardEditorTabs, settings.recentProjects, updateSettings]
   );
 
-  // 初回ロード
+  // 初回ロード — lastOpenedRoot (前回開いたルート) があれば復元、なければ process.cwd()。
+  // settings の非同期 hydration を待ってから走らせないと、DEFAULT_SETTINGS の
+  // 空文字を読み取って process.cwd() に fallback し、結果として永続値を失ってしまう。
+  const didInitRef = useRef(false);
   useEffect(() => {
+    if (settingsLoading) return;
+    if (didInitRef.current) return;
+    didInitRef.current = true;
     let cancelled = false;
     (async () => {
       try {
-        const root = await window.api.app.getProjectRoot();
+        // 既存ユーザーの移行: lastOpenedRoot が空で claudeCwd が設定されている場合は
+        // かつての挙動 (claudeCwd = 最後に開いたルート) を尊重して再利用する。
+        const remembered = settings.lastOpenedRoot || settings.claudeCwd;
+        const root = remembered || (await window.api.app.getProjectRoot());
         if (cancelled) return;
         setProjectRoot(root);
+        if (!settings.lastOpenedRoot) {
+          void updateSettings({ lastOpenedRoot: root });
+        }
         const [gs, sess] = await Promise.all([
           window.api.git.status(root),
           window.api.sessions.list(root)
@@ -639,7 +660,8 @@ export function App(): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsLoading]);
 
   // タイトルバー
   useEffect(() => {

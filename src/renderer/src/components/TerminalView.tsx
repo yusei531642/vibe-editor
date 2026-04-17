@@ -49,6 +49,8 @@ interface TerminalViewProps {
   onExit?: () => void;
   /** Claude Code の起動ログから session id を抽出したとき（初回1回のみ） */
   onSessionId?: (sessionId: string) => void;
+  /** ユーザーが xterm 上で入力したキーストロークの sniff (タイトル auto-summary 等の用途) */
+  onUserInput?: (data: string) => void;
 }
 
 /**
@@ -78,7 +80,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       onStatus,
       onActivity,
       onExit,
-      onSessionId
+      onSessionId,
+      onUserInput
     },
     ref
   ): JSX.Element {
@@ -121,9 +124,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       onStatus,
       onActivity,
       onExit,
-      onSessionId
+      onSessionId,
+      onUserInput
     });
-    callbacksRef.current = { onStatus, onActivity, onExit, onSessionId };
+    callbacksRef.current = { onStatus, onActivity, onExit, onSessionId, onUserInput };
 
     // --- 共通の write ヘルパ (closure で ptyIdRef を読む) ---
     const writeToPty = (text: string): void => {

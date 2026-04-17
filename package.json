@@ -5,12 +5,16 @@
   "description": "Electronベースの Claude Code 専用エディタ",
   "main": "out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "tsc --noEmit && electron-vite build",
+    "dev": "cargo tauri dev",
+    "build": "cargo tauri build",
+    "dev:vite": "vite",
+    "build:vite": "vite build",
+    "dev:electron": "electron-vite dev",
+    "build:electron": "tsc --noEmit && electron-vite build",
     "preview": "electron-vite preview",
     "start": "electron-vite preview",
-    "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win",
+    "dist:electron": "npm run build:electron && electron-builder",
+    "dist:electron-win": "npm run build:electron && electron-builder --win",
     "postinstall": "electron-builder install-app-deps",
     "rebuild": "electron-rebuild",
     "typecheck": "tsc --noEmit",
@@ -132,8 +136,16 @@
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
     "@fontsource/source-serif-4": "^5.2.9",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-process": "^2",
+    "@tauri-apps/plugin-shell": "^2",
+    "@tauri-apps/plugin-updater": "^2",
+    "@xyflow/react": "^12.10.2",
     "electron-updater": "^6.8.3",
-    "node-pty": "^1.1.0"
+    "node-pty": "^1.1.0",
+    "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.6.0",

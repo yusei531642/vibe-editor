@@ -23,3 +23,13 @@ Thumbs.db
 .env.local
 .vscode/
 .idea/
+# Claude Code の per-session lock (sessionId/pid/acquiredAt が毎回書き換わる)
+.claude/scheduled_tasks.lock
+# 実験用 POC / スクラッチ (ADR 本体は tasks/ に置いてある)
+experiments/
+# Tauri のビルド中間生成物
+src-tauri/target/
+src-tauri/gen/schemas/
+# リポジトリ直下のスクリーンショット — experiments/screenshots/ に退避するか破棄する
+/*.png
+/*.gif

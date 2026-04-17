@@ -18,6 +18,9 @@ export interface PtySessionCallbacks {
   onActivity?: () => void;
   onExit?: () => void;
   onSessionId?: (sessionId: string) => void;
+  /** ユーザーの xterm 入力 (キーストローク・改行含む) を観察したいとき。
+   *  画面表示や pty 書き込みは別途行うので、純粋にスニファとして使う想定。 */
+  onUserInput?: (data: string) => void;
 }
 
 export interface UsePtySessionOptions {
@@ -165,6 +168,11 @@ export function usePtySession(options: UsePtySessionOptions): void {
       if (composing) return;
       if (ptyIdRef.current) {
         void window.api.terminal.write(ptyIdRef.current, data);
+      }
+      try {
+        callbacksRef.current.onUserInput?.(data);
+      } catch {
+        /* noop */
       }
     });
 

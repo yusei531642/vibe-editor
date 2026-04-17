@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { X } from 'lucide-react';
+import { ArrowLeft } from 'lucide-react';
 import type { AppSettings } from '../../../types/shared';
 import { DEFAULT_SETTINGS } from '../../../types/shared';
 import { useT } from '../lib/i18n';
@@ -20,7 +20,12 @@ interface SettingsModalProps {
   onReset: () => void;
 }
 
-type SettingsSectionId = 'general' | 'appearance' | 'fonts' | 'runtime';
+type SectionId =
+  | 'general'
+  | 'appearance'
+  | 'fonts'
+  | 'claude'
+  | 'codex';
 
 export function SettingsModal({
   open,
@@ -31,9 +36,8 @@ export function SettingsModal({
 }: SettingsModalProps): JSX.Element | null {
   const t = useT();
   const [draft, setDraft] = useState<AppSettings>(initial);
-  const [activeSection, setActiveSection] = useState<SettingsSectionId>('general');
+  const [activeSection, setActiveSection] = useState<SectionId>('general');
 
-  // モーダルを開いた瞬間に最新の initial で draft を初期化
   useEffect(() => {
     if (open) {
       setDraft(initial);
@@ -58,33 +62,29 @@ export function SettingsModal({
     onReset();
   };
 
-  const hasChanges = JSON.stringify(draft) !== JSON.stringify(initial);
+  const isJa = draft.language === 'ja';
+  const labels: Record<SectionId, { label: string; title: string; desc: string }> = isJa
+    ? {
+        general: { label: '一般', title: '一般', desc: '言語と密度設定' },
+        appearance: { label: '表示', title: '表示', desc: 'テーマと配色' },
+        fonts: { label: 'フォント', title: 'フォント', desc: 'UI / エディタ / ターミナルのフォント' },
+        claude: { label: 'Claude Code', title: 'Claude Code', desc: '起動コマンドと引数' },
+        codex: { label: 'Codex', title: 'Codex', desc: '起動コマンドと引数' }
+      }
+    : {
+        general: { label: 'General', title: 'General', desc: 'Language and density' },
+        appearance: { label: 'Appearance', title: 'Appearance', desc: 'Theme and surfaces' },
+        fonts: { label: 'Fonts', title: 'Typography', desc: 'UI / editor / terminal fonts' },
+        claude: { label: 'Claude Code', title: 'Claude Code', desc: 'Launch command and args' },
+        codex: { label: 'Codex', title: 'Codex', desc: 'Launch command and args' }
+      };
 
-  const copy =
-    draft.language === 'ja'
-      ? {
-          general: { label: '基本', desc: '言語と密度' },
-          appearance: { label: '表示', desc: 'テーマと見た目' },
-          fonts: { label: 'フォント', desc: 'UI とエディタ' },
-          runtime: { label: 'エージェント', desc: 'Claude と Codex' }
-        }
-      : {
-          general: { label: 'General', desc: 'Language and density' },
-          appearance: { label: 'Appearance', desc: 'Theme and surfaces' },
-          fonts: { label: 'Typography', desc: 'UI and editor fonts' },
-          runtime: { label: 'Agents', desc: 'Claude and Codex' }
-        };
-
-  const sections: Array<{ id: SettingsSectionId; label: string; desc: string }> = [
-    { id: 'general', label: copy.general.label, desc: copy.general.desc },
-    { id: 'appearance', label: copy.appearance.label, desc: copy.appearance.desc },
-    { id: 'fonts', label: copy.fonts.label, desc: copy.fonts.desc },
-    { id: 'runtime', label: copy.runtime.label, desc: copy.runtime.desc }
+  const groups: Array<{ label: string | null; items: SectionId[] }> = [
+    { label: null, items: ['general', 'appearance', 'fonts'] },
+    { label: isJa ? 'エージェント' : 'Agents', items: ['claude', 'codex'] }
   ];
 
-  const currentSection = sections.find((s) => s.id === activeSection) ?? sections[0];
-
-  const sectionContent: Record<SettingsSectionId, JSX.Element> = {
+  const sectionContent: Record<SectionId, JSX.Element> = {
     general: (
       <>
         <LanguageSection draft={draft} update={update} />
@@ -95,7 +95,7 @@ export function SettingsModal({
     fonts: (
       <>
         <FontFamilySection
-          title="UI フォント"
+          title={isJa ? 'UI フォント' : 'UI Font'}
           familyKey="uiFontFamily"
           sizeKey="uiFontSize"
           presets={UI_FONT_PRESETS}
@@ -103,7 +103,7 @@ export function SettingsModal({
           update={update}
         />
         <FontFamilySection
-          title="エディタフォント (Monaco)"
+          title={isJa ? 'エディタフォント (Monaco)' : 'Editor Font (Monaco)'}
           familyKey="editorFontFamily"
           sizeKey="editorFontSize"
           presets={EDITOR_FONT_PRESETS}
@@ -113,35 +113,41 @@ export function SettingsModal({
         <TerminalSection draft={draft} update={update} />
       </>
     ),
-    runtime: (
-      <>
-        <CommandOptionsSection
-          title="Claude Code 起動オプション"
-          commandKey="claudeCommand"
-          commandPlaceholder="claude"
-          argsKey="claudeArgs"
-          argsLabel="引数（空白区切り、ダブルクォートで空白を含む値）"
-          argsPlaceholder='--model opus --add-dir "D:/other project"'
-          cwdKey="claudeCwd"
-          cwdLabel="作業ディレクトリ（空なら現在のプロジェクトルート）"
-          cwdPlaceholder="（未設定）"
-          note="変更後は右パネルの「再起動」ボタンでターミナルを再起動すると反映されます。"
-          draft={draft}
-          update={update}
-        />
-        <CommandOptionsSection
-          title="Codex 起動オプション"
-          commandKey="codexCommand"
-          commandPlaceholder="codex"
-          argsKey="codexArgs"
-          argsLabel="引数（空白区切り）"
-          argsPlaceholder="--model o3"
-          draft={draft}
-          update={update}
-        />
-      </>
+    claude: (
+      <CommandOptionsSection
+        title={isJa ? '起動オプション' : 'Launch options'}
+        commandKey="claudeCommand"
+        commandPlaceholder="claude"
+        argsKey="claudeArgs"
+        argsLabel={isJa ? '引数（空白区切り、ダブルクォートで空白を含む値）' : 'Arguments'}
+        argsPlaceholder='--model opus --add-dir "D:/other project"'
+        cwdKey="claudeCwd"
+        cwdLabel={isJa ? '作業ディレクトリ（空なら現在のプロジェクトルート）' : 'Working directory'}
+        cwdPlaceholder={isJa ? '（未設定）' : '(unset)'}
+        note={
+          isJa
+            ? '変更後は再起動でターミナルに反映されます。'
+            : 'Restart terminals to apply changes.'
+        }
+        draft={draft}
+        update={update}
+      />
+    ),
+    codex: (
+      <CommandOptionsSection
+        title={isJa ? '起動オプション' : 'Launch options'}
+        commandKey="codexCommand"
+        commandPlaceholder="codex"
+        argsKey="codexArgs"
+        argsLabel={isJa ? '引数（空白区切り）' : 'Arguments'}
+        argsPlaceholder="--model o3"
+        draft={draft}
+        update={update}
+      />
     )
   };
+
+  const current = labels[activeSection];
 
   return (
     <div
@@ -157,43 +163,50 @@ export function SettingsModal({
         onClick={(e) => e.stopPropagation()}
       >
         <header className="modal__header">
-          <div className="modal__title-group">
+          <div className="modal__title-group" style={{ display: 'flex', alignItems: 'center' }}>
+            <button
+              type="button"
+              className="settings-back-btn"
+              onClick={onClose}
+              aria-label={isJa ? '戻る' : 'Back'}
+              title={isJa ? '戻る' : 'Back'}
+            >
+              <ArrowLeft size={16} strokeWidth={2} />
+            </button>
             <h2>{t('settings.title')}</h2>
-            {hasChanges && <span className="modal__status">Unsaved</span>}
           </div>
-          <button
-            type="button"
-            className="modal__close"
-            onClick={onClose}
-            aria-label="閉じる"
-          >
-            <X size={18} strokeWidth={2} />
-          </button>
         </header>
 
         <div className="modal__body modal__body--settings">
           <nav className="settings-shell__nav" aria-label="Settings sections">
-            {sections.map((section) => (
-              <button
-                key={section.id}
-                type="button"
-                className={`settings-shell__nav-item${
-                  section.id === activeSection ? ' is-active' : ''
-                }`}
-                onClick={() => setActiveSection(section.id)}
-              >
-                <span className="settings-shell__nav-label">{section.label}</span>
-                <span className="settings-shell__nav-desc">{section.desc}</span>
-              </button>
+            {groups.map((g, gi) => (
+              <div key={gi} style={{ display: 'contents' }}>
+                {g.label && (
+                  <div className="settings-shell__nav-group-label">{g.label}</div>
+                )}
+                {g.items.map((id) => (
+                  <button
+                    key={id}
+                    type="button"
+                    className={`settings-shell__nav-item${
+                      id === activeSection ? ' is-active' : ''
+                    }`}
+                    onClick={() => setActiveSection(id)}
+                  >
+                    <span className="settings-shell__nav-label">{labels[id].label}</span>
+                  </button>
+                ))}
+              </div>
             ))}
           </nav>
+
           <div className="settings-shell__content">
-            <div className="settings-shell__intro">
-              <span className="settings-shell__eyebrow">{currentSection.label}</span>
-              <p>{currentSection.desc}</p>
+            <div>
+              <h2 className="settings-shell__pane-title">{current.title}</h2>
+              <p className="settings-shell__pane-desc">{current.desc}</p>
             </div>
-            <div key={currentSection.id} className="settings-shell__panel">
-              {sectionContent[currentSection.id]}
+            <div key={activeSection} className="settings-shell__panel">
+              {sectionContent[activeSection]}
             </div>
           </div>
         </div>

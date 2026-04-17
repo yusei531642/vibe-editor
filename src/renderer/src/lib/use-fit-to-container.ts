@@ -31,14 +31,45 @@ export function useFitToContainer(options: {
   const visibleRef = useRef(visible);
   visibleRef.current = visible;
 
+  // PTY resize IPC を debounce (リサイズ中の毎フレーム IPC 抑制)
+  const ptyResizeTimerRef = useRef<number | null>(null);
+  const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null);
+
+  // 最後に「スケジュールした」サイズ。早期リターン判定はこちらで行う。
+  // (lastSizeRef は「最後に適用した」サイズのため、A→B→A の往復リサイズで
+  //  まだ発火していない T1 をキャンセルし損ねる原因になっていた)
+  const lastScheduledRef = useRef<{ cols: number; rows: number } | null>(null);
+
+  const schedulePtyResize = (cols: number, rows: number): void => {
+    if (
+      lastScheduledRef.current &&
+      lastScheduledRef.current.cols === cols &&
+      lastScheduledRef.current.rows === rows
+    ) {
+      return;
+    }
+    lastScheduledRef.current = { cols, rows };
+    if (ptyResizeTimerRef.current !== null) {
+      window.clearTimeout(ptyResizeTimerRef.current);
+    }
+    ptyResizeTimerRef.current = window.setTimeout(() => {
+      ptyResizeTimerRef.current = null;
+      const id = ptyIdRef.current;
+      if (!id) return;
+      lastSizeRef.current = { cols, rows };
+      void window.api.terminal.resize(id, cols, rows);
+    }, 120);
+  };
+
   const refit = (): void => {
     const term = termRef.current;
     const fit = fitRef.current;
     if (!term || !fit) return;
     try {
       fit.fit();
+      // PTY 側へのサイズ通知は debounce
       if (ptyIdRef.current) {
-        void window.api.terminal.resize(ptyIdRef.current, term.cols, term.rows);
+        schedulePtyResize(term.cols, term.rows);
       }
     } catch {
       /* 非表示状態などでの失敗は無視 */
@@ -61,7 +92,13 @@ export function useFitToContainer(options: {
       });
     });
     ro.observe(container);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      if (ptyResizeTimerRef.current !== null) {
+        window.clearTimeout(ptyResizeTimerRef.current);
+        ptyResizeTimerRef.current = null;
+      }
+    };
     // 依存は refs のみ。effect の再マウントは不要。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -1,10 +1,13 @@
 import {
   Command as CommandIcon,
   Folder,
+  LayoutGrid,
   RotateCw,
   Settings as SettingsIcon
 } from 'lucide-react';
 import { useT } from '../lib/i18n';
+import { useSettings } from '../lib/settings-context';
+import { useUiStore } from '../stores/ui';
 
 interface ToolbarProps {
   projectRoot: string;
@@ -68,6 +71,7 @@ export function Toolbar({
         ) : null}
 
         <div className="toolbar__control-group">
+          <ToolbarCanvasToggle />
           <button
             type="button"
             className="toolbar__btn toolbar__btn--icon"
@@ -89,5 +93,26 @@ export function Toolbar({
         </div>
       </div>
     </div>
+  );
+}
+
+/** IDE / Canvas モード切替ボタン (Phase 2) */
+function ToolbarCanvasToggle(): JSX.Element {
+  const setViewMode = useUiStore((s) => s.setViewMode);
+  const { settings } = useSettings();
+  const label =
+    settings.language === 'ja'
+      ? 'Canvas モード (無限キャンバス) に切替'
+      : 'Switch to Canvas mode';
+  return (
+    <button
+      type="button"
+      className="toolbar__btn toolbar__btn--icon"
+      onClick={() => setViewMode('canvas')}
+      title={label}
+      aria-label={label}
+    >
+      <LayoutGrid size={14} strokeWidth={1.75} />
+    </button>
   );
 }

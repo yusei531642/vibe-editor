@@ -1,0 +1,267 @@
+// TeamHub モジュール
+//
+// 旧 src/main/team-hub.ts (Node.js TCP + JSON-RPC) の Rust 移植版。
+//
+// 役割:
+// - 各 Claude Code / Codex プロセスに spawn される team-bridge.js から TCP 接続を受ける
+// - JSON-RPC line protocol (初期化 / tools/list / tools/call) を処理
+// - team_send 等のツール呼び出しを PTY に直接 write 注入する (64B / 15ms)
+
+pub mod bridge;
+pub mod inject;
+pub mod protocol;
+
+use crate::pty::SessionRegistry;
+use anyhow::Result;
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::TcpListener;
+use tokio::sync::Mutex;
+
+#[derive(Clone)]
+pub struct TeamHub {
+    pub(crate) state: Arc<Mutex<HubState>>,
+    pub(crate) registry: Arc<SessionRegistry>,
+    /// 任意で AppHandle を保持。`set_app_handle` で setup 後に注入する。
+    /// Phase 3: protocol::team_send が `team:handoff` event を emit するために使う。
+    pub(crate) app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
+}
+
+struct HubState {
+    /// チーム別の会話履歴・タスク
+    teams: HashMap<String, TeamInfo>,
+    /// アクティブな team_id (MCP 設定の参照カウント)
+    active_teams: HashSet<String>,
+    /// listen ポート (0 なら未起動)
+    port: u16,
+    /// ハンドシェイクトークン (16 進 48 文字)
+    token: String,
+    /// 書き出し済みの bridge スクリプトパス
+    bridge_path: PathBuf,
+    /// agent_id → 現在進行中の inject タスク数 (cancel 用には含めない、レート制限用)
+    pending_injects: HashMap<String, usize>,
+}
+
+#[derive(Default, Clone)]
+pub struct TeamInfo {
+    pub id: String,
+    pub name: String,
+    pub messages: Vec<TeamMessage>,
+    pub tasks: Vec<TeamTask>,
+}
+
+#[derive(Clone)]
+pub struct TeamMessage {
+    pub id: u32,
+    pub from: String,
+    pub from_agent_id: String,
+    pub to: String,
+    pub message: String,
+    pub timestamp: String,
+    pub read_by: Vec<String>,
+}
+
+#[derive(Clone)]
+pub struct TeamTask {
+    pub id: u32,
+    pub assigned_to: String,
+    pub description: String,
+    pub status: String,
+    pub created_by: String,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct CallContext {
+    pub team_id: String,
+    pub role: String,
+    pub agent_id: String,
+}
+
+impl TeamHub {
+    pub fn new(registry: Arc<SessionRegistry>) -> Self {
+        Self {
+            registry,
+            state: Arc::new(Mutex::new(HubState {
+                teams: HashMap::new(),
+                active_teams: HashSet::new(),
+                port: 0,
+                token: String::new(),
+                bridge_path: PathBuf::new(),
+                pending_injects: HashMap::new(),
+            })),
+            app_handle: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// setup 後に AppHandle を注入 (event::emit で使う)
+    pub async fn set_app_handle(&self, app: tauri::AppHandle) {
+        let mut g = self.app_handle.lock().await;
+        *g = Some(app);
+    }
+
+    pub async fn start(&self) -> Result<()> {
+        let mut state = self.state.lock().await;
+        if state.port != 0 {
+            return Ok(());
+        }
+        // ハンドシェイクトークンを生成 (24 byte → hex 48 文字)
+        use rand::RngCore;
+        let mut buf = [0u8; 24];
+        rand::thread_rng().fill_bytes(&mut buf);
+        state.token = hex_encode(&buf);
+
+        // bridge スクリプトを `~/.vibe-editor/team-bridge.js` に書き出し
+        let dir = dirs::home_dir().unwrap_or_default().join(".vibe-editor");
+        tokio::fs::create_dir_all(&dir).await?;
+        let bridge_path = dir.join("team-bridge.js");
+        tokio::fs::write(&bridge_path, bridge::SOURCE).await?;
+        state.bridge_path = bridge_path;
+
+        // TCP listen
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let local = listener.local_addr()?;
+        state.port = local.port();
+        let token = state.token.clone();
+        drop(state);
+
+        let hub = self.clone();
+        tokio::spawn(async move {
+            loop {
+                let (sock, _) = match listener.accept().await {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::warn!("teamhub accept failed: {e}");
+                        continue;
+                    }
+                };
+                let hub2 = hub.clone();
+                let token = token.clone();
+                tokio::spawn(async move {
+                    if let Err(e) = handle_client(hub2, sock, token).await {
+                        tracing::debug!("teamhub client error: {e:#}");
+                    }
+                });
+            }
+        });
+        tracing::info!("[teamhub] listening on 127.0.0.1:{}", local.port());
+        Ok(())
+    }
+
+    pub async fn info(&self) -> (u16, String, String) {
+        let s = self.state.lock().await;
+        (
+            s.port,
+            s.token.clone(),
+            s.bridge_path.to_string_lossy().into_owned(),
+        )
+    }
+
+    /// チームを active list に追加 (renderer の setupTeamMcp 経由)
+    pub async fn register_team(&self, team_id: &str, name: &str) {
+        if team_id.is_empty() || team_id == "_init" {
+            return;
+        }
+        let mut s = self.state.lock().await;
+        s.active_teams.insert(team_id.to_string());
+        let team = s
+            .teams
+            .entry(team_id.to_string())
+            .or_insert_with(|| TeamInfo {
+                id: team_id.to_string(),
+                ..Default::default()
+            });
+        if !name.is_empty() {
+            team.name = name.to_string();
+        }
+    }
+
+    /// チームを active list から外す。戻り値が true なら active が 0 → MCP 設定削除可
+    pub async fn clear_team(&self, team_id: &str) -> bool {
+        let mut s = self.state.lock().await;
+        s.teams.remove(team_id);
+        s.active_teams.remove(team_id);
+        s.active_teams.is_empty()
+    }
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
+async fn handle_client(
+    hub: TeamHub,
+    sock: tokio::net::TcpStream,
+    expected_token: String,
+) -> Result<()> {
+    let (rd, mut wr) = sock.into_split();
+    let mut lines = BufReader::new(rd).lines();
+
+    // ハンドシェイク (1 行目): {token, teamId, role, agentId}
+    let hello_line = match lines.next_line().await? {
+        Some(l) => l,
+        None => return Ok(()),
+    };
+    let hello: serde_json::Value = serde_json::from_str(hello_line.trim())?;
+    let token = hello.get("token").and_then(|v| v.as_str()).unwrap_or("");
+    if token != expected_token {
+        return Ok(()); // 不正トークンは即切断
+    }
+    let ctx = CallContext {
+        team_id: hello
+            .get("teamId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        role: hello
+            .get("role")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string(),
+        agent_id: hello
+            .get("agentId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+    };
+    tracing::debug!(
+        "[teamhub] client authed team={} role={} agent={}",
+        ctx.team_id,
+        ctx.role,
+        ctx.agent_id
+    );
+
+    // 以降は JSON-RPC 行
+    while let Some(line) = lines.next_line().await? {
+        let trimmed = line.trim_end_matches('\r');
+        if trimmed.is_empty() {
+            continue;
+        }
+        let req: serde_json::Value = match serde_json::from_str(trimmed) {
+            Ok(v) => v,
+            Err(_) => {
+                let err = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": null,
+                    "error": { "code": -32700, "message": "Parse error" }
+                });
+                wr.write_all(err.to_string().as_bytes()).await?;
+                wr.write_all(b"\n").await?;
+                continue;
+            }
+        };
+        if let Some(resp) = protocol::handle(&hub, &ctx, &req).await {
+            wr.write_all(resp.to_string().as_bytes()).await?;
+            wr.write_all(b"\n").await?;
+        }
+    }
+    Ok(())
+}

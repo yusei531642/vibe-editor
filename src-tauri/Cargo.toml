@@ -1,0 +1,61 @@
+[package]
+name = "vibe-editor"
+version = "1.1.5"
+description = "Electron→Tauri 移行版 vibe-editor (Claude Code / Codex 専用エディタ)"
+authors = ["yusei <yusei@yuseilab.com>"]
+edition = "2021"
+rust-version = "1.85"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# --- Tauri core ---
+tauri = { version = "2", features = ["tray-icon", "image-png", "image-ico"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-process = "2"
+tauri-plugin-opener = "2"
+
+# --- async / serialization ---
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "net", "io-util", "fs", "process"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# --- PTY / TeamHub ---
+portable-pty = "0.9"
+bytes = "1"
+notify = "6"
+
+# --- error / logging ---
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# --- misc ---
+once_cell = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5"
+percent-encoding = "2"
+which = "6"
+whoami = "1"
+base64 = "0.22"
+rand = "0.8"
+
+[features]
+# デフォルトで dev tools 有効
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[lib]
+name = "vibe_editor_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "vibe-editor"
+path = "src/main.rs"

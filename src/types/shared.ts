@@ -24,7 +24,17 @@ export interface AppSettings {
   // ---------- Claude Code 起動オプション ----------
   claudeCommand: string;
   claudeArgs: string;
+  /**
+   * ユーザー設定の作業ディレクトリ。空文字なら「現在のプロジェクトルート」を使う。
+   * これは SettingsModal で明示的に編集される値であり、プロジェクトを開くたびに
+   * 上書きしてはいけない (上書きすると SettingsModal の設定が実質無効化される)。
+   */
   claudeCwd: string;
+  /**
+   * 最後に開いたプロジェクトルート。起動時にここから復元する。
+   * ユーザー設定ではなく runtime の状態を永続化するためのスロット。
+   */
+  lastOpenedRoot: string;
   recentProjects: string[];
   /**
    * VSCode の "フォルダーをワークスペースに追加" 相当。
@@ -74,6 +84,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   claudeCommand: 'claude',
   claudeArgs: '',
   claudeCwd: '',
+  lastOpenedRoot: '',
   recentProjects: [],
   workspaceFolders: [],
   claudeCodePanelWidth: 460,
@@ -156,6 +167,25 @@ export interface TeamHistoryEntry {
   createdAt: string;
   lastUsedAt: string;
   members: TeamHistoryMember[];
+  /**
+   * Phase 5: Canvas モードで使う配置状態。
+   * 各メンバーの { agentId, x, y, width, height } と viewport を保持。
+   * IDE モードからは無視される (後方互換)。
+   */
+  canvasState?: TeamCanvasState;
+}
+
+export interface TeamCanvasNode {
+  agentId: string;
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+}
+
+export interface TeamCanvasState {
+  nodes: TeamCanvasNode[];
+  viewport: { x: number; y: number; zoom: number };
 }
 
 // ---------- ファイルツリー / 簡易エディタ ----------
