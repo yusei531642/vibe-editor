@@ -13,6 +13,7 @@ export const THEME_OPTIONS: { value: ThemeName; label: string; desc: string }[] 
   },
   { value: 'dark', label: 'Dark', desc: 'VS Code系のクラシックダーク' },
   { value: 'midnight', label: 'Midnight', desc: '深い青紫ベース、紫アクセント' },
+  { value: 'glass', label: 'Glass', desc: 'すりガラス風 — 半透明パネル + ブラー' },
   { value: 'light', label: 'Light', desc: '明るい背景、暗い文字' }
 ];
 

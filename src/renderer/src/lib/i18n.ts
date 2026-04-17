@@ -54,6 +54,18 @@ const ja: Dict = {
   'sidebar.refresh': '更新',
   'sidebar.teams': 'チーム',
   'sidebar.singleSessions': '個別セッション',
+  'sidebar.notes': 'メモ',
+
+  // ---------- Notes (Issue #17) ----------
+  'notes.title': 'メモ',
+  'notes.placeholder': 'ターミナル間で受け渡したい内容を書き留めてください…\n自動保存されます。',
+  'notes.copy': 'クリップボードにコピー',
+  'notes.clear': 'メモをクリア',
+  'notes.copied': 'メモをコピーしました',
+  'notes.copyFailed': 'コピーに失敗しました',
+  'notes.confirmClear': 'メモをクリアしますか？',
+  'notes.autoSaved': '自動保存済み',
+  'notes.chars': '文字',
 
   // ---------- Team history ----------
   'teamHistory.resume': 'チーム「{name}」を復元',
@@ -241,6 +253,18 @@ const en: Dict = {
   'sidebar.refresh': 'Refresh',
   'sidebar.teams': 'Teams',
   'sidebar.singleSessions': 'Single sessions',
+  'sidebar.notes': 'Notes',
+
+  // ---------- Notes (Issue #17) ----------
+  'notes.title': 'Notes',
+  'notes.placeholder': 'Jot down anything you want to hand off between terminals…\nSaved automatically.',
+  'notes.copy': 'Copy to clipboard',
+  'notes.clear': 'Clear notes',
+  'notes.copied': 'Copied notes',
+  'notes.copyFailed': 'Failed to copy',
+  'notes.confirmClear': 'Clear notes?',
+  'notes.autoSaved': 'Saved automatically',
+  'notes.chars': 'chars',
 
   // ---------- Team history ----------
   'teamHistory.resume': 'Resume team "{name}"',

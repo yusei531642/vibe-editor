@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import type { FileNode } from '../../../types/shared';
 import { useT } from '../lib/i18n';
+import { fileIconColor } from '../lib/file-icon-color';
 
 interface FileTreePanelProps {
   /** メインのプロジェクトルート(ターミナル/Git 等はこちら基準で動作する) */
@@ -338,18 +339,33 @@ function FileTreeNode({
 }: FileTreeNodeProps): JSX.Element {
   const isOpen = expanded.has(dirKey(rootPath, node.path));
   const isActive = !node.isDir && activeFilePath === node.path;
+  const iconColor = node.isDir ? undefined : fileIconColor(node.name);
 
   const handleClick = (): void => {
     if (node.isDir) onToggle(rootPath, node);
     else onOpenFile(rootPath, node.path);
   };
 
+  // Issue #18: 階層ごとのインデントガイドを background-image で描く。
+  // 1px の縦線を 12px 間隔で depth 本だけ。深い階層でも視線が迷子にならない。
+  const guideStyle: React.CSSProperties =
+    depth > 0
+      ? {
+          paddingLeft: 4 + depth * 12,
+          backgroundImage:
+            'repeating-linear-gradient(to right, var(--filetree-guide, rgba(127,127,127,0.16)) 0 1px, transparent 1px 12px)',
+          backgroundSize: `${depth * 12}px 100%`,
+          backgroundRepeat: 'no-repeat',
+          backgroundPosition: '4px 0'
+        }
+      : { paddingLeft: 4 };
+
   return (
     <>
       <button
         type="button"
         className={`filetree__row${isActive ? ' is-active' : ''}`}
-        style={{ paddingLeft: 4 + depth * 12 }}
+        style={guideStyle}
         onClick={handleClick}
       >
         {node.isDir ? (
@@ -368,7 +384,12 @@ function FileTreeNode({
         ) : (
           <>
             <span className="filetree__chevron-spacer" />
-            <FileIcon size={13} strokeWidth={1.75} className="filetree__icon" />
+            <FileIcon
+              size={13}
+              strokeWidth={1.75}
+              className="filetree__icon"
+              style={iconColor ? { color: iconColor } : undefined}
+            />
           </>
         )}
         <span className="filetree__name">{node.name}</span>

@@ -29,7 +29,9 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
       try {
         const loaded = await window.api.settings.load();
         if (cancelled) return;
-        setSettings(loaded);
+        // 既存 settings.json に新フィールドが無い場合 (notepad など) は
+        // DEFAULT_SETTINGS で穴埋めする。forward compat。
+        setSettings({ ...DEFAULT_SETTINGS, ...loaded });
       } finally {
         if (!cancelled) setLoading(false);
       }

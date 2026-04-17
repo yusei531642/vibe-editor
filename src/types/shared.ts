@@ -5,7 +5,8 @@ export type ThemeName =
   | 'claude-light'
   | 'dark'
   | 'light'
-  | 'midnight';
+  | 'midnight'
+  | 'glass';
 
 export type Density = 'compact' | 'normal' | 'comfortable';
 
@@ -50,6 +51,11 @@ export interface AppSettings {
   codexArgs: string;
   // ---------- チームプリセット ----------
   teamPresets: TeamPreset[];
+  /**
+   * Issue #17: ターミナル間の受け渡し用メモ。
+   * 入力中も自動保存し、再起動しても残る。
+   */
+  notepad: string;
 }
 
 export interface ClaudeCheckResult {
@@ -90,7 +96,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   claudeCodePanelWidth: 460,
   codexCommand: 'codex',
   codexArgs: '',
-  teamPresets: []
+  teamPresets: [],
+  notepad: ''
 };
 
 /** git status --porcelain のエントリ */

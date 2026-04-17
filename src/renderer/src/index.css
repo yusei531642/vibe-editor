@@ -3657,20 +3657,34 @@ body.is-resizing * {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   width: 100%;
-  background: transparent;
+  background-color: transparent;
   color: var(--text);
   border: none;
   text-align: left;
-  padding: 3px 8px 3px 6px;
+  padding: 4px 8px 4px 6px;
   font-size: 12.5px;
   cursor: pointer;
   border-radius: var(--radius-sm);
   white-space: nowrap;
   overflow: hidden;
-  transition: background var(--dur-fast) var(--ease-out-soft),
+  transition: background-color var(--dur-fast) var(--ease-out-soft),
     color var(--dur-fast) var(--ease-out-soft);
+}
+
+/* Issue #18: ファイルツリーインデントガイドの色 (テーマ別に上書き) */
+:root {
+  --filetree-guide: rgba(127, 127, 127, 0.18);
+}
+[data-theme='claude-dark'],
+[data-theme='dark'],
+[data-theme='midnight'] {
+  --filetree-guide: rgba(255, 255, 255, 0.07);
+}
+[data-theme='claude-light'],
+[data-theme='light'] {
+  --filetree-guide: rgba(0, 0, 0, 0.08);
 }
 
 .filetree__row:hover {
@@ -4112,4 +4126,118 @@ body.is-resizing * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+
+/* ==========================================================================
+   Issue #16: Glass テーマ — すりガラス風 (半透明 + backdrop-filter)
+   data-theme=glass のときだけ主要パネルにブラーを適用する。
+   テーマ変数 (bg-panel/sidebar/toolbar/elev) は themes.ts 側で半透明に
+   設定済みなので、ここでは backdrop-filter を当てるだけで成立する。
+   ========================================================================== */
+[data-theme="glass"] .toolbar,
+[data-theme="glass"] .sidebar,
+[data-theme="glass"] .tabbar,
+[data-theme="glass"] .modal,
+[data-theme="glass"] .cmdp,
+[data-theme="glass"] .app-menu__dropdown,
+[data-theme="glass"] .user-menu__dropdown,
+[data-theme="glass"] .context-menu,
+[data-theme="glass"] .canvas-agent-card,
+[data-theme="glass"] .canvas-toolbar,
+[data-theme="glass"] .filetree__header {
+  -webkit-backdrop-filter: blur(22px) saturate(160%);
+  backdrop-filter: blur(22px) saturate(160%);
+}
+
+/* glass テーマでは modal-backdrop / cmdp-backdrop の暗幕を弱め、
+   背後のブラーが活きるようにする */
+[data-theme="glass"] .modal-backdrop,
+[data-theme="glass"] .cmdp-backdrop {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+
+
+/* ==========================================================================
+   Issue #17: NotesPanel — ターミナル間受け渡しの永続メモ
+   ========================================================================== */
+.notes-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 8px 10px 10px 10px;
+  gap: 6px;
+}
+
+.notes-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 2px 4px 2px;
+}
+
+.notes-panel__title {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-mute);
+}
+
+.notes-panel__actions {
+  display: flex;
+  gap: 2px;
+}
+
+.notes-panel__btn {
+  background: transparent;
+  color: var(--text-mute);
+  border: none;
+  border-radius: 4px;
+  padding: 3px 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  transition: background var(--dur-fast) var(--ease-out-soft),
+    color var(--dur-fast) var(--ease-out-soft);
+}
+
+.notes-panel__btn:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.notes-panel__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.notes-panel__textarea {
+  flex: 1;
+  resize: none;
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-family: var(--mono-font, 'Cascadia Code', 'Consolas', monospace);
+  font-size: 12.5px;
+  line-height: 1.55;
+  outline: none;
+  transition: border-color var(--dur-fast) var(--ease-out-soft),
+    box-shadow var(--dur-fast) var(--ease-out-soft);
+}
+
+.notes-panel__textarea:focus-visible {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+.notes-panel__footer {
+  font-size: 10.5px;
+  color: var(--text-mute);
+  text-align: right;
+  padding: 0 2px;
 }

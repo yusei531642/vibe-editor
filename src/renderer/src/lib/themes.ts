@@ -117,6 +117,31 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
     focusRing: '0 0 0 1px rgba(5, 7, 12, 0.86), 0 0 0 3px rgba(124, 92, 255, 0.28)',
     monacoTheme: 'vs-dark'
   },
+  glass: {
+    // Issue #16: すりガラス風テーマ。半透明 + backdrop-filter で奥行きを出す。
+    // bg は solid に近い値 (壁紙が見えなくても破綻しないため)。パネル類は半透明。
+    bg: '#0d1018',
+    bgPanel: 'rgba(22, 26, 38, 0.55)',
+    bgSidebar: 'rgba(18, 22, 33, 0.50)',
+    bgToolbar: 'rgba(14, 17, 26, 0.48)',
+    bgElev: 'rgba(28, 33, 48, 0.70)',
+    border: 'rgba(255, 255, 255, 0.10)',
+    borderStrong: 'rgba(255, 255, 255, 0.18)',
+    bgHover: 'rgba(255, 255, 255, 0.06)',
+    bgActive: 'rgba(120, 145, 255, 0.18)',
+    accent: '#7891ff',
+    accentHover: '#8aa1ff',
+    accentSoft: '#a8b8ff',
+    accentTint: 'rgba(120, 145, 255, 0.20)',
+    warning: '#f5a623',
+    warningHover: '#f7b955',
+    text: '#f0f3ff',
+    textDim: '#aab2c9',
+    textMute: '#737a92',
+    surfaceGlass: 'rgba(14, 17, 26, 0.40)',
+    focusRing: '0 0 0 1px rgba(13, 16, 24, 0.6), 0 0 0 3px rgba(120, 145, 255, 0.32)',
+    monacoTheme: 'vs-dark'
+  },
   light: {
     bg: '#ffffff',
     bgPanel: '#fafafa',

@@ -1,4 +1,4 @@
-import { Files, GitBranch, History } from 'lucide-react';
+import { Files, GitBranch, History, StickyNote } from 'lucide-react';
 import type {
   GitFileChange,
   GitStatus,
@@ -8,11 +8,12 @@ import type {
 import { ChangesPanel } from './ChangesPanel';
 import { SessionsPanel } from './SessionsPanel';
 import { FileTreePanel } from './FileTreePanel';
+import { NotesPanel } from './NotesPanel';
 import { AppMenu } from './AppMenu';
 import { UserMenu } from './UserMenu';
 import { useT } from '../lib/i18n';
 
-export type SidebarView = 'files' | 'changes' | 'sessions';
+export type SidebarView = 'files' | 'changes' | 'sessions' | 'notes';
 
 interface SidebarProps {
   view: SidebarView;
@@ -74,6 +75,11 @@ export function Sidebar(props: SidebarProps): JSX.Element {
       label: t('sidebar.history'),
       count: totalHistory > 0 ? totalHistory : undefined,
       icon: <History size={15} strokeWidth={1.85} />
+    },
+    {
+      view: 'notes',
+      label: t('sidebar.notes'),
+      icon: <StickyNote size={15} strokeWidth={1.85} />
     }
   ];
 
@@ -141,6 +147,8 @@ export function Sidebar(props: SidebarProps): JSX.Element {
             onFileContextMenu={props.onFileContextMenu}
             activeDiffPath={props.activeDiffPath}
           />
+        ) : props.view === 'notes' ? (
+          <NotesPanel />
         ) : (
           <SessionsPanel
             sessions={props.sessions}

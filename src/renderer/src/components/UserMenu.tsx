@@ -30,6 +30,7 @@ const THEME_LABELS: Record<ThemeName, string> = {
   'claude-light': 'Claude Light',
   dark: 'Dark',
   midnight: 'Midnight',
+  glass: 'Glass',
   light: 'Light'
 };
 
