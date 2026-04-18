@@ -36,13 +36,22 @@ import 'monaco-editor/esm/vs/basic-languages/lua/lua.contribution';
 import 'monaco-editor/esm/vs/basic-languages/sql/sql.contribution';
 import 'monaco-editor/esm/vs/basic-languages/dockerfile/dockerfile.contribution';
 // Issue #77: JSON / C / TOML が plaintext で開いていた取り残しを塞ぐ。
-import 'monaco-editor/esm/vs/basic-languages/json/json.contribution';
-import 'monaco-editor/esm/vs/basic-languages/c/c.contribution';
-import 'monaco-editor/esm/vs/basic-languages/toml/toml.contribution';
+// - JSON: monaco-editor 同梱の JSON language service (schema 補完 / 診断つき) を登録。
+//   付随する JSON worker は下の MonacoEnvironment で返す。
+// - C: basic-languages には独立の `c` エントリが無く、cpp.contribution が `c` language も
+//   登録するので追加 import は不要。language.ts 側の EXT_MAP で `c: 'c'` のままでよい。
+// - TOML: basic-languages に TOML が同梱されていないため、構造が近い ini tokenizer を
+//   利用してハイライトだけ効かせる (`language.ts` で `toml: 'ini'` にマップ)。
+import 'monaco-editor/esm/vs/basic-languages/ini/ini.contribution';
+import 'monaco-editor/esm/vs/language/json/monaco.contribution';
+// @ts-expect-error ?worker import は Vite 固有
+import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 
 // 型: 環境変数は緩い any として扱う（Electron renderer だが self は Worker と共通の型がない）
 (self as unknown as { MonacoEnvironment: monaco.Environment }).MonacoEnvironment = {
-  getWorker(_moduleId: string, _label: string) {
+  getWorker(_moduleId: string, label: string) {
+    // Issue #77: JSON language service を有効にしたので、json worker はこちらで返す。
+    if (label === 'json') return new JsonWorker();
     return new EditorWorker();
   }
 };

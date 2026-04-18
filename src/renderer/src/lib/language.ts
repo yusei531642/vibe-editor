@@ -18,7 +18,8 @@ const EXT_MAP: Record<string, string> = {
   less: 'less',
   yml: 'yaml',
   yaml: 'yaml',
-  toml: 'toml',
+  // Issue #77: monaco-editor の basic-languages には TOML がないので、構造が近い ini を流用。
+  toml: 'ini',
   xml: 'xml',
   svg: 'xml',
   sh: 'shell',
