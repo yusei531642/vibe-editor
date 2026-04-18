@@ -23,7 +23,7 @@ pub async fn handle(hub: &TeamHub, ctx: &CallContext, req: &Value) -> Option<Val
             "result": {
                 "protocolVersion": "2025-03-26",
                 "capabilities": { "tools": { "listChanged": false } },
-                "serverInfo": { "name": "vive-team", "version": "2.0.0-rust" }
+                "serverInfo": { "name": "vibe-team", "version": "2.0.0-rust" }
             }
         })),
         "notifications/initialized" | "notifications/cancelled" => None,

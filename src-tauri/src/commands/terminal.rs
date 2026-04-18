@@ -91,14 +91,14 @@ pub async fn terminal_create(
     let mut env = opts.env.unwrap_or_default();
     if let Some(team_id) = &opts.team_id {
         let (port, token, _) = state.team_hub.info().await;
-        env.insert("VIVE_TEAM_SOCKET".into(), format!("127.0.0.1:{port}"));
-        env.insert("VIVE_TEAM_TOKEN".into(), token);
-        env.insert("VIVE_TEAM_ID".into(), team_id.clone());
+        env.insert("VIBE_TEAM_SOCKET".into(), format!("127.0.0.1:{port}"));
+        env.insert("VIBE_TEAM_TOKEN".into(), token);
+        env.insert("VIBE_TEAM_ID".into(), team_id.clone());
         if let Some(role) = &opts.role {
-            env.insert("VIVE_TEAM_ROLE".into(), role.clone());
+            env.insert("VIBE_TEAM_ROLE".into(), role.clone());
         }
         if let Some(aid) = &opts.agent_id {
-            env.insert("VIVE_AGENT_ID".into(), aid.clone());
+            env.insert("VIBE_AGENT_ID".into(), aid.clone());
         }
     }
 

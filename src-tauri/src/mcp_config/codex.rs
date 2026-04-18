@@ -1,10 +1,11 @@
-// Codex MCP 設定 (~/.codex/config.toml) の `[mcp_servers.vive-team]` を更新
+// Codex MCP 設定 (~/.codex/config.toml) の `[mcp_servers.vibe-team]` を更新
 
 use anyhow::Result;
 use std::path::PathBuf;
 use tokio::fs;
 
-const SECTION: &str = "mcp_servers.vive-team";
+const SECTION: &str = "mcp_servers.vibe-team";
+const LEGACY_SECTION: &str = "mcp_servers.vive-team";
 
 fn config_path() -> PathBuf {
     dirs::home_dir()
@@ -43,9 +44,10 @@ pub async fn setup(bridge_path: &str) -> Result<()> {
         Err(_) => String::new(),
     };
     content = remove_toml_section(&content, SECTION);
+    content = remove_toml_section(&content, LEGACY_SECTION);
     let escaped = bridge_path.replace('\\', "/");
     let section = format!(
-        "\n[{SECTION}]\ncommand = \"node\"\nargs = [\"{escaped}\"]\nenv_vars = [\"VIVE_TEAM_ID\", \"VIVE_TEAM_ROLE\", \"VIVE_AGENT_ID\", \"VIVE_TEAM_SOCKET\", \"VIVE_TEAM_TOKEN\"]\n",
+        "\n[{SECTION}]\ncommand = \"node\"\nargs = [\"{escaped}\"]\nenv_vars = [\"VIBE_TEAM_ID\", \"VIBE_TEAM_ROLE\", \"VIBE_AGENT_ID\", \"VIBE_TEAM_SOCKET\", \"VIBE_TEAM_TOKEN\"]\n",
     );
     fs::write(&path, content + &section).await?;
     Ok(())
@@ -58,6 +60,7 @@ pub async fn cleanup() -> Result<()> {
         Err(_) => return Ok(()),
     };
     let stripped = remove_toml_section(&content, SECTION);
+    let stripped = remove_toml_section(&stripped, LEGACY_SECTION);
     let cleaned = format!("{}\n", stripped.trim_end());
     fs::write(&path, cleaned).await?;
     Ok(())

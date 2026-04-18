@@ -6,7 +6,6 @@ import {
   Settings as SettingsIcon
 } from 'lucide-react';
 import { useT } from '../lib/i18n';
-import { useSettings } from '../lib/settings-context';
 import { useUiStore } from '../stores/ui';
 
 interface ToolbarProps {
@@ -99,11 +98,8 @@ export function Toolbar({
 /** IDE / Canvas モード切替ボタン (Phase 2) */
 function ToolbarCanvasToggle(): JSX.Element {
   const setViewMode = useUiStore((s) => s.setViewMode);
-  const { settings } = useSettings();
-  const label =
-    settings.language === 'ja'
-      ? 'Canvas モード (無限キャンバス) に切替'
-      : 'Switch to Canvas mode';
+  const t = useT();
+  const label = t('canvas.modeToggle');
   return (
     <button
       type="button"

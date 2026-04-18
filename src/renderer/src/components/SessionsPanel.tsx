@@ -1,6 +1,8 @@
+import { useMemo } from 'react';
 import { RefreshCw, Users, X } from 'lucide-react';
 import type { SessionInfo, TeamHistoryEntry } from '../../../types/shared';
 import { useT } from '../lib/i18n';
+import { useSettings } from '../lib/settings-context';
 
 interface SessionsPanelProps {
   sessions: SessionInfo[];
@@ -15,21 +17,24 @@ interface SessionsPanelProps {
   onDeleteTeamHistory: (id: string) => void;
 }
 
-/** 相対時刻表示（例: "3分前", "2時間前", "昨日", "2026/03/01"） */
-function relativeTime(iso: string): string {
+/** 相対時刻表示（例: "3分前", "2 hours ago", "yesterday"） */
+function relativeTime(
+  iso: string,
+  rtf: Intl.RelativeTimeFormat,
+  dateFormatter: Intl.DateTimeFormat
+): string {
   const then = new Date(iso).getTime();
   if (!Number.isFinite(then)) return '';
-  const now = Date.now();
-  const diffSec = Math.round((now - then) / 1000);
-  if (diffSec < 60) return `${diffSec}秒前`;
+  const diffSec = Math.round((then - Date.now()) / 1000);
+  const absSec = Math.abs(diffSec);
+  if (absSec < 60) return rtf.format(diffSec, 'second');
   const diffMin = Math.round(diffSec / 60);
-  if (diffMin < 60) return `${diffMin}分前`;
-  const diffH = Math.round(diffMin / 60);
-  if (diffH < 24) return `${diffH}時間前`;
-  const diffD = Math.round(diffH / 24);
-  if (diffD < 7) return `${diffD}日前`;
-  const d = new Date(iso);
-  return `${d.getFullYear()}/${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}`;
+  if (Math.abs(diffMin) < 60) return rtf.format(diffMin, 'minute');
+  const diffHour = Math.round(diffMin / 60);
+  if (Math.abs(diffHour) < 24) return rtf.format(diffHour, 'hour');
+  const diffDay = Math.round(diffHour / 24);
+  if (Math.abs(diffDay) < 7) return rtf.format(diffDay, 'day');
+  return dateFormatter.format(new Date(iso));
 }
 
 export function SessionsPanel({
@@ -43,6 +48,21 @@ export function SessionsPanel({
   onDeleteTeamHistory
 }: SessionsPanelProps): JSX.Element {
   const t = useT();
+  const { settings } = useSettings();
+  const locale = settings.language === 'ja' ? 'ja-JP' : 'en-US';
+  const rtf = useMemo(
+    () => new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }),
+    [locale]
+  );
+  const dateFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat(locale, {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit'
+      }),
+    [locale]
+  );
   return (
     <div className="sidebar-view">
       <header className="sidebar-view__header">
@@ -87,7 +107,7 @@ export function SessionsPanel({
                     <div className="team-history-item__top">
                       <span className="team-history-item__name">{entry.name}</span>
                       <span className="team-history-item__time">
-                        {relativeTime(entry.lastUsedAt)}
+                        {relativeTime(entry.lastUsedAt, rtf, dateFormatter)}
                       </span>
                     </div>
                     <div className="team-history-item__roles">
@@ -144,11 +164,15 @@ export function SessionsPanel({
                 type="button"
                 className={`session ${isActive ? 'is-active' : ''}`}
                 onClick={() => onResume(s)}
-                title={`セッション ${s.id} に戻る`}
+                title={t('sessions.resume', { id: s.id.slice(0, 8) })}
               >
                 <div className="session__top">
-                  <span className="session__time">{relativeTime(s.lastModifiedAt)}</span>
-                  <span className="session__count">{s.messageCount} msgs</span>
+                  <span className="session__time">
+                    {relativeTime(s.lastModifiedAt, rtf, dateFormatter)}
+                  </span>
+                  <span className="session__count">
+                    {t('sessions.messages', { count: s.messageCount })}
+                  </span>
                 </div>
                 <div className="session__title">{s.title}</div>
                 <div className="session__id">{s.id.slice(0, 8)}</div>

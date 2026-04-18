@@ -1,137 +1,15 @@
 {
   "name": "vibe-editor",
-  "version": "1.1.5",
+  "version": "1.2.0",
   "private": true,
-  "description": "Electronベースの Claude Code 専用エディタ",
-  "main": "out/main/index.js",
+  "description": "Tauri ベースの Claude Code / Codex 専用エディタ",
   "scripts": {
     "dev": "cargo tauri dev",
     "build": "cargo tauri build",
     "dev:vite": "vite",
     "build:vite": "vite build",
-    "dev:electron": "electron-vite dev",
-    "build:electron": "tsc --noEmit && electron-vite build",
-    "preview": "electron-vite preview",
-    "start": "electron-vite preview",
-    "dist:electron": "npm run build:electron && electron-builder",
-    "dist:electron-win": "npm run build:electron && electron-builder --win",
-    "postinstall": "electron-builder install-app-deps",
-    "rebuild": "electron-rebuild",
     "typecheck": "tsc --noEmit",
     "icons": "node build/generate-icons.mjs"
-  },
-  "build": {
-    "appId": "com.vibe-editor.app",
-    "productName": "vibe-editor",
-    "copyright": "Copyright © 2026 vibe-editor",
-    "compression": "maximum",
-    "removePackageScripts": true,
-    "removePackageKeywords": true,
-    "electronLanguages": [
-      "en-US",
-      "ja"
-    ],
-    "directories": {
-      "output": "release",
-      "buildResources": "build"
-    },
-    "files": [
-      "out/**/*",
-      "package.json",
-      "!**/*.map",
-      "!**/*.ts",
-      "!**/*.tsx",
-      "!node_modules/node-pty/build/**/*",
-      "!node_modules/node-pty/deps/**/*",
-      "!node_modules/node-pty/src/**/*",
-      "!node_modules/node-pty/scripts/**/*",
-      "!node_modules/node-pty/third_party/**/*",
-      "!node_modules/node-pty/prebuilds/darwin-arm64/**/*",
-      "!node_modules/node-pty/prebuilds/darwin-x64/**/*",
-      "!node_modules/node-pty/prebuilds/win32-arm64/**/*"
-    ],
-    "asarUnpack": [
-      "**/node_modules/node-pty/**"
-    ],
-    "extraResources": [
-      {
-        "from": "build",
-        "to": "build",
-        "filter": [
-          "icon.ico",
-          "icon.png",
-          "icon-16.png",
-          "icon-32.png",
-          "icon-48.png",
-          "icon-64.png",
-          "icon-128.png",
-          "icon-256.png"
-        ]
-      }
-    ],
-    "npmRebuild": false,
-    "buildDependenciesFromSource": false,
-    "nodeGypRebuild": false,
-    "win": {
-      "icon": "build/icon.ico",
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "publish": [
-      {
-        "provider": "github",
-        "owner": "yusei531642",
-        "repo": "vibe-editor"
-      }
-    ],
-    "nsis": {
-      "oneClick": true,
-      "perMachine": false,
-      "deleteAppDataOnUninstall": false,
-      "shortcutName": "vibe-editor",
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "menuCategory": "vibe-editor",
-      "runAfterFinish": true,
-      "installerIcon": "build/icon.ico",
-      "uninstallerIcon": "build/icon.ico",
-      "installerHeaderIcon": "build/icon.ico",
-      "installerSidebar": "build/installerSidebar.bmp",
-      "uninstallerSidebar": "build/installerSidebar.bmp",
-      "multiLanguageInstaller": true,
-      "displayLanguageSelector": false,
-      "unicode": true,
-      "removeDefaultUninstallWelcomePage": true,
-      "warningsAsErrors": false,
-      "artifactName": "${productName}-Setup-${version}.${ext}",
-      "include": "build/installer.nsh"
-    },
-    "mac": {
-      "icon": "build/icon.png",
-      "category": "public.app-category.developer-tools",
-      "target": [
-        {
-          "target": "dmg",
-          "arch": [
-            "x64",
-            "arm64"
-          ]
-        }
-      ]
-    },
-    "linux": {
-      "icon": "build/icon.png",
-      "category": "Development",
-      "target": [
-        "AppImage"
-      ]
-    }
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",
@@ -143,12 +21,9 @@
     "@tauri-apps/plugin-shell": "^2",
     "@tauri-apps/plugin-updater": "^2",
     "@xyflow/react": "^12.10.2",
-    "electron-updater": "^6.8.3",
-    "node-pty": "^1.1.0",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.6.0",
     "@monaco-editor/react": "^4.7.0",
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.3",
@@ -156,9 +31,6 @@
     "@vitejs/plugin-react": "^4.3.1",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
-    "electron": "^33.0.0",
-    "electron-builder": "^25.0.0",
-    "electron-vite": "^2.3.0",
     "lucide-react": "^1.8.0",
     "monaco-editor": "^0.55.1",
     "png-to-ico": "^3.0.1",

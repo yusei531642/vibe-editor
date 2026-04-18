@@ -8,6 +8,9 @@ import { useSettings } from './settings-context';
 type Dict = Record<string, string>;
 
 const ja: Dict = {
+  // ---------- Common ----------
+  'common.close': '閉じる',
+
   // ---------- Toolbar ----------
   'toolbar.restart.title': 'アプリを再起動',
   'toolbar.palette.title': 'コマンドパレット (Ctrl+Shift+P)',
@@ -144,6 +147,41 @@ const ja: Dict = {
   'team.closeTeam': 'チームを閉じる',
   'team.closeLeaderOnly': 'リーダーのみ閉じる',
   'team.teamLabel': 'チーム: {name}',
+  'team.defaultName': 'チーム',
+
+  // ---------- Canvas ----------
+  'canvas.add': '追加',
+  'canvas.spawnTeam': 'チーム起動',
+  'canvas.preset': 'プリセット',
+  'canvas.recent': '最近使ったチーム',
+  'canvas.panels': 'パネル',
+  'canvas.customTeam': 'カスタムチームを作成…',
+  'canvas.savedPresets': '保存済みプリセット',
+  'canvas.noRecentTeams': 'まだ保存されたチームがありません。プリセットから起動してください。',
+  'canvas.clear': 'クリア',
+  'canvas.clearConfirm': 'Canvas 上のカードをすべて削除しますか？',
+  'canvas.switchToIde': 'IDE モードに戻る',
+  'canvas.modeToggle': 'Canvas モードに切り替え',
+  'canvas.modeToggleShortcut': 'Canvas モードに切り替え (Ctrl+Shift+M)',
+  'canvas.add.claude': 'Claude Code',
+  'canvas.add.codex': 'Codex',
+  'canvas.add.fileTree': 'ファイルツリー',
+  'canvas.add.gitChanges': 'Git 変更',
+  'canvas.add.emptyEditor': 'エディタ（空）',
+  'canvas.card.editor': 'エディタ',
+  'canvas.lastUsed': '最終使用: {value}',
+  'canvas.deletePreset': 'プリセットを削除',
+  'canvas.deletePresetConfirm': 'プリセット「{name}」を削除しますか？',
+
+  // ---------- Agent Card ----------
+  'agentCard.close': 'カードを閉じる',
+  'agentStatus.idle': '待機中',
+  'agentStatus.thinking': '思考中',
+  'agentStatus.typing': '応答中',
+
+  // ---------- Sessions ----------
+  'sessions.resume': 'セッション {id} に戻る',
+  'sessions.messages': '{count} 件',
 
   // ---------- Roles ----------
   'role.leader': 'Leader',
@@ -207,6 +245,9 @@ const ja: Dict = {
 };
 
 const en: Dict = {
+  // ---------- Common ----------
+  'common.close': 'Close',
+
   // ---------- Toolbar ----------
   'toolbar.restart.title': 'Restart app',
   'toolbar.palette.title': 'Command palette (Ctrl+Shift+P)',
@@ -343,6 +384,41 @@ const en: Dict = {
   'team.closeTeam': 'Close Team',
   'team.closeLeaderOnly': 'Close Leader Only',
   'team.teamLabel': 'Team: {name}',
+  'team.defaultName': 'Team',
+
+  // ---------- Canvas ----------
+  'canvas.add': 'Add',
+  'canvas.spawnTeam': 'Spawn Team',
+  'canvas.preset': 'Preset',
+  'canvas.recent': 'Recent',
+  'canvas.panels': 'Panels',
+  'canvas.customTeam': 'Create custom team…',
+  'canvas.savedPresets': 'Saved presets',
+  'canvas.noRecentTeams': 'No saved teams yet. Start one from a preset.',
+  'canvas.clear': 'Clear',
+  'canvas.clearConfirm': 'Clear every card on the canvas?',
+  'canvas.switchToIde': 'Switch to IDE mode',
+  'canvas.modeToggle': 'Switch to Canvas mode',
+  'canvas.modeToggleShortcut': 'Switch to Canvas mode (Ctrl+Shift+M)',
+  'canvas.add.claude': 'Claude Code',
+  'canvas.add.codex': 'Codex',
+  'canvas.add.fileTree': 'File Tree',
+  'canvas.add.gitChanges': 'Git Changes',
+  'canvas.add.emptyEditor': 'Editor (empty)',
+  'canvas.card.editor': 'Editor',
+  'canvas.lastUsed': 'Last used: {value}',
+  'canvas.deletePreset': 'Delete preset',
+  'canvas.deletePresetConfirm': 'Delete preset "{name}"?',
+
+  // ---------- Agent Card ----------
+  'agentCard.close': 'Close card',
+  'agentStatus.idle': 'Idle',
+  'agentStatus.thinking': 'Thinking',
+  'agentStatus.typing': 'Typing',
+
+  // ---------- Sessions ----------
+  'sessions.resume': 'Resume session {id}',
+  'sessions.messages': '{count} msgs',
 
   // ---------- Roles ----------
   'role.leader': 'Leader',

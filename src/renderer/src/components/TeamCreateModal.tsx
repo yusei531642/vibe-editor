@@ -55,7 +55,7 @@ export function TeamCreateModal({
   };
 
   const handleCreate = (): void => {
-    const name = form.teamName.trim() || 'Team';
+    const name = form.teamName.trim() || t('team.defaultName');
     if (form.saveAsPreset) {
       const pname = form.presetName.trim() || name;
       onSavePreset({
@@ -101,7 +101,12 @@ export function TeamCreateModal({
             <Users size={18} strokeWidth={2} style={{ marginRight: 8, verticalAlign: -3 }} />
             {t('team.title')}
           </h2>
-          <button type="button" className="modal__close" onClick={onClose} aria-label="Close">
+          <button
+            type="button"
+            className="modal__close"
+            onClick={onClose}
+            aria-label={t('common.close')}
+          >
             <X size={18} strokeWidth={2} />
           </button>
         </header>

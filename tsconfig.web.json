@@ -14,7 +14,7 @@
     "isolatedModules": true,
     "allowSyntheticDefaultImports": true,
     "noEmit": true,
-    "types": ["vite/client", "electron"],
+    "types": ["vite/client"],
     "baseUrl": ".",
     "paths": {
       "@shared/*": ["src/types/*"]
@@ -23,7 +23,6 @@
   "include": [
     "src/renderer/**/*.ts",
     "src/renderer/**/*.tsx",
-    "src/types/**/*.ts",
-    "src/preload/index.ts"
+    "src/types/**/*.ts"
   ]
 }

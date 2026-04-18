@@ -14,14 +14,14 @@ pub const SOURCE: &str = r#"#!/usr/bin/env node
  */
 const net = require('net');
 
-const SOCKET = process.env.VIVE_TEAM_SOCKET || '';
-const TOKEN = process.env.VIVE_TEAM_TOKEN || '';
-const TEAM_ID = process.env.VIVE_TEAM_ID || '';
-const ROLE = process.env.VIVE_TEAM_ROLE || 'unknown';
-const AGENT_ID = process.env.VIVE_AGENT_ID || '';
+const SOCKET = process.env.VIBE_TEAM_SOCKET || '';
+const TOKEN = process.env.VIBE_TEAM_TOKEN || '';
+const TEAM_ID = process.env.VIBE_TEAM_ID || '';
+const ROLE = process.env.VIBE_TEAM_ROLE || 'unknown';
+const AGENT_ID = process.env.VIBE_AGENT_ID || '';
 
 if (!SOCKET || !TOKEN) {
-  process.stderr.write('[team-bridge] missing VIVE_TEAM_SOCKET or VIVE_TEAM_TOKEN\n');
+  process.stderr.write('[team-bridge] missing VIBE_TEAM_SOCKET or VIBE_TEAM_TOKEN\n');
 }
 
 const [host, portStr] = SOCKET.split(':');
@@ -105,7 +105,7 @@ function localFallback(req) {
         result: {
           protocolVersion: '2025-03-26',
           capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'vive-team', version: '2.0.0-offline' }
+          serverInfo: { name: 'vibe-team', version: '2.0.0-offline' }
         }
       };
     case 'tools/list':
