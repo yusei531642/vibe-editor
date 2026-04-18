@@ -39,6 +39,7 @@ fn decode_text(bytes: &[u8]) -> (String, String, bool) {
         Err(_) => (
             String::from_utf8_lossy(body).into_owned(),
             "lossy".into(),
+            false,
         ),
     }
 }
