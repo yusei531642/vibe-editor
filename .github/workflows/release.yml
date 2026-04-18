@@ -71,6 +71,9 @@ jobs:
         uses: tauri-apps/tauri-action@v0.5.22
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # tauri 自動アップデート用の署名鍵 (GitHub Secrets から)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           # tag 名そのものを Release タグに使う
           tagName: ${{ github.ref_name }}
@@ -85,7 +88,5 @@ jobs:
             動作確認後にこの draft を publish してください。
           releaseDraft: true
           prerelease: false
-          # updater 鍵を未設定のため latest.json は出さない (tauri-action の自動判定が
-          # 鍵不在で artifact 0 件と判定する不具合を回避)
-          includeUpdaterJson: false
+          includeUpdaterJson: true
           args: ${{ matrix.args }}

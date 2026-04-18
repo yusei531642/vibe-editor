@@ -469,6 +469,11 @@ export function App(): JSX.Element {
     void runClaudeCheck();
   }, [runClaudeCheck]);
 
+  // 起動時に GitHub Release の latest.json を確認 (prod のみ)
+  useEffect(() => {
+    void import('./lib/updater-check').then((m) => m.checkForUpdatesOnce());
+  }, []);
+
   // ---------- Claude Code パネル リサイズ ----------
   const MIN_PANEL = 320;
   const MAX_PANEL = 900;
