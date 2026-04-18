@@ -2,11 +2,13 @@
 
 [English](README.md) · [日本語](README-ja.md)
 
-![vibe-editor](docs/screenshot.png)
+![vibe-editor demo](docs/demo.gif)
 
-> A minimal desktop companion for [Claude Code](https://claude.com/code) and [Codex](https://openai.com/codex/) — **vibe coding with a warm, focused UI, and a multi-agent team runtime built in.**
+> **The team orchestrator for [Claude Code](https://claude.com/code) & [Codex](https://openai.com/codex/).** Spin up 2–30 agents with roles, watch them hand off work in real time, review and redirect from one desktop surface.
 
-vibe-editor is an Electron-based desktop shell with one idea: **let agents write the code; the human reviews, redirects, and coordinates a team of agents.** It is not a text editor first. It is a **review surface** and **team orchestration layer** around Claude Code / Codex sessions.
+vibe-editor is not a code editor. It is a **team dispatcher** built on Tauri + Rust — you describe the job, a leader agent delegates to programmers / researchers / reviewers, messages are **pty-injected directly into each agent's prompt** (no polling, no file queues), and you stay in the loop as reviewer. The built-in editor, git diff, and session history are there to support that review loop, not to compete with your real IDE.
+
+![vibe-editor screenshot](docs/screenshot.png)
 
 ---
 
@@ -25,7 +27,7 @@ The build is not code-signed (no Authenticode certificate). Choose whichever you
 - **SmartScreen "More info" → "Run anyway"** — the easiest path. You can also right-click the `.exe` → Properties → tick "Unblock" → OK.
 - **Switch Smart App Control to "Evaluation"** — Settings → Privacy & security → Windows Security → App & browser control → Smart App Control → **Evaluation**. Only known-bad apps get blocked.
   - ⚠️ Don't pick "Off" — turning it back on requires a full Windows reinstall. "Evaluation" is the sweet spot.
-- **Build locally** — `git clone … && npm install && npm run dist:win` and verify the binary yourself.
+- **Build locally** — `git clone … && npm install && npm run build` and verify the binary yourself.
 
 ### Install location
 
@@ -39,7 +41,7 @@ Pre-built binaries are not yet published for macOS and Linux. Build from source:
 git clone https://github.com/yusei531642/vibe-editor.git
 cd vibe-editor
 npm install
-npm run dist        # outputs to release/
+npm run build      # outputs to src-tauri/target/release/bundle/
 ```
 
 ---
@@ -50,7 +52,7 @@ npm run dist        # outputs to release/
 - **Git** on `PATH` — used by the Changes panel.
 - **Node.js 20+** — only if you plan to build from source.
 
-You do *not* need Python, C++ build tools, or node-gyp — `node-pty` ships NAPI prebuilds.
+You do *not* need Python, C++ build tools, or node-gyp — the pty layer lives in Rust (`portable-pty`) and the renderer is pure JS. You only need a working Rust toolchain (`rustup`).
 
 ---
 
@@ -94,9 +96,9 @@ You do *not* need Python, C++ build tools, or node-gyp — `node-pty` ships NAPI
 
 ### Auto-updater
 
-- Background update checks on startup via `electron-updater` against GitHub Releases
-- Silent NSIS install on completion — no setup wizard, no "Run anyway" prompts on update
-- Downloads resume on failure, TLS settings hardened for GitHub CDN
+- Background update checks on startup via `tauri-plugin-updater` against GitHub Releases
+- Silent install on completion — no setup wizard, no "Run anyway" prompts on update
+- Signed update manifest, resumable downloads, TLS hardened for GitHub CDN
 
 ### Theming and polish
 
@@ -130,16 +132,15 @@ npm install
 npm run dev
 ```
 
-Electron launches with a single Claude Code terminal tab. Open any folder via the project menu (top left) or `Ctrl+Shift+P` → "Open folder…".
+Tauri launches with a single Claude Code terminal tab. Open any folder via the project menu (top left) or `Ctrl+Shift+P` → "Open folder…".
 
 ### Other scripts
 
 ```bash
 npm run typecheck    # tsc --noEmit (strict)
-npm run build        # electron-vite build → out/
-npm run dist:win     # Windows NSIS installer → release/
-npm run dist         # Current-OS installer
-npm run icons        # Regenerate build/icon.ico and installer BMPs from build/icon.svg
+npm run dev:vite     # Renderer only (no Rust)
+npm run build        # cargo tauri build → src-tauri/target/release/bundle/
+npm run icons        # Regenerate build/icon.ico from build/icon.svg
 ```
 
 ---
@@ -147,62 +148,37 @@ npm run icons        # Regenerate build/icon.ico and installer BMPs from build/i
 ## Architecture
 
 ```
-src/
-├── main/                       # Electron main process
-│   ├── index.ts                # BrowserWindow, IPC registration, auto-updater init
-│   ├── team-hub.ts             # In-process TCP JSON-RPC MCP hub + team-bridge.js generator
-│   ├── updater.ts              # electron-updater wiring + silent install
-│   └── ipc/
-│       ├── app.ts              # getProjectRoot, restart, setupTeamMcp, Claude MCP registration
-│       ├── dialog.ts           # folder/file pickers
-│       ├── files.ts            # list/read/write for the file tree + simple editor
-│       ├── git.ts              # status + diff (HEAD vs worktree)
-│       ├── sessions.ts         # parse ~/.claude/projects/*/*.jsonl + session dir utils
-│       ├── settings.ts         # userData/settings.json persistence
-│       ├── team-history.ts     # per-project team history JSON store
-│       └── terminal.ts         # node-pty spawn/write/resize, image paste, session watcher
-├── preload/
-│   └── index.ts                # contextBridge.exposeInMainWorld('api', ...)
-└── renderer/src/
-    ├── App.tsx                 # layout + state orchestration
-    ├── components/
-    │   ├── AppMenu.tsx
-    │   ├── ChangesPanel.tsx
-    │   ├── CommandPalette.tsx
-    │   ├── DiffView.tsx
-    │   ├── EditorView.tsx
-    │   ├── FileTreePanel.tsx
-    │   ├── SessionsPanel.tsx
-    │   ├── SettingsModal.tsx
-    │   ├── Sidebar.tsx
-    │   ├── TabBar.tsx
-    │   ├── TeamCreateModal.tsx
-    │   ├── TerminalView.tsx
-    │   ├── Toolbar.tsx
-    │   └── WelcomePane.tsx
-    └── lib/
-        ├── commands.ts         # fuzzy filter + Command type
-        ├── i18n.ts             # ja / en flat-key dict
-        ├── language.ts         # ext → Monaco language
-        ├── monaco-setup.ts     # Vite worker wiring
-        ├── parse-args.ts       # shell-like arg split
-        ├── settings-context.tsx
-        ├── themes.ts           # CSS variable themes
-        └── toast-context.tsx
+src-tauri/                       # Rust side (Tauri host)
+├── src/
+│   ├── main.rs                  # Tauri app entry, updater init
+│   ├── lib.rs                   # invoke handler wiring
+│   ├── commands/                # IPC handlers (app/git/terminal/settings/…)
+│   ├── pty/                     # portable-pty + batcher + Claude session watcher
+│   ├── team_hub/                # TCP JSON-RPC MCP hub + embedded team-bridge.js
+│   └── mcp_config/              # ~/.claude.json & ~/.codex/config.toml writers
+├── Cargo.toml
+└── tauri.conf.json
+
+src/renderer/src/                # React 18 + TypeScript, UI only
+├── App.tsx
+├── components/                  # UI components
+├── components/canvas/           # @xyflow/react infinite-canvas mode
+├── stores/                      # zustand (ui, canvas)
+└── lib/                         # themes, i18n, tauri-api, commands, …
 ```
 
 ### How TeamHub works
 
 ```
- ┌──────── Electron main process ────────┐
- │                                       │
- │  TeamHub                              │
- │   ├─ TCP JSON-RPC on 127.0.0.1:rand   │
- │   ├─ agentId → pty registry           │
- │   └─ team_send → pty.write() inject   │
- │                                       │
- │  terminal.ts owns the ptys            │
- └───────────────────────────────────────┘
+ ┌────────────── Rust host (src-tauri) ──────────────┐
+ │                                                   │
+ │  TeamHub                                          │
+ │   ├─ TCP JSON-RPC on 127.0.0.1:rand               │
+ │   ├─ agentId → pty registry                       │
+ │   └─ team_send → pty.write() inject               │
+ │                                                   │
+ │  commands/terminal.rs owns the ptys (portable-pty)│
+ └───────────────────────────────────────────────────┘
           ▲                  ▲
     stdio MCP           stdio MCP
  ┌────┴──────┐      ┌────┴──────┐
@@ -211,19 +187,18 @@ src/
  └───────────┘      └───────────┘
 ```
 
-- On startup, `TeamHub.start()` opens a local TCP JSON-RPC server with a random port + 24-byte auth token
-- A tiny `team-bridge.js` is written to `%APPDATA%\vibe-editor\team-bridge.js` and registered as the `vive-team` MCP server in `~/.claude.json` and `~/.codex/config.toml`
-- When Claude Code spawns `vive-team`, the bridge connects to the hub via TCP using the token
+- On startup, the Rust `TeamHub` opens a local TCP JSON-RPC server with a random port + 24-byte auth token
+- A tiny `team-bridge.js` is written to `%APPDATA%\vibe-editor\team-bridge.js` and registered as the `vibe-team` MCP server in `~/.claude.json` and `~/.codex/config.toml`
+- When Claude Code spawns `vibe-team`, the bridge connects to the hub via TCP using the token
 - `team_send(to, message)` on the hub resolves the target `agentId` → pty and calls `pty.write(message + '\r')` directly. No file polling.
 - UTF-8 safe chunked writes handle long messages on Windows ConPTY
-- On unmount, the hub stops, the JSON config entries remain (no cleanup of other users' state)
+- On app shutdown, the hub stops and MCP config entries are cleaned up (graceful uninstall)
 
 ### Constraints
 
-- Main process owns: filesystem, git, node-pty, dialogs, the TeamHub TCP server
-- Renderer is pure UI: no direct `fs` / `child_process` / Node imports
-- All IPC through `contextBridge.exposeInMainWorld('api', ...)`
-- TypeScript strict mode across the whole codebase
+- Rust host owns: filesystem, git, pty, dialogs, the TeamHub TCP server, auto-updater
+- Renderer is pure UI: all side effects go through `@tauri-apps/api/core` `invoke()` + `listen()`
+- TypeScript strict mode across the whole renderer codebase
 
 ---
 

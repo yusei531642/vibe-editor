@@ -16,6 +16,9 @@ pub struct GitFileChange {
     pub index_status: String,
     pub worktree_status: String,
     pub label: String,
+    /// rename / copy の場合、HEAD 側 (移動前) のパス。通常は None。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_path: Option<String>,
 }
 
 #[derive(Serialize, Default)]
@@ -54,6 +57,74 @@ async fn run_git(args: &[&str], cwd: &str) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// `git status --porcelain=v1 -z` の raw bytes を返す。
+/// -z は NUL 区切りなので UTF-8 変換せず bytes 単位で返す必要がある。
+async fn run_git_bytes(args: &[&str], cwd: &str) -> Result<Vec<u8>, String> {
+    let out = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .await
+        .map_err(|e| format!("failed to spawn git: {e}"))?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).into_owned());
+    }
+    Ok(out.stdout)
+}
+
+/// `--porcelain=v1 -z` の出力をパースする。
+///
+/// レコード形式:
+///   - 通常: `XY ` + path + `\0`
+///   - rename/copy: `XY ` + new_path + `\0` + old_path + `\0`
+///
+/// X == 'R' or 'C' (どちら側の列でも) の場合のみ 2 番目の NUL 区切りが old_path。
+fn parse_porcelain_z(bytes: &[u8]) -> Vec<GitFileChange> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        // 最低 4 バイト (XY + space + path + NUL) が必要
+        if bytes.len() < i + 4 {
+            break;
+        }
+        let idx = bytes[i] as char;
+        let wt = bytes[i + 1] as char;
+        // bytes[i+2] は ' ' (space) のはず
+        i += 3;
+
+        // 次の NUL を探す
+        let path_end = match bytes[i..].iter().position(|&b| b == 0) {
+            Some(n) => i + n,
+            None => break,
+        };
+        let new_path = String::from_utf8_lossy(&bytes[i..path_end]).into_owned();
+        i = path_end + 1;
+
+        // rename / copy なら続けて old_path が入っている
+        let original_path = if matches!(idx, 'R' | 'C') || matches!(wt, 'R' | 'C') {
+            match bytes[i..].iter().position(|&b| b == 0) {
+                Some(n) => {
+                    let old = String::from_utf8_lossy(&bytes[i..i + n]).into_owned();
+                    i += n + 1;
+                    Some(old)
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+
+        out.push(GitFileChange {
+            path: new_path,
+            index_status: idx.to_string(),
+            worktree_status: wt.to_string(),
+            label: label_from_status(idx, wt).to_string(),
+            original_path,
+        });
+    }
+    out
+}
+
 fn label_from_status(idx: char, wt: char) -> &'static str {
     match (idx, wt) {
         ('?', '?') => "Untracked",
@@ -83,8 +154,10 @@ pub async fn git_status(project_root: String) -> GitStatus {
         .await
         .ok()
         .map(|s| s.trim().to_string());
-    let porcelain = match run_git(&["status", "--porcelain"], &project_root).await {
-        Ok(s) => s,
+    // Issue #19: -z (NUL 区切り) を使わないと rename が "old -> new" の 1 行として返り
+    //            parser が解釈できない。`--porcelain=v1 -z` でバイト単位にパースする。
+    let porcelain_bytes = match run_git_bytes(&["status", "--porcelain=v1", "-z"], &project_root).await {
+        Ok(b) => b,
         Err(e) => {
             return GitStatus {
                 ok: false,
@@ -95,24 +168,7 @@ pub async fn git_status(project_root: String) -> GitStatus {
             }
         }
     };
-    let files = porcelain
-        .lines()
-        .filter_map(|line| {
-            if line.len() < 3 {
-                return None;
-            }
-            let bytes = line.as_bytes();
-            let idx = bytes[0] as char;
-            let wt = bytes[1] as char;
-            let path = line[3..].to_string();
-            Some(GitFileChange {
-                path,
-                index_status: idx.to_string(),
-                worktree_status: wt.to_string(),
-                label: label_from_status(idx, wt).to_string(),
-            })
-        })
-        .collect();
+    let files = parse_porcelain_z(&porcelain_bytes);
 
     GitStatus {
         ok: true,
@@ -124,12 +180,18 @@ pub async fn git_status(project_root: String) -> GitStatus {
 }
 
 #[tauri::command]
-pub async fn git_diff(project_root: String, rel_path: String) -> GitDiffResult {
+pub async fn git_diff(
+    project_root: String,
+    rel_path: String,
+    // Issue #19: rename の場合、HEAD 側 (移動前) のパス。UI (GitFileChange.originalPath) から渡す。
+    // 未指定なら rel_path を両側に使う (通常の変更)。
+    original_rel_path: Option<String>,
+) -> GitDiffResult {
     // 旧実装と同じく `git diff -- <path>` ではなく、HEAD と worktree を別々に取って
     // Monaco DiffEditor が比較しやすい形式 (original / modified) に整形する。
-    // ここでは簡略実装として cat-file HEAD:<path> + 現在ファイル内容を返す。
+    let head_path = original_rel_path.as_deref().unwrap_or(&rel_path);
     let head = run_git(
-        &["show", &format!("HEAD:{rel_path}")],
+        &["show", &format!("HEAD:{head_path}")],
         &project_root,
     )
     .await;
@@ -153,5 +215,43 @@ pub async fn git_diff(project_root: String, rel_path: String) -> GitDiffResult {
         is_binary,
         original,
         modified,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_rename_record() {
+        // "R  newname\0oldname\0"
+        let data = b"R  newname\0oldname\0";
+        let v = parse_porcelain_z(data);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].path, "newname");
+        assert_eq!(v[0].original_path.as_deref(), Some("oldname"));
+        assert_eq!(v[0].index_status, "R");
+    }
+
+    #[test]
+    fn parse_multiple_mixed() {
+        // "M  a.txt\0R  new.rs\0old.rs\0?? untracked.bin\0"
+        let data = b"M  a.txt\0R  new.rs\0old.rs\0?? untracked.bin\0";
+        let v = parse_porcelain_z(data);
+        assert_eq!(v.len(), 3);
+        assert_eq!(v[0].path, "a.txt");
+        assert!(v[0].original_path.is_none());
+        assert_eq!(v[1].path, "new.rs");
+        assert_eq!(v[1].original_path.as_deref(), Some("old.rs"));
+        assert_eq!(v[2].path, "untracked.bin");
+    }
+
+    #[test]
+    fn parse_path_with_spaces() {
+        // -z はスペースを escape しないので "file with spaces.txt" がそのまま入る
+        let data = b"M  file with spaces.txt\0";
+        let v = parse_porcelain_z(data);
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].path, "file with spaces.txt");
     }
 }

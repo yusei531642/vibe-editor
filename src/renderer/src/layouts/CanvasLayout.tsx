@@ -10,9 +10,8 @@
  *   - Preset 起動時に teamHistory に自動保存 (canvasState 込み)
  *   - "Recent Teams" タブで過去チームを再開 (Card 配置完全復元)
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Bot,
   FilePlus,
   FolderTree,
   GitBranch,
@@ -25,6 +24,7 @@ import {
 } from 'lucide-react';
 import type { CardType } from '../stores/canvas';
 import type {
+  Language,
   Team,
   TeamHistoryEntry,
   TeamMember,
@@ -36,6 +36,7 @@ import { Canvas } from '../components/canvas/Canvas';
 import { CanvasSidebar } from '../components/canvas/CanvasSidebar';
 import { SettingsModal } from '../components/SettingsModal';
 import { TeamCreateModal } from '../components/TeamCreateModal';
+import { useT } from '../lib/i18n';
 import { useUiStore } from '../stores/ui';
 import { useCanvasStore } from '../stores/canvas';
 import {
@@ -47,6 +48,41 @@ import { ROLE_META } from '../lib/team-roles';
 import { useSettings } from '../lib/settings-context';
 
 type Tab = 'preset' | 'recent';
+const MAX_CANVAS_AGENTS = 30;
+
+function localeOf(language: Language): string {
+  return language === 'ja' ? 'ja-JP' : 'en-US';
+}
+
+function formatCardCount(count: number, language: Language): string {
+  return language === 'ja'
+    ? `${count} 枚のカード`
+    : `${count} ${count === 1 ? 'card' : 'cards'}`;
+}
+
+function formatAgentCount(count: number, language: Language): string {
+  return language === 'ja' ? `${count} エージェント` : `${count} agents`;
+}
+
+function mergeCanvasMembers(
+  currentMembers: { role: TeamRole; agent: TerminalAgent }[],
+  existingEntry?: TeamHistoryEntry
+): TeamHistoryEntry['members'] {
+  const sessionQueues = new Map<string, Array<string | null>>();
+  for (const member of existingEntry?.members ?? []) {
+    const key = `${member.role}:${member.agent}`;
+    const queue = sessionQueues.get(key) ?? [];
+    queue.push(member.sessionId ?? null);
+    sessionQueues.set(key, queue);
+  }
+
+  return currentMembers.map((member) => {
+    const key = `${member.role}:${member.agent}`;
+    const queue = sessionQueues.get(key);
+    const sessionId = queue && queue.length > 0 ? queue.shift() ?? null : null;
+    return { ...member, sessionId };
+  });
+}
 
 export function CanvasLayout(): JSX.Element {
   const setViewMode = useUiStore((s) => s.setViewMode);
@@ -56,6 +92,7 @@ export function CanvasLayout(): JSX.Element {
   const clear = useCanvasStore((s) => s.clear);
   const addCards = useCanvasStore((s) => s.addCards);
   const { settings, update: updateSettings, reset: resetSettings } = useSettings();
+  const t = useT();
   // プロジェクトルート: runtime の lastOpenedRoot を優先。ユーザー設定の
   // claudeCwd (明示指定された作業ディレクトリ) は互換フォールバックとして扱う。
   const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || '';
@@ -66,6 +103,45 @@ export function CanvasLayout(): JSX.Element {
   const [tab, setTab] = useState<Tab>('preset');
   const [recent, setRecent] = useState<TeamHistoryEntry[]>([]);
   const [teamModalOpen, setTeamModalOpen] = useState(false);
+  const addPopoverRef = useRef<HTMLDivElement>(null);
+  const spawnPopoverRef = useRef<HTMLDivElement>(null);
+  const locale = localeOf(settings.language);
+  const dateTimeFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat(locale, {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+      }),
+    [locale]
+  );
+
+  useEffect(() => {
+    if (!addCardOpen && !spawnOpen) return;
+    const handlePointerDown = (event: MouseEvent): void => {
+      const target = event.target as Node;
+      if (addCardOpen && addPopoverRef.current && !addPopoverRef.current.contains(target)) {
+        setAddCardOpen(false);
+      }
+      if (spawnOpen && spawnPopoverRef.current && !spawnPopoverRef.current.contains(target)) {
+        setSpawnOpen(false);
+      }
+    };
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setAddCardOpen(false);
+        setSpawnOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [addCardOpen, spawnOpen]);
 
   // Recent ロード
   const loadRecent = async (): Promise<void> => {
@@ -82,61 +158,92 @@ export function CanvasLayout(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectRoot]);
 
-  // Phase 5: Canvas state が変わったら、active な team について team-history へ自動保存
-  useEffect(() => {
-    if (nodes.length === 0) return;
-    // 同 teamId で agentId を持つ node 群を集約
-    const byTeam = new Map<string, { name: string; entries: typeof nodes }>();
+  // Phase 5: Canvas state が変わったら、active な team について team-history へ自動保存。
+  //
+  // パフォーマンス注意:
+  //   nodes は zustand で position 変化のたび (drag 中毎フレーム) 参照が変わるため、
+  //   この useEffect を [nodes, viewport] に依存させると毎フレーム clearTimeout/setTimeout
+  //   が走り、800ms 無操作が続かない限り保存されない (drag 中は永遠に保存されない)。
+  //
+  // 対策:
+  //   1. 保存対象のエントリを JSON stringify で stable key 化し、deps に渡す (string 比較で
+  //      早期 bailout)。
+  //   2. debounce を 1500ms に延長。
+  //   3. 直前保存値を ref に保持し、同一内容なら fs 書き込みをスキップ。
+  const lastSavedKeyRef = useRef<string>('');
+  const autoSavePayload = useMemo(() => {
+    if (nodes.length === 0) return null;
+    interface TeamEntryInfo { name: string; members: { role: TeamRole; agent: TerminalAgent }[]; canvasNodes: { agentId: string; x: number; y: number; width?: number; height?: number }[]; }
+    const byTeam = new Map<string, TeamEntryInfo>();
     for (const n of nodes) {
-      const payload = (n.data?.payload ?? {}) as { teamId?: string; agentId?: string; role?: string };
-      if (!payload.teamId || !payload.agentId) continue;
-      const ex = byTeam.get(payload.teamId);
-      if (ex) {
-        ex.entries.push(n);
-      } else {
-        byTeam.set(payload.teamId, {
-          name: String(n.data?.title ?? 'Team'),
-          entries: [n]
-        });
-      }
+      const p = (n.data?.payload ?? {}) as { teamId?: string; agentId?: string; role?: string; agent?: string };
+      if (!p.teamId || !p.agentId) continue;
+      const title = String(n.data?.title ?? 'Team');
+      const entry = byTeam.get(p.teamId) ?? { name: title, members: [], canvasNodes: [] };
+      entry.members.push({
+        role: (p.role ?? 'leader') as TeamRole,
+        agent: (p.agent ?? 'claude') as TerminalAgent
+      });
+      entry.canvasNodes.push({
+        agentId: p.agentId,
+        // 位置は整数に丸めて key の微動を抑える (サブピクセル更新で再保存しない)
+        x: Math.round(n.position.x),
+        y: Math.round(n.position.y),
+        width: typeof n.style?.width === 'number' ? Math.round(n.style.width as number) : undefined,
+        height: typeof n.style?.height === 'number' ? Math.round(n.style.height as number) : undefined
+      });
+      byTeam.set(p.teamId, entry);
     }
-    // debounce 800ms
+    return { byTeam, viewport };
+  }, [nodes, viewport]);
+
+  const autoSaveKey = useMemo(() => {
+    if (!autoSavePayload) return '';
+    const { byTeam, viewport: vp } = autoSavePayload;
+    const parts: string[] = [];
+    for (const [teamId, info] of byTeam) {
+      parts.push(`${teamId}|${info.name}|` + info.canvasNodes.map((c) => `${c.agentId}@${c.x},${c.y}:${c.width}x${c.height}`).sort().join(','));
+    }
+    parts.sort();
+    return parts.join('##') + `##vp:${Math.round(vp.x)},${Math.round(vp.y)}:${vp.zoom.toFixed(2)}`;
+  }, [autoSavePayload]);
+
+  useEffect(() => {
+    if (!autoSavePayload) return;
+    if (autoSaveKey === lastSavedKeyRef.current) return;
     const handle = window.setTimeout(() => {
-      for (const [teamId, info] of byTeam) {
-        const members = info.entries.map((n) => {
-          const p = n.data?.payload as { role?: string; agent?: string; agentId?: string } | undefined;
-          return {
-            role: (p?.role ?? 'leader') as TeamRole,
-            agent: (p?.agent ?? 'claude') as TerminalAgent,
-            sessionId: null
-          };
-        });
-        const canvasNodes = info.entries.map((n) => {
-          const p = n.data?.payload as { agentId?: string } | undefined;
-          return {
-            agentId: p?.agentId ?? n.id,
-            x: n.position.x,
-            y: n.position.y,
-            width: typeof n.style?.width === 'number' ? (n.style.width as number) : undefined,
-            height: typeof n.style?.height === 'number' ? (n.style.height as number) : undefined
-          };
-        });
+      // debounce タイマー発火時点でも最新 key が変わらなければ保存
+      lastSavedKeyRef.current = autoSaveKey;
+      const nowIso = new Date().toISOString();
+      const nextEntries: TeamHistoryEntry[] = [];
+      for (const [teamId, info] of autoSavePayload.byTeam) {
+        const existing = recent.find((entry) => entry.id === teamId);
         const entry: TeamHistoryEntry = {
           id: teamId,
-          name: info.entries[0]?.data?.title ? `${info.entries[0].data.title} (${members.length})` : 'Team',
-          projectRoot,
-          createdAt: new Date().toISOString(),
-          lastUsedAt: new Date().toISOString(),
-          members,
-          canvasState: { nodes: canvasNodes, viewport }
+          name: info.members.length > 0 ? `${info.name} (${info.members.length})` : info.name,
+          projectRoot: existing?.projectRoot ?? projectRoot,
+          createdAt: existing?.createdAt ?? nowIso,
+          lastUsedAt: nowIso,
+          members: mergeCanvasMembers(info.members, existing),
+          canvasState: { nodes: info.canvasNodes, viewport: autoSavePayload.viewport }
         };
+        nextEntries.push(entry);
         void window.api.teamHistory.save(entry).catch((err) => {
           console.warn('[recent] save failed:', err);
         });
       }
-    }, 800);
+      if (nextEntries.length > 0) {
+        setRecent((prev) => {
+          const merged = new Map(prev.map((entry) => [entry.id, entry]));
+          for (const entry of nextEntries) merged.set(entry.id, entry);
+          return Array.from(merged.values()).sort((a, b) =>
+            b.lastUsedAt.localeCompare(a.lastUsedAt)
+          );
+        });
+      }
+    }, 1500);
     return () => window.clearTimeout(handle);
-  }, [nodes, viewport, projectRoot]);
+  }, [autoSaveKey, autoSavePayload, projectRoot, recent]);
 
   // ----- カスタムチーム作成 (TeamCreateModal からのコールバック) -----
   const handleCreateCustomTeam = (
@@ -270,6 +377,18 @@ export function CanvasLayout(): JSX.Element {
     } catch (err) {
       console.warn('[restore] setupTeamMcp failed:', err);
     }
+    const updatedEntry: TeamHistoryEntry = {
+      ...entry,
+      lastUsedAt: new Date().toISOString()
+    };
+    setRecent((prev) =>
+      [updatedEntry, ...prev.filter((item) => item.id !== updatedEntry.id)].sort((a, b) =>
+        b.lastUsedAt.localeCompare(a.lastUsedAt)
+      )
+    );
+    void window.api.teamHistory.save(updatedEntry).catch((err) => {
+      console.warn('[restore] team_history_save failed:', err);
+    });
     setSpawnOpen(false);
   };
 
@@ -297,10 +416,10 @@ export function CanvasLayout(): JSX.Element {
   const addByType = (type: Exclude<CardType, 'terminal' | 'agent'>): void => {
     const cwd = projectRoot;
     const titles: Record<typeof type, string> = {
-      editor: 'Editor',
+      editor: t('canvas.card.editor'),
       diff: 'Diff',
-      fileTree: 'Files',
-      changes: 'Changes'
+      fileTree: t('sidebar.files'),
+      changes: t('sidebar.changes')
     };
     const payload =
       type === 'fileTree' || type === 'changes'
@@ -311,156 +430,77 @@ export function CanvasLayout(): JSX.Element {
   };
 
   return (
-    <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'var(--bg-deep, #0a0a0d)',
-        color: 'var(--fg, #e6e6e6)'
-      }}
-    >
-      <header
-        style={{
-          height: 56,
-          display: 'flex',
-          alignItems: 'center',
-          padding: '0 16px',
-          gap: 12,
-          background: 'var(--bg-elevated, #16161c)',
-          borderBottom: '1px solid var(--border, #2a2a35)',
-          zIndex: 5
-        }}
-      >
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 8,
-            fontWeight: 600,
-            fontSize: 14
-          }}
-        >
-          <MonitorSmartphone size={16} />
+    <div className="canvas-layout">
+      <header className="canvas-header">
+        <span className="canvas-header__brand">
+          <MonitorSmartphone size={14} strokeWidth={1.75} />
           Canvas
         </span>
-        <span style={{ fontSize: 12, color: 'var(--fg-muted, #8a8aa3)' }}>
-          {cardCount} card{cardCount === 1 ? '' : 's'}
-        </span>
-        <div style={{ flex: 1 }} />
+        <span className="canvas-header__count">{formatCardCount(cardCount, settings.language)}</span>
+        <div className="canvas-header__spacer" />
 
-        <div style={{ position: 'relative' }}>
+        <div className="canvas-popover__wrap" ref={addPopoverRef}>
           <button
             type="button"
+            className="canvas-btn"
             onClick={() => setAddCardOpen((v) => !v)}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 12px',
-              background: 'transparent',
-              color: 'var(--fg, #e6e6e6)',
-              border: '1px solid var(--border, #2a2a35)',
-              borderRadius: 6,
-              cursor: 'pointer',
-              fontSize: 12
-            }}
+            aria-label={t('canvas.add')}
           >
-            <Plus size={14} />
-            <Bot size={14} />
-            AI Agent
+            <Plus size={13} strokeWidth={1.8} />
+            {t('canvas.add')}
           </button>
           {addCardOpen && (
-            <div
-              style={{
-                position: 'absolute',
-                right: 0,
-                top: 'calc(100% + 8px)',
-                width: 220,
-                background: 'var(--bg-deep, #0d0d12)',
-                border: '1px solid var(--border, #2a2a35)',
-                borderRadius: 8,
-                boxShadow: '0 12px 32px rgba(0,0,0,0.6)',
-                zIndex: 20,
-                overflow: 'hidden'
-              }}
-            >
+            <div className="canvas-popover">
               <AddItem
                 icon={<AgentBadge label="C" color="#5c5cff" />}
-                label="Claude Code"
+                label={t('canvas.add.claude')}
                 onClick={() => addAgent('claude')}
               />
               <AddItem
                 icon={<AgentBadge label="X" color="#10b981" />}
-                label="Codex"
+                label={t('canvas.add.codex')}
                 onClick={() => addAgent('codex')}
               />
-              <div style={{ height: 1, background: 'var(--border, #2a2a35)' }} />
-              <AddItem icon={<FolderTree size={14} />} label="File Tree" onClick={() => addByType('fileTree')} />
-              <AddItem icon={<GitBranch size={14} />} label="Git Changes" onClick={() => addByType('changes')} />
-              <AddItem icon={<FilePlus size={14} />} label="Editor (empty)" onClick={() => addByType('editor')} />
+              <div className="canvas-popover__section">{t('canvas.panels')}</div>
+              <AddItem
+                icon={<FolderTree size={13} />}
+                label={t('canvas.add.fileTree')}
+                onClick={() => addByType('fileTree')}
+              />
+              <AddItem
+                icon={<GitBranch size={13} />}
+                label={t('canvas.add.gitChanges')}
+                onClick={() => addByType('changes')}
+              />
+              <AddItem
+                icon={<FilePlus size={13} />}
+                label={t('canvas.add.emptyEditor')}
+                onClick={() => addByType('editor')}
+              />
             </div>
           )}
         </div>
 
-        <div style={{ position: 'relative' }}>
+        <div className="canvas-popover__wrap" ref={spawnPopoverRef}>
           <button
             type="button"
+            className="canvas-btn canvas-btn--primary"
             onClick={() => setSpawnOpen((v) => !v)}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              padding: '6px 12px',
-              background: '#5c5cff',
-              color: '#fff',
-              border: 0,
-              borderRadius: 6,
-              cursor: 'pointer',
-              fontSize: 12,
-              fontWeight: 500
-            }}
+            aria-label={t('canvas.spawnTeam')}
           >
-            <Sparkles size={14} />
-            Spawn Team
+            <Sparkles size={13} strokeWidth={1.8} />
+            {t('canvas.spawnTeam')}
           </button>
           {spawnOpen && (
-            <div
-              style={{
-                position: 'absolute',
-                right: 0,
-                top: 'calc(100% + 8px)',
-                width: 360,
-                background: 'var(--bg-deep, #0d0d12)',
-                border: '1px solid var(--border, #2a2a35)',
-                borderRadius: 8,
-                boxShadow: '0 12px 32px rgba(0,0,0,0.6)',
-                zIndex: 20,
-                overflow: 'hidden'
-              }}
-            >
-              <div
-                style={{
-                  display: 'flex',
-                  borderBottom: '1px solid var(--border, #2a2a35)'
-                }}
-              >
+            <div className="canvas-popover canvas-popover--wide">
+              <div className="canvas-popover__tabs">
                 <TabBtn active={tab === 'preset'} onClick={() => setTab('preset')}>
-                  <Sparkles size={12} /> Preset
+                  <Sparkles size={11} /> {t('canvas.preset')}
                 </TabBtn>
                 <TabBtn active={tab === 'recent'} onClick={() => setTab('recent')}>
-                  <History size={12} /> Recent
+                  <History size={11} /> {t('canvas.recent')}
                   {closeRecent.length > 0 && (
-                    <span
-                      style={{
-                        marginLeft: 4,
-                        fontSize: 9,
-                        color: 'var(--fg-muted, #8a8aa3)'
-                      }}
-                    >
-                      {closeRecent.length}
-                    </span>
+                    <span className="canvas-popover__tab-badge">{closeRecent.length}</span>
                   )}
                 </TabBtn>
               </div>
@@ -468,56 +508,32 @@ export function CanvasLayout(): JSX.Element {
                 <>
                   <button
                     type="button"
+                    className="canvas-popover__item canvas-popover__item--emph"
                     onClick={() => {
                       setSpawnOpen(false);
                       setTeamModalOpen(true);
                     }}
-                    style={{
-                      width: '100%',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      padding: '12px 14px',
-                      background: 'rgba(92,92,255,0.10)',
-                      color: 'var(--fg, #e6e6e6)',
-                      border: 0,
-                      borderBottom: '1px solid var(--border, #2a2a35)',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      fontSize: 13,
-                      fontWeight: 600
-                    }}
-                    onMouseEnter={(e) =>
-                      ((e.currentTarget as HTMLElement).style.background = 'rgba(92,92,255,0.18)')
-                    }
-                    onMouseLeave={(e) =>
-                      ((e.currentTarget as HTMLElement).style.background = 'rgba(92,92,255,0.10)')
-                    }
                   >
-                    <Plus size={14} />
-                    カスタムチームを作成…
+                    <Plus size={13} />
+                    {t('canvas.customTeam')}
                   </button>
                   {BUILTIN_PRESETS.map((p) => (
-                    <PresetItem key={p.id} preset={p} onClick={() => void applyPreset(p)} />
+                    <PresetItem
+                      key={p.id}
+                      preset={p}
+                      agentCountLabel={formatAgentCount(p.members.length, settings.language)}
+                      onClick={() => void applyPreset(p)}
+                    />
                   ))}
                   {(settings.teamPresets ?? []).length > 0 && (
-                    <div
-                      style={{
-                        padding: '6px 14px',
-                        fontSize: 10,
-                        color: 'var(--fg-muted, #8a8aa3)',
-                        textTransform: 'uppercase',
-                        letterSpacing: 0.5,
-                        background: 'rgba(255,255,255,0.02)'
-                      }}
-                    >
-                      保存済みプリセット
-                    </div>
+                    <div className="canvas-popover__section">{t('canvas.savedPresets')}</div>
                   )}
                   {(settings.teamPresets ?? []).map((sp) => (
                     <SavedPresetItem
                       key={sp.id}
                       preset={sp}
+                      agentCountLabel={formatAgentCount(sp.members.length, settings.language)}
+                      deleteLabel={t('canvas.deletePreset')}
                       onClick={() => {
                         const leaderM = sp.members.find((m) => m.role === 'leader');
                         const others = sp.members.filter((m) => m.role !== 'leader');
@@ -528,7 +544,15 @@ export function CanvasLayout(): JSX.Element {
                         );
                         setSpawnOpen(false);
                       }}
-                      onDelete={() => handleDeleteTeamPreset(sp.id)}
+                      onDelete={() => {
+                        if (
+                          window.confirm(
+                            t('canvas.deletePresetConfirm', { name: sp.name })
+                          )
+                        ) {
+                          handleDeleteTeamPreset(sp.id);
+                        }
+                      }}
                     />
                   ))}
                 </>
@@ -536,20 +560,17 @@ export function CanvasLayout(): JSX.Element {
               {tab === 'recent' && (
                 <>
                   {closeRecent.length === 0 && (
-                    <div
-                      style={{
-                        padding: 16,
-                        fontSize: 12,
-                        color: 'var(--fg-muted, #8a8aa3)'
-                      }}
-                    >
-                      まだ保存されたチームがありません。Preset から起動してください。
-                    </div>
+                    <div className="canvas-popover__empty">{t('canvas.noRecentTeams')}</div>
                   )}
                   {closeRecent.map((entry) => (
                     <RecentItem
                       key={entry.id}
                       entry={entry}
+                      fallbackName={t('team.defaultName')}
+                      agentCountLabel={formatAgentCount(entry.members.length, settings.language)}
+                      lastUsedLabel={t('canvas.lastUsed', {
+                        value: dateTimeFormatter.format(new Date(entry.lastUsedAt))
+                      })}
                       onClick={() => void restoreRecent(entry)}
                     />
                   ))}
@@ -562,46 +583,28 @@ export function CanvasLayout(): JSX.Element {
         {cardCount > 0 && (
           <button
             type="button"
+            className="canvas-btn canvas-btn--ghost"
             onClick={() => {
-              if (window.confirm('Canvas 上のカードを全て削除しますか?')) clear();
-            }}
-            style={{
-              padding: '6px 10px',
-              background: 'transparent',
-              color: 'var(--fg-muted, #a8a8b8)',
-              border: '1px solid var(--border, #2a2a35)',
-              borderRadius: 6,
-              cursor: 'pointer',
-              fontSize: 12
+              if (window.confirm(t('canvas.clearConfirm'))) clear();
             }}
           >
-            Clear
+            {t('canvas.clear')}
           </button>
         )}
         <button
           type="button"
+          className="canvas-btn"
           onClick={() => setViewMode('ide')}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '6px 12px',
-            background: 'var(--bg-deep, #0d0d12)',
-            color: 'var(--fg, #e6e6e6)',
-            border: '1px solid var(--border, #2a2a35)',
-            borderRadius: 6,
-            cursor: 'pointer',
-            fontSize: 12
-          }}
-          title="Switch to IDE mode"
+          title={t('canvas.switchToIde')}
+          aria-label={t('canvas.switchToIde')}
         >
-          <Layout size={14} />
+          <Layout size={13} strokeWidth={1.8} />
           IDE
         </button>
       </header>
-      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+      <div className="canvas-layout__body">
         <CanvasSidebar />
-        <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
+        <div className="canvas-layout__stage">
           <Canvas />
         </div>
       </div>
@@ -625,7 +628,7 @@ export function CanvasLayout(): JSX.Element {
         savedPresets={settings.teamPresets ?? []}
         onSavePreset={handleSaveTeamPreset}
         onDeletePreset={handleDeleteTeamPreset}
-        maxTerminals={20}
+        maxTerminals={MAX_CANVAS_AGENTS}
         currentTabCount={nodes.filter((n) => n.type === 'agent').length}
         existingTeams={[] as Team[]}
       />
@@ -633,66 +636,50 @@ export function CanvasLayout(): JSX.Element {
   );
 }
 
+function RoleDot({
+  role,
+  agent
+}: {
+  role: TeamRole;
+  agent: TerminalAgent;
+}): JSX.Element {
+  const meta = ROLE_META[role];
+  return (
+    <span
+      className="canvas-role-dot"
+      title={`${meta.label} (${agent})`}
+      style={{ ['--dot-color' as string]: meta.color } as React.CSSProperties}
+    >
+      {meta.glyph}
+    </span>
+  );
+}
+
 function SavedPresetItem({
   preset,
+  agentCountLabel,
+  deleteLabel,
   onClick,
   onDelete
 }: {
   preset: TeamPreset;
+  agentCountLabel: string;
+  deleteLabel: string;
   onClick: () => void;
   onDelete: () => void;
 }): JSX.Element {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        borderBottom: '1px solid var(--border, #2a2a35)'
-      }}
-    >
-      <button
-        type="button"
-        onClick={onClick}
-        style={{
-          flex: 1,
-          padding: '10px 14px',
-          background: 'transparent',
-          color: 'var(--fg, #e6e6e6)',
-          border: 0,
-          textAlign: 'left',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8
-        }}
-        onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = 'rgba(92,92,255,0.08)')}
-        onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
-      >
-        <Users size={14} />
-        <span style={{ fontSize: 13, fontWeight: 600 }}>{preset.name}</span>
-        <span style={{ fontSize: 10, color: 'var(--fg-muted, #8a8aa3)' }}>
-          {preset.members.length} agents
-        </span>
-        <span style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
+    <div className="canvas-popover__saved">
+      <button type="button" onClick={onClick} className="canvas-popover__saved-btn">
+        <Users size={13} />
+        <span style={{ fontSize: 12, fontWeight: 600 }}>{preset.name}</span>
+        <span style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>{agentCountLabel}</span>
+        <span
+          className="canvas-popover__preset-roles"
+          style={{ marginLeft: 'auto', marginTop: 0 }}
+        >
           {preset.members.map((m, i) => (
-            <span
-              key={i}
-              title={`${ROLE_META[m.role].label} (${m.agent})`}
-              style={{
-                width: 14,
-                height: 14,
-                borderRadius: '50%',
-                background: ROLE_META[m.role].color,
-                color: '#0a0a0d',
-                fontSize: 9,
-                fontWeight: 700,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center'
-              }}
-            >
-              {ROLE_META[m.role].glyph}
-            </span>
+            <RoleDot key={i} role={m.role} agent={m.agent} />
           ))}
         </span>
       </button>
@@ -700,17 +687,11 @@ function SavedPresetItem({
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          if (window.confirm(`プリセット「${preset.name}」を削除しますか?`)) onDelete();
+          onDelete();
         }}
-        title="削除"
-        style={{
-          padding: '0 12px',
-          height: '100%',
-          background: 'transparent',
-          color: 'var(--fg-muted, #8a8aa3)',
-          border: 0,
-          cursor: 'pointer'
-        }}
+        title={deleteLabel}
+        aria-label={deleteLabel}
+        className="canvas-popover__saved-delete"
       >
         ×
       </button>
@@ -722,18 +703,16 @@ function AgentBadge({ label, color }: { label: string; color: string }): JSX.Ele
   return (
     <span
       aria-hidden="true"
-      style={{
-        width: 18,
-        height: 18,
-        borderRadius: 4,
-        background: color,
-        color: '#0a0a0d',
-        fontSize: 11,
-        fontWeight: 700,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center'
-      }}
+      className="canvas-role-dot"
+      style={
+        {
+          ['--dot-color' as string]: color,
+          width: 18,
+          height: 18,
+          borderRadius: 4,
+          fontSize: 10
+        } as React.CSSProperties
+      }
     >
       {label}
     </span>
@@ -750,26 +729,7 @@ function AddItem({
   onClick: () => void;
 }): JSX.Element {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        width: '100%',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 8,
-        padding: '10px 12px',
-        background: 'transparent',
-        color: 'var(--fg, #e6e6e6)',
-        border: 0,
-        borderBottom: '1px solid var(--border, #2a2a35)',
-        cursor: 'pointer',
-        fontSize: 12,
-        textAlign: 'left'
-      }}
-      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = 'rgba(92,92,255,0.08)')}
-      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
-    >
+    <button type="button" onClick={onClick} className="canvas-popover__item">
       {icon}
       {label}
     </button>
@@ -789,20 +749,7 @@ function TabBtn({
     <button
       type="button"
       onClick={onClick}
-      style={{
-        flex: 1,
-        padding: '8px 12px',
-        background: active ? 'rgba(92,92,255,0.12)' : 'transparent',
-        color: active ? 'var(--fg, #e6e6e6)' : 'var(--fg-muted, #8a8aa3)',
-        border: 0,
-        borderBottom: active ? '2px solid #5c5cff' : '2px solid transparent',
-        cursor: 'pointer',
-        fontSize: 12,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 4
-      }}
+      className={`canvas-popover__tab${active ? ' is-active' : ''}`}
     >
       {children}
     </button>
@@ -811,59 +758,24 @@ function TabBtn({
 
 function PresetItem({
   preset,
+  agentCountLabel,
   onClick
 }: {
   preset: WorkspacePreset;
+  agentCountLabel: string;
   onClick: () => void;
 }): JSX.Element {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        width: '100%',
-        padding: '12px 14px',
-        background: 'transparent',
-        color: 'var(--fg, #e6e6e6)',
-        border: 0,
-        borderBottom: '1px solid var(--border, #2a2a35)',
-        textAlign: 'left',
-        cursor: 'pointer',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 4
-      }}
-      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = 'rgba(92,92,255,0.08)')}
-      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
-    >
-      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Users size={14} />
-        <span style={{ fontSize: 13, fontWeight: 600 }}>{preset.name}</span>
-        <span style={{ fontSize: 10, color: 'var(--fg-muted, #8a8aa3)' }}>
-          {preset.members.length} agents
-        </span>
+    <button type="button" onClick={onClick} className="canvas-popover__preset">
+      <span className="canvas-popover__preset-title-row">
+        <Users size={13} />
+        <span className="canvas-popover__preset-title">{preset.name}</span>
+        <span className="canvas-popover__preset-sub">{agentCountLabel}</span>
       </span>
-      <span style={{ fontSize: 11, color: 'var(--fg-muted, #a8a8b8)' }}>{preset.description}</span>
-      <span style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+      <span className="canvas-popover__preset-desc">{preset.description}</span>
+      <span className="canvas-popover__preset-roles">
         {preset.members.map((m, i) => (
-          <span
-            key={i}
-            title={`${ROLE_META[m.role].label} (${m.agent})`}
-            style={{
-              width: 14,
-              height: 14,
-              borderRadius: '50%',
-              background: ROLE_META[m.role].color,
-              color: '#0a0a0d',
-              fontSize: 9,
-              fontWeight: 700,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-          >
-            {ROLE_META[m.role].glyph}
-          </span>
+          <RoleDot key={i} role={m.role} agent={m.agent} />
         ))}
       </span>
     </button>
@@ -872,60 +784,27 @@ function PresetItem({
 
 function RecentItem({
   entry,
+  fallbackName,
+  agentCountLabel,
+  lastUsedLabel,
   onClick
 }: {
   entry: TeamHistoryEntry;
+  fallbackName: string;
+  agentCountLabel: string;
+  lastUsedLabel: string;
   onClick: () => void;
 }): JSX.Element {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        width: '100%',
-        padding: '10px 14px',
-        background: 'transparent',
-        color: 'var(--fg, #e6e6e6)',
-        border: 0,
-        borderBottom: '1px solid var(--border, #2a2a35)',
-        textAlign: 'left',
-        cursor: 'pointer',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 4
-      }}
-      onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = 'rgba(92,92,255,0.08)')}
-      onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = 'transparent')}
-    >
-      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ fontSize: 13, fontWeight: 600 }}>{entry.name || 'Team'}</span>
-        <span style={{ fontSize: 10, color: 'var(--fg-muted, #8a8aa3)' }}>
-          {entry.members.length} agents
-        </span>
+    <button type="button" onClick={onClick} className="canvas-popover__preset">
+      <span className="canvas-popover__preset-title-row">
+        <span className="canvas-popover__preset-title">{entry.name || fallbackName}</span>
+        <span className="canvas-popover__preset-sub">{agentCountLabel}</span>
       </span>
-      <span style={{ fontSize: 10, color: 'var(--fg-muted, #8a8aa3)' }}>
-        last used {new Date(entry.lastUsedAt).toLocaleString()}
-      </span>
-      <span style={{ display: 'flex', gap: 4, marginTop: 2 }}>
+      <span className="canvas-popover__preset-sub">{lastUsedLabel}</span>
+      <span className="canvas-popover__preset-roles">
         {entry.members.map((m, i) => (
-          <span
-            key={i}
-            title={`${ROLE_META[m.role].label} (${m.agent})`}
-            style={{
-              width: 14,
-              height: 14,
-              borderRadius: '50%',
-              background: ROLE_META[m.role].color,
-              color: '#0a0a0d',
-              fontSize: 9,
-              fontWeight: 700,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center'
-            }}
-          >
-            {ROLE_META[m.role].glyph}
-          </span>
+          <RoleDot key={i} role={m.role} agent={m.agent} />
         ))}
       </span>
     </button>

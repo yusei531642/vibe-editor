@@ -1,0 +1,497 @@
+/* ===========================================================================
+ * Canvas mode — Linear / Raycast 風のトーンダウンしたデザイン
+ *
+ * 設計原則:
+ *   - ボーダーは 1px のみ。accent はデフォルト 25% 透過、hover/active で濃く
+ *   - 発光 (blur) は原則使わない。深度は 1 枚の flat な shadow で表現
+ *   - ロール色は card 側に `--agent-accent` を渡して CSS 内で参照
+ *   - 寸法・色はすべてテーマ変数 (--bg/--fg/--border/--accent) と揃える
+ * =========================================================================== */
+
+/* ---------- layout root ---------- */
+.canvas-layout {
+  position: fixed;
+  inset: 0;
+  /*
+   * App (.layout::before) のノイズオーバーレイ (var(--z-noise-overlay)) より前に出す必要がある。
+   * App 自体は常時マウント (bug_027 対策で PTY を殺さないため) なので、Canvas 側で明示的に
+   * z-index を確保する。--z-canvas-root はノイズより高く、modal/toast より低い値 (tokens.css)。
+   */
+  z-index: var(--z-canvas-root);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.canvas-layout__body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.canvas-layout__stage {
+  flex: 1;
+  position: relative;
+  min-width: 0;
+}
+
+/* ---------- top header ---------- */
+.canvas-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  padding: 0 14px;
+  background: var(--bg-toolbar, var(--bg-panel));
+  border-bottom: 1px solid var(--border);
+  z-index: 5;
+}
+
+.canvas-header__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.2px;
+}
+
+.canvas-header__count {
+  font-size: 11px;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-header__spacer {
+  flex: 1;
+}
+
+/* ---------- buttons ---------- */
+.canvas-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--fg);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease;
+}
+.canvas-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+.canvas-btn:active {
+  background: var(--bg-active);
+}
+.canvas-btn--icon {
+  width: 30px;
+  padding: 0;
+}
+.canvas-btn--primary {
+  background: var(--accent);
+  border-color: transparent;
+  color: #fff;
+}
+.canvas-btn--primary:hover {
+  background: var(--accent-hover);
+  border-color: transparent;
+}
+.canvas-btn--ghost {
+  border-color: transparent;
+  color: var(--fg-muted);
+}
+.canvas-btn--ghost:hover {
+  color: var(--fg);
+  background: var(--bg-hover);
+}
+
+/* ---------- popover ---------- */
+.canvas-popover__wrap {
+  position: relative;
+}
+.canvas-popover {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 240px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.12),
+    0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: 20;
+  overflow: hidden;
+}
+.canvas-popover--wide {
+  width: 340px;
+}
+.canvas-popover__tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+.canvas-popover__tab {
+  flex: 1;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--fg-subtle);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+.canvas-popover__tab:hover {
+  color: var(--fg-muted);
+}
+.canvas-popover__tab.is-active {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+.canvas-popover__tab-badge {
+  font-size: 9px;
+  margin-left: 2px;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+
+.canvas-popover__item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--fg);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 100ms ease;
+}
+.canvas-popover__item:last-child {
+  border-bottom: 0;
+}
+.canvas-popover__item:hover {
+  background: var(--bg-hover);
+}
+.canvas-popover__item--emph {
+  font-weight: 600;
+  color: var(--accent);
+}
+.canvas-popover__item--emph:hover {
+  background: var(--accent-tint);
+}
+.canvas-popover__section {
+  padding: 6px 12px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--fg-subtle);
+  background: var(--bg);
+}
+.canvas-popover__empty {
+  padding: 14px;
+  font-size: 11px;
+  color: var(--fg-subtle);
+  line-height: 1.5;
+}
+
+.canvas-popover__preset {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 12px;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 100ms ease;
+}
+.canvas-popover__preset:last-child {
+  border-bottom: 0;
+}
+.canvas-popover__preset:hover {
+  background: var(--bg-hover);
+}
+.canvas-popover__preset-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.canvas-popover__preset-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+.canvas-popover__preset-sub {
+  font-size: 10px;
+  color: var(--fg-subtle);
+}
+.canvas-popover__preset-desc {
+  font-size: 11px;
+  color: var(--fg-muted);
+}
+.canvas-popover__preset-roles {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+/* 役割アバター (ドット) */
+.canvas-role-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--dot-color, var(--accent));
+  color: #0a0a0d;
+  font-size: 9px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.canvas-popover__saved {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+}
+.canvas-popover__saved-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: transparent;
+  color: var(--fg);
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 100ms ease;
+}
+.canvas-popover__saved-btn:hover {
+  background: var(--bg-hover);
+}
+.canvas-popover__saved-delete {
+  width: 30px;
+  background: transparent;
+  color: var(--fg-subtle);
+  border: 0;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  transition: color 100ms ease;
+}
+.canvas-popover__saved-delete:hover {
+  color: var(--fg);
+}
+
+/* ---------- agent card (Linear/Raycast 風にトーンダウン) ---------- */
+.canvas-agent-card {
+  /* --agent-accent は AgentNodeCard 側で style として注入する */
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.25);
+  position: relative;
+  transition: border-color 160ms ease;
+}
+/* 左端 2px のロール色バー (ボーダー発光の代替) */
+.canvas-agent-card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--agent-accent, var(--accent));
+  opacity: 0.75;
+}
+.canvas-agent-card:hover {
+  border-color: color-mix(in srgb, var(--agent-accent, var(--accent)) 40%, var(--border));
+}
+
+.canvas-agent-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px 6px 14px;
+  height: 34px;
+  background: var(--bg-elev, var(--bg-panel));
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--fg);
+  user-select: none;
+  cursor: grab;
+}
+.canvas-agent-card__header:active {
+  cursor: grabbing;
+}
+.canvas-agent-card__title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.canvas-agent-card__avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: var(--agent-accent, var(--accent));
+  color: #0a0a0d;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.canvas-agent-card__title {
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.canvas-agent-card__role {
+  font-size: 9px;
+  color: color-mix(in srgb, var(--agent-accent, var(--fg-muted)) 80%, var(--fg-muted));
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  flex-shrink: 0;
+}
+.canvas-agent-card__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.canvas-agent-card__status {
+  font-size: 10px;
+  color: var(--fg-subtle);
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.canvas-agent-card__close {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--fg-subtle);
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: background-color 100ms ease, color 100ms ease;
+}
+.canvas-agent-card__close:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.canvas-agent-card__term {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ---------- status badge (idle / thinking / typing) ---------- */
+.canvas-agent-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  color: var(--fg-subtle);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.canvas-agent-status__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--fg-subtle);
+  transition: background-color 100ms ease;
+}
+.canvas-agent-status--typing .canvas-agent-status__dot {
+  background: var(--agent-accent, var(--accent));
+  animation: canvas-agent-pulse 0.9s ease-in-out infinite;
+}
+.canvas-agent-status--thinking .canvas-agent-status__dot {
+  background: #f5b048;
+}
+@keyframes canvas-agent-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* ---------- floating canvas toggle (IDE 側) ---------- */
+.canvas-floating-toggle {
+  position: fixed;
+  bottom: 14px;
+  right: 14px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-panel);
+  color: var(--fg-muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  z-index: var(--z-canvas-toggle);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 6px 18px rgba(0, 0, 0, 0.25);
+  transition:
+    color 120ms ease,
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+.canvas-floating-toggle:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  background: var(--bg-elev, var(--bg-panel));
+}
+.canvas-floating-toggle__grid {
+  display: inline-grid;
+  grid-template-columns: 5px 5px;
+  grid-template-rows: 5px 5px;
+  gap: 2px;
+}
+.canvas-floating-toggle__grid > span {
+  background: currentColor;
+  border-radius: 1px;
+}

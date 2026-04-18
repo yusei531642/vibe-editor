@@ -282,7 +282,7 @@ export function UserMenu({ onOpenSettings }: UserMenuProps): JSX.Element {
           <div className="user-menu__footer">
             <Info size={11} strokeWidth={1.75} />
             <span>
-              v{info?.version ?? ''} · Electron {info?.electronVersion ?? ''} ·{' '}
+              v{info?.version ?? ''} · Tauri {info?.tauriVersion ?? ''} ·{' '}
               {info?.platform ?? ''}
             </span>
           </div>

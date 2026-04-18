@@ -12,11 +12,13 @@ import { DiffView } from '../../DiffView';
 interface DiffPayload {
   projectRoot: string;
   relPath: string;
+  /** Issue #19: rename の HEAD 側パス。CanvasSidebar / ChangesCard が渡す。 */
+  originalRelPath?: string;
 }
 
 function DiffCardImpl({ id, data }: NodeProps): JSX.Element {
   const payload = (data?.payload ?? {}) as DiffPayload;
-  const { projectRoot, relPath } = payload;
+  const { projectRoot, relPath, originalRelPath } = payload;
   const title = (data?.title as string) ?? `diff: ${relPath}`;
 
   const [result, setResult] = useState<GitDiffResult | null>(null);
@@ -31,7 +33,7 @@ function DiffCardImpl({ id, data }: NodeProps): JSX.Element {
     }
     setLoading(true);
     void window.api.git
-      .diff(projectRoot, relPath)
+      .diff(projectRoot, relPath, originalRelPath)
       .then((r) => {
         if (!cancelled) setResult(r);
       })
@@ -42,7 +44,7 @@ function DiffCardImpl({ id, data }: NodeProps): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [projectRoot, relPath]);
+  }, [projectRoot, relPath, originalRelPath]);
 
   return (
     <>

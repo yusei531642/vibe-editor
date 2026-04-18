@@ -19,7 +19,8 @@ interface FileTreePayload {
 function FileTreeCardImpl({ id, data, positionAbsoluteX, positionAbsoluteY }: NodeProps): JSX.Element {
   const { settings } = useSettings();
   const payload = (data?.payload ?? {}) as FileTreePayload;
-  const projectRoot = settings.claudeCwd || payload.projectRoot || '';
+  // Issue #23: lastOpenedRoot (現在プロジェクト) を最優先、claudeCwd は fallback。
+  const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || payload.projectRoot || '';
   const extraRoots = payload.extraRoots ?? settings.workspaceFolders ?? [];
   const title = (data?.title as string) ?? 'Files';
 

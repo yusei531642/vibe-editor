@@ -1,14 +1,13 @@
 /**
  * ipc.ts — IPC チャンネル名と input/output 型を 1 ファイルに集約。
  *
- * main (src/main/ipc/*.ts) と preload (src/preload/index.ts) の双方から
+ * Tauri 側の tauri::command と renderer 側 (lib/tauri-api.ts 経由) の双方から
  * 参照する、IPC 契約の単一情報源 (SSOT)。
  *
  * ルール:
- * - チャンネル名は `<namespace>:<action>` のコロン区切り
- * - main 側の `ipcMain.handle` / preload 側の `ipcRenderer.invoke` では
- *   ここに宣言された定数を参照する (将来段階的に置換)
- * - 構造が複雑な input/output は src/types/shared.ts にある既存型を参照する
+ * - チャンネル名は `<namespace>:<action>` のコロン区切り (旧 Electron 時代の命名を継承)
+ * - Rust 側の #[tauri::command] 関数名は `<namespace>_<action>` (scripts で機械変換可能)
+ * - 構造が複雑な input/output は src/types/shared.ts の既存型を参照する
  */
 
 import type {

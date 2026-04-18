@@ -66,15 +66,17 @@ export interface ClaudeCheckResult {
 
 /**
  * サイドバー左下のユーザーメニューで表示する情報。
- * main プロセスで os.userInfo() と app.getVersion() を使って集める。
+ * Rust 側で whoami / tauri::package_info / std::env::consts::OS から集める。
  */
 export interface AppUserInfo {
   username: string;
   version: string;
-  platform: NodeJS.Platform;
-  electronVersion: string;
-  nodeVersion: string;
-  chromeVersion: string;
+  /** "windows" | "macos" | "linux" | その他 std::env::consts::OS 値 */
+  platform: string;
+  /** Tauri ランタイムのバージョン */
+  tauriVersion: string;
+  /** WebView2 (Windows) / WKWebView (macOS) / WebKitGTK (Linux) のバージョン */
+  webviewVersion: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -106,6 +108,11 @@ export interface GitFileChange {
   indexStatus: string;
   worktreeStatus: string;
   label: string;
+  /**
+   * rename / copy の場合、HEAD 側のパス (移動前の名前)。
+   * 通常の変更は undefined。Diff 表示時に HEAD 側を引くためのキーとして使う。
+   */
+  originalPath?: string;
 }
 
 export interface GitStatus {

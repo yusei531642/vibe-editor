@@ -64,7 +64,7 @@ body,
   content: '';
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  z-index: var(--z-noise-overlay);
   pointer-events: none;
   opacity: var(--noise-opacity);
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
@@ -2395,7 +2395,7 @@ body.is-resizing * {
 
 .context-menu {
   position: fixed;
-  z-index: 3500;
+  z-index: var(--z-context-menu);
   min-width: 240px;
   max-width: 320px;
   background: var(--bg-panel);
@@ -2479,7 +2479,7 @@ body.is-resizing * {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: var(--z-modal);
   backdrop-filter: blur(0px);
   transition:
     background var(--dur-slow) var(--ease-out-soft),
@@ -3120,7 +3120,7 @@ body.is-resizing * {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  z-index: 3000;
+  z-index: var(--z-toast);
   pointer-events: none;
 }
 

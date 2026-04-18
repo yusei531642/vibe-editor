@@ -2,10 +2,10 @@
  * TerminalCard — Canvas 上で 1 つの Claude/Codex/シェル端末を表示するカード。
  *
  * Phase 2 MVP: TerminalView をそのまま埋め込む。
- * payload で渡される {agent, role, teamId, command, args, cwd, agentId} を TerminalView に伝える。
- * Phase 3 で AgentNodeCard (ロール色) に派生させる。
+ * payload で渡される {agent, role, teamId, command, args, cwd, agentId, resumeSessionId} を
+ * TerminalView に伝える。Phase 3 で AgentNodeCard (ロール色) に派生させる。
  */
-import { memo, useRef, useState } from 'react';
+import { memo, useMemo, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { CardFrame } from '../CardFrame';
 import { TerminalView, type TerminalViewHandle } from '../../TerminalView';
@@ -19,6 +19,9 @@ interface TerminalPayload {
   command?: string;
   args?: string[];
   cwd?: string;
+  /** Issue #22: Canvas から Resume 起動したときの Claude セッション id。
+   *  Claude の場合は args に `--resume <id>` を追加して既存会話を再開する。 */
+  resumeSessionId?: string | null;
 }
 
 function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
@@ -28,9 +31,21 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
   const title = (data?.title as string) ?? 'Terminal';
   const [, setStatus] = useState<string>('');
 
-  const cwd = settings.claudeCwd || payload.cwd || '';
-  const command =
-    payload.command ?? (payload.agent === 'codex' ? settings.codexCommand : settings.claudeCommand);
+  // Issue #23: 現在開いているプロジェクト (lastOpenedRoot) を最優先。
+  // claudeCwd / payload.cwd は fallback として残す。
+  const cwd = settings.lastOpenedRoot || settings.claudeCwd || payload.cwd || '';
+  const isCodex = payload.agent === 'codex';
+  const command = payload.command ?? (isCodex ? settings.codexCommand : settings.claudeCommand);
+
+  // Issue #22: resumeSessionId があり Claude 側なら --resume <id> を付与して起動。
+  // Codex は `--resume` 非対応なので付けない (IDE 側 App.tsx:1396 と同じ条件)。
+  const args = useMemo<string[] | undefined>(() => {
+    const base = payload.args ? [...payload.args] : [];
+    if (payload.resumeSessionId && !isCodex) {
+      base.push('--resume', payload.resumeSessionId);
+    }
+    return base.length > 0 ? base : undefined;
+  }, [payload.args, payload.resumeSessionId, isCodex]);
 
   return (
     <>
@@ -41,7 +56,7 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
           cwd={cwd}
           fallbackCwd={cwd}
           command={command}
-          args={payload.args}
+          args={args}
           visible={true}
           teamId={payload.teamId}
           agentId={payload.agentId}

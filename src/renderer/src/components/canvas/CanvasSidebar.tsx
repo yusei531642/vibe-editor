@@ -16,7 +16,10 @@ import { ROLE_META } from '../../lib/team-roles';
 
 export function CanvasSidebar(): JSX.Element {
   const { settings, update } = useSettings();
-  const projectRoot = settings.claudeCwd ?? '';
+  // Issue #23: projectRoot は「現在開いているプロジェクト」= lastOpenedRoot を優先。
+  // claudeCwd は Claude CLI 起動時の作業ディレクトリ設定 (別用途) としてだけ使う。
+  // lastOpenedRoot が空 (初回) のときだけ claudeCwd にフォールバック。
+  const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || '';
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
 
   const addCard = useCanvasStore((s) => s.addCard);
@@ -87,7 +90,8 @@ export function CanvasSidebar(): JSX.Element {
       addCard({
         type: 'diff',
         title: `Δ ${file.path.split(/[\\/]/).pop() ?? file.path}`,
-        payload: { projectRoot, relPath: file.path }
+        // Issue #19: rename なら HEAD 側パスも伝える
+        payload: { projectRoot, relPath: file.path, originalRelPath: file.originalPath }
       });
     },
     [addCard, projectRoot]
@@ -154,7 +158,9 @@ export function CanvasSidebar(): JSX.Element {
     async (path: string): Promise<void> => {
       const next = [path, ...recentProjects.filter((p) => p !== path)].slice(0, 12);
       setRecentProjects(next);
-      await update({ recentProjects: next, claudeCwd: path });
+      // Issue #23: 開いたフォルダは lastOpenedRoot に記録する。
+      // claudeCwd は Claude CLI の作業ディレクトリ設定 (別の意味) なので上書きしない。
+      await update({ recentProjects: next, lastOpenedRoot: path });
     },
     [recentProjects, update]
   );

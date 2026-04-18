@@ -76,6 +76,13 @@ export function usePtySession(options: UsePtySessionOptions): void {
     if (!term) return;
 
     disposedRef.current = false;
+    // 注意: disposedRef は外部共有 (options.disposedRef) なので、cwd/command 変化で
+    // この effect が再実行されたとき、古い effect の in-flight await が戻ってきた時点で
+    // `disposedRef.current` は新 effect が line 78 で false にリセットしている。
+    // よって disposedRef だけ見ると「古い spawn が終わった直後に、新セッションの id に
+    // 対して古い async が listener を付ける」race が発生しうる。
+    // effect-local な localDisposed を併用し、再 run でも確実に古い spawn を無効化する。
+    let localDisposed = false;
 
     // 初期サイズ調整
     let initialCols = 80;
@@ -111,7 +118,13 @@ export function usePtySession(options: UsePtySessionOptions): void {
           codexInstructions: snap.codexInstructions
         });
 
-        if (disposedRef.current) return;
+        if (localDisposed || disposedRef.current) {
+          // 古い effect の戻り値だった場合、spawn 済みの pty は責任を持って kill
+          if (res.ok && res.id) {
+            void window.api.terminal.kill(res.id);
+          }
+          return;
+        }
 
         if (!res.ok || !res.id) {
           term.writeln(`\x1b[31m[起動エラー] ${res.error ?? '不明なエラー'}\x1b[0m`);
@@ -177,6 +190,7 @@ export function usePtySession(options: UsePtySessionOptions): void {
     });
 
     return () => {
+      localDisposed = true;
       disposedRef.current = true;
       dataSub.dispose();
       textarea?.removeEventListener('compositionstart', onCompStart);

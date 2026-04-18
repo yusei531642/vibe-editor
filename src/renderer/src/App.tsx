@@ -36,6 +36,7 @@ const THEMES_FOR_PALETTE: ThemeName[] = [
   'claude-light',
   'dark',
   'midnight',
+  'glass',
   'light'
 ];
 
@@ -143,7 +144,7 @@ function generateTeamSystemPrompt(
     .join(', ');
 
   const mcpTools =
-    'MCP vive-team ツール: team_send(to,message) / team_assign_task(assignee,description) / team_get_tasks() / team_update_task(task_id,status) / team_info() / team_status(status) / team_read(). ' +
+    'MCP vibe-team ツール: team_send(to,message) / team_assign_task(assignee,description) / team_get_tasks() / team_update_task(task_id,status) / team_info() / team_status(status) / team_read(). ' +
     'team_send/team_assign_task で送ったメッセージは相手のプロンプトにリアルタイム注入されるので、受信側はポーリング不要。受信時は [Team ← <role>] プレフィックス付きで入力に届く。';
 
   if (tab.role === 'leader') {
@@ -733,7 +734,8 @@ export function App(): JSX.Element {
         ];
       });
       try {
-        const result = await window.api.git.diff(projectRoot, file.path);
+        // Issue #19: rename の場合は HEAD 側を originalPath から引く
+        const result = await window.api.git.diff(projectRoot, file.path, file.originalPath);
         setDiffTabs((prev) =>
           prev.map((t) => (t.id === id ? { ...t, result, loading: false } : t))
         );
@@ -767,8 +769,10 @@ export function App(): JSX.Element {
     async (relPath: string) => {
       if (!projectRoot) return;
       if (!diffTabs.some((tab) => tab.relPath === relPath)) return;
+      // Issue #19: rename entry なら HEAD 側を引くため originalPath を同時に渡す
+      const originalPath = gitStatus?.files.find((f) => f.path === relPath)?.originalPath;
       try {
-        const result = await window.api.git.diff(projectRoot, relPath);
+        const result = await window.api.git.diff(projectRoot, relPath, originalPath);
         setDiffTabs((prev) =>
           prev.map((tab) =>
             tab.relPath === relPath ? { ...tab, result, loading: false } : tab
@@ -797,7 +801,7 @@ export function App(): JSX.Element {
         );
       }
     },
-    [projectRoot, diffTabs]
+    [projectRoot, diffTabs, gitStatus]
   );
 
   // ---------- エディタタブ ----------
@@ -1442,11 +1446,11 @@ export function App(): JSX.Element {
       if (!tab.teamId || !tab.role) return undefined;
       if (!teamHubInfo) return undefined;
       return {
-        VIVE_TEAM_ID: tab.teamId,
-        VIVE_TEAM_ROLE: tab.role,
-        VIVE_AGENT_ID: tab.agentId,
-        VIVE_TEAM_SOCKET: teamHubInfo.socket,
-        VIVE_TEAM_TOKEN: teamHubInfo.token
+        VIBE_TEAM_ID: tab.teamId,
+        VIBE_TEAM_ROLE: tab.role,
+        VIBE_AGENT_ID: tab.agentId,
+        VIBE_TEAM_SOCKET: teamHubInfo.socket,
+        VIBE_TEAM_TOKEN: teamHubInfo.token
       };
     },
     [teamHubInfo]
@@ -1963,7 +1967,7 @@ export function App(): JSX.Element {
               {tabCreateMenuOpen && (
                 <>
                   <div
-                    style={{ position: 'fixed', inset: 0, zIndex: 499 }}
+                    style={{ position: 'fixed', inset: 0, zIndex: 499 /* = tokens.css --z-cmd-backdrop */ }}
                     onClick={() => setTabCreateMenuOpen(false)}
                   />
                   <div className="tab-create-menu" style={{ top: '100%', bottom: 'auto', right: 0, marginTop: 4 }}>

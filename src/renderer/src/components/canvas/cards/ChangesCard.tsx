@@ -18,8 +18,8 @@ interface ChangesPayload {
 function ChangesCardImpl({ id, data, positionAbsoluteX, positionAbsoluteY }: NodeProps): JSX.Element {
   const { settings } = useSettings();
   const payload = (data?.payload ?? {}) as ChangesPayload;
-  // workspace を真の source とする: settings.claudeCwd 優先、payload は fallback
-  const projectRoot = settings.claudeCwd || payload.projectRoot || '';
+  // Issue #23: lastOpenedRoot (現在プロジェクト) を最優先、claudeCwd は fallback。
+  const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || payload.projectRoot || '';
   const title = (data?.title as string) ?? 'Changes';
 
   const addCard = useCanvasStore((s) => s.addCard);
@@ -41,11 +41,12 @@ function ChangesCardImpl({ id, data, positionAbsoluteX, positionAbsoluteY }: Nod
   }, [refresh]);
 
   const handleOpenDiff = useCallback(
-    (file: { path: string }) => {
+    (file: { path: string; originalPath?: string }) => {
       addCard({
         type: 'diff',
         title: `diff: ${file.path.split(/[\\/]/).pop() ?? file.path}`,
-        payload: { projectRoot, relPath: file.path },
+        // Issue #19: rename の HEAD 側パスも伝える
+        payload: { projectRoot, relPath: file.path, originalRelPath: file.originalPath },
         position: {
           x: (positionAbsoluteX ?? 0) + 520,
           y: (positionAbsoluteY ?? 0) + 0

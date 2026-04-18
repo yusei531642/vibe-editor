@@ -2,8 +2,7 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
 
-// Tauri 用 renderer-only Vite 設定。
-// Electron 用は引き続き electron.vite.config.ts を使う (並存運用)。
+// Tauri 用 renderer Vite 設定。
 // `cargo tauri dev` / `cargo tauri build` から参照される。
 
 const host = process.env.TAURI_DEV_HOST;

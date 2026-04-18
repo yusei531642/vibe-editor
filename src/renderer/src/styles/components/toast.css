@@ -7,7 +7,7 @@
   transform: translateX(-50%);
   align-items: center;
   gap: 10px;
-  z-index: 3200;
+  z-index: var(--z-toast-top);
 }
 
 .toast {

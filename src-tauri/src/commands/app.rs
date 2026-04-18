@@ -55,9 +55,8 @@ pub struct AppUserInfo {
     pub username: String,
     pub version: String,
     pub platform: String,
-    pub electron_version: String,
-    pub node_version: String,
-    pub chrome_version: String,
+    pub tauri_version: String,
+    pub webview_version: String,
 }
 
 #[derive(serde::Deserialize)]
@@ -237,13 +236,13 @@ pub async fn app_get_team_hub_info(
 pub fn app_get_user_info(app: tauri::AppHandle) -> AppUserInfo {
     tracing::info!("[IPC] app_get_user_info called");
     let username = whoami::username();
+    let webview_version = tauri::webview_version().unwrap_or_default();
     AppUserInfo {
         username,
         version: app.package_info().version.to_string(),
         platform: std::env::consts::OS.to_string(),
-        electron_version: String::new(),
-        node_version: String::new(),
-        chrome_version: String::new(),
+        tauri_version: tauri::VERSION.to_string(),
+        webview_version,
     }
 }
 

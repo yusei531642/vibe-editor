@@ -5,7 +5,21 @@
 
 use crate::pty::session::SessionHandle;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+
+/// Mutex が poison していたら warn ログを出し、data を取り出して処理を継続する。
+/// panic はしない (上位が IPC 層の場合 panic はプロセスごと吹き飛ばすため)。
+fn recover<'a, T>(
+    result: Result<MutexGuard<'a, T>, PoisonError<MutexGuard<'a, T>>>,
+) -> MutexGuard<'a, T> {
+    match result {
+        Ok(g) => g,
+        Err(poisoned) => {
+            tracing::warn!("[registry] mutex poisoned — recovering inner data");
+            poisoned.into_inner()
+        }
+    }
+}
 
 #[derive(Default)]
 struct Inner {
@@ -24,7 +38,7 @@ impl SessionRegistry {
     }
 
     pub fn insert(&self, id: String, handle: SessionHandle) {
-        let mut g = self.inner.lock().expect("registry lock poisoned");
+        let mut g = recover(self.inner.lock());
         if let Some(aid) = handle.agent_id.clone() {
             g.by_agent.insert(aid, id.clone());
         }
@@ -32,13 +46,13 @@ impl SessionRegistry {
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<SessionHandle>> {
-        let g = self.inner.lock().expect("registry lock poisoned");
+        let g = recover(self.inner.lock());
         g.by_id.get(id).cloned()
     }
 
     /// agent_id 経由で取得 (TeamHub がメッセージ注入時に使う)
     pub fn get_by_agent(&self, agent_id: &str) -> Option<Arc<SessionHandle>> {
-        let g = self.inner.lock().expect("registry lock poisoned");
+        let g = recover(self.inner.lock());
         g.by_agent
             .get(agent_id)
             .and_then(|sid| g.by_id.get(sid).cloned())
@@ -46,7 +60,7 @@ impl SessionRegistry {
 
     /// 同一 team_id の (agent_id, role) ペア一覧 (TeamHub の broadcast/team_info で使う)
     pub fn list_team_members(&self, team_id: &str) -> Vec<(String, String)> {
-        let g = self.inner.lock().expect("registry lock poisoned");
+        let g = recover(self.inner.lock());
         g.by_id
             .values()
             .filter_map(|s| {
@@ -61,7 +75,7 @@ impl SessionRegistry {
     }
 
     pub fn remove(&self, id: &str) -> Option<Arc<SessionHandle>> {
-        let mut g = self.inner.lock().expect("registry lock poisoned");
+        let mut g = recover(self.inner.lock());
         if let Some(handle) = g.by_id.remove(id) {
             if let Some(aid) = &handle.agent_id {
                 if g.by_agent.get(aid).map(String::as_str) == Some(id) {
@@ -75,7 +89,7 @@ impl SessionRegistry {
     }
 
     pub fn kill_all(&self) {
-        let mut g = self.inner.lock().expect("registry lock poisoned");
+        let mut g = recover(self.inner.lock());
         g.by_agent.clear();
         for (_, s) in g.by_id.drain() {
             let _ = s.kill();
@@ -83,6 +97,6 @@ impl SessionRegistry {
     }
 
     pub fn len(&self) -> usize {
-        self.inner.lock().map(|g| g.by_id.len()).unwrap_or(0)
+        recover(self.inner.lock()).by_id.len()
     }
 }

@@ -1,21 +1,43 @@
 /**
- * tauri-api.ts — Electron `window.api` 互換層
+ * tauri-api.ts — renderer 向け IPC 互換層
  *
  * 役割:
- * - Phase 1 Tauri 移行で renderer 側のコード変更を最小化するための互換シム
- * - `import { api } from './tauri-api'` で Electron 版 `window.api` と同じ shape を提供
- * - 内部的には `@tauri-apps/api/core` の `invoke()` を呼ぶ
- *
- * 既存 Electron 版 (`src/preload/index.ts`) との切り替え:
- *   import { api } from './lib/tauri-api'   // Tauri 版
- *   const api = window.api                  // Electron 版
- *
- * Phase 1 完了時に renderer 全体の import を Tauri 版に切り替え。
- * Electron 版 preload は当面残す (デュアル運用)。
+ * - `import { api } from './tauri-api'` で namespaced な API を提供
+ * - 内部では `@tauri-apps/api/core` の `invoke()` と `listen()` を呼ぶ
+ * - `window.api` にも同じインスタンスを割り当てている (旧コードパスとの互換のため)
  */
 
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+
+/**
+ * `listen()` は Promise で unlisten を返すが、caller が cleanup を同期的に要求することが多い。
+ * naive に `listen().then(u => unlisten = u)` すると Promise resolve 前に呼ばれた cleanup が no-op
+ * になり、listener が orphan 化する。
+ *
+ * この helper は cleanup 要求を sentinel (`disposed`) で記録し、listen() 解決時に deferred
+ * unlisten を行う。したがって:
+ *   - 早期 cleanup: resolve 時に即 u() を呼び、永続 listener を残さない
+ *   - 通常 cleanup: unlisten を保持し、呼び出し時に u() を実行
+ */
+function subscribeEvent<T>(event: string, cb: (payload: T) => void): () => void {
+  let unlisten: UnlistenFn | null = null;
+  let disposed = false;
+  void listen<T>(event, (e) => {
+    if (!disposed) cb(e.payload);
+  }).then((u) => {
+    if (disposed) {
+      u();
+    } else {
+      unlisten = u;
+    }
+  });
+  return () => {
+    disposed = true;
+    unlisten?.();
+    unlisten = null;
+  };
+}
 import {
   DEFAULT_SETTINGS,
   type AppSettings,
@@ -98,8 +120,12 @@ export const api = {
 
   git: {
     status: (projectRoot: string): Promise<GitStatus> => invoke('git_status', { projectRoot }),
-    diff: (projectRoot: string, relPath: string): Promise<GitDiffResult> =>
-      invoke('git_diff', { projectRoot, relPath })
+    diff: (
+      projectRoot: string,
+      relPath: string,
+      originalRelPath?: string
+    ): Promise<GitDiffResult> =>
+      invoke('git_diff', { projectRoot, relPath, originalRelPath })
   },
 
   files: {
@@ -153,35 +179,14 @@ export const api = {
     savePastedImage: (base64: string, mimeType: string): Promise<SavePastedImageResult> =>
       invoke('terminal_save_pasted_image', { base64, mimeType }),
 
-    onData: (id: string, cb: (data: string) => void): (() => void) => {
-      let unlisten: UnlistenFn | null = null;
-      void listen<string>(`terminal:data:${id}`, (e) => cb(e.payload)).then((u) => {
-        unlisten = u;
-      });
-      return () => {
-        unlisten?.();
-      };
-    },
+    onData: (id: string, cb: (data: string) => void): (() => void) =>
+      subscribeEvent<string>(`terminal:data:${id}`, cb),
 
-    onExit: (id: string, cb: (info: TerminalExitInfo) => void): (() => void) => {
-      let unlisten: UnlistenFn | null = null;
-      void listen<TerminalExitInfo>(`terminal:exit:${id}`, (e) => cb(e.payload)).then((u) => {
-        unlisten = u;
-      });
-      return () => {
-        unlisten?.();
-      };
-    },
+    onExit: (id: string, cb: (info: TerminalExitInfo) => void): (() => void) =>
+      subscribeEvent<TerminalExitInfo>(`terminal:exit:${id}`, cb),
 
-    onSessionId: (id: string, cb: (sessionId: string) => void): (() => void) => {
-      let unlisten: UnlistenFn | null = null;
-      void listen<string>(`terminal:sessionId:${id}`, (e) => cb(e.payload)).then((u) => {
-        unlisten = u;
-      });
-      return () => {
-        unlisten?.();
-      };
-    }
+    onSessionId: (id: string, cb: (sessionId: string) => void): (() => void) =>
+      subscribeEvent<string>(`terminal:sessionId:${id}`, cb)
   }
 };
 

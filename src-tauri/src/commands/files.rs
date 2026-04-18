@@ -3,7 +3,7 @@
 // 通常の fs 操作。tokio::fs を使い、エラーを ok=false で返す既存契約を維持。
 
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -40,14 +40,105 @@ pub struct FileWriteResult {
     pub error: Option<String>,
 }
 
+/// 相対パスを root 配下に閉じ込める形で解決する。
+///
+/// 旧実装は `joined.canonicalize()` が失敗 (= 未作成ファイル) したとき `joined` をそのまま
+/// `starts_with(&root)` に渡していたが、`Path::starts_with` はコンポーネント単位比較なので
+/// `root/../outside.txt` のようなパスでも一致しすり抜ける (Issue #20)。
+///
+/// 正しい方針:
+///   1. `rel` に絶対パス (Windows の `C:` prefix や POSIX の `/`) が含まれていたら拒否
+///   2. コンポーネントを `.` / `..` / 通常成分に分解し、`..` が stack を空にする前に現れたら拒否
+///      (root を脱出する `..`)
+///   3. その上で物理 canonicalize を試み、symlink 解決後も root 配下であることを再確認
 fn safe_join(root: &str, rel: &str) -> Option<PathBuf> {
     let root = Path::new(root).canonicalize().ok()?;
-    let joined = root.join(rel);
-    let canonical = joined.canonicalize().unwrap_or(joined);
-    if canonical.starts_with(&root) {
-        Some(canonical)
-    } else {
-        None
+    let rel_path = Path::new(rel);
+
+    // (1) 絶対パス混入を拒否
+    if rel_path.is_absolute() {
+        return None;
+    }
+
+    // (2) コンポーネント単位で仮想的に正規化 (fs 非依存)
+    let mut stack: Vec<&std::ffi::OsStr> = Vec::new();
+    for comp in rel_path.components() {
+        match comp {
+            Component::Normal(name) => stack.push(name),
+            Component::CurDir => { /* "." は無視 */ }
+            Component::ParentDir => {
+                // root 直下で ".." が来たら脱出なので拒否
+                if stack.pop().is_none() {
+                    return None;
+                }
+            }
+            // RootDir / Prefix / ... は絶対パス要素 → 既に (1) で弾いているが念のため拒否
+            _ => return None,
+        }
+    }
+
+    // 正規化後の joined パス (fs 実体は未作成かもしれない)
+    let mut joined = root.clone();
+    for c in &stack {
+        joined.push(c);
+    }
+
+    // (3) 可能なら symlink 展開後も root 配下であることを再確認
+    if let Ok(canonical) = joined.canonicalize() {
+        if canonical.starts_with(&root) {
+            return Some(canonical);
+        }
+        return None;
+    }
+
+    // 未作成ファイル → 親ディレクトリを canonicalize して確認
+    match joined.parent().and_then(|p| p.canonicalize().ok()) {
+        Some(parent_canonical) if parent_canonical.starts_with(&root) => {
+            // 親が root 配下なら joined (ファイル名成分を付け直した絶対パス) を返す
+            let name = joined.file_name()?;
+            Some(parent_canonical.join(name))
+        }
+        _ => Some(joined).filter(|p| p.starts_with(&root)),
+    }
+}
+
+#[cfg(test)]
+mod safe_join_tests {
+    use super::*;
+    use std::fs;
+
+    fn tempdir() -> PathBuf {
+        let d = std::env::temp_dir().join(format!("vibe-safe-join-{}", std::process::id()));
+        let _ = fs::create_dir_all(&d);
+        d.canonicalize().unwrap()
+    }
+
+    #[test]
+    fn rejects_parent_escape() {
+        let root = tempdir();
+        let root_str = root.to_string_lossy();
+        assert!(safe_join(&root_str, "../outside.txt").is_none());
+        assert!(safe_join(&root_str, "a/../../outside.txt").is_none());
+    }
+
+    #[test]
+    fn rejects_absolute() {
+        let root = tempdir();
+        let root_str = root.to_string_lossy();
+        if cfg!(windows) {
+            assert!(safe_join(&root_str, "C:\\Windows\\notepad.exe").is_none());
+        } else {
+            assert!(safe_join(&root_str, "/etc/passwd").is_none());
+        }
+    }
+
+    #[test]
+    fn allows_inside() {
+        let root = tempdir();
+        let root_str = root.to_string_lossy();
+        assert!(safe_join(&root_str, "sub/file.txt").is_some());
+        assert!(safe_join(&root_str, "a/../b.txt").is_some()); // 中間の .. は OK
+        assert!(safe_join(&root_str, "./nested/./file.txt").is_some());
     }
 }
 

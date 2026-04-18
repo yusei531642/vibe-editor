@@ -12,6 +12,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
 import type { TeamRole } from '../../../../../types/shared';
 import { TerminalView, type TerminalViewHandle } from '../../TerminalView';
+import { useT } from '../../../lib/i18n';
 import { useSettings } from '../../../lib/settings-context';
 import { useCanvasStore } from '../../../stores/canvas';
 import {
@@ -71,6 +72,7 @@ function summarizeInput(text: string): string {
 function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const ref = useRef<TerminalViewHandle | null>(null);
   const { settings } = useSettings();
+  const t = useT();
   const removeCard = useCanvasStore((s) => s.removeCard);
   const setCardTitle = useCanvasStore((s) => s.setCardTitle);
   const payload = (data?.payload ?? {}) as AgentPayload;
@@ -127,16 +129,17 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     }
   };
 
-  // workspace を settings.claudeCwd に統一: 変更時は usePtySession (deps=[cwd, command]) が
-  // PTY を kill → 新しい cwd で re-spawn する。payload.cwd は legacy fallback。
-  const cwd = settings.claudeCwd || payload.cwd || '';
+  // Issue #23: 現在開いているプロジェクト (lastOpenedRoot) を最優先。
+  // claudeCwd は Claude CLI の作業ディレクトリ設定としての意味なので fallback。payload.cwd は legacy。
+  // 変更時は usePtySession (deps=[cwd, command]) が PTY を kill → 新しい cwd で re-spawn する。
+  const cwd = settings.lastOpenedRoot || settings.claudeCwd || payload.cwd || '';
   const command =
     payload.command ?? (payload.agent === 'codex' ? settings.codexCommand : settings.claudeCommand);
 
   // ----- チームのシステムプロンプトを構築 -----
   // 同 teamId の AgentNode カード群から roster を作成。
-  // 注意: useCanvasStore のセレクタで .filter().map() を返すと毎回新しい配列参照
-  // になり Object.is 比較で再レンダー無限ループになる。なので生 nodes を購読し、
+  // 注意: useCanvasStore のセレクタで .filter().map() を返すと毎回新しい配列参照に
+  // なり Object.is 比較で再レンダー無限ループになる。なので生 nodes を購読し、
   // useMemo 内で派生する。
   const allNodes = useCanvasStore((s) => s.nodes);
   const teamMembers = useMemo<TeamMemberSeed[] | null>(() => {
@@ -144,7 +147,10 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     return allNodes
       .filter((n) => n.type === 'agent')
       .map((n) => n.data?.payload as AgentPayload | undefined)
-      .filter((p): p is AgentPayload => !!p && p.teamId === payload.teamId && !!p.agentId && !!p.role)
+      .filter(
+        (p): p is AgentPayload =>
+          !!p && p.teamId === payload.teamId && !!p.agentId && !!p.role
+      )
       .map<TeamMemberSeed>((p) => ({
         agentId: p.agentId!,
         role: p.role as TeamRole,
@@ -184,6 +190,12 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
 
   const codexInstructions = isCodex ? sysPrompt : undefined;
 
+  // accent は CSS 変数 --agent-accent として子孫で参照する
+  const cardStyle = useMemo(
+    () => ({ ['--agent-accent' as string]: accent } as React.CSSProperties),
+    [accent]
+  );
+
   return (
     <>
       <NodeResizer
@@ -198,106 +210,34 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
         position={Position.Left}
         style={{ background: accent, width: 10, height: 10 }}
       />
-      <div
-        style={{
-          width: '100%',
-          height: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          background: 'var(--bg-elevated, #16161c)',
-          border: `1px solid ${accent}`,
-          borderRadius: 8,
-          overflow: 'hidden',
-          boxShadow: `0 8px 24px ${accent}33, 0 4px 12px rgba(0,0,0,0.4)`
-        }}
-      >
-        <header
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '6px 10px',
-            background: `linear-gradient(90deg, ${accent}22 0%, transparent 70%)`,
-            borderBottom: `1px solid ${accent}55`,
-            fontSize: 12,
-            color: 'var(--fg, #e6e6e6)',
-            userSelect: 'none',
-            cursor: 'grab'
-          }}
-        >
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span
-              aria-hidden="true"
-              style={{
-                width: 22,
-                height: 22,
-                borderRadius: '50%',
-                background: accent,
-                color: '#0a0a0d',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: 12,
-                fontWeight: 700
-              }}
-            >
+      <div className="canvas-agent-card" style={cardStyle}>
+        <header className="canvas-agent-card__header">
+          <span className="canvas-agent-card__title-row">
+            <span aria-hidden="true" className="canvas-agent-card__avatar">
               {meta?.glyph ?? 'A'}
             </span>
-            <span style={{ fontWeight: 600 }}>{title}</span>
-            {meta && (
-              <span style={{ fontSize: 10, color: `${accent}cc`, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                {meta.label}
-              </span>
-            )}
+            <span className="canvas-agent-card__title">{title}</span>
+            {meta && <span className="canvas-agent-card__role">{meta.label}</span>}
           </span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <StatusBadge state={activity} accent={accent} />
+          <span className="canvas-agent-card__actions">
+            <StatusBadge state={activity} label={t(`agentStatus.${activity}`)} />
             {status && (
-              <span
-                title={status}
-                style={{
-                  fontSize: 10,
-                  color: 'var(--fg-muted, #8a8aa3)',
-                  maxWidth: 140,
-                  whiteSpace: 'nowrap',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis'
-                }}
-              >
+              <span className="canvas-agent-card__status" title={status}>
                 {shortStatus(status)}
               </span>
             )}
             <button
               type="button"
-              className="nodrag"
+              className="nodrag canvas-agent-card__close"
               onClick={() => removeCard(id)}
-              style={{
-                background: 'transparent',
-                border: 0,
-                color: 'var(--fg-muted, #a8a8b8)',
-                cursor: 'pointer',
-                padding: '2px 6px',
-                fontSize: 14,
-                lineHeight: 1
-              }}
-              title="Close"
+              title={t('agentCard.close')}
+              aria-label={t('agentCard.close')}
             >
               ×
             </button>
           </span>
         </header>
-        <div
-          className="nodrag nowheel"
-          style={{
-            flex: 1,
-            minHeight: 0,
-            minWidth: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-            position: 'relative'
-          }}
-        >
+        <div className="nodrag nowheel canvas-agent-card__term">
           <TerminalView
             ref={ref}
             cwd={cwd}
@@ -327,38 +267,19 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
 /** ヘッダー右の小さなステータスドット (idle=灰, thinking=黄, typing=accent パルス) */
 function StatusBadge({
   state,
-  accent
+  label
 }: {
   state: AgentStatus;
-  accent: string;
+  label: string;
 }): JSX.Element {
-  const color = state === 'typing' ? accent : state === 'thinking' ? '#f5b048' : '#5a5a6a';
   return (
     <span
-      title={state}
-      aria-label={`agent ${state}`}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 4,
-        fontSize: 9,
-        color: 'var(--fg-muted, #8a8aa3)',
-        textTransform: 'uppercase',
-        letterSpacing: 0.5
-      }}
+      title={label}
+      aria-label={label}
+      className={`canvas-agent-status canvas-agent-status--${state}`}
     >
-      <span
-        style={{
-          width: 7,
-          height: 7,
-          borderRadius: '50%',
-          background: color,
-          boxShadow: state === 'typing' ? `0 0 8px ${accent}` : 'none',
-          animation: state === 'typing' ? 'agent-pulse 0.8s ease-in-out infinite' : undefined
-        }}
-      />
-      <span>{state}</span>
-      <style>{`@keyframes agent-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.4 } }`}</style>
+      <span className="canvas-agent-status__dot" />
+      <span>{label}</span>
     </span>
   );
 }
