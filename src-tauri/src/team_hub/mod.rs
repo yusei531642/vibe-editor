@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::sync::{Mutex, Semaphore};
 
@@ -218,6 +218,47 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
+/// Issue #51: `\n` に到達するまで `dst` に追記しつつ、`max` バイトを超えたら `Ok(false)` を返す。
+/// `\n` 到達なら `Ok(true)`、EOF なら現時点の内容と `Ok(true)`。
+async fn read_line_limited<R: tokio::io::AsyncBufRead + Unpin>(
+    reader: &mut R,
+    dst: &mut Vec<u8>,
+    max: usize,
+) -> std::io::Result<bool> {
+    use tokio::io::AsyncBufReadExt;
+    loop {
+        let available = match reader.fill_buf().await {
+            Ok(b) => b,
+            Err(e) => return Err(e),
+        };
+        if available.is_empty() {
+            return Ok(true); // EOF
+        }
+        match memchr_newline(available) {
+            Some(i) => {
+                if dst.len() + i + 1 > max {
+                    return Ok(false);
+                }
+                dst.extend_from_slice(&available[..=i]);
+                reader.consume(i + 1);
+                return Ok(true);
+            }
+            None => {
+                if dst.len() + available.len() > max {
+                    return Ok(false);
+                }
+                let len = available.len();
+                dst.extend_from_slice(available);
+                reader.consume(len);
+            }
+        }
+    }
+}
+
+fn memchr_newline(buf: &[u8]) -> Option<usize> {
+    buf.iter().position(|&b| b == b'\n')
+}
+
 /// Issue #50: バイト長を合わせた constant-time 比較。`a` と `b` の長さが違えば即 false。
 fn constant_time_eq(a: &str, b: &str) -> bool {
     let a = a.as_bytes();
@@ -238,20 +279,23 @@ async fn handle_client(
     expected_token: String,
 ) -> Result<()> {
     let (rd, mut wr) = sock.into_split();
-    // Issue #51: ハンドシェイク 1 行のバイト長上限 → BufReader を take() で絞る。
-    let bounded = rd.take(HANDSHAKE_MAX_BYTES);
-    let mut lines = BufReader::new(bounded).lines();
-
-    // Issue #51: ハンドシェイクにタイムアウトを掛ける。
-    // ハンドシェイク (1 行目): {token, teamId, role, agentId}
-    let hello_line = match tokio::time::timeout(
+    // Issue #51: ハンドシェイクのみタイムアウト + 1行バイト長を制限する。
+    // BufReader の read_until で '\n' までを読み、max を超えたら即切断。
+    // 読み終えたら BufReader をそのまま再利用し、JSON-RPC 本体の読み込みでは
+    // 上限なしで動作する (= 普通の MCP セッションを阻害しない)。
+    let mut reader = BufReader::new(rd);
+    let mut hello_buf: Vec<u8> = Vec::new();
+    let handshake_result = tokio::time::timeout(
         Duration::from_millis(HANDSHAKE_TIMEOUT_MS),
-        lines.next_line(),
+        read_line_limited(&mut reader, &mut hello_buf, HANDSHAKE_MAX_BYTES as usize),
     )
-    .await
-    {
-        Ok(Ok(Some(l))) => l,
-        Ok(Ok(None)) => return Ok(()),
+    .await;
+    let hello_line = match handshake_result {
+        Ok(Ok(true)) => String::from_utf8_lossy(&hello_buf).trim_end_matches(['\r', '\n']).to_string(),
+        Ok(Ok(false)) => {
+            tracing::warn!("[teamhub] handshake exceeded max bytes");
+            return Ok(());
+        }
         Ok(Err(e)) => return Err(e.into()),
         Err(_) => {
             tracing::warn!("[teamhub] handshake timed out");
@@ -304,7 +348,9 @@ async fn handle_client(
         ctx.agent_id
     );
 
-    // 以降は JSON-RPC 行
+    // 以降は JSON-RPC 行 (bounded な handshake は終わったので、ここからは BufReader を再利用して
+    // 通常どおり `lines()` で読む。size cap は無し)。
+    let mut lines = reader.lines();
     while let Some(line) = lines.next_line().await? {
         let trimmed = line.trim_end_matches('\r');
         if trimmed.is_empty() {

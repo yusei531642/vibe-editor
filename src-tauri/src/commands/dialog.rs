@@ -38,32 +38,18 @@ pub async fn dialog_open_file(
     rx.await.ok().flatten()
 }
 
-#[derive(serde::Serialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct FolderEmptyResult {
-    pub ok: bool,
-    pub empty: bool,
-    pub error: Option<String>,
-}
-
-/// Issue #60: 読み取り失敗を「空」と混同しないよう、ok フラグを返す。
-/// 呼び出し側は `ok=false` のとき空扱いせず警告を出すべき。
+/// Issue #60: 読み取り失敗を「空」と誤判定しないよう、`Err` 時は `false` (= 空ではない扱い)
+/// に倒す。権限エラーや存在しないパスで「空なので警告スキップ」にならない。
+/// 既存の renderer 側 `Promise<boolean>` 契約を保つため戻り値は bool のまま。
 #[tauri::command]
-pub async fn dialog_is_folder_empty(folder_path: String) -> FolderEmptyResult {
-    match tokio::fs::read_dir(&folder_path).await {
-        Ok(mut rd) => {
-            let empty = matches!(rd.next_entry().await, Ok(None));
-            FolderEmptyResult {
-                ok: true,
-                empty,
-                error: None,
-            }
+pub async fn dialog_is_folder_empty(folder_path: String) -> bool {
+    let mut rd = match tokio::fs::read_dir(&folder_path).await {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!("[dialog] read_dir({folder_path}) failed: {e}");
+            // 読めないフォルダは「空不明」→ 安全側倒し (= 空ではない)
+            return false;
         }
-        Err(e) => FolderEmptyResult {
-            ok: false,
-            // 権限エラー等は「空不明」= 安全側倒し (empty=false)。
-            empty: false,
-            error: Some(e.to_string()),
-        },
-    }
+    };
+    matches!(rd.next_entry().await, Ok(None))
 }
