@@ -1,4 +1,6 @@
 import type { AppSettings } from '../../../../types/shared';
+import { useT } from '../../lib/i18n';
+import { parseShellArgsStrict } from '../../lib/parse-args';
 import type { StringSettingKey, UpdateSetting } from './types';
 
 interface Props {
@@ -34,11 +36,14 @@ export function CommandOptionsSection({
   draft,
   update
 }: Props): JSX.Element {
+  const t = useT();
+  // Issue #76: 閉じクォート忘れを検出してユーザーに警告する
+  const argsParse = parseShellArgsStrict(draft[argsKey] as string);
   return (
     <section className="modal__section">
       <h3>{title}</h3>
       <label className="modal__label modal__label--full">
-        <span>コマンド</span>
+        <span>{t('settings.command')}</span>
         <input
           type="text"
           value={draft[commandKey]}
@@ -55,7 +60,11 @@ export function CommandOptionsSection({
           onChange={(e) => update(argsKey, e.target.value)}
           placeholder={argsPlaceholder}
           spellCheck={false}
+          aria-invalid={argsParse.unterminatedQuote}
         />
+        {argsParse.unterminatedQuote && (
+          <span className="modal__error">{t('settings.argsUnterminatedQuote')}</span>
+        )}
       </label>
       {cwdKey && (
         <label className="modal__label modal__label--full">

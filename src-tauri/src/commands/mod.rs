@@ -7,6 +7,7 @@ pub mod app;
 pub mod atomic_write;
 pub mod dialog;
 pub mod files;
+pub mod fs_watch;
 pub mod git;
 pub mod sessions;
 pub mod settings;

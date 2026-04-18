@@ -18,7 +18,9 @@ const EXT_MAP: Record<string, string> = {
   less: 'less',
   yml: 'yaml',
   yaml: 'yaml',
-  toml: 'plaintext',
+  // Issue #77: TOML は Monaco 純正言語が無いので ini contribution で流用。
+  //   TOML は ini の上位互換 (key=value + [section]) なので highlight は十分。
+  toml: 'ini',
   xml: 'xml',
   svg: 'xml',
   sh: 'shell',

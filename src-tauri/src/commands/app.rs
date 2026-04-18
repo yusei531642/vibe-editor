@@ -81,17 +81,26 @@ pub fn app_get_project_root(state: State<AppState>) -> String {
 /// Issue #29: renderer 側 (settings.lastOpenedRoot の変更 / Canvas-Sidebar の openFolder 等) で
 /// プロジェクトルートが切り替わったとき、Rust 側 AppState の project_root を同期する。
 /// この state は app_get_project_root と Claude session watcher 双方の SSOT。
+///
+/// Issue #66: 同時に FS watcher を再起動し、外部変更 (git pull / 他エディタ保存) を
+/// `project:files-changed` イベントで renderer に通知する。
 #[tauri::command]
-pub fn app_set_project_root(state: State<AppState>, project_root: String) -> Result<(), String> {
+pub fn app_set_project_root(
+    app: tauri::AppHandle,
+    state: State<AppState>,
+    project_root: String,
+) -> Result<(), String> {
     let mut guard = state
         .project_root
         .lock()
         .map_err(|e| format!("project_root lock poisoned: {e}"))?;
-    *guard = if project_root.trim().is_empty() {
-        None
-    } else {
-        Some(project_root)
-    };
+    let trimmed = project_root.trim().to_string();
+    *guard = if trimmed.is_empty() { None } else { Some(trimmed.clone()) };
+    drop(guard);
+    // Issue #66: watcher は project_root 変更ごとに付け替える
+    if !trimmed.is_empty() {
+        crate::commands::fs_watch::start_for_root(app, trimmed);
+    }
     Ok(())
 }
 

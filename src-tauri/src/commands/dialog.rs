@@ -38,11 +38,25 @@ pub async fn dialog_open_file(
     rx.await.ok().flatten()
 }
 
+/// Issue #60: 旧実装は読み取り失敗時に `true` (= 空) を返していたため、権限エラー /
+/// path 不存在を「空」と取り違え、呼び出し側の警告ロジックが誤判定していた。
+///
+/// 新方針: fail-closed (中身があるかもしれないとみなす)。
+/// - 読み取り成功 + next_entry が None → 空 (true)
+/// - 読み取り失敗 or エントリ検出 → false ("OK as empty" と判定させない)
+///
+/// ユーザーが「権限無しで空扱い」されるケースを潰す。本当に「読めない」を区別したい
+/// 呼び出し側は dialog_read_dir 等を別途用意すること (現時点では不要)。
 #[tauri::command]
 pub async fn dialog_is_folder_empty(folder_path: String) -> bool {
     let mut rd = match tokio::fs::read_dir(&folder_path).await {
         Ok(r) => r,
-        Err(_) => return true,
+        Err(e) => {
+            tracing::warn!(
+                "[dialog_is_folder_empty] read_dir failed for {folder_path:?}: {e} — treating as non-empty"
+            );
+            return false;
+        }
     };
     matches!(rd.next_entry().await, Ok(None))
 }

@@ -8,6 +8,7 @@ import {
   type ReactNode
 } from 'react';
 import { DEFAULT_SETTINGS, type AppSettings } from '../../../types/shared';
+import { migrateSettings } from './settings-migrate';
 import { applyDensity, applyTheme, THEMES } from './themes';
 
 interface SettingsContextValue {
@@ -37,9 +38,9 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
       try {
         const loaded = await window.api.settings.load();
         if (cancelled) return;
-        // 既存 settings.json に新フィールドが無い場合 (notepad など) は
-        // DEFAULT_SETTINGS で穴埋めする。forward compat。
-        const merged = { ...DEFAULT_SETTINGS, ...loaded };
+        // Issue #75: schemaVersion に従った明示マイグレーションを挟む。
+        // 単純な shallow merge だけでは型変更や意味変更を吸収できない。
+        const merged = migrateSettings(loaded);
         // Issue #71: 初回起動で settings.json がまだ無い場合、OS ロケールから language を決める。
         // `loaded` が空 (settings.json 未作成) かつ loaded.language が未定義のときのみ適用。
         const hasSavedLanguage =

@@ -305,6 +305,10 @@ const ja: Dict = {
   'cmd.cat.app': 'アプリ',
   'cmd.app.restart': 'vibe-editor (アプリ) を再起動',
 
+  // ---------- Settings 補助 (Issue #76) ----------
+  'settings.command': 'コマンド',
+  'settings.argsUnterminatedQuote': 'ダブルクォート (") が閉じていません。引数が誤って解釈される可能性があります。',
+
   // ---------- Updater (Issue #59) ----------
   'updater.confirm': 'vibe-editor v{version} が利用可能です。今すぐ更新しますか?',
 
@@ -621,6 +625,11 @@ const en: Dict = {
   'cmd.theme.current': '✓ current theme',
   'cmd.cat.app': 'App',
   'cmd.app.restart': 'Restart vibe-editor',
+
+  // ---------- Settings helpers (Issue #76) ----------
+  'settings.command': 'Command',
+  'settings.argsUnterminatedQuote':
+    'Unterminated double quote (") — arguments may be parsed incorrectly.',
 
   // ---------- Updater (Issue #59) ----------
   'updater.confirm': 'vibe-editor v{version} is available. Install it now?',

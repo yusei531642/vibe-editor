@@ -20,8 +20,12 @@ const TEAM_ID = process.env.VIBE_TEAM_ID || '';
 const ROLE = process.env.VIBE_TEAM_ROLE || 'unknown';
 const AGENT_ID = process.env.VIBE_AGENT_ID || '';
 
-if (!SOCKET || !TOKEN) {
-  process.stderr.write('[team-bridge] missing VIBE_TEAM_SOCKET or VIBE_TEAM_TOKEN\n');
+// Issue #62: SOCKET / TOKEN が欠落しているときは、offline fallback で「繋がっているフリ」を
+// するのではなく、initialize を明示的にエラーで返すことで Claude / Codex が
+// vibe-team MCP を「失敗サーバ」として認識できるようにする (ユーザーが気付きやすい)。
+const MISSING_HUB_ENV = !SOCKET || !TOKEN;
+if (MISSING_HUB_ENV) {
+  process.stderr.write('[team-bridge] missing VIBE_TEAM_SOCKET or VIBE_TEAM_TOKEN — team tools disabled\n');
 }
 
 const [host, portStr] = SOCKET.split(':');
@@ -31,12 +35,27 @@ let socket = null;
 let connected = false;
 let reconnectTimer = null;
 const pendingOut = [];
+// Issue #61: 500ms 固定 retry を exponential backoff + 上限付きに変更。
+// hub が止まっているときの busy loop と CPU 負荷を避ける。
+let retryCount = 0;
+const MAX_RETRIES = 12;         // 合計 ~60 秒程度で諦める
+const BASE_RETRY_MS = 500;
+const MAX_RETRY_MS = 10000;
+let givenUp = false;
+
+function nextBackoffMs() {
+  // 500ms → 1s → 2s → ... (cap 10s)
+  const ms = Math.min(BASE_RETRY_MS * 2 ** retryCount, MAX_RETRY_MS);
+  retryCount += 1;
+  return ms;
+}
 
 function connect() {
   socket = net.createConnection({ host: host || '127.0.0.1', port }, () => {
     const hello = JSON.stringify({ token: TOKEN, teamId: TEAM_ID, role: ROLE, agentId: AGENT_ID });
     socket.write(hello + '\n');
     connected = true;
+    retryCount = 0; // 成功したので backoff リセット
     for (const line of pendingOut) socket.write(line);
     pendingOut.length = 0;
   });
@@ -56,11 +75,18 @@ function connect() {
     connected = false;
     try { socket && socket.destroy(); } catch {}
     socket = null;
+    if (givenUp) return;
+    if (retryCount >= MAX_RETRIES) {
+      givenUp = true;
+      process.stderr.write(`[team-bridge] giving up after ${MAX_RETRIES} reconnect attempts\n`);
+      return;
+    }
     if (!reconnectTimer) {
+      const delay = nextBackoffMs();
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         connect();
-      }, 500);
+      }, delay);
     }
   };
   socket.on('end', onClose);
@@ -68,7 +94,7 @@ function connect() {
   socket.on('error', () => { /* onClose で処理 */ });
 }
 
-if (SOCKET && TOKEN) connect();
+if (!MISSING_HUB_ENV) connect();
 
 let stdinBuf = '';
 process.stdin.setEncoding('utf-8');
@@ -97,17 +123,27 @@ process.stdin.on('data', (chunk) => {
 process.stdin.on('end', () => process.exit(0));
 
 function localFallback(req) {
+  // Issue #62: SOCKET/TOKEN 欠如時は initialize をエラーで返し、Claude/Codex に
+  // 「vibe-team MCP は失敗した」ことを明示する。成功応答にしておくと "空の tools/list で
+  // Claude だけ動いている" ように見え、ユーザーが故障に気付けない。
+  // hub への接続は試みたが未接続 (= まだ connecting 中) は従来どおり pending 扱い。
   const { method, id } = req;
-  switch (method) {
-    case 'initialize':
+  if (MISSING_HUB_ENV) {
+    if (id !== undefined && id !== null) {
       return {
         jsonrpc: '2.0', id,
-        result: {
-          protocolVersion: '2025-03-26',
-          capabilities: { tools: { listChanged: false } },
-          serverInfo: { name: 'vibe-team', version: '2.0.0-offline' }
+        error: {
+          code: -32001,
+          message: 'vibe-team bridge is not configured (VIBE_TEAM_SOCKET / VIBE_TEAM_TOKEN missing)'
         }
       };
+    }
+    return null;
+  }
+  switch (method) {
+    case 'initialize':
+      // 通常は TeamHub が応答する。ここに落ちるのは hub 未接続時のみ → pending 保留
+      return null;
     case 'tools/list':
       return { jsonrpc: '2.0', id, result: { tools: [] } };
     case 'ping':

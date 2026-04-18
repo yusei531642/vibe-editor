@@ -12,7 +12,12 @@ export type Density = 'compact' | 'normal' | 'comfortable';
 
 export type Language = 'ja' | 'en';
 
+/** Issue #75: AppSettings の現在スキーマ。破壊変更時に上げる。 */
+export const APP_SETTINGS_SCHEMA_VERSION = 1;
+
 export interface AppSettings {
+  /** Issue #75: スキーマ番号。未設定 (旧データ) は 0 扱い */
+  schemaVersion?: number;
   /** UI 言語 */
   language: Language;
   theme: ThemeName;
@@ -80,6 +85,7 @@ export interface AppUserInfo {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
   language: 'ja',
   theme: 'claude-dark',
   uiFontFamily:

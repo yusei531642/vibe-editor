@@ -35,6 +35,13 @@ import 'monaco-editor/esm/vs/basic-languages/cpp/cpp.contribution';
 import 'monaco-editor/esm/vs/basic-languages/lua/lua.contribution';
 import 'monaco-editor/esm/vs/basic-languages/sql/sql.contribution';
 import 'monaco-editor/esm/vs/basic-languages/dockerfile/dockerfile.contribution';
+// Issue #77: json / c / toml の contribution を追加登録。
+//   - json: basic-languages にシンタックスのみ存在 (language worker は未登録)
+//   - c: cpp の別エントリで、cpp.contribution には含まれないため明示
+//   - toml: basic-languages には無いので、代替として ini を登録して TOML 拡張子も賄う
+import 'monaco-editor/esm/vs/basic-languages/json/json.contribution';
+import 'monaco-editor/esm/vs/basic-languages/c/c.contribution';
+import 'monaco-editor/esm/vs/basic-languages/ini/ini.contribution';
 
 // 型: 環境変数は緩い any として扱う（Electron renderer だが self は Worker と共通の型がない）
 (self as unknown as { MonacoEnvironment: monaco.Environment }).MonacoEnvironment = {

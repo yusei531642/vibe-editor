@@ -29,6 +29,7 @@ import { useT } from './lib/i18n';
 import { useSettings } from './lib/settings-context';
 import { useToast } from './lib/toast-context';
 import { parseShellArgs } from './lib/parse-args';
+import { dedupPrepend, listContainsPath } from './lib/path-norm';
 import type { Command } from './lib/commands';
 
 const THEMES_FOR_PALETTE: ThemeName[] = [
@@ -481,6 +482,39 @@ export function App(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Issue #66: project_root の外部変更 (git pull / Claude 編集 / 他エディタ) を検知して
+  //           UI を更新する。Rust 側 fs_watch が debounce した `project:files-changed` を emit。
+  //           refreshGit と diffTabs は ref 経由で読むことで effect deps を [] に保てる。
+  const fsWatchHandlersRef = useRef<{
+    refreshGit: () => Promise<void>;
+    refreshDiffTabsForPath: (p: string) => Promise<void>;
+    diffTabs: { relPath: string }[];
+  } | null>(null);
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    void (async () => {
+      const { listen } = await import('@tauri-apps/api/event');
+      const u = await listen<string>('project:files-changed', () => {
+        const h = fsWatchHandlersRef.current;
+        if (!h) return;
+        void h.refreshGit();
+        for (const tab of h.diffTabs) {
+          void h.refreshDiffTabsForPath(tab.relPath);
+        }
+      });
+      if (cancelled) {
+        u();
+      } else {
+        unlisten = u;
+      }
+    })();
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, []);
+
   // ---------- Claude Code パネル リサイズ ----------
   const MIN_PANEL = 320;
   const MAX_PANEL = 900;
@@ -619,7 +653,9 @@ export function App(): JSX.Element {
         // `claudeCwd` は SettingsModal で設定されるユーザー設定のため上書き厳禁。
         if (options.addToRecent !== false) {
           const rp = settings.recentProjects ?? [];
-          const next = [root, ...rp.filter((p) => p !== root)].slice(0, 10);
+          // Issue #67: path を raw 比較すると表記揺れで重複エントリが増える。
+          // normalize 後キーで dedup。
+          const next = dedupPrepend(rp, root, 10);
           void updateSettings({ recentProjects: next, lastOpenedRoot: root });
         } else {
           void updateSettings({ lastOpenedRoot: root });
@@ -688,8 +724,15 @@ export function App(): JSX.Element {
   }, [projectRoot]);
 
   const handleRestart = useCallback(async () => {
-    if (dirtyEditorTabs.length > 0 && !window.confirm(t('editor.restartConfirm'))) {
-      return;
+    if (dirtyEditorTabs.length > 0) {
+      // Issue #68: WebView の window.confirm ではなく Tauri ネイティブ dialog を使う。
+      // @tauri-apps/plugin-dialog の ask を動的 import して重さを抑える。
+      const { ask } = await import('@tauri-apps/plugin-dialog');
+      const ok = await ask(t('editor.restartConfirm'), {
+        title: 'vibe-editor',
+        kind: 'warning'
+      });
+      if (!ok) return;
     }
     await window.api.app.restart();
   }, [dirtyEditorTabs.length, t]);
@@ -820,6 +863,13 @@ export function App(): JSX.Element {
     },
     [projectRoot, diffTabs, gitStatus]
   );
+
+  // Issue #66: fs watcher の callback が ref 経由で最新 refresh 関数を引けるように同期
+  fsWatchHandlersRef.current = {
+    refreshGit,
+    refreshDiffTabsForPath,
+    diffTabs
+  };
 
   // ---------- エディタタブ ----------
 
@@ -1136,15 +1186,16 @@ export function App(): JSX.Element {
   );
 
   const handleAddWorkspaceFolder = useCallback(async () => {
-    const folder = await window.api.dialog.openFolder('ワークスペースに追加するフォルダを選択');
+    const folder = await window.api.dialog.openFolder(t('appMenu.addWorkspaceDialogTitle'));
     if (!folder) return;
     const name = folder.split(/[\\/]/).pop() ?? folder;
-    if (folder === projectRoot) {
+    // Issue #67: 比較を normalize 後キーで行い、表記揺れ (大小文字 / `\` vs `/`) を吸収。
+    if (listContainsPath([projectRoot], folder)) {
       showToast(t('workspace.alreadyAdded', { name }), { tone: 'info' });
       return;
     }
     const current = settings.workspaceFolders ?? [];
-    if (current.includes(folder)) {
+    if (listContainsPath(current, folder)) {
       showToast(t('workspace.alreadyAdded', { name }), { tone: 'info' });
       return;
     }
