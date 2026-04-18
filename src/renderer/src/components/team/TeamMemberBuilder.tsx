@@ -50,12 +50,13 @@ export function TeamMemberBuilder({
           </select>
         </div>
 
-        {/* メンバー */}
+        {/* メンバー (Issue #83: key={idx} ではなく stable uid を使う) */}
         {form.members.map((m, idx) => (
-          <div key={idx} className="team-builder__row">
+          <div key={m._uid} className="team-builder__row">
             <select
               value={m.agent}
               onChange={(e) => actions.updateMember(idx, 'agent', e.target.value)}
+              aria-label={t('team.agent')}
             >
               {AGENTS.map((a) => (
                 <option key={a.value} value={a.value}>
@@ -66,6 +67,7 @@ export function TeamMemberBuilder({
             <select
               value={m.role}
               onChange={(e) => actions.updateMember(idx, 'role', e.target.value)}
+              aria-label={t('team.role')}
             >
               {MEMBER_ROLES.map((r) => (
                 <option key={r.value} value={r.value}>
@@ -74,9 +76,11 @@ export function TeamMemberBuilder({
               ))}
             </select>
             <button
+              type="button"
               className="team-builder__remove"
               onClick={() => actions.removeMember(idx)}
               title={t('team.removeMember')}
+              aria-label={t('team.removeMember')}
             >
               <X size={14} />
             </button>
@@ -84,9 +88,11 @@ export function TeamMemberBuilder({
         ))}
 
         <button
+          type="button"
           className="team-builder__add"
           onClick={() => actions.addMember(remaining)}
           disabled={totalNeeded >= remaining}
+          aria-label={t('team.addMember')}
         >
           <Plus size={14} />
           {t('team.addMember')}

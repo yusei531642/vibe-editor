@@ -33,6 +33,7 @@ export function TeamPresetList({
           return (
             <button
               key={p.name}
+              type="button"
               className="team-preset-card"
               onClick={() => onPickBuiltin(p)}
               disabled={!spawnable}
@@ -59,6 +60,7 @@ export function TeamPresetList({
             data-editing={editingPresetId === p.id ? '' : undefined}
           >
             <button
+              type="button"
               className="team-preset-card__main"
               onClick={() => onPickSaved(p)}
               disabled={!canSpawnPreset(p.members.length, remaining)}
@@ -72,16 +74,20 @@ export function TeamPresetList({
               </span>
             </button>
             <button
+              type="button"
               className="team-preset-card__edit"
               onClick={() => onEditSaved(p)}
               title={t('team.editPreset')}
+              aria-label={t('team.editPreset')}
             >
               <Pencil size={12} />
             </button>
             <button
+              type="button"
               className="team-preset-card__delete"
               onClick={() => onDeleteSaved(p.id)}
               title={t('team.deletePreset')}
+              aria-label={t('team.deletePreset')}
             >
               <Trash2 size={12} />
             </button>
