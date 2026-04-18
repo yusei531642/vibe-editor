@@ -11,11 +11,13 @@ import type {
 import { Sidebar, type SidebarView } from '../Sidebar';
 import { useCanvasStore } from '../../stores/canvas';
 import { useSettings } from '../../lib/settings-context';
+import { useT } from '../../lib/i18n';
 import { useUiStore } from '../../stores/ui';
 import { ROLE_META } from '../../lib/team-roles';
 
 export function CanvasSidebar(): JSX.Element {
   const { settings, update } = useSettings();
+  const t = useT();
   // Issue #23: projectRoot は「現在開いているプロジェクト」= lastOpenedRoot を優先。
   // claudeCwd は Claude CLI 起動時の作業ディレクトリ設定 (別用途) としてだけ使う。
   // lastOpenedRoot が空 (初回) のときだけ claudeCwd にフォールバック。
@@ -166,32 +168,32 @@ export function CanvasSidebar(): JSX.Element {
   );
 
   const handleNewProject = useCallback(async () => {
-    const picked = await window.api.dialog.openFolder('新規プロジェクト');
+    const picked = await window.api.dialog.openFolder(t('appMenu.newDialogTitle'));
     if (picked) await pushRecent(picked);
-  }, [pushRecent]);
+  }, [pushRecent, t]);
 
   const handleOpenFolder = useCallback(async () => {
-    const picked = await window.api.dialog.openFolder('フォルダを開く');
+    const picked = await window.api.dialog.openFolder(t('appMenu.openFolderDialogTitle'));
     if (picked) await pushRecent(picked);
-  }, [pushRecent]);
+  }, [pushRecent, t]);
 
   const handleOpenFileDialog = useCallback(async () => {
-    const picked = await window.api.dialog.openFile('ファイルを開く');
+    const picked = await window.api.dialog.openFile(t('appMenu.openFileDialogTitle'));
     if (picked) {
       const dir = picked.replace(/[\\/][^\\/]+$/, '');
       const name = picked.slice(dir.length + 1);
       handleOpenFile(dir, name);
     }
-  }, [handleOpenFile]);
+  }, [handleOpenFile, t]);
 
   const handleAddWorkspaceFolder = useCallback(async () => {
-    const picked = await window.api.dialog.openFolder('ワークスペースに追加');
+    const picked = await window.api.dialog.openFolder(t('appMenu.addWorkspaceDialogTitle'));
     if (!picked) return;
     if (workspaceFolders.includes(picked)) return;
     const next = [...workspaceFolders, picked];
     setWorkspaceFolders(next);
     await update({ workspaceFolders: next });
-  }, [workspaceFolders, update]);
+  }, [workspaceFolders, update, t]);
 
   const handleRemoveWorkspaceFolder = useCallback(
     async (path: string) => {

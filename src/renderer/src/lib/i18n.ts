@@ -24,6 +24,10 @@ const ja: Dict = {
   'appMenu.openFolderHint': '既存のプロジェクト',
   'appMenu.openFile': 'ファイルを開く…',
   'appMenu.openFileHint': '単独ファイル',
+  'appMenu.newDialogTitle': '新規プロジェクト',
+  'appMenu.openFolderDialogTitle': 'フォルダを開く',
+  'appMenu.openFileDialogTitle': 'ファイルを開く',
+  'appMenu.addWorkspaceDialogTitle': 'ワークスペースに追加',
   'appMenu.addToWorkspace': 'フォルダをワークスペースに追加…',
   'appMenu.addToWorkspaceHint': 'サイドバーに別ルートを並べる',
   'appMenu.recent': '最近のプロジェクト',
@@ -137,6 +141,7 @@ const ja: Dict = {
   'team.presets': 'プリセット',
   'team.custom': 'カスタム',
   'team.members': 'メンバー',
+  'team.leader': 'リーダー',
   'team.addMember': 'メンバーを追加',
   'team.removeMember': '削除',
   'team.saveAsPreset': 'プリセットとして保存',
@@ -243,6 +248,70 @@ const ja: Dict = {
   'toast.openedFile': '{file} の親フォルダをプロジェクトとして読み込みました',
   'toast.terminalNotReady': 'ターミナルが起動していません',
 
+  // ---------- Terminal (pasteエラー等) ----------
+  'terminal.pasteImageFailed': '画像保存失敗',
+  'terminal.pasteException': 'ペースト例外',
+
+  // ---------- Command palette (Issue #39) ----------
+  'palette.ariaLabel': 'コマンドパレット',
+  'palette.placeholder': 'コマンドを検索…',
+  'palette.hint': '↑↓ で選択 · Enter で実行 · Esc で閉じる',
+  'palette.count': '{count} 件',
+  'palette.empty': '一致するコマンドがありません',
+
+  // ---------- Canvas QuickNav (Issue #58) ----------
+  'quicknav.placeholder': 'エージェント / カードへジャンプ…',
+  'quicknav.empty': '該当するカードがありません',
+  'quicknav.hintNavigate': '↑↓ 選択',
+  'quicknav.hintJump': 'Enter ジャンプ',
+  'quicknav.hintClose': 'Esc 閉じる',
+
+  // ---------- Command palette entries (Issue #57) ----------
+  'cmd.cat.project': 'プロジェクト',
+  'cmd.cat.workspace': 'ワークスペース',
+  'cmd.cat.view': 'ビュー',
+  'cmd.cat.tab': 'タブ',
+  'cmd.cat.git': 'Git',
+  'cmd.cat.sessions': 'セッション',
+  'cmd.cat.terminal': 'ターミナル',
+  'cmd.cat.settings': '設定',
+  'cmd.cat.theme': 'テーマ',
+  'cmd.project.new': '新規プロジェクト…',
+  'cmd.project.openFolder': 'フォルダを開く…',
+  'cmd.project.openFile': 'ファイルを開く…',
+  'cmd.workspace.addFolder': 'フォルダをワークスペースに追加…',
+  'cmd.project.recent': '最近: {name}',
+  'cmd.view.sidebarChanges': 'サイドバー: 変更',
+  'cmd.view.sidebarSessions': 'サイドバー: 履歴',
+  'cmd.view.nextTab': '次のタブへ',
+  'cmd.view.prevTab': '前のタブへ',
+  'cmd.tab.close': 'アクティブなタブを閉じる',
+  'cmd.tab.reopen': '最近閉じたタブを復元',
+  'cmd.tab.togglePin': 'アクティブなタブをピン留め/解除',
+  'cmd.git.refresh': '変更ファイル一覧を更新',
+  'cmd.sessions.refresh': 'セッション履歴を更新',
+  'cmd.terminal.addClaude': 'Claude Code タブを追加',
+  'cmd.terminal.addCodex': 'Codex タブを追加',
+  'cmd.terminal.createTeam': 'Team を作成…',
+  'cmd.terminal.closeTab': 'アクティブなターミナルタブを閉じる',
+  'cmd.terminal.restart': 'ターミナルを再起動',
+  'cmd.settings.open': '設定を開く',
+  'cmd.settings.cycleDensity': '情報密度を切り替え',
+  'cmd.settings.cycleDensitySub': '現在: {density}',
+  'cmd.theme.title': 'テーマ: {name}',
+  'cmd.theme.current': '✓ 現在のテーマ',
+  'cmd.cat.app': 'アプリ',
+  'cmd.app.restart': 'vibe-editor (アプリ) を再起動',
+
+  // ---------- Updater (Issue #59) ----------
+  'updater.confirm': 'vibe-editor v{version} が利用可能です。今すぐ更新しますか?',
+
+  // ---------- Toast tone ラベル (Issue #80) ----------
+  'toast.tone.info': '情報',
+  'toast.tone.success': '完了',
+  'toast.tone.warning': '注意',
+  'toast.tone.error': 'エラー',
+
   // ---------- Status ----------
   'status.loaded': '読み込み完了',
   'status.loading': 'プロジェクト読み込み中…',
@@ -267,6 +336,10 @@ const en: Dict = {
   'appMenu.openFolder': 'Open folder…',
   'appMenu.openFolderHint': 'Existing project',
   'appMenu.openFile': 'Open file…',
+  'appMenu.newDialogTitle': 'New project',
+  'appMenu.openFolderDialogTitle': 'Open folder',
+  'appMenu.openFileDialogTitle': 'Open file',
+  'appMenu.addWorkspaceDialogTitle': 'Add to workspace',
   'appMenu.openFileHint': 'Single file',
   'appMenu.addToWorkspace': 'Add folder to workspace…',
   'appMenu.addToWorkspaceHint': 'Show another root in the sidebar',
@@ -381,6 +454,7 @@ const en: Dict = {
   'team.presets': 'Presets',
   'team.custom': 'Custom',
   'team.members': 'members',
+  'team.leader': 'Leader',
   'team.addMember': 'Add member',
   'team.removeMember': 'Remove',
   'team.saveAsPreset': 'Save as preset',
@@ -489,6 +563,70 @@ const en: Dict = {
   'toast.terminalNotReady': 'Terminal is not ready',
 
   // ---------- Status ----------
+  // ---------- Terminal (paste errors) ----------
+  'terminal.pasteImageFailed': 'Paste image failed',
+  'terminal.pasteException': 'Paste exception',
+
+  // ---------- Command palette (Issue #39) ----------
+  'palette.ariaLabel': 'Command palette',
+  'palette.placeholder': 'Search commands…',
+  'palette.hint': '↑↓ to select · Enter to run · Esc to close',
+  'palette.count': '{count}',
+  'palette.empty': 'No matching commands',
+
+  // ---------- Canvas QuickNav (Issue #58) ----------
+  'quicknav.placeholder': 'Jump to agent / card …',
+  'quicknav.empty': 'No matching cards.',
+  'quicknav.hintNavigate': '↑↓ navigate',
+  'quicknav.hintJump': 'Enter jump',
+  'quicknav.hintClose': 'Esc close',
+
+  // ---------- Command palette entries (Issue #57) ----------
+  'cmd.cat.project': 'Project',
+  'cmd.cat.workspace': 'Workspace',
+  'cmd.cat.view': 'View',
+  'cmd.cat.tab': 'Tab',
+  'cmd.cat.git': 'Git',
+  'cmd.cat.sessions': 'Sessions',
+  'cmd.cat.terminal': 'Terminal',
+  'cmd.cat.settings': 'Settings',
+  'cmd.cat.theme': 'Theme',
+  'cmd.project.new': 'New project…',
+  'cmd.project.openFolder': 'Open folder…',
+  'cmd.project.openFile': 'Open file…',
+  'cmd.workspace.addFolder': 'Add folder to workspace…',
+  'cmd.project.recent': 'Recent: {name}',
+  'cmd.view.sidebarChanges': 'Sidebar: Changes',
+  'cmd.view.sidebarSessions': 'Sidebar: History',
+  'cmd.view.nextTab': 'Next tab',
+  'cmd.view.prevTab': 'Previous tab',
+  'cmd.tab.close': 'Close active tab',
+  'cmd.tab.reopen': 'Reopen last closed tab',
+  'cmd.tab.togglePin': 'Toggle pin on active tab',
+  'cmd.git.refresh': 'Refresh changed files',
+  'cmd.sessions.refresh': 'Refresh session history',
+  'cmd.terminal.addClaude': 'Add Claude Code tab',
+  'cmd.terminal.addCodex': 'Add Codex tab',
+  'cmd.terminal.createTeam': 'Create team…',
+  'cmd.terminal.closeTab': 'Close active terminal tab',
+  'cmd.terminal.restart': 'Restart terminal',
+  'cmd.settings.open': 'Open settings',
+  'cmd.settings.cycleDensity': 'Cycle density',
+  'cmd.settings.cycleDensitySub': 'Current: {density}',
+  'cmd.theme.title': 'Theme: {name}',
+  'cmd.theme.current': '✓ current theme',
+  'cmd.cat.app': 'App',
+  'cmd.app.restart': 'Restart vibe-editor',
+
+  // ---------- Updater (Issue #59) ----------
+  'updater.confirm': 'vibe-editor v{version} is available. Install it now?',
+
+  // ---------- Toast tone labels (Issue #80) ----------
+  'toast.tone.info': 'Info',
+  'toast.tone.success': 'Success',
+  'toast.tone.warning': 'Warning',
+  'toast.tone.error': 'Error',
+
   'status.loaded': 'Loaded',
   'status.loading': 'Loading project…',
   'status.templateInserted': 'Template inserted (not saved yet)',
@@ -518,4 +656,21 @@ export function useT(): (key: string, params?: Record<string, string | number>) 
       text
     );
   };
+}
+
+/**
+ * React コンテキスト外 (updater-check / timer callback など) から呼べる翻訳関数。
+ * 言語を明示的に受け取るので、呼び出し元が settings.language を取って渡す必要がある。
+ */
+export function translate(
+  lang: Language,
+  key: string,
+  params?: Record<string, string | number>
+): string {
+  const text = translations[lang]?.[key] ?? translations.ja[key] ?? key;
+  if (!params) return text;
+  return Object.entries(params).reduce(
+    (acc, [k, v]) => acc.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v)),
+    text
+  );
 }

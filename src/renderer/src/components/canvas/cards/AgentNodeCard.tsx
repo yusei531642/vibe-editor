@@ -165,9 +165,11 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
       payload.agentId,
       payload.role as TeamRole,
       title,
-      teamMembers
+      teamMembers,
+      // Issue #70: UI 言語に合わせて system prompt も切り替える
+      settings.language
     );
-  }, [teamMembers, payload.teamId, payload.agentId, payload.role, title]);
+  }, [teamMembers, payload.teamId, payload.agentId, payload.role, title, settings.language]);
 
   // Claude: --append-system-prompt でシステム指示を渡す
   // Codex: codexInstructions (一時ファイル化されて model_instructions_file へ)

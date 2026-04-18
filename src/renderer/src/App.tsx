@@ -471,9 +471,14 @@ export function App(): JSX.Element {
     void runClaudeCheck();
   }, [runClaudeCheck]);
 
-  // 起動時に GitHub Release の latest.json を確認 (prod のみ)
+  // 起動時に GitHub Release の latest.json を確認 (prod のみ)。
+  // Issue #59: UI 言語をダイアログ文言に反映するため settings.language を渡す。
   useEffect(() => {
-    void import('./lib/updater-check').then((m) => m.checkForUpdatesOnce());
+    void import('./lib/updater-check').then((m) =>
+      m.checkForUpdatesOnce(settings.language)
+    );
+    // 言語変更時に再チェックはしない (didCheck で 1 回のみ)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ---------- Claude Code パネル リサイズ ----------
@@ -1182,149 +1187,161 @@ export function App(): JSX.Element {
   // ---------- コマンドパレット ----------
 
   const commands = useMemo<Command[]>(() => {
+    // Issue #57: タイトル / カテゴリ / subtitle を i18n キー経由に置換
+    const CAT = {
+      project: t('cmd.cat.project'),
+      workspace: t('cmd.cat.workspace'),
+      view: t('cmd.cat.view'),
+      tab: t('cmd.cat.tab'),
+      git: t('cmd.cat.git'),
+      sessions: t('cmd.cat.sessions'),
+      terminal: t('cmd.cat.terminal'),
+      settings: t('cmd.cat.settings'),
+      theme: t('cmd.cat.theme')
+    };
     const list: Command[] = [
       {
         id: 'project.new',
-        title: '新規プロジェクト…',
-        category: 'プロジェクト',
+        title: t('cmd.project.new'),
+        category: CAT.project,
         run: () => void handleNewProject()
       },
       {
         id: 'project.openFolder',
-        title: 'フォルダを開く…',
-        category: 'プロジェクト',
+        title: t('cmd.project.openFolder'),
+        category: CAT.project,
         run: () => void handleOpenFolder()
       },
       {
         id: 'project.openFile',
-        title: 'ファイルを開く…',
-        category: 'プロジェクト',
+        title: t('cmd.project.openFile'),
+        category: CAT.project,
         run: () => void handleOpenFile()
       },
       {
         id: 'workspace.addFolder',
-        title: 'フォルダをワークスペースに追加…',
-        category: 'ワークスペース',
+        title: t('cmd.workspace.addFolder'),
+        category: CAT.workspace,
         run: () => void handleAddWorkspaceFolder()
       },
       ...(settings.recentProjects ?? []).slice(0, 5).map<Command>((p) => ({
         id: `project.recent.${p}`,
-        title: `最近: ${p.split(/[\\/]/).pop()}`,
+        title: t('cmd.project.recent', { name: p.split(/[\\/]/).pop() ?? p }),
         subtitle: p,
-        category: 'プロジェクト',
+        category: CAT.project,
         run: () => void handleOpenRecent(p)
       })),
       {
         id: 'view.sidebar.changes',
-        title: 'サイドバー: 変更',
-        category: 'ビュー',
+        title: t('cmd.view.sidebarChanges'),
+        category: CAT.view,
         run: () => setSidebarView('changes')
       },
       {
         id: 'view.sidebar.sessions',
-        title: 'サイドバー: 履歴',
-        category: 'ビュー',
+        title: t('cmd.view.sidebarSessions'),
+        category: CAT.view,
         run: () => setSidebarView('sessions')
       },
       {
         id: 'view.nextTab',
-        title: '次のタブへ',
+        title: t('cmd.view.nextTab'),
         subtitle: 'Ctrl+Tab',
-        category: 'ビュー',
+        category: CAT.view,
         when: () => diffTabs.length > 0,
         run: () => cycleTab(1)
       },
       {
         id: 'view.prevTab',
-        title: '前のタブへ',
+        title: t('cmd.view.prevTab'),
         subtitle: 'Ctrl+Shift+Tab',
-        category: 'ビュー',
+        category: CAT.view,
         when: () => diffTabs.length > 0,
         run: () => cycleTab(-1)
       },
       {
         id: 'tab.close',
-        title: 'アクティブなタブを閉じる',
+        title: t('cmd.tab.close'),
         subtitle: 'Ctrl+W',
-        category: 'タブ',
+        category: CAT.tab,
         when: () => !!activeTabId,
         run: () => { if (activeTabId) closeTab(activeTabId); }
       },
       {
         id: 'tab.reopen',
-        title: '最近閉じたタブを復元',
+        title: t('cmd.tab.reopen'),
         subtitle: 'Ctrl+Shift+T',
-        category: 'タブ',
+        category: CAT.tab,
         when: () => recentlyClosed.length > 0,
         run: () => reopenLastClosed()
       },
       {
         id: 'tab.togglePin',
-        title: 'アクティブなタブをピン留め/解除',
-        category: 'タブ',
+        title: t('cmd.tab.togglePin'),
+        category: CAT.tab,
         when: () => !!activeTabId,
         run: () => { if (activeTabId) togglePin(activeTabId); }
       },
       {
         id: 'git.refresh',
-        title: '変更ファイル一覧を更新',
-        category: 'Git',
+        title: t('cmd.git.refresh'),
+        category: CAT.git,
         run: () => refreshGit()
       },
       {
         id: 'sessions.refresh',
-        title: 'セッション履歴を更新',
-        category: 'セッション',
+        title: t('cmd.sessions.refresh'),
+        category: CAT.sessions,
         run: () => refreshSessions()
       },
       {
         id: 'terminal.addClaude',
-        title: 'Claude Code タブを追加',
+        title: t('cmd.terminal.addClaude'),
         subtitle: `${terminalTabs.length}/${MAX_TERMINALS}`,
-        category: 'ターミナル',
+        category: CAT.terminal,
         when: () => terminalTabs.length < MAX_TERMINALS,
         run: () => { addTerminalTab({ agent: 'claude' }); }
       },
       {
         id: 'terminal.addCodex',
-        title: 'Codex タブを追加',
+        title: t('cmd.terminal.addCodex'),
         subtitle: `${terminalTabs.length}/${MAX_TERMINALS}`,
-        category: 'ターミナル',
+        category: CAT.terminal,
         when: () => terminalTabs.length < MAX_TERMINALS,
         run: () => { addTerminalTab({ agent: 'codex' }); }
       },
       {
         id: 'terminal.createTeam',
-        title: 'Team を作成…',
-        category: 'ターミナル',
+        title: t('cmd.terminal.createTeam'),
+        category: CAT.terminal,
         when: () => terminalTabs.length < MAX_TERMINALS,
         run: () => setTeamModalOpen(true)
       },
       {
         id: 'terminal.closeTab',
-        title: 'アクティブなターミナルタブを閉じる',
-        category: 'ターミナル',
+        title: t('cmd.terminal.closeTab'),
+        category: CAT.terminal,
         when: () => terminalTabs.length > 1,
         run: () => closeTerminalTab(activeTerminalTabId)
       },
       {
         id: 'terminal.restart',
-        title: 'ターミナルを再起動',
-        category: 'ターミナル',
+        title: t('cmd.terminal.restart'),
+        category: CAT.terminal,
         run: () => restartTerminal()
       },
       {
         id: 'settings.open',
-        title: '設定を開く',
+        title: t('cmd.settings.open'),
         subtitle: 'Ctrl+,',
-        category: '設定',
+        category: CAT.settings,
         run: () => setSettingsOpen(true)
       },
       {
         id: 'settings.cycleDensity',
-        title: '情報密度を切り替え',
-        subtitle: `現在: ${settings.density}`,
-        category: '設定',
+        title: t('cmd.settings.cycleDensity'),
+        subtitle: t('cmd.settings.cycleDensitySub', { density: settings.density }),
+        category: CAT.settings,
         run: () => {
           const order: typeof settings.density[] = ['compact', 'normal', 'comfortable'];
           const nextDensity = order[(order.indexOf(settings.density) + 1) % order.length];
@@ -1333,20 +1350,21 @@ export function App(): JSX.Element {
       },
       ...THEMES_FOR_PALETTE.map<Command>((tn) => ({
         id: `theme.${tn}`,
-        title: `テーマ: ${tn}`,
-        subtitle: tn === settings.theme ? '✓ 現在のテーマ' : undefined,
-        category: 'テーマ',
+        title: t('cmd.theme.title', { name: tn }),
+        subtitle: tn === settings.theme ? t('cmd.theme.current') : undefined,
+        category: CAT.theme,
         run: () => void updateSettings({ theme: tn })
       })),
       {
         id: 'app.restart',
-        title: 'vibe-editor (アプリ) を再起動',
-        category: 'アプリ',
+        title: t('cmd.app.restart'),
+        category: t('cmd.cat.app'),
         run: () => void handleRestart()
       }
     ];
     return list;
   }, [
+    t,
     handleNewProject,
     handleOpenFolder,
     handleOpenFile,

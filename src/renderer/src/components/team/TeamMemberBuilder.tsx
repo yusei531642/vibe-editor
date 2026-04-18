@@ -37,7 +37,7 @@ export function TeamMemberBuilder({
       <div className="team-builder">
         <div className="team-builder__row team-builder__row--leader">
           <Crown size={14} className="terminal-tab__leader-icon" />
-          <span className="team-builder__label">Leader</span>
+          <span className="team-builder__label">{t('team.leader')}</span>
           <select
             value={form.leaderAgent}
             onChange={(e) => actions.setLeaderAgent(e.target.value as TerminalAgent)}

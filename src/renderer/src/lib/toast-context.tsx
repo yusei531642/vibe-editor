@@ -9,6 +9,7 @@ import {
   type ReactNode
 } from 'react';
 import { X } from 'lucide-react';
+import { useT } from './i18n';
 
 /**
  * グローバルなトースト通知（Undoアクション付き）基盤。
@@ -52,40 +53,49 @@ interface ToastContextValue {
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
-const TOAST_LABELS = {
-  info: '情報',
-  success: '完了',
-  warning: '注意',
-  error: 'エラー'
-} as const;
 
 export function ToastProvider({ children }: { children: ReactNode }): JSX.Element {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const nextId = useRef(1);
+  // Issue #80: アクティブな全 timer を Set で追跡。unmount 時に確実に clear する。
+  const timersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+
+  // 登録 → 発火時 / cleanup 時に Set から外す
+  const registerTimer = useCallback((fn: () => void, ms: number) => {
+    const handle: ReturnType<typeof setTimeout> = setTimeout(() => {
+      timersRef.current.delete(handle);
+      fn();
+    }, ms);
+    timersRef.current.add(handle);
+    return handle;
+  }, []);
 
   // exit アニメ付きで配列から除去する
   const dismissToast = useCallback((id: number) => {
     setToasts((prev) => {
       const target = prev.find((x) => x.id === id);
       if (!target || target.exiting) return prev;
-      if (target._timer) clearTimeout(target._timer);
+      if (target._timer) {
+        clearTimeout(target._timer);
+        timersRef.current.delete(target._timer);
+      }
       return prev.map((x) => (x.id === id ? { ...x, exiting: true } : x));
     });
-    setTimeout(() => {
+    registerTimer(() => {
       setToasts((prev) => prev.filter((x) => x.id !== id));
     }, _EXIT_MS);
-  }, []);
+  }, [registerTimer]);
 
   const showToast = useCallback(
     (message: string, options: ToastOptions = {}): number => {
       const id = nextId.current++;
       const duration = options.duration ?? 4000;
       // 自動消滅時も exit アニメを通す
-      const timer = setTimeout(() => {
+      const timer = registerTimer(() => {
         setToasts((prev) =>
           prev.map((x) => (x.id === id ? { ...x, exiting: true } : x))
         );
-        setTimeout(() => {
+        registerTimer(() => {
           setToasts((prev) => prev.filter((x) => x.id !== id));
         }, _EXIT_MS);
       }, duration);
@@ -95,7 +105,7 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
       ]);
       return id;
     },
-    []
+    [registerTimer]
   );
 
   const value = useMemo<ToastContextValue>(
@@ -103,13 +113,15 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
     [showToast, dismissToast]
   );
 
-  // アンマウント時のタイマー掃除
+  // Issue #80: アンマウント時に進行中の全 timer を確実に clear
   useEffect(() => {
+    const timers = timersRef.current;
     return () => {
-      toasts.forEach((t) => t._timer && clearTimeout(t._timer));
+      for (const h of timers) {
+        clearTimeout(h);
+      }
+      timers.clear();
     };
-    // 意図的に依存配列空: マウント/アンマウント時のみ
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -150,7 +162,10 @@ function ToastItem({
   toast: Toast;
   onDismiss: () => void;
 }): JSX.Element {
+  // Issue #80: toast の tone label を i18n 経由で引く
+  const t = useT();
   const tone = toast.options.tone ?? 'info';
+  const label = t(`toast.tone.${tone}`);
   return (
     <div
       className={`toast toast--${tone}`}
@@ -158,7 +173,7 @@ function ToastItem({
     >
       <span className="toast__indicator" aria-hidden="true" />
       <div className="toast__body">
-        <span className="toast__label">{TOAST_LABELS[tone]}</span>
+        <span className="toast__label">{label}</span>
         <span className="toast__message">{toast.message}</span>
       </div>
       {toast.options.action && (
@@ -177,7 +192,7 @@ function ToastItem({
         type="button"
         className="toast__close"
         onClick={onDismiss}
-        aria-label="閉じる"
+        aria-label={t('common.close')}
       >
         <X size={14} strokeWidth={2} />
       </button>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search } from 'lucide-react';
 import { filterCommands, type Command } from '../lib/commands';
+import { useT } from '../lib/i18n';
 import { useSpringMount } from '../lib/use-animated-mount';
 
 interface CommandPaletteProps {
@@ -20,6 +21,7 @@ export function CommandPalette({
   commands,
   onClose
 }: CommandPaletteProps): JSX.Element | null {
+  const t = useT();
   const [query, setQuery] = useState<string>('');
   const [selected, setSelected] = useState<number>(0);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -85,7 +87,7 @@ export function CommandPalette({
       onClick={onClose}
       role="dialog"
       aria-modal="true"
-      aria-label="コマンドパレット"
+      aria-label={t('palette.ariaLabel')}
     >
       <div
         className="cmdp"
@@ -100,7 +102,7 @@ export function CommandPalette({
               ref={inputRef}
               className="cmdp__input"
               type="text"
-              placeholder="コマンドを検索…"
+              placeholder={t('palette.placeholder')}
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
@@ -118,13 +120,13 @@ export function CommandPalette({
             />
           </div>
           <div className="cmdp__meta">
-            <span className="cmdp__hint">↑↓ で選択 · Enter で実行 · Esc で閉じる</span>
-            <span className="cmdp__count">{filtered.length} 件</span>
+            <span className="cmdp__hint">{t('palette.hint')}</span>
+            <span className="cmdp__count">{t('palette.count', { count: filtered.length })}</span>
           </div>
         </div>
         <ul ref={listRef} className="cmdp__list" role="listbox" id="cmdp-listbox">
           {filtered.length === 0 ? (
-            <li className="cmdp__empty">一致するコマンドがありません</li>
+            <li className="cmdp__empty">{t('palette.empty')}</li>
           ) : (
             filtered.map((cmd, i) => (
               <li

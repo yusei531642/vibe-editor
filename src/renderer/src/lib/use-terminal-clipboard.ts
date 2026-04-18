@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import { insertPastedImageToPty } from './paste-image-client';
+import { useT } from './i18n';
 
 /**
  * ターミナルのコピー＆ペースト制御を担当するフック。
@@ -27,6 +28,11 @@ export function useTerminalClipboard(options: {
   const writeRef = useRef(writeToPty);
   writeRef.current = writeToPty;
 
+  // Issue #64: エラーラベルの i18n 化。effect の [] deps を保つため、最新 t を ref 経由で参照する。
+  const t = useT();
+  const tRef = useRef(t);
+  tRef.current = t;
+
   useEffect(() => {
     const term = termRef.current;
     const container = containerRef.current;
@@ -39,7 +45,7 @@ export function useTerminalClipboard(options: {
     const handleImageBlob = async (blob: Blob, mime: string): Promise<void> => {
       const res = await insertPastedImageToPty(blob, mime, (text) => writeRef.current(text));
       if (!res.ok) {
-        writeError('画像保存失敗', res.error);
+        writeError(tRef.current('terminal.pasteImageFailed'), res.error);
       }
     };
 
@@ -114,7 +120,7 @@ export function useTerminalClipboard(options: {
       if (!blob) return;
 
       void handleImageBlob(blob, imageItem.type).catch((err) => {
-        writeError('ペースト例外', String(err));
+        writeError(tRef.current('terminal.pasteException'), String(err));
       });
     };
 

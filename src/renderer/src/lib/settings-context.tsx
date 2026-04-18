@@ -40,6 +40,16 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
         // 既存 settings.json に新フィールドが無い場合 (notepad など) は
         // DEFAULT_SETTINGS で穴埋めする。forward compat。
         const merged = { ...DEFAULT_SETTINGS, ...loaded };
+        // Issue #71: 初回起動で settings.json がまだ無い場合、OS ロケールから language を決める。
+        // `loaded` が空 (settings.json 未作成) かつ loaded.language が未定義のときのみ適用。
+        const hasSavedLanguage =
+          loaded != null &&
+          typeof loaded === 'object' &&
+          'language' in (loaded as Record<string, unknown>);
+        if (!hasSavedLanguage) {
+          const loc = (navigator.language || 'en').toLowerCase();
+          merged.language = loc.startsWith('ja') ? 'ja' : 'en';
+        }
         settingsRef.current = merged;
         setSettings(merged);
       } finally {

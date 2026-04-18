@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { useCanvasStore } from '../../stores/canvas';
+import { useT } from '../../lib/i18n';
 import { metaOf } from '../../lib/team-roles';
 
 interface QuickNavProps {
@@ -15,6 +16,7 @@ interface QuickNavProps {
 }
 
 export function QuickNav({ open, onClose }: QuickNavProps): JSX.Element | null {
+  const t = useT();
   const nodes = useCanvasStore((s) => s.nodes);
   const rf = useReactFlow();
   const [query, setQuery] = useState('');
@@ -107,7 +109,7 @@ export function QuickNav({ open, onClose }: QuickNavProps): JSX.Element | null {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onKey}
-          placeholder="Jump to agent / card …"
+          placeholder={t('quicknav.placeholder')}
           style={{
             width: '100%',
             padding: '12px 16px',
@@ -130,7 +132,7 @@ export function QuickNav({ open, onClose }: QuickNavProps): JSX.Element | null {
         >
           {items.length === 0 && (
             <li style={{ padding: 16, color: 'var(--fg-muted, #8a8aa3)', fontSize: 12 }}>
-              No matching cards.
+              {t('quicknav.empty')}
             </li>
           )}
           {items.map((item, i) => {
@@ -194,9 +196,9 @@ export function QuickNav({ open, onClose }: QuickNavProps): JSX.Element | null {
             color: 'var(--fg-muted, #8a8aa3)'
           }}
         >
-          <span>↑↓ navigate</span>
-          <span>Enter jump</span>
-          <span>Esc close</span>
+          <span>{t('quicknav.hintNavigate')}</span>
+          <span>{t('quicknav.hintJump')}</span>
+          <span>{t('quicknav.hintClose')}</span>
         </footer>
       </div>
     </div>
