@@ -68,7 +68,7 @@ jobs:
         run: npm ci
 
       - name: Build & release
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v0.5.22
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -85,4 +85,7 @@ jobs:
             動作確認後にこの draft を publish してください。
           releaseDraft: true
           prerelease: false
+          # updater 鍵を未設定のため latest.json は出さない (tauri-action の自動判定が
+          # 鍵不在で artifact 0 件と判定する不具合を回避)
+          includeUpdaterJson: false
           args: ${{ matrix.args }}
