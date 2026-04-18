@@ -5,6 +5,75 @@
 use serde::Serialize;
 use std::path::{Component, Path, PathBuf};
 
+/// Issue #45: BOM から UTF-16 LE/BE / UTF-32 LE/BE を検出して UTF-8 に変換。
+/// 検出できなかった場合は従来どおり NUL バイトの有無でバイナリ判定する。
+fn decode_text(bytes: &[u8]) -> (String, String, bool) {
+    // UTF-32 は 4 バイト BOM、UTF-16 は 2 バイト BOM。UTF-32 判定を先に行う。
+    if bytes.starts_with(&[0xFF, 0xFE, 0x00, 0x00]) {
+        return (
+            decode_utf32(&bytes[4..], /*le=*/ true),
+            "utf-32le".into(),
+            false,
+        );
+    }
+    if bytes.starts_with(&[0x00, 0x00, 0xFE, 0xFF]) {
+        return (decode_utf32(&bytes[4..], false), "utf-32be".into(), false);
+    }
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        return (decode_utf16(&bytes[2..], true), "utf-16le".into(), false);
+    }
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        return (decode_utf16(&bytes[2..], false), "utf-16be".into(), false);
+    }
+    // UTF-8 BOM (EF BB BF) もスキップ
+    let body = if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        &bytes[3..]
+    } else {
+        bytes
+    };
+    if body.contains(&0u8) {
+        return (String::new(), "binary".into(), true);
+    }
+    match std::str::from_utf8(body) {
+        Ok(s) => (s.to_string(), "utf-8".into(), false),
+        Err(_) => (
+            String::from_utf8_lossy(body).into_owned(),
+            "lossy".into(),
+        ),
+    }
+}
+
+fn decode_utf16(body: &[u8], little_endian: bool) -> String {
+    let units: Vec<u16> = body
+        .chunks_exact(2)
+        .map(|c| {
+            if little_endian {
+                u16::from_le_bytes([c[0], c[1]])
+            } else {
+                u16::from_be_bytes([c[0], c[1]])
+            }
+        })
+        .collect();
+    String::from_utf16_lossy(&units)
+}
+
+fn decode_utf32(body: &[u8], little_endian: bool) -> String {
+    let mut out = String::new();
+    for c in body.chunks_exact(4) {
+        let v = if little_endian {
+            u32::from_le_bytes([c[0], c[1], c[2], c[3]])
+        } else {
+            u32::from_be_bytes([c[0], c[1], c[2], c[3]])
+        };
+        if let Some(ch) = char::from_u32(v) {
+            out.push(ch);
+        } else {
+            out.push('\u{FFFD}');
+        }
+    }
+    out
+}
+
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct FileNode {
@@ -51,7 +120,7 @@ pub struct FileWriteResult {
 ///   2. コンポーネントを `.` / `..` / 通常成分に分解し、`..` が stack を空にする前に現れたら拒否
 ///      (root を脱出する `..`)
 ///   3. その上で物理 canonicalize を試み、symlink 解決後も root 配下であることを再確認
-fn safe_join(root: &str, rel: &str) -> Option<PathBuf> {
+pub(crate) fn safe_join(root: &str, rel: &str) -> Option<PathBuf> {
     let root = Path::new(root).canonicalize().ok()?;
     let rel_path = Path::new(rel);
 
@@ -225,15 +294,8 @@ pub async fn files_read(project_root: String, rel_path: String) -> FileReadResul
             }
         }
     };
-    let is_binary = bytes.contains(&0u8);
-    let (content, encoding) = if is_binary {
-        (String::new(), "binary".to_string())
-    } else {
-        match std::str::from_utf8(&bytes) {
-            Ok(s) => (s.to_string(), "utf-8".to_string()),
-            Err(_) => (String::from_utf8_lossy(&bytes).into_owned(), "lossy".to_string()),
-        }
-    };
+    // Issue #45: BOM を先に検出し、UTF-16/32 を binary 扱いせず UTF-8 に変換する。
+    let (content, encoding, is_binary) = decode_text(&bytes);
     FileReadResult {
         ok: true,
         error: None,

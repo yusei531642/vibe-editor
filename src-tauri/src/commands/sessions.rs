@@ -79,7 +79,15 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
 }
 
 /// jsonl から (title, count, cwd) を抽出。cwd は最初に見つかった `cwd` フィールド。
+///
+/// Issue #43: title / cwd が確定したら、巨大 jsonl を最後まで読まない。
+/// message_count は早期確定できないので、ファイルサイズからの概算に切り替える
+/// (正確値が必要なら別 IPC で `sessions_get_count(id)` を用意する設計)。
 async fn read_jsonl_summary(path: &std::path::Path) -> (String, u32, Option<String>) {
+    let file_size = tokio::fs::metadata(path)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(0);
     let f = match tokio::fs::File::open(path).await {
         Ok(f) => f,
         Err(_) => return (String::new(), 0, None),
@@ -87,17 +95,21 @@ async fn read_jsonl_summary(path: &std::path::Path) -> (String, u32, Option<Stri
     let reader = tokio::io::BufReader::new(f);
     let mut lines = reader.lines();
     let mut title = String::new();
-    let mut count = 0u32;
     let mut cwd: Option<String> = None;
+    // Issue #43: 最初の数十行だけ読み、title / cwd を拾えたら抜ける。
+    // 巨大 jsonl (数十〜数百 MB) を全走査すると UI が詰まる。
+    const MAX_SCAN_LINES: u32 = 64;
+    let mut scanned_lines = 0u32;
+    let mut scanned_bytes: u64 = 0;
     while let Ok(Some(line)) = lines.next_line().await {
+        scanned_lines += 1;
+        scanned_bytes = scanned_bytes.saturating_add(line.len() as u64 + 1);
         if line.trim().is_empty() {
             continue;
         }
-        count += 1;
         if title.is_empty() || cwd.is_none() {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                 if cwd.is_none() {
-                    // Claude Code は meta entry や user entry に "cwd" を載せる
                     if let Some(c) = v.get("cwd").and_then(|c| c.as_str()) {
                         cwd = Some(c.to_string());
                     }
@@ -118,6 +130,22 @@ async fn read_jsonl_summary(path: &std::path::Path) -> (String, u32, Option<Stri
                 }
             }
         }
+        if !title.is_empty() && cwd.is_some() {
+            break;
+        }
+        if scanned_lines >= MAX_SCAN_LINES {
+            break;
+        }
     }
-    (title, count, cwd)
+    // 概算 message_count: scanned_bytes を読んで scanned_lines 行取れたので、
+    // 同じ平均で残り (file_size - scanned_bytes) を按分する。
+    let approx_count = if scanned_bytes == 0 {
+        0
+    } else if file_size <= scanned_bytes {
+        scanned_lines
+    } else {
+        let avg = (scanned_bytes as f64) / (scanned_lines.max(1) as f64);
+        ((file_size as f64) / avg).round() as u32
+    };
+    (title, approx_count, cwd)
 }

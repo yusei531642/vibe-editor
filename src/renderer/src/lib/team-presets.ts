@@ -1,16 +1,17 @@
 import type { TeamMember, TeamRole, TerminalAgent } from '../../../types/shared';
 
-export const AGENTS: { value: TerminalAgent; label: string }[] = [
-  { value: 'claude', label: 'Claude Code' },
-  { value: 'codex', label: 'Codex' }
+/** Issue #82: label を i18n key に変更。UI 側では `t(AGENT.labelKey)` で解決する。 */
+export const AGENTS: { value: TerminalAgent; labelKey: string }[] = [
+  { value: 'claude', labelKey: 'team.agent.claude' },
+  { value: 'codex', labelKey: 'team.agent.codex' }
 ];
 
 /** Leader 以外のロール */
-export const MEMBER_ROLES: { value: TeamRole; label: string }[] = [
-  { value: 'planner', label: 'Planner' },
-  { value: 'programmer', label: 'Programmer' },
-  { value: 'researcher', label: 'Researcher' },
-  { value: 'reviewer', label: 'Reviewer' }
+export const MEMBER_ROLES: { value: TeamRole; labelKey: string }[] = [
+  { value: 'planner', labelKey: 'role.planner' },
+  { value: 'programmer', labelKey: 'role.programmer' },
+  { value: 'researcher', labelKey: 'role.researcher' },
+  { value: 'reviewer', labelKey: 'role.reviewer' }
 ];
 
 /** ビルトインプリセット。`members` はリーダーを含まない */

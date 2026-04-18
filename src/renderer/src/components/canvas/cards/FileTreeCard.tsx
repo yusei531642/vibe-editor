@@ -10,6 +10,8 @@ import { CardFrame } from '../CardFrame';
 import { FileTreePanel } from '../../FileTreePanel';
 import { useCanvasStore } from '../../../stores/canvas';
 import { useSettings } from '../../../lib/settings-context';
+import { useT } from '../../../lib/i18n';
+import { normalizePathKey } from '../../../lib/normalize-path';
 
 interface FileTreePayload {
   projectRoot?: string;
@@ -17,7 +19,8 @@ interface FileTreePayload {
 }
 
 function FileTreeCardImpl({ id, data, positionAbsoluteX, positionAbsoluteY }: NodeProps): JSX.Element {
-  const { settings } = useSettings();
+  const { settings, update } = useSettings();
+  const t = useT();
   const payload = (data?.payload ?? {}) as FileTreePayload;
   // Issue #23: lastOpenedRoot (現在プロジェクト) を最優先、claudeCwd は fallback。
   const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || payload.projectRoot || '';
@@ -51,11 +54,20 @@ function FileTreeCardImpl({ id, data, positionAbsoluteX, positionAbsoluteY }: No
             extraRoots={extraRoots}
             activeFilePath={null}
             onOpenFile={handleOpen}
-            onAddWorkspaceFolder={() => {
-              /* noop in canvas */
+            onAddWorkspaceFolder={async () => {
+              // Issue #73: Canvas FileTreeCard でも workspace フォルダを実操作できるよう、
+              // IDE 側と同じく settings.workspaceFolders へ反映する。
+              const picked = await window.api.dialog.openFolder(t('dialog.addWorkspace'));
+              if (!picked) return;
+              const current = settings.workspaceFolders ?? [];
+              const key = normalizePathKey(picked);
+              if (current.some((p) => normalizePathKey(p) === key)) return;
+              await update({ workspaceFolders: [...current, picked] });
             }}
-            onRemoveWorkspaceFolder={() => {
-              /* noop in canvas */
+            onRemoveWorkspaceFolder={async (path: string) => {
+              const current = settings.workspaceFolders ?? [];
+              const next = current.filter((p) => p !== path);
+              await update({ workspaceFolders: next });
             }}
           />
         </div>

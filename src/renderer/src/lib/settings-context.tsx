@@ -39,7 +39,24 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
         if (cancelled) return;
         // 既存 settings.json に新フィールドが無い場合 (notepad など) は
         // DEFAULT_SETTINGS で穴埋めする。forward compat。
-        const merged = { ...DEFAULT_SETTINGS, ...loaded };
+        const merged: AppSettings = { ...DEFAULT_SETTINGS, ...loaded };
+        // Issue #71: language が保存されていない初回起動時のみ、OS ロケールから既定を決める。
+        if (!loaded || typeof loaded !== 'object' || !(loaded as Partial<AppSettings>).language) {
+          const loc = (typeof navigator !== 'undefined' ? navigator.language : '') || '';
+          merged.language = loc.toLowerCase().startsWith('ja') ? 'ja' : 'en';
+        }
+        // Issue #75: 既存の不正値 (language / theme / density の enum 外) を runtime 検証する。
+        const ALLOWED_LANG = ['ja', 'en'] as const;
+        if (!ALLOWED_LANG.includes(merged.language as (typeof ALLOWED_LANG)[number])) {
+          merged.language = DEFAULT_SETTINGS.language;
+        }
+        if (!THEMES[merged.theme as keyof typeof THEMES]) {
+          merged.theme = DEFAULT_SETTINGS.theme;
+        }
+        const ALLOWED_DENSITY = ['compact', 'normal', 'comfortable'] as const;
+        if (!ALLOWED_DENSITY.includes(merged.density as (typeof ALLOWED_DENSITY)[number])) {
+          merged.density = DEFAULT_SETTINGS.density;
+        }
         settingsRef.current = merged;
         setSettings(merged);
       } finally {

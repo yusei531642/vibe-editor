@@ -1,5 +1,6 @@
 import type { AppSettings } from '../../../../types/shared';
 import { DENSITY_OPTIONS } from '../../lib/settings-options';
+import { useT } from '../../lib/i18n';
 import type { UpdateSetting } from './types';
 
 interface Props {
@@ -8,9 +9,10 @@ interface Props {
 }
 
 export function DensitySection({ draft, update }: Props): JSX.Element {
+  const t = useT();
   return (
     <section className="modal__section">
-      <h3>情報密度</h3>
+      <h3>{t('settings.density')}</h3>
       <div className="density-grid">
         {DENSITY_OPTIONS.map((opt) => (
           <label
@@ -24,8 +26,8 @@ export function DensitySection({ draft, update }: Props): JSX.Element {
               checked={draft.density === opt.value}
               onChange={() => update('density', opt.value)}
             />
-            <strong>{opt.label}</strong>
-            <span>{opt.desc}</span>
+            <strong>{t(`settings.density.${opt.value}`)}</strong>
+            <span>{t(`settings.density.${opt.value}Desc`)}</span>
           </label>
         ))}
       </div>

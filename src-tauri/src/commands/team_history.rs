@@ -3,9 +3,10 @@
 // ~/.vibe-editor/team-history.json (JSON 配列) を読み書き。
 // プロジェクト単位のフィルタ、最新 20 件 + lastUsedAt 降順保持。
 
+use crate::atomic_write::write_atomic;
 use crate::pty::path_norm::normalize_project_root;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::sync::Mutex;
@@ -89,13 +90,9 @@ async fn load_all() -> Vec<TeamHistoryEntry> {
 
 async fn save_all(entries: &[TeamHistoryEntry]) -> Result<(), String> {
     let path = store_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
     let json = serde_json::to_vec_pretty(entries).map_err(|e| e.to_string())?;
-    fs::write(&path, json).await.map_err(|e| e.to_string())
+    // Issue #37: temp → rename のアトミック置換。
+    write_atomic(&path, &json).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -113,16 +110,30 @@ pub async fn team_history_list(project_root: String) -> Vec<TeamHistoryEntry> {
 #[tauri::command]
 pub async fn team_history_save(entry: TeamHistoryEntry) -> MutationResult {
     let _g = LOCK.lock().await;
+    let new_id = entry.id.clone();
     let mut all = load_all().await;
     all.retain(|e| e.id != entry.id);
     all.insert(0, entry);
     all.sort_by(|a, b| b.last_used_at.cmp(&a.last_used_at));
 
-    // Issue #27: 20 件上限は project ごとに掛ける。
-    // normalize 後のキーでグループ化し、同一 project 内で 20 件を超えた分だけ削除する。
+    // Issue #27 + #46: 20 件上限は project ごとに掛けるが、新しく追加された entry は
+    // 必ず保持する (古い last_used_at で保存されても silent drop されない)。
+    // project 内の件数が超えるときは、一番古い別 entry が押し出される。
+    let protected: HashSet<&str> = std::iter::once(new_id.as_str()).collect();
     let mut kept: Vec<TeamHistoryEntry> = Vec::with_capacity(all.len());
     let mut per_project_count: HashMap<String, usize> = HashMap::new();
+    // Pass 1: 保護対象を先に確保。
+    for e in all.iter() {
+        if protected.contains(e.id.as_str()) {
+            let key = normalize_project_root(&e.project_root);
+            *per_project_count.entry(key).or_insert(0) += 1;
+        }
+    }
     for e in all.into_iter() {
+        if protected.contains(e.id.as_str()) {
+            kept.push(e);
+            continue;
+        }
         let key = normalize_project_root(&e.project_root);
         let count = per_project_count.entry(key).or_insert(0);
         if *count < MAX_ENTRIES_PER_PROJECT {

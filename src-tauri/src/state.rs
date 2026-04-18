@@ -2,8 +2,11 @@
 
 use crate::pty::SessionRegistry;
 use crate::team_hub::TeamHub;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
+/// Issue #56: async context から触るので tokio::sync::Mutex に揃える。
+/// project_root は読みが多く書きが稀なので、単純な Mutex で十分 (RwLock 化は追加コストに見合わない)。
 pub struct AppState {
     pub project_root: Mutex<Option<String>>,
     pub pty_registry: Arc<SessionRegistry>,

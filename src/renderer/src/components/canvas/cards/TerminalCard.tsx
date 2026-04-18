@@ -10,11 +10,14 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { CardFrame } from '../CardFrame';
 import { TerminalView, type TerminalViewHandle } from '../../TerminalView';
 import { useSettings } from '../../../lib/settings-context';
+import { buildTeamSystemPrompt, type TeamMemberSeed } from '../../../lib/team-roles';
+import type { TeamRole } from '../../../../../types/shared';
 
 interface TerminalPayload {
   agent?: 'claude' | 'codex';
   role?: string;
   teamId?: string;
+  teamName?: string;
   agentId?: string;
   command?: string;
   args?: string[];
@@ -22,6 +25,8 @@ interface TerminalPayload {
   /** Issue #22: Canvas から Resume 起動したときの Claude セッション id。
    *  Claude の場合は args に `--resume <id>` を追加して既存会話を再開する。 */
   resumeSessionId?: string | null;
+  /** Issue #63: team member 全員 (buildTeamSystemPrompt 用)。Canvas から Resume 経路で渡される。 */
+  teamMembers?: TeamMemberSeed[];
 }
 
 function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
@@ -39,6 +44,21 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
 
   // Issue #22: resumeSessionId があり Claude 側なら --resume <id> を付与して起動。
   // Codex は `--resume` 非対応なので付けない (IDE 側 App.tsx:1396 と同じ条件)。
+  // Issue #63: Codex では role/team の system prompt を --config で渡す必要がある。
+  // Claude は Rust 側 terminal_create で VIBE_TEAM_* env が注入されるが、Codex はさらに
+  // `codexInstructions` (system prompt) が必要なので buildTeamSystemPrompt から組み立てる。
+  const codexInstructions = useMemo<string | undefined>(() => {
+    if (!isCodex || !payload.teamId || !payload.role || !payload.agentId || !payload.teamMembers) {
+      return undefined;
+    }
+    return buildTeamSystemPrompt(
+      payload.agentId,
+      payload.role as TeamRole,
+      payload.teamName ?? 'Team',
+      payload.teamMembers
+    );
+  }, [isCodex, payload.teamId, payload.role, payload.agentId, payload.teamMembers, payload.teamName]);
+
   const args = useMemo<string[] | undefined>(() => {
     const base = payload.args ? [...payload.args] : [];
     if (payload.resumeSessionId && !isCodex) {
@@ -61,6 +81,7 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
           teamId={payload.teamId}
           agentId={payload.agentId}
           role={payload.role}
+          codexInstructions={codexInstructions}
           onStatus={setStatus}
         />
       </CardFrame>

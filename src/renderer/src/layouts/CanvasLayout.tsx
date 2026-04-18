@@ -264,7 +264,7 @@ export function CanvasLayout(): JSX.Element {
       const row = Math.floor(i / 3);
       return {
         type: 'agent' as const,
-        title: ROLE_META[m.role].label,
+        title: ROLE_META[m.role]?.label ?? m.role,
         position: presetPosition(col, row),
         payload: { agent: m.agent, role: m.role, teamId, agentId, cwd }
       };

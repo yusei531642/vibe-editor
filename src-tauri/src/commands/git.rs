@@ -198,7 +198,31 @@ pub async fn git_diff(
     let is_new = matches!(&head, Err(e) if e.contains("does not exist") || e.contains("exists on disk, but not in"));
     let original = head.clone().unwrap_or_default();
 
-    let abs = std::path::Path::new(&project_root).join(&rel_path);
+    // Issue #36: safe_join を通し、project_root の外を参照できないようにする。
+    // head_path 側 (`git show HEAD:<path>`) は git 自身が worktree 外を拒否するが、
+    // worktree 側 (fs 読み取り) は raw join だと `../../etc/passwd` を許してしまう。
+    let abs = match crate::commands::files::safe_join(&project_root, &rel_path) {
+        Some(p) => p,
+        None => {
+            return GitDiffResult {
+                ok: false,
+                error: Some("invalid path".into()),
+                path: rel_path,
+                ..Default::default()
+            };
+        }
+    };
+    // original_rel_path (rename の旧パス) も同様に検証する。
+    if let Some(orig) = original_rel_path.as_deref() {
+        if crate::commands::files::safe_join(&project_root, orig).is_none() {
+            return GitDiffResult {
+                ok: false,
+                error: Some("invalid original path".into()),
+                path: rel_path,
+                ..Default::default()
+            };
+        }
+    }
     // Issue #35: read_to_string() は非 UTF-8 で失敗し、worktree 側が空文字になって
     // diff が「全削除」に見えてしまう。raw bytes → from_utf8_lossy で落としどころを作る。
     let (modified, worktree_is_lossy) = match tokio::fs::read(&abs).await {

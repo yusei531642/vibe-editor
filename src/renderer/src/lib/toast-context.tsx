@@ -9,6 +9,7 @@ import {
   type ReactNode
 } from 'react';
 import { X } from 'lucide-react';
+import { useT } from './i18n';
 
 /**
  * グローバルなトースト通知（Undoアクション付き）基盤。
@@ -52,16 +53,14 @@ interface ToastContextValue {
 }
 
 const ToastContext = createContext<ToastContextValue | null>(null);
-const TOAST_LABELS = {
-  info: '情報',
-  success: '完了',
-  warning: '注意',
-  error: 'エラー'
-} as const;
 
 export function ToastProvider({ children }: { children: ReactNode }): JSX.Element {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const nextId = useRef(1);
+  // Issue #80: 既存の _timer は toast 本体の setTimeout しか覚えておらず、
+  // dismissToast() の exit 側 (_EXIT_MS 後) の setTimeout はここに積まれていた。
+  // provider がアンマウントされたとき、exit 側のタイマーが孤立するので集約する。
+  const exitTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
 
   // exit アニメ付きで配列から除去する
   const dismissToast = useCallback((id: number) => {
@@ -71,9 +70,11 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
       if (target._timer) clearTimeout(target._timer);
       return prev.map((x) => (x.id === id ? { ...x, exiting: true } : x));
     });
-    setTimeout(() => {
+    const t = setTimeout(() => {
+      exitTimersRef.current.delete(t);
       setToasts((prev) => prev.filter((x) => x.id !== id));
     }, _EXIT_MS);
+    exitTimersRef.current.add(t);
   }, []);
 
   const showToast = useCallback(
@@ -85,9 +86,11 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
         setToasts((prev) =>
           prev.map((x) => (x.id === id ? { ...x, exiting: true } : x))
         );
-        setTimeout(() => {
+        const t = setTimeout(() => {
+          exitTimersRef.current.delete(t);
           setToasts((prev) => prev.filter((x) => x.id !== id));
         }, _EXIT_MS);
+        exitTimersRef.current.add(t);
       }, duration);
       setToasts((prev) => [
         ...prev,
@@ -103,13 +106,16 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
     [showToast, dismissToast]
   );
 
-  // アンマウント時のタイマー掃除
+  // Issue #80: アンマウント時にタイマーを漏れなく掃除する。
+  // toasts state に乗っている _timer と、dismiss 側の exit 用 setTimeout の双方。
+  const toastsRef = useRef(toasts);
+  toastsRef.current = toasts;
   useEffect(() => {
     return () => {
-      toasts.forEach((t) => t._timer && clearTimeout(t._timer));
+      toastsRef.current.forEach((t) => t._timer && clearTimeout(t._timer));
+      exitTimersRef.current.forEach((t) => clearTimeout(t));
+      exitTimersRef.current.clear();
     };
-    // 意図的に依存配列空: マウント/アンマウント時のみ
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
@@ -151,6 +157,8 @@ function ToastItem({
   onDismiss: () => void;
 }): JSX.Element {
   const tone = toast.options.tone ?? 'info';
+  const t = useT();
+  const label = t(`toast.tone.${tone}`);
   return (
     <div
       className={`toast toast--${tone}`}
@@ -158,7 +166,7 @@ function ToastItem({
     >
       <span className="toast__indicator" aria-hidden="true" />
       <div className="toast__body">
-        <span className="toast__label">{TOAST_LABELS[tone]}</span>
+        <span className="toast__label">{label}</span>
         <span className="toast__message">{toast.message}</span>
       </div>
       {toast.options.action && (
@@ -177,7 +185,7 @@ function ToastItem({
         type="button"
         className="toast__close"
         onClick={onDismiss}
-        aria-label="閉じる"
+        aria-label={t('common.close')}
       >
         <X size={14} strokeWidth={2} />
       </button>

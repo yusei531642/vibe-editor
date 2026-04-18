@@ -245,7 +245,64 @@ const ja: Dict = {
   'status.loading': 'プロジェクト読み込み中…',
   'status.templateInserted': 'テンプレートを挿入しました（まだ保存されていません）',
   'status.initError': '初期化エラー: {err}',
-  'status.loadError': '読み込みエラー: {err}'
+  'status.loadError': '読み込みエラー: {err}',
+
+  // ---------- Command Palette (Issue #39) ----------
+  'palette.ariaLabel': 'コマンドパレット',
+  'palette.placeholder': 'コマンドを検索…',
+  'palette.hint': '↑↓ で選択 · Enter で実行 · Esc で閉じる',
+  'palette.count': '{count} 件',
+  'palette.empty': '一致するコマンドがありません',
+
+  // ---------- Command items (Issue #57) ----------
+  'command.workspace.addFolder': 'フォルダをワークスペースに追加…',
+  'command.workspace.category': 'ワークスペース',
+  'command.project.category': 'プロジェクト',
+  'command.project.recent': '最近: {name}',
+  'command.view.category': 'ビュー',
+  'command.view.files': 'サイドバー: ファイル',
+  'command.view.changes': 'サイドバー: 変更',
+  'command.view.history': 'サイドバー: 履歴',
+  'command.view.notes': 'サイドバー: メモ',
+  'command.tab.category': 'タブ',
+  'command.tab.next': '次のタブへ',
+  'command.tab.prev': '前のタブへ',
+  'command.tab.close': 'アクティブなタブを閉じる',
+  'command.tab.restore': '最近閉じたタブを復元',
+
+  // ---------- Canvas QuickNav (Issue #58) ----------
+  'quickNav.placeholder': 'エージェント / カードにジャンプ…',
+  'quickNav.empty': '一致するカードがありません。',
+  'quickNav.hintNav': '↑↓ で移動',
+  'quickNav.hintJump': 'Enter でジャンプ',
+  'quickNav.hintClose': 'Esc で閉じる',
+
+  // ---------- Updater (Issue #59) ----------
+  'updater.availableTitle': 'アップデートがあります',
+  'updater.availableConfirm': 'vibe-editor v{version} が利用可能です。今すぐ更新しますか?',
+  'updater.install': '更新する',
+  'updater.skip': 'あとで',
+
+  // ---------- Terminal (Issue #64) ----------
+  'terminal.pasteImageFailed': '画像保存失敗',
+  'terminal.pasteException': 'ペースト例外',
+
+  // ---------- Toast tone (Issue #80) ----------
+  'toast.tone.info': '情報',
+  'toast.tone.success': '完了',
+  'toast.tone.warning': '注意',
+  'toast.tone.error': 'エラー',
+
+  // ---------- Team (Issue #82) ----------
+  'team.leaderLabel': 'Leader',
+  'team.agent.claude': 'Claude Code',
+  'team.agent.codex': 'Codex',
+
+  // ---------- Dialog titles (Issue #74) ----------
+  'dialog.newProject': '新規プロジェクト',
+  'dialog.openFolder': 'フォルダを開く',
+  'dialog.openFile': 'ファイルを開く',
+  'dialog.addWorkspace': 'ワークスペースに追加'
 };
 
 const en: Dict = {
@@ -487,7 +544,64 @@ const en: Dict = {
   'status.loading': 'Loading project…',
   'status.templateInserted': 'Template inserted (not saved yet)',
   'status.initError': 'Init error: {err}',
-  'status.loadError': 'Load error: {err}'
+  'status.loadError': 'Load error: {err}',
+
+  // ---------- Command Palette (Issue #39) ----------
+  'palette.ariaLabel': 'Command palette',
+  'palette.placeholder': 'Search commands…',
+  'palette.hint': '↑↓ select · Enter run · Esc close',
+  'palette.count': '{count} result(s)',
+  'palette.empty': 'No matching commands',
+
+  // ---------- Command items (Issue #57) ----------
+  'command.workspace.addFolder': 'Add folder to workspace…',
+  'command.workspace.category': 'Workspace',
+  'command.project.category': 'Project',
+  'command.project.recent': 'Recent: {name}',
+  'command.view.category': 'View',
+  'command.view.files': 'Sidebar: Files',
+  'command.view.changes': 'Sidebar: Changes',
+  'command.view.history': 'Sidebar: History',
+  'command.view.notes': 'Sidebar: Notes',
+  'command.tab.category': 'Tabs',
+  'command.tab.next': 'Next tab',
+  'command.tab.prev': 'Previous tab',
+  'command.tab.close': 'Close active tab',
+  'command.tab.restore': 'Restore recently closed tab',
+
+  // ---------- Canvas QuickNav (Issue #58) ----------
+  'quickNav.placeholder': 'Jump to agent / card…',
+  'quickNav.empty': 'No matching cards.',
+  'quickNav.hintNav': '↑↓ navigate',
+  'quickNav.hintJump': 'Enter jump',
+  'quickNav.hintClose': 'Esc close',
+
+  // ---------- Updater (Issue #59) ----------
+  'updater.availableTitle': 'Update available',
+  'updater.availableConfirm': 'vibe-editor v{version} is available. Install now?',
+  'updater.install': 'Install',
+  'updater.skip': 'Later',
+
+  // ---------- Terminal (Issue #64) ----------
+  'terminal.pasteImageFailed': 'Paste image failed',
+  'terminal.pasteException': 'Paste exception',
+
+  // ---------- Toast tone (Issue #80) ----------
+  'toast.tone.info': 'Info',
+  'toast.tone.success': 'Done',
+  'toast.tone.warning': 'Warning',
+  'toast.tone.error': 'Error',
+
+  // ---------- Team (Issue #82) ----------
+  'team.leaderLabel': 'Leader',
+  'team.agent.claude': 'Claude Code',
+  'team.agent.codex': 'Codex',
+
+  // ---------- Dialog titles (Issue #74) ----------
+  'dialog.newProject': 'New project',
+  'dialog.openFolder': 'Open folder',
+  'dialog.openFile': 'Open file',
+  'dialog.addWorkspace': 'Add to workspace'
 };
 
 const translations: Record<Language, Dict> = { ja, en };

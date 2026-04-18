@@ -35,6 +35,10 @@ import 'monaco-editor/esm/vs/basic-languages/cpp/cpp.contribution';
 import 'monaco-editor/esm/vs/basic-languages/lua/lua.contribution';
 import 'monaco-editor/esm/vs/basic-languages/sql/sql.contribution';
 import 'monaco-editor/esm/vs/basic-languages/dockerfile/dockerfile.contribution';
+// Issue #77: JSON / C / TOML が plaintext で開いていた取り残しを塞ぐ。
+import 'monaco-editor/esm/vs/basic-languages/json/json.contribution';
+import 'monaco-editor/esm/vs/basic-languages/c/c.contribution';
+import 'monaco-editor/esm/vs/basic-languages/toml/toml.contribution';
 
 // 型: 環境変数は緩い any として扱う（Electron renderer だが self は Worker と共通の型がない）
 (self as unknown as { MonacoEnvironment: monaco.Environment }).MonacoEnvironment = {

@@ -46,6 +46,15 @@ pub struct SessionHandle {
     pub role: Option<String>,
 }
 
+impl Drop for SessionHandle {
+    // Issue #55: Arc が 0 になったら必ず子プロセスを kill する保険。
+    fn drop(&mut self) {
+        if let Ok(mut k) = self.killer.lock() {
+            let _ = k.kill();
+        }
+    }
+}
+
 impl SessionHandle {
     pub fn write(&self, data: &[u8]) -> Result<()> {
         let mut w = self
@@ -79,6 +88,32 @@ impl SessionHandle {
         let _ = k.kill();
         Ok(())
     }
+}
+
+/// Issue #54: PTY 子プロセスへ継承させない env キーを判定する。
+/// - team セッションでない場合は VIBE_TEAM_* / VIBE_AGENT_ID を必ず落とす。
+/// - 代表的なシークレット接頭辞は常に除外する (取りこぼしが出るケースは opts.env で明示注入)。
+fn should_strip_env(key: &str, is_team_session: bool) -> bool {
+    if !is_team_session
+        && (key == "VIBE_TEAM_ID"
+            || key == "VIBE_TEAM_ROLE"
+            || key == "VIBE_TEAM_SOCKET"
+            || key == "VIBE_TEAM_TOKEN"
+            || key == "VIBE_AGENT_ID")
+    {
+        return true;
+    }
+    const DENY_PREFIXES: &[&str] = &[
+        "AWS_",
+        "OPENAI_",
+        "ANTHROPIC_",
+        "AZURE_OPENAI_",
+        "GOOGLE_API_",
+    ];
+    if DENY_PREFIXES.iter().any(|p| key.starts_with(p)) {
+        return true;
+    }
+    matches!(key, "GH_TOKEN" | "GITHUB_TOKEN" | "NPM_TOKEN")
 }
 
 /// `cwd` の検証 (旧 resolveValidCwd と同等)。
@@ -141,8 +176,14 @@ pub fn spawn_session(
         cmd.arg(a);
     }
     cmd.cwd(&opts.cwd);
-    // 既存 env を継承しつつ上書き、最低限の TERM/COLORTERM を設定。
+    // Issue #54: 親プロセスから継承する env を絞る。team 端末でない場合は VIBE_TEAM_*
+    // を明示的に落とし、既知のシークレット接頭辞 (AWS_*, OPENAI_*, ANTHROPIC_*, GH_TOKEN,
+    // GITHUB_TOKEN) は常に除外する。
+    let is_team_session = opts.team_id.is_some();
     for (k, v) in std::env::vars() {
+        if should_strip_env(&k, is_team_session) {
+            continue;
+        }
         cmd.env(k, v);
     }
     for (k, v) in &opts.env {
@@ -163,14 +204,17 @@ pub fn spawn_session(
     let data_event = format!("terminal:data:{id}");
     let exit_event = format!("terminal:exit:{id}");
 
-    let (tx, rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    // Issue #53: 128 slot ≒ 1MB 上限の bounded channel。renderer が遅れたら
+    // reader thread を blocking_send でスローダウンさせ、PTY 側 pipe の backpressure に
+    // 任せることで無制限のメモリ増加を抑える。
+    let (tx, rx) = mpsc::channel::<Vec<u8>>(128);
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    if tx.send(buf[..n].to_vec()).is_err() {
+                    if tx.blocking_send(buf[..n].to_vec()).is_err() {
                         break;
                     }
                 }

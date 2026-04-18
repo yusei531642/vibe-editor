@@ -39,8 +39,19 @@ impl SessionRegistry {
 
     pub fn insert(&self, id: String, handle: SessionHandle) {
         let mut g = recover(self.inner.lock());
+        // Issue #42: 同じ agent_id で既存 session があれば kill して registry から外す。
+        // そうしないと古い PTY が by_id にだけ残り、再 spawn のたびに幽霊 PTY が増える。
         if let Some(aid) = handle.agent_id.clone() {
-            g.by_agent.insert(aid, id.clone());
+            if let Some(old_sid) = g.by_agent.insert(aid, id.clone()) {
+                if old_sid != id {
+                    if let Some(old_handle) = g.by_id.remove(&old_sid) {
+                        let _ = old_handle.kill();
+                        tracing::info!(
+                            "[registry] evicted stale session {old_sid} for re-spawned agent"
+                        );
+                    }
+                }
+            }
         }
         g.by_id.insert(id, Arc::new(handle));
     }

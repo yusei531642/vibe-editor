@@ -68,25 +68,25 @@ pub struct TeamMcpMember {
 }
 
 #[tauri::command]
-pub fn app_get_project_root(state: State<AppState>) -> String {
-    state
-        .project_root
-        .lock()
-        .ok()
-        .and_then(|guard| guard.clone())
+pub async fn app_get_project_root(state: State<'_, AppState>) -> Result<String, String> {
+    // Issue #56: tokio::sync::Mutex へ移行したので await で取得する。
+    let guard = state.project_root.lock().await;
+    let v = guard
+        .clone()
         .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().into_owned()))
-        .unwrap_or_default()
+        .unwrap_or_default();
+    Ok(v)
 }
 
 /// Issue #29: renderer 側 (settings.lastOpenedRoot の変更 / Canvas-Sidebar の openFolder 等) で
 /// プロジェクトルートが切り替わったとき、Rust 側 AppState の project_root を同期する。
 /// この state は app_get_project_root と Claude session watcher 双方の SSOT。
 #[tauri::command]
-pub fn app_set_project_root(state: State<AppState>, project_root: String) -> Result<(), String> {
-    let mut guard = state
-        .project_root
-        .lock()
-        .map_err(|e| format!("project_root lock poisoned: {e}"))?;
+pub async fn app_set_project_root(
+    state: State<'_, AppState>,
+    project_root: String,
+) -> Result<(), String> {
+    let mut guard = state.project_root.lock().await;
     *guard = if project_root.trim().is_empty() {
         None
     } else {
@@ -263,11 +263,32 @@ pub fn app_get_user_info(app: tauri::AppHandle) -> AppUserInfo {
     }
 }
 
+/// Issue #49: 許可するスキームを allowlist で限定。file:// / javascript: / data: など
+/// 任意ハンドラが叩けないようにする。URL として parse できない値も reject。
+const ALLOWED_SCHEMES: &[&str] = &["http", "https", "mailto"];
+
+fn is_url_allowed(url: &str) -> bool {
+    if url.len() > 2048 {
+        return false;
+    }
+    let Some(colon) = url.find(':') else {
+        return false;
+    };
+    let scheme = url[..colon].to_ascii_lowercase();
+    ALLOWED_SCHEMES.contains(&scheme.as_str())
+}
+
 #[tauri::command]
 pub async fn app_open_external(
     app: tauri::AppHandle,
     url: String,
 ) -> OpenExternalResult {
+    if !is_url_allowed(&url) {
+        return OpenExternalResult {
+            ok: false,
+            error: Some(format!("disallowed URL scheme: {url}")),
+        };
+    }
     use tauri_plugin_opener::OpenerExt;
     match app.opener().open_url(&url, None::<&str>) {
         Ok(_) => OpenExternalResult {
@@ -278,5 +299,25 @@ pub async fn app_open_external(
             ok: false,
             error: Some(e.to_string()),
         },
+    }
+}
+
+#[cfg(test)]
+mod open_external_tests {
+    use super::*;
+
+    #[test]
+    fn allows_http_https_mailto() {
+        assert!(is_url_allowed("https://example.com"));
+        assert!(is_url_allowed("http://example.com"));
+        assert!(is_url_allowed("mailto:foo@bar"));
+    }
+
+    #[test]
+    fn rejects_file_and_scripts() {
+        assert!(!is_url_allowed("file:///etc/passwd"));
+        assert!(!is_url_allowed("javascript:alert(1)"));
+        assert!(!is_url_allowed("data:text/html,hi"));
+        assert!(!is_url_allowed("noscheme"));
     }
 }

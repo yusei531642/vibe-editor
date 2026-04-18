@@ -13,8 +13,13 @@ import { useCanvasStore } from '../../stores/canvas';
 import { useSettings } from '../../lib/settings-context';
 import { useUiStore } from '../../stores/ui';
 import { ROLE_META } from '../../lib/team-roles';
+import { useT } from '../../lib/i18n';
+import { useToast } from '../../lib/toast-context';
+import { normalizePathKey } from '../../lib/normalize-path';
 
 export function CanvasSidebar(): JSX.Element {
+  const t = useT();
+  const { showToast } = useToast();
   const { settings, update } = useSettings();
   // Issue #23: projectRoot は「現在開いているプロジェクト」= lastOpenedRoot を優先。
   // claudeCwd は Claude CLI 起動時の作業ディレクトリ設定 (別用途) としてだけ使う。
@@ -109,24 +114,13 @@ export function CanvasSidebar(): JSX.Element {
   );
 
   const handleResumeTeam = useCallback(
-    (entry: TeamHistoryEntry): void => {
+    async (entry: TeamHistoryEntry): Promise<void> => {
       const cwd = projectRoot || entry.projectRoot;
-      const cards = entry.members.map((m, i) => {
-        const agentId = `${m.role}-${i}-${entry.id}`;
-        const saved = entry.canvasState?.nodes.find((s) => s.agentId === agentId);
-        const pos = saved
-          ? { x: saved.x, y: saved.y }
-          : { x: (i % 3) * 520, y: Math.floor(i / 3) * 360 };
-        return {
-          type: 'agent' as const,
-          title: ROLE_META[m.role].label,
-          position: pos,
-          payload: { agent: m.agent, role: m.role, teamId: entry.id, agentId, cwd }
-        };
-      });
-      addCards(cards);
-      void window.api.app
-        .setupTeamMcp(
+      // Issue #72: setupTeamMcp を先に完了させてから AgentCard を描画する。
+      // こうしないと Claude/Codex が spawn してから MCP 設定が書き込まれる race になり、
+      // 起動直後のセッションでは team_send / team_read が Unknown tool になる。
+      try {
+        await window.api.app.setupTeamMcp(
           cwd,
           entry.id,
           entry.name,
@@ -135,10 +129,29 @@ export function CanvasSidebar(): JSX.Element {
             role: m.role,
             agent: m.agent
           }))
-        )
-        .catch((err) => console.warn('[resume-team] setupTeamMcp failed:', err));
+        );
+      } catch (err) {
+        console.warn('[resume-team] setupTeamMcp failed:', err);
+        showToast(String(err), { tone: 'error' });
+        return;
+      }
+      const cards = entry.members.map((m, i) => {
+        const agentId = `${m.role}-${i}-${entry.id}`;
+        const saved = entry.canvasState?.nodes.find((s) => s.agentId === agentId);
+        const pos = saved
+          ? { x: saved.x, y: saved.y }
+          : { x: (i % 3) * 520, y: Math.floor(i / 3) * 360 };
+        // Issue #69: ROLE_META に無い role でもクラッシュしないよう optional chaining + fallback。
+        return {
+          type: 'agent' as const,
+          title: ROLE_META[m.role]?.label ?? m.role,
+          position: pos,
+          payload: { agent: m.agent, role: m.role, teamId: entry.id, agentId, cwd }
+        };
+      });
+      addCards(cards);
     },
-    [addCards, projectRoot]
+    [addCards, projectRoot, showToast]
   );
 
   const handleDeleteTeamHistory = useCallback(
@@ -156,7 +169,9 @@ export function CanvasSidebar(): JSX.Element {
   // ---- Project / workspace folder handlers (永続化は settings.update 経由) ----
   const pushRecent = useCallback(
     async (path: string): Promise<void> => {
-      const next = [path, ...recentProjects.filter((p) => p !== path)].slice(0, 12);
+      // Issue #67: 重複判定を normalize したキーで行う (表示は raw を残す)。
+      const key = normalizePathKey(path);
+      const next = [path, ...recentProjects.filter((p) => normalizePathKey(p) !== key)].slice(0, 12);
       setRecentProjects(next);
       // Issue #23: 開いたフォルダは lastOpenedRoot に記録する。
       // claudeCwd は Claude CLI の作業ディレクトリ設定 (別の意味) なので上書きしない。
@@ -166,32 +181,34 @@ export function CanvasSidebar(): JSX.Element {
   );
 
   const handleNewProject = useCallback(async () => {
-    const picked = await window.api.dialog.openFolder('新規プロジェクト');
+    const picked = await window.api.dialog.openFolder(t('dialog.newProject'));
     if (picked) await pushRecent(picked);
-  }, [pushRecent]);
+  }, [pushRecent, t]);
 
   const handleOpenFolder = useCallback(async () => {
-    const picked = await window.api.dialog.openFolder('フォルダを開く');
+    const picked = await window.api.dialog.openFolder(t('dialog.openFolder'));
     if (picked) await pushRecent(picked);
-  }, [pushRecent]);
+  }, [pushRecent, t]);
 
   const handleOpenFileDialog = useCallback(async () => {
-    const picked = await window.api.dialog.openFile('ファイルを開く');
+    const picked = await window.api.dialog.openFile(t('dialog.openFile'));
     if (picked) {
       const dir = picked.replace(/[\\/][^\\/]+$/, '');
       const name = picked.slice(dir.length + 1);
       handleOpenFile(dir, name);
     }
-  }, [handleOpenFile]);
+  }, [handleOpenFile, t]);
 
   const handleAddWorkspaceFolder = useCallback(async () => {
-    const picked = await window.api.dialog.openFolder('ワークスペースに追加');
+    const picked = await window.api.dialog.openFolder(t('dialog.addWorkspace'));
     if (!picked) return;
-    if (workspaceFolders.includes(picked)) return;
+    // Issue #67: normalize 済みキーで重複判定する。
+    const key = normalizePathKey(picked);
+    if (workspaceFolders.some((p) => normalizePathKey(p) === key)) return;
     const next = [...workspaceFolders, picked];
     setWorkspaceFolders(next);
     await update({ workspaceFolders: next });
-  }, [workspaceFolders, update]);
+  }, [workspaceFolders, update, t]);
 
   const handleRemoveWorkspaceFolder = useCallback(
     async (path: string) => {

@@ -29,6 +29,7 @@ import { useT } from './lib/i18n';
 import { useSettings } from './lib/settings-context';
 import { useToast } from './lib/toast-context';
 import { parseShellArgs } from './lib/parse-args';
+import { normalizePathKey } from './lib/normalize-path';
 import type { Command } from './lib/commands';
 
 const THEMES_FOR_PALETTE: ThemeName[] = [
@@ -471,7 +472,8 @@ export function App(): JSX.Element {
 
   // 起動時に GitHub Release の latest.json を確認 (prod のみ)
   useEffect(() => {
-    void import('./lib/updater-check').then((m) => m.checkForUpdatesOnce());
+    void import('./lib/updater-check').then((m) => m.checkForUpdatesOnce(settings.language));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ---------- Claude Code パネル リサイズ ----------
@@ -611,8 +613,11 @@ export function App(): JSX.Element {
         // ここでは runtime の「最後に開いたルート」のみ永続化する。
         // `claudeCwd` は SettingsModal で設定されるユーザー設定のため上書き厳禁。
         if (options.addToRecent !== false) {
+          // Issue #67: 同じフォルダでも表記ゆれ (ドライブ文字の大文字/小文字、末尾 /、/ と \)
+          // があると重複登録されるため normalize キーで比較する。表示は raw を残す。
           const rp = settings.recentProjects ?? [];
-          const next = [root, ...rp.filter((p) => p !== root)].slice(0, 10);
+          const key = normalizePathKey(root);
+          const next = [root, ...rp.filter((p) => normalizePathKey(p) !== key)].slice(0, 10);
           void updateSettings({ recentProjects: next, lastOpenedRoot: root });
         } else {
           void updateSettings({ lastOpenedRoot: root });
@@ -681,8 +686,15 @@ export function App(): JSX.Element {
   }, [projectRoot]);
 
   const handleRestart = useCallback(async () => {
-    if (dirtyEditorTabs.length > 0 && !window.confirm(t('editor.restartConfirm'))) {
-      return;
+    // Issue #68: Tauri ネイティブの ask() を使い、WebView 標準 confirm の見た目のバラつきと
+    // フォーカス問題を避ける。
+    if (dirtyEditorTabs.length > 0) {
+      const { ask } = await import('@tauri-apps/plugin-dialog');
+      const ok = await ask(t('editor.restartConfirm'), {
+        title: 'vibe-editor',
+        kind: 'warning'
+      });
+      if (!ok) return;
     }
     await window.api.app.restart();
   }, [dirtyEditorTabs.length, t]);
@@ -1161,78 +1173,79 @@ export function App(): JSX.Element {
 
   const commands = useMemo<Command[]>(() => {
     const list: Command[] = [
+      // Issue #57: コマンドパレット項目の title / category を i18n 化する。
       {
         id: 'project.new',
-        title: '新規プロジェクト…',
-        category: 'プロジェクト',
+        title: t('appMenu.new'),
+        category: t('command.project.category'),
         run: () => void handleNewProject()
       },
       {
         id: 'project.openFolder',
-        title: 'フォルダを開く…',
-        category: 'プロジェクト',
+        title: t('appMenu.openFolder'),
+        category: t('command.project.category'),
         run: () => void handleOpenFolder()
       },
       {
         id: 'project.openFile',
-        title: 'ファイルを開く…',
-        category: 'プロジェクト',
+        title: t('appMenu.openFile'),
+        category: t('command.project.category'),
         run: () => void handleOpenFile()
       },
       {
         id: 'workspace.addFolder',
-        title: 'フォルダをワークスペースに追加…',
-        category: 'ワークスペース',
+        title: t('command.workspace.addFolder'),
+        category: t('command.workspace.category'),
         run: () => void handleAddWorkspaceFolder()
       },
       ...(settings.recentProjects ?? []).slice(0, 5).map<Command>((p) => ({
         id: `project.recent.${p}`,
-        title: `最近: ${p.split(/[\\/]/).pop()}`,
+        title: t('command.project.recent', { name: p.split(/[\\/]/).pop() ?? p }),
         subtitle: p,
-        category: 'プロジェクト',
+        category: t('command.project.category'),
         run: () => void handleOpenRecent(p)
       })),
       {
         id: 'view.sidebar.changes',
-        title: 'サイドバー: 変更',
-        category: 'ビュー',
+        title: t('command.view.changes'),
+        category: t('command.view.category'),
         run: () => setSidebarView('changes')
       },
       {
         id: 'view.sidebar.sessions',
-        title: 'サイドバー: 履歴',
-        category: 'ビュー',
+        title: t('command.view.history'),
+        category: t('command.view.category'),
         run: () => setSidebarView('sessions')
       },
       {
         id: 'view.nextTab',
-        title: '次のタブへ',
+        title: t('command.tab.next'),
         subtitle: 'Ctrl+Tab',
-        category: 'ビュー',
+        category: t('command.view.category'),
         when: () => diffTabs.length > 0,
         run: () => cycleTab(1)
       },
       {
         id: 'view.prevTab',
-        title: '前のタブへ',
+        title: t('command.tab.prev'),
         subtitle: 'Ctrl+Shift+Tab',
-        category: 'ビュー',
+        category: t('command.view.category'),
         when: () => diffTabs.length > 0,
         run: () => cycleTab(-1)
       },
       {
         id: 'tab.close',
-        title: 'アクティブなタブを閉じる',
+        title: t('command.tab.close'),
         subtitle: 'Ctrl+W',
-        category: 'タブ',
+        category: t('command.tab.category'),
         when: () => !!activeTabId,
         run: () => { if (activeTabId) closeTab(activeTabId); }
       },
       {
         id: 'tab.reopen',
-        title: '最近閉じたタブを復元',
+        title: t('command.tab.restore'),
         subtitle: 'Ctrl+Shift+T',
-        category: 'タブ',
+        category: t('command.tab.category'),
         when: () => recentlyClosed.length > 0,
         run: () => reopenLastClosed()
       },
@@ -1405,7 +1418,11 @@ export function App(): JSX.Element {
         return;
       }
       if (e.key === 'w' || e.key === 'W') {
-        if (activeTabId) {
+        // Issue #38: フォーカスがターミナル (xterm) の中にあるときは Ctrl+W を
+        // タブクローズに奪わない。xterm の「直前の単語を削除」を優先させる。
+        const target = e.target as Element | null;
+        const inTerminal = !!target?.closest?.('.xterm, .xterm-screen, .xterm-helpers');
+        if (!inTerminal && activeTabId) {
           e.preventDefault();
           e.stopPropagation();
           closeTab(activeTabId);

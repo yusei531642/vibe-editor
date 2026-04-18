@@ -183,8 +183,8 @@ body.is-resizing * {
   box-shadow: inset -1px 0 0 var(--glass-border), var(--glass-highlight);
   /* backdrop-filter がスタッキングコンテキストを生成するため、
      ドロップダウンが他のグリッド列の後ろに隠れてしまう。
-     z-index で sidebar を前面に持ち上げる。 */
-  z-index: 10;
+     Issue #85: z-index は design token (tokens.css の --z-sidebar) を使って揃える。 */
+  z-index: var(--z-sidebar);
 }
 
 /* サイドバーブランドヘッダー */

@@ -42,12 +42,15 @@ export function TeamCreateModal({
 
   const remaining = maxTerminals - currentTabCount;
 
+  // Issue #83: 永続化 / onCreate へ渡す前に TeamMemberRow の UI 専用 `_rowId` を剥がす。
+  const plainMembers = form.members.map(({ agent, role }) => ({ agent, role }));
+
   const handleSaveEditedPreset = (): void => {
     if (!form.presetName.trim()) return;
     onSavePreset({
       id: form.editingPresetId ?? `custom-${Date.now()}`,
       name: form.presetName.trim(),
-      members: presetFromMembers(form.leaderAgent, form.members)
+      members: presetFromMembers(form.leaderAgent, plainMembers)
     });
     actions.setEditingPresetId(null);
     actions.setSaveAsPreset(false);
@@ -61,11 +64,11 @@ export function TeamCreateModal({
       onSavePreset({
         id: form.editingPresetId ?? `custom-${Date.now()}`,
         name: pname,
-        members: presetFromMembers(form.leaderAgent, form.members)
+        members: presetFromMembers(form.leaderAgent, plainMembers)
       });
     }
     actions.resetAfterCreate();
-    onCreate(name, { agent: form.leaderAgent }, form.members);
+    onCreate(name, { agent: form.leaderAgent }, plainMembers);
     onClose();
   };
 

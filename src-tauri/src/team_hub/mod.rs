@@ -16,9 +16,19 @@ use anyhow::Result;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
+
+/// Issue #51: ハンドシェイク 1 行を受信するまでの最大時間。
+const HANDSHAKE_TIMEOUT_MS: u64 = 5_000;
+/// Issue #51: ハンドシェイク 1 行のバイト長上限。
+const HANDSHAKE_MAX_BYTES: u64 = 1024;
+/// Issue #51: 同時接続数の上限 (ハンドシェイク完了含む)。
+const MAX_CONCURRENT_CONNECTIONS: usize = 32;
+/// Issue #50: 不正トークン / 認証失敗後の固定遅延 (brute force 抑止)。
+const AUTH_FAIL_DELAY_MS: u64 = 200;
 
 #[derive(Clone)]
 pub struct TeamHub {
@@ -128,6 +138,7 @@ impl TeamHub {
         drop(state);
 
         let hub = self.clone();
+        let sem = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNECTIONS));
         tokio::spawn(async move {
             loop {
                 let (sock, _) = match listener.accept().await {
@@ -137,9 +148,19 @@ impl TeamHub {
                         continue;
                     }
                 };
+                // Issue #51: 同時接続数を Semaphore で制限。閾値超は即切断。
+                let permit = match sem.clone().try_acquire_owned() {
+                    Ok(p) => p,
+                    Err(_) => {
+                        tracing::warn!("[teamhub] connection limit reached; dropping client");
+                        drop(sock);
+                        continue;
+                    }
+                };
                 let hub2 = hub.clone();
                 let token = token.clone();
                 tokio::spawn(async move {
+                    let _permit = permit;
                     if let Err(e) = handle_client(hub2, sock, token).await {
                         tracing::debug!("teamhub client error: {e:#}");
                     }
@@ -197,40 +218,84 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
+/// Issue #50: バイト長を合わせた constant-time 比較。`a` と `b` の長さが違えば即 false。
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    let a = a.as_bytes();
+    let b = b.as_bytes();
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for i in 0..a.len() {
+        diff |= a[i] ^ b[i];
+    }
+    diff == 0
+}
+
 async fn handle_client(
     hub: TeamHub,
     sock: tokio::net::TcpStream,
     expected_token: String,
 ) -> Result<()> {
     let (rd, mut wr) = sock.into_split();
-    let mut lines = BufReader::new(rd).lines();
+    // Issue #51: ハンドシェイク 1 行のバイト長上限 → BufReader を take() で絞る。
+    let bounded = rd.take(HANDSHAKE_MAX_BYTES);
+    let mut lines = BufReader::new(bounded).lines();
 
+    // Issue #51: ハンドシェイクにタイムアウトを掛ける。
     // ハンドシェイク (1 行目): {token, teamId, role, agentId}
-    let hello_line = match lines.next_line().await? {
-        Some(l) => l,
-        None => return Ok(()),
+    let hello_line = match tokio::time::timeout(
+        Duration::from_millis(HANDSHAKE_TIMEOUT_MS),
+        lines.next_line(),
+    )
+    .await
+    {
+        Ok(Ok(Some(l))) => l,
+        Ok(Ok(None)) => return Ok(()),
+        Ok(Err(e)) => return Err(e.into()),
+        Err(_) => {
+            tracing::warn!("[teamhub] handshake timed out");
+            return Ok(());
+        }
     };
-    let hello: serde_json::Value = serde_json::from_str(hello_line.trim())?;
+    let hello: serde_json::Value = match serde_json::from_str(hello_line.trim()) {
+        Ok(v) => v,
+        Err(_) => {
+            tokio::time::sleep(Duration::from_millis(AUTH_FAIL_DELAY_MS)).await;
+            return Ok(());
+        }
+    };
     let token = hello.get("token").and_then(|v| v.as_str()).unwrap_or("");
-    if token != expected_token {
-        return Ok(()); // 不正トークンは即切断
+    // Issue #50: タイミング攻撃対策。定数時間比較 + 失敗時固定 delay。
+    if !constant_time_eq(token, &expected_token) {
+        tokio::time::sleep(Duration::from_millis(AUTH_FAIL_DELAY_MS)).await;
+        return Ok(());
+    }
+    // Issue #52: teamId / agentId / role の空文字 / 未知 team_id を拒否。
+    let team_id = hello.get("teamId").and_then(|v| v.as_str()).unwrap_or("");
+    let role = hello.get("role").and_then(|v| v.as_str()).unwrap_or("");
+    let agent_id = hello.get("agentId").and_then(|v| v.as_str()).unwrap_or("");
+    if team_id.is_empty() || role.is_empty() || agent_id.is_empty() {
+        tracing::warn!(
+            "[teamhub] handshake rejected: empty team_id/role/agent_id (team={team_id:?} role={role:?} agent={agent_id:?})"
+        );
+        tokio::time::sleep(Duration::from_millis(AUTH_FAIL_DELAY_MS)).await;
+        return Ok(());
+    }
+    // Issue #52: register_team 済みの team のみ許可。
+    {
+        let s = hub.state.lock().await;
+        if !s.active_teams.contains(team_id) {
+            tracing::warn!("[teamhub] handshake rejected: unknown team_id={team_id}");
+            drop(s);
+            tokio::time::sleep(Duration::from_millis(AUTH_FAIL_DELAY_MS)).await;
+            return Ok(());
+        }
     }
     let ctx = CallContext {
-        team_id: hello
-            .get("teamId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
-        role: hello
-            .get("role")
-            .and_then(|v| v.as_str())
-            .unwrap_or("unknown")
-            .to_string(),
-        agent_id: hello
-            .get("agentId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string(),
+        team_id: team_id.to_string(),
+        role: role.to_string(),
+        agent_id: agent_id.to_string(),
     };
     tracing::debug!(
         "[teamhub] client authed team={} role={} agent={}",

@@ -37,29 +37,31 @@ export function TeamMemberBuilder({
       <div className="team-builder">
         <div className="team-builder__row team-builder__row--leader">
           <Crown size={14} className="terminal-tab__leader-icon" />
-          <span className="team-builder__label">Leader</span>
+          {/* Issue #82: Leader ラベルも i18n 化する。 */}
+          <span className="team-builder__label">{t('team.leaderLabel')}</span>
           <select
             value={form.leaderAgent}
             onChange={(e) => actions.setLeaderAgent(e.target.value as TerminalAgent)}
           >
             {AGENTS.map((a) => (
               <option key={a.value} value={a.value}>
-                {a.label}
+                {t(a.labelKey)}
               </option>
             ))}
           </select>
         </div>
 
         {/* メンバー */}
+        {/* Issue #83: key は unique _rowId を使う。idx だと削除で入力 state が別メンバーに引き継がれる。 */}
         {form.members.map((m, idx) => (
-          <div key={idx} className="team-builder__row">
+          <div key={m._rowId} className="team-builder__row">
             <select
               value={m.agent}
               onChange={(e) => actions.updateMember(idx, 'agent', e.target.value)}
             >
               {AGENTS.map((a) => (
                 <option key={a.value} value={a.value}>
-                  {a.label}
+                  {t(a.labelKey)}
                 </option>
               ))}
             </select>
@@ -69,14 +71,18 @@ export function TeamMemberBuilder({
             >
               {MEMBER_ROLES.map((r) => (
                 <option key={r.value} value={r.value}>
-                  {r.label}
+                  {t(r.labelKey)}
                 </option>
               ))}
             </select>
+            {/* Issue #84: type="button" を明示し、将来 <form> 内に置かれても誤 submit しない。 */}
+            {/* Issue #86: aria-label で削除操作の意図をスクリーンリーダーに伝える。 */}
             <button
+              type="button"
               className="team-builder__remove"
               onClick={() => actions.removeMember(idx)}
               title={t('team.removeMember')}
+              aria-label={t('team.removeMember')}
             >
               <X size={14} />
             </button>
@@ -84,6 +90,7 @@ export function TeamMemberBuilder({
         ))}
 
         <button
+          type="button"
           className="team-builder__add"
           onClick={() => actions.addMember(remaining)}
           disabled={totalNeeded >= remaining}

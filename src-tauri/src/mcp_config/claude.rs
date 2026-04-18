@@ -1,5 +1,6 @@
 // Claude Code MCP 設定 (~/.claude.json) の `mcpServers.vibe-team` を更新
 
+use crate::atomic_write::write_atomic;
 use anyhow::Result;
 use serde_json::Value;
 use std::path::PathBuf;
@@ -38,7 +39,8 @@ pub async fn setup(desired: &Value) -> Result<bool> {
     }
     servers_obj.insert(ENTRY.into(), desired.clone());
     let json = serde_json::to_vec_pretty(&config)?;
-    fs::write(&path, json).await?;
+    // Issue #37: 他アプリの MCP 設定も含むファイルなので、アトミック置換で壊さない。
+    write_atomic(&path, &json).await?;
     Ok(true)
 }
 
@@ -60,7 +62,7 @@ pub async fn cleanup() -> Result<bool> {
         .unwrap_or(false);
     if removed {
         let json = serde_json::to_vec_pretty(&config)?;
-        fs::write(&path, json).await?;
+        write_atomic(&path, &json).await?;
     }
     Ok(removed)
 }

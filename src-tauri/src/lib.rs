@@ -4,13 +4,14 @@
 // 各 commands/*.rs は IPC 契約 (src/types/ipc.ts) に合わせた #[tauri::command] を提供する。
 // PTY backend (portable-pty + batcher) は src/pty/ に集約。
 
+mod atomic_write;
 mod commands;
 mod mcp_config;
 mod pty;
 mod state;
 mod team_hub;
 
-use tauri::Manager;
+use tauri::{Manager, RunEvent, WindowEvent};
 #[allow(unused_imports)]
 use tracing::info;
 
@@ -98,6 +99,11 @@ pub fn run() {
                 }
             });
 
+            // Issue #41: 起動時に古い paste 画像を掃除する (7 日以上経過したもの)。
+            tauri::async_runtime::spawn(async move {
+                commands::terminal::cleanup_paste_images().await;
+            });
+
             // Issue #29: settings.json の lastOpenedRoot から AppState.project_root を復元する。
             // renderer がロードされる前に watcher / app_get_project_root が呼ばれても、
             // 正しい project root を返せるようにするためここで先読みする。
@@ -118,11 +124,9 @@ pub fn run() {
                     });
                 if let Some(root) = root {
                     let state = app_handle_for_root.state::<state::AppState>();
-                    let lock_result = state.project_root.lock();
-                    if let Ok(mut guard) = lock_result {
-                        *guard = Some(root.clone());
-                        tracing::info!("[setup] project_root restored from settings: {root}");
-                    }
+                    let mut guard = state.project_root.lock().await;
+                    *guard = Some(root.clone());
+                    tracing::info!("[setup] project_root restored from settings: {root}");
                 }
             });
             #[cfg(debug_assertions)]
@@ -134,7 +138,24 @@ pub fn run() {
             Ok(())
         });
 
-    builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    let app = builder
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    // Issue #55: ウィンドウが閉じられた / プロセス終了時に全 PTY を確実に kill する。
+    // drop 任せだと Windows の ConPTY 子プロセス (claude.exe / codex.exe / bash.exe) が孤立する。
+    app.run(|app_handle, event| match event {
+        RunEvent::WindowEvent {
+            event: WindowEvent::CloseRequested { .. },
+            ..
+        } => {
+            let state = app_handle.state::<state::AppState>();
+            state.pty_registry.kill_all();
+        }
+        RunEvent::Exit => {
+            let state = app_handle.state::<state::AppState>();
+            state.pty_registry.kill_all();
+        }
+        _ => {}
+    });
 }

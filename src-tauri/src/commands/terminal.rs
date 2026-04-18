@@ -121,12 +121,10 @@ pub async fn terminal_create(
             if command.to_lowercase().contains("claude") {
                 let registry = state.pty_registry.clone();
                 let watcher_id = id.clone();
-                let watcher_root = state
-                    .project_root
-                    .lock()
-                    .ok()
-                    .and_then(|g| g.clone())
-                    .unwrap_or_default();
+                let watcher_root = {
+                    let guard = state.project_root.lock().await;
+                    guard.clone().unwrap_or_default()
+                };
                 let actual_root = if watcher_root.is_empty() {
                     // PTY spawn 時の cwd を流用
                     std::env::current_dir()
@@ -193,13 +191,57 @@ pub async fn terminal_kill(state: State<'_, AppState>, id: String) -> Result<(),
     Ok(())
 }
 
+/// Issue #40: MIME タイプから正しい拡張子を決める。未知の場合は .bin にフォールバック。
+fn extension_for_mime(mime: &str) -> &'static str {
+    match mime.to_ascii_lowercase().as_str() {
+        "image/png" => "png",
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "image/bmp" => "bmp",
+        "image/svg+xml" => "svg",
+        "image/tiff" => "tiff",
+        "image/avif" => "avif",
+        "image/heic" => "heic",
+        _ => "bin",
+    }
+}
+
+/// Issue #41: 起動時に古い paste 画像 (7 日以上) を削除する。
+pub async fn cleanup_paste_images() {
+    use std::time::{Duration, SystemTime};
+    let dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".vibe-editor")
+        .join("paste-images");
+    let mut rd = match tokio::fs::read_dir(&dir).await {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    let cutoff = SystemTime::now()
+        .checked_sub(Duration::from_secs(7 * 24 * 60 * 60))
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+    while let Ok(Some(entry)) = rd.next_entry().await {
+        let path = entry.path();
+        if !path.file_name().and_then(|n| n.to_str()).map_or(false, |n| n.starts_with("paste-")) {
+            continue;
+        }
+        if let Ok(meta) = tokio::fs::metadata(&path).await {
+            if let Ok(modified) = meta.modified() {
+                if modified < cutoff {
+                    let _ = tokio::fs::remove_file(&path).await;
+                }
+            }
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn terminal_save_pasted_image(
     base64: String,
     mime_type: String,
 ) -> SavePastedImageResult {
     use base64::Engine;
-    let _ = mime_type;
     let bytes = match base64::engine::general_purpose::STANDARD.decode(base64.as_bytes()) {
         Ok(b) => b,
         Err(e) => {
@@ -221,7 +263,9 @@ pub async fn terminal_save_pasted_image(
             error: Some(e.to_string()),
         };
     }
-    let name = format!("paste-{}.png", uuid::Uuid::new_v4());
+    // Issue #40: MIME からの拡張子で保存する。
+    let ext = extension_for_mime(&mime_type);
+    let name = format!("paste-{}.{ext}", uuid::Uuid::new_v4());
     let path = dir.join(&name);
     if let Err(e) = tokio::fs::write(&path, bytes).await {
         return SavePastedImageResult {
