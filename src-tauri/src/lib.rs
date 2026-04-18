@@ -41,6 +41,7 @@ pub fn run() {
             commands::ping,
             // ---- app ----
             commands::app::app_get_project_root,
+            commands::app::app_set_project_root,
             commands::app::app_restart,
             commands::app::app_set_window_title,
             commands::app::app_check_claude,
@@ -93,6 +94,34 @@ pub fn run() {
                 hub.set_app_handle(app_handle).await;
                 if let Err(e) = hub.start().await {
                     tracing::warn!("teamhub start failed: {e:#}");
+                }
+            });
+
+            // Issue #29: settings.json の lastOpenedRoot から AppState.project_root を復元する。
+            // renderer がロードされる前に watcher / app_get_project_root が呼ばれても、
+            // 正しい project root を返せるようにするためここで先読みする。
+            let app_handle_for_root = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let settings = commands::settings::settings_load().await;
+                let root = settings
+                    .get("lastOpenedRoot")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_owned)
+                    .filter(|s| !s.trim().is_empty())
+                    .or_else(|| {
+                        settings
+                            .get("claudeCwd")
+                            .and_then(|v| v.as_str())
+                            .map(str::to_owned)
+                            .filter(|s| !s.trim().is_empty())
+                    });
+                if let Some(root) = root {
+                    let state = app_handle_for_root.state::<state::AppState>();
+                    let lock_result = state.project_root.lock();
+                    if let Ok(mut guard) = lock_result {
+                        *guard = Some(root.clone());
+                        tracing::info!("[setup] project_root restored from settings: {root}");
+                    }
                 }
             });
             #[cfg(debug_assertions)]

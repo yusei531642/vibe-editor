@@ -12,6 +12,10 @@ interface EditorViewProps {
   isBinary: boolean;
   loading: boolean;
   error: string | null;
+  /** Issue #35: 非 UTF-8 などで保存が危険な場合、編集を禁止する */
+  readOnly?: boolean;
+  /** readOnly=true のときヘッダに出す警告文 */
+  readOnlyReason?: string;
   onChange: (value: string) => void;
   onSave: () => void;
 }
@@ -23,6 +27,8 @@ export function EditorView({
   isBinary,
   loading,
   error,
+  readOnly = false,
+  readOnlyReason,
   onChange,
   onSave
 }: EditorViewProps): JSX.Element {
@@ -66,13 +72,22 @@ export function EditorView({
         <span className="diffview__path">
           {path}
           {dirty ? ' ●' : ''}
+          {readOnly && readOnlyReason && (
+            <span
+              className="diffview__path"
+              style={{ marginLeft: 8, opacity: 0.7, fontSize: 11 }}
+              title={readOnlyReason}
+            >
+              — {readOnlyReason}
+            </span>
+          )}
         </span>
         <button
           type="button"
           className="toolbar__btn toolbar__btn--icon"
           onClick={onSave}
-          disabled={!dirty}
-          title={t('editor.save')}
+          disabled={!dirty || readOnly}
+          title={readOnly ? readOnlyReason ?? t('editor.save') : t('editor.save')}
           aria-label="save"
         >
           <Save size={15} strokeWidth={1.75} />
@@ -85,7 +100,7 @@ export function EditorView({
           theme={theme}
           onChange={(v) => onChange(v ?? '')}
           options={{
-            readOnly: false,
+            readOnly,
             minimap: { enabled: false },
             scrollBeyondLastLine: false,
             fontSize: settings.editorFontSize,

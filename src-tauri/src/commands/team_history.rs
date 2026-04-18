@@ -3,12 +3,17 @@
 // ~/.vibe-editor/team-history.json (JSON 配列) を読み書き。
 // プロジェクト単位のフィルタ、最新 20 件 + lastUsedAt 降順保持。
 
+use crate::pty::path_norm::normalize_project_root;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::sync::Mutex;
 
-const MAX_ENTRIES: usize = 20;
+/// Issue #27: 20 件制限は project 単位で適用する。
+/// ("project A で 10 件保存している状態で project B を使うと project A が消える"
+/// 挙動を避けるため)
+const MAX_ENTRIES_PER_PROJECT: usize = 20;
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -96,10 +101,12 @@ async fn save_all(entries: &[TeamHistoryEntry]) -> Result<(), String> {
 #[tauri::command]
 pub async fn team_history_list(project_root: String) -> Vec<TeamHistoryEntry> {
     let _g = LOCK.lock().await;
+    // Issue #32: 比較は normalize 後の値で行う
+    let target = normalize_project_root(&project_root);
     load_all()
         .await
         .into_iter()
-        .filter(|e| e.project_root == project_root)
+        .filter(|e| normalize_project_root(&e.project_root) == target)
         .collect()
 }
 
@@ -110,10 +117,21 @@ pub async fn team_history_save(entry: TeamHistoryEntry) -> MutationResult {
     all.retain(|e| e.id != entry.id);
     all.insert(0, entry);
     all.sort_by(|a, b| b.last_used_at.cmp(&a.last_used_at));
-    if all.len() > MAX_ENTRIES {
-        all.truncate(MAX_ENTRIES);
+
+    // Issue #27: 20 件上限は project ごとに掛ける。
+    // normalize 後のキーでグループ化し、同一 project 内で 20 件を超えた分だけ削除する。
+    let mut kept: Vec<TeamHistoryEntry> = Vec::with_capacity(all.len());
+    let mut per_project_count: HashMap<String, usize> = HashMap::new();
+    for e in all.into_iter() {
+        let key = normalize_project_root(&e.project_root);
+        let count = per_project_count.entry(key).or_insert(0);
+        if *count < MAX_ENTRIES_PER_PROJECT {
+            *count += 1;
+            kept.push(e);
+        }
     }
-    match save_all(&all).await {
+
+    match save_all(&kept).await {
         Ok(_) => MutationResult {
             ok: true,
             error: None,

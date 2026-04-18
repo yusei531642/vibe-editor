@@ -95,6 +95,9 @@ export const api = {
 
   app: {
     getProjectRoot: (): Promise<string> => invoke('app_get_project_root'),
+    /** Issue #29: renderer 側で project root が切り替わったとき Rust 側 state を同期する */
+    setProjectRoot: (projectRoot: string): Promise<void> =>
+      invoke('app_set_project_root', { projectRoot }),
     restart: (): Promise<void> => invoke('app_restart'),
     setWindowTitle: (title: string): Promise<void> => invoke('app_set_window_title', { title }),
     checkClaude: (command: string): Promise<ClaudeCheckResult> =>

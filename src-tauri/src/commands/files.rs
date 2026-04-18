@@ -168,13 +168,18 @@ pub async fn files_list(project_root: String, rel_path: String) -> FileListResul
             }
         }
     };
-    let root = Path::new(&project_root);
+    // Issue #34: entry.path() は canonicalize された実パスを返すので、relative を取る
+    // prefix は raw の project_root ではなく同じく canonicalize された root を使う必要がある。
+    // Windows の junction / symlink / 大文字小文字違いで raw と real が食い違うと strip_prefix
+    // が失敗して entry.path が空文字に落ちる。
+    let canonical_root = Path::new(&project_root).canonicalize().ok();
+    let root_ref = canonical_root.as_deref().unwrap_or_else(|| Path::new(&project_root));
     while let Ok(Some(entry)) = rd.next_entry().await {
         let p = entry.path();
         let is_dir = p.is_dir();
         let name = entry.file_name().to_string_lossy().into_owned();
         let rel = p
-            .strip_prefix(root)
+            .strip_prefix(root_ref)
             .map(|r| r.to_string_lossy().replace('\\', "/"))
             .unwrap_or_default();
         entries.push(FileNode {

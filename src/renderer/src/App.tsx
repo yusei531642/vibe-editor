@@ -59,6 +59,11 @@ interface EditorTab {
   content: string;
   originalContent: string;
   isBinary: boolean;
+  /**
+   * Issue #35: 非 UTF-8 (CP932 など) を from_utf8_lossy で読んだ場合に true。
+   * 編集は許可しない (保存すると lossy 変換後の UTF-8 で上書きされ、元 encoding を失うため)。
+   */
+  lossyEncoding: boolean;
   loading: boolean;
   error: string | null;
   pinned: boolean;
@@ -824,6 +829,7 @@ export function App(): JSX.Element {
             content: '',
             originalContent: '',
             isBinary: false,
+            lossyEncoding: false,
             loading: true,
             error: null,
             pinned: false
@@ -832,29 +838,38 @@ export function App(): JSX.Element {
       });
       try {
         const res = await window.api.files.read(effectiveRoot, relPath);
+        const lossy = res.encoding === 'lossy';
+        // Issue #35: lossy 読み込み時はユーザーに明示的に通知する
+        if (lossy) {
+          showToast(
+            t('editor.nonUtf8Warning', { path: relPath }),
+            { tone: 'warning' }
+          );
+        }
         setEditorTabs((prev) =>
-          prev.map((t) =>
-            t.id === id
+          prev.map((tab) =>
+            tab.id === id
               ? {
-                  ...t,
+                  ...tab,
                   loading: false,
                   error: res.ok ? null : res.error ?? 'error',
                   content: res.content,
                   originalContent: res.content,
-                  isBinary: res.isBinary
+                  isBinary: res.isBinary,
+                  lossyEncoding: lossy
                 }
-              : t
+              : tab
           )
         );
       } catch (err) {
         setEditorTabs((prev) =>
-          prev.map((t) =>
-            t.id === id ? { ...t, loading: false, error: String(err) } : t
+          prev.map((tab) =>
+            tab.id === id ? { ...tab, loading: false, error: String(err) } : tab
           )
         );
       }
     },
-    [projectRoot]
+    [projectRoot, showToast, t]
   );
 
   const updateEditorContent = useCallback((id: string, content: string) => {
@@ -870,6 +885,12 @@ export function App(): JSX.Element {
       const targetRoot = tab.rootPath || projectRoot;
       if (!targetRoot) return;
       if (tab.isBinary) return;
+      // Issue #35: lossy で読み込んだ (非 UTF-8) タブは UTF-8 書き戻すと元 encoding を失う。
+      // 保存を拒否し、ユーザーに明示する。
+      if (tab.lossyEncoding) {
+        showToast(t('editor.nonUtf8SaveBlocked', { path: tab.relPath }), { tone: 'warning' });
+        return;
+      }
       if (tab.content === tab.originalContent) return;
       try {
         const res = await window.api.files.write(targetRoot, tab.relPath, tab.content);
@@ -1104,25 +1125,31 @@ export function App(): JSX.Element {
       const current = settings.workspaceFolders ?? [];
       if (!current.includes(path)) return;
       const name = path.split(/[\\/]/).pop() ?? path;
+
+      // Issue #33: 未保存タブの破棄確認を settings 更新より先に行う。
+      // Cancel された場合は settings / tabs どちらも変更せず、UI と永続状態の整合を保つ。
+      const closingTabs = editorTabs.filter((tab) => tab.rootPath === path);
+      const dirty = closingTabs.filter(
+        (t) => !t.isBinary && t.content !== t.originalContent
+      );
+      if (dirty.length > 0 && !confirmDiscardEditorTabs(closingTabs.map((t) => t.id))) {
+        // 破棄キャンセル → 何も変更しない
+        return;
+      }
+      if (closingTabs.length > 0) {
+        setEditorTabs((prev) => prev.filter((t) => t.rootPath !== path));
+      }
       void updateSettings({ workspaceFolders: current.filter((p) => p !== path) });
-      // 該当ルート配下のエディタタブを閉じる(未保存はユーザー操作なしで捨てる前に確認)
-      setEditorTabs((prev) => {
-        const closing = prev.filter((t) => t.rootPath === path);
-        if (closing.length === 0) return prev;
-        const dirty = closing.filter(
-          (t) => !t.isBinary && t.content !== t.originalContent
-        );
-        if (
-          dirty.length > 0 &&
-          !confirmDiscardEditorTabs(closing.map((t) => t.id))
-        ) {
-          return prev;
-        }
-        return prev.filter((t) => t.rootPath !== path);
-      });
       showToast(t('workspace.removed', { name }), { tone: 'info' });
     },
-    [settings.workspaceFolders, updateSettings, showToast, t, confirmDiscardEditorTabs]
+    [
+      settings.workspaceFolders,
+      editorTabs,
+      updateSettings,
+      showToast,
+      t,
+      confirmDiscardEditorTabs
+    ]
   );
 
   // ---------- コマンドパレット ----------
@@ -1902,6 +1929,11 @@ export function App(): JSX.Element {
                 isBinary={activeEditorTab.isBinary}
                 loading={activeEditorTab.loading}
                 error={activeEditorTab.error}
+                /* Issue #35: 非 UTF-8 テキストは lossy 変換で読み込んでいるので編集不可にする */
+                readOnly={activeEditorTab.lossyEncoding}
+                readOnlyReason={
+                  activeEditorTab.lossyEncoding ? t('editor.nonUtf8ReadOnly') : undefined
+                }
                 onChange={(v) => updateEditorContent(activeEditorTab.id, v)}
                 onSave={() => void saveEditorTab(activeEditorTab.id)}
               />

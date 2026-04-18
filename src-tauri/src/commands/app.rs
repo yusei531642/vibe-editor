@@ -78,6 +78,23 @@ pub fn app_get_project_root(state: State<AppState>) -> String {
         .unwrap_or_default()
 }
 
+/// Issue #29: renderer 側 (settings.lastOpenedRoot の変更 / Canvas-Sidebar の openFolder 等) で
+/// プロジェクトルートが切り替わったとき、Rust 側 AppState の project_root を同期する。
+/// この state は app_get_project_root と Claude session watcher 双方の SSOT。
+#[tauri::command]
+pub fn app_set_project_root(state: State<AppState>, project_root: String) -> Result<(), String> {
+    let mut guard = state
+        .project_root
+        .lock()
+        .map_err(|e| format!("project_root lock poisoned: {e}"))?;
+    *guard = if project_root.trim().is_empty() {
+        None
+    } else {
+        Some(project_root)
+    };
+    Ok(())
+}
+
 #[tauri::command]
 pub fn app_restart(app: tauri::AppHandle) {
     app.restart();

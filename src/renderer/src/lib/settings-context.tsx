@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode
 } from 'react';
@@ -21,6 +22,13 @@ const SettingsContext = createContext<SettingsContextValue | null>(null);
 export function SettingsProvider({ children }: { children: ReactNode }): JSX.Element {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [loading, setLoading] = useState<boolean>(true);
+  // Issue #25: update() が古い settings クロージャを元に次状態を作ると、短時間に複数の
+  // 独立な patch が走った場合に後発 save が先発の patch を巻き戻しうる。
+  // state をそのまま deps にすると再レンダー ごとに update が再生成され、すでに渡された
+  // callback が stale になるのも別の落とし穴。
+  // → ref に最新 settings をミラーし、update() は常に ref.current を起点に merge する。
+  const settingsRef = useRef<AppSettings>(settings);
+  settingsRef.current = settings;
 
   // 初回読み込み
   useEffect(() => {
@@ -31,7 +39,9 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
         if (cancelled) return;
         // 既存 settings.json に新フィールドが無い場合 (notepad など) は
         // DEFAULT_SETTINGS で穴埋めする。forward compat。
-        setSettings({ ...DEFAULT_SETTINGS, ...loaded });
+        const merged = { ...DEFAULT_SETTINGS, ...loaded };
+        settingsRef.current = merged;
+        setSettings(merged);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -51,20 +61,33 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
     applyDensity(settings.density);
   }, [settings.density]);
 
-  const update = useCallback(
-    async (patch: Partial<AppSettings>) => {
-      const next = { ...settings, ...patch };
-      setSettings(next);
-      try {
-        await window.api.settings.save(next);
-      } catch (err) {
-        console.error('[settings] 保存失敗:', err);
-      }
-    },
-    [settings]
-  );
+  // Issue #29: 現在の project root (lastOpenedRoot / fallback claudeCwd) を Rust 側 state
+  // へ同期する。watcher や app_get_project_root の SSOT として使われる。
+  const lastSyncedRootRef = useRef<string>('');
+  useEffect(() => {
+    const effectiveRoot = (settings.lastOpenedRoot || settings.claudeCwd || '').trim();
+    if (effectiveRoot === lastSyncedRootRef.current) return;
+    lastSyncedRootRef.current = effectiveRoot;
+    void window.api.app.setProjectRoot(effectiveRoot).catch((err) => {
+      console.warn('[settings] setProjectRoot failed:', err);
+    });
+  }, [settings.lastOpenedRoot, settings.claudeCwd]);
+
+  const update = useCallback(async (patch: Partial<AppSettings>) => {
+    // 常に最新値 (ref) を起点に merge。ref を先行コミットすることで、
+    // await 中に走る次の update() 呼び出しが今の patch を含んだ state を見る。
+    const next = { ...settingsRef.current, ...patch };
+    settingsRef.current = next;
+    setSettings(next);
+    try {
+      await window.api.settings.save(next);
+    } catch (err) {
+      console.error('[settings] 保存失敗:', err);
+    }
+  }, []);
 
   const reset = useCallback(async () => {
+    settingsRef.current = DEFAULT_SETTINGS;
     setSettings(DEFAULT_SETTINGS);
     await window.api.settings.save(DEFAULT_SETTINGS);
   }, []);

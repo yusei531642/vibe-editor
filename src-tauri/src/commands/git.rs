@@ -199,12 +199,19 @@ pub async fn git_diff(
     let original = head.clone().unwrap_or_default();
 
     let abs = std::path::Path::new(&project_root).join(&rel_path);
-    let modified = match tokio::fs::read_to_string(&abs).await {
-        Ok(s) => s,
-        Err(_) => String::new(),
+    // Issue #35: read_to_string() は非 UTF-8 で失敗し、worktree 側が空文字になって
+    // diff が「全削除」に見えてしまう。raw bytes → from_utf8_lossy で落としどころを作る。
+    let (modified, worktree_is_lossy) = match tokio::fs::read(&abs).await {
+        Ok(bytes) => match std::str::from_utf8(&bytes) {
+            Ok(s) => (s.to_string(), false),
+            Err(_) => (String::from_utf8_lossy(&bytes).into_owned(), true),
+        },
+        Err(_) => (String::new(), false),
     };
     let is_deleted = !abs.exists();
-    let is_binary = original.contains('\u{0}') || modified.contains('\u{0}');
+    // NUL-byte を含むファイル、または非 UTF-8 (lossy) はバイナリ扱い (DiffEditor は placeholder)。
+    let is_binary =
+        original.contains('\u{0}') || modified.contains('\u{0}') || worktree_is_lossy;
 
     GitDiffResult {
         ok: true,

@@ -12,6 +12,7 @@
 
 pub mod batcher;
 pub mod claude_watcher;
+pub mod path_norm;
 pub mod registry;
 pub mod session;
 

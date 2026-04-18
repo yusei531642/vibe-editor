@@ -14,24 +14,65 @@
 //   - notify は OS の inotify/ReadDirectoryChangesW に依存。Windows でも動く
 
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use once_cell::sync::Lazy;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::channel;
+use std::sync::Mutex;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 
-/// 旧 encodeProjectPath: 非英数を `-` に置換
-fn encode_project_path(root: &str) -> String {
-    root.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect()
+/// Issue #30: 同じ project で watcher が複数同時に走ると、全 watcher が
+/// `snapshot.difference(current)` の先頭を自分の sessionId と誤認する。
+/// プロセス全体で「既に配布済み sessionId」を共有し、他の watcher がそれを採らないようにする。
+///
+/// 実運用ではセッション数 << UUID 衝突率 なので単純な HashSet で十分。
+/// アプリ終了時に消えるためリークも無視できる範囲。
+static CLAIMED_SESSIONS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+
+fn try_claim(session_id: &str) -> bool {
+    match CLAIMED_SESSIONS.lock() {
+        Ok(mut set) => set.insert(session_id.to_string()),
+        Err(poisoned) => poisoned.into_inner().insert(session_id.to_string()),
+    }
+}
+
+fn is_claimed(session_id: &str) -> bool {
+    match CLAIMED_SESSIONS.lock() {
+        Ok(set) => set.contains(session_id),
+        Err(poisoned) => poisoned.into_inner().contains(session_id),
+    }
+}
+
+/// Issue #31: 同 encoded directory に別 project が集まる場合に備え、jsonl の最初の `cwd`
+/// フィールドを読み、期待する project_root と一致するか確認する。
+/// ファイルが小さい/まだ書き込み途中のときは None を返し fail-open (claim 許可)。
+fn jsonl_matches_project(jsonl_path: &Path, expected_norm: &str) -> bool {
+    use std::io::{BufRead, BufReader};
+    let file = match std::fs::File::open(jsonl_path) {
+        Ok(f) => f,
+        Err(_) => return true,
+    };
+    let reader = BufReader::new(file);
+    // 先頭 8 行までを検査 (cwd は meta/first user entry に書かれる)
+    for line in reader.lines().take(8).flatten() {
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+            if let Some(c) = v.get("cwd").and_then(|c| c.as_str()) {
+                if c.trim().is_empty() {
+                    return true;
+                }
+                return super::path_norm::normalize_project_root(c) == expected_norm;
+            }
+        }
+    }
+    true
 }
 
 fn projects_dir(project_root: &str) -> PathBuf {
     let home = dirs::home_dir().unwrap_or_default();
     home.join(".claude")
         .join("projects")
-        .join(encode_project_path(project_root))
+        .join(super::path_norm::encode_project_path(project_root))
 }
 
 /// 既存 jsonl ファイル一覧 (UUID 部分のみ) を snapshot
@@ -80,9 +121,17 @@ pub fn spawn_watcher(
             return;
         }
 
-        let snapshot = list_session_ids(&dir);
+        // 初期 snapshot には既に他の watcher が claim 済みの session も含めて除外対象とする。
+        // こうしておくと「spawn 時点で新規扱いだが他 watcher が先に claim した id」を
+        // この watcher が後から誤拾いする可能性も閉じられる。
+        let mut snapshot = list_session_ids(&dir);
+        if let Ok(set) = CLAIMED_SESSIONS.lock() {
+            for s in set.iter() {
+                snapshot.insert(s.clone());
+            }
+        }
         tracing::debug!(
-            "[claude_watcher] tid={} dir={} initial={} entries",
+            "[claude_watcher] tid={} dir={} initial={} entries (+ claimed merged)",
             terminal_id,
             dir.display(),
             snapshot.len()
@@ -121,20 +170,47 @@ pub fn spawn_watcher(
                         continue;
                     }
                     let current = list_session_ids(&dir);
-                    let new_ids: Vec<&String> = current.difference(&snapshot).collect();
-                    if let Some(found) = new_ids.first() {
+                    // Issue #30: 既に他 watcher が claim 済みの id は除外し、未 claim の
+                    // 新規 id から 1 個だけ atomically に占有する。
+                    let mut new_ids: Vec<&String> = current
+                        .difference(&snapshot)
+                        .filter(|sid| !is_claimed(sid))
+                        .collect();
+                    // 順序を安定化 (どの watcher が先に claim してもデテルミニスティックに)
+                    new_ids.sort();
+                    // Issue #31 対策用 normalize。毎イベント再計算しても軽量 (canonicalize は
+                    // 最初にキャッシュされる OS FS cache にヒットする)。
+                    let expected_norm =
+                        super::path_norm::normalize_project_root(&project_root);
+                    for candidate in new_ids {
+                        // jsonl の cwd が一致しないなら別 project の衝突なのでスキップ
+                        let candidate_path = dir.join(format!("{}.jsonl", candidate));
+                        if !jsonl_matches_project(&candidate_path, &expected_norm) {
+                            tracing::debug!(
+                                "[claude_watcher] skip {} (cwd mismatch)",
+                                candidate
+                            );
+                            continue;
+                        }
+                        if !try_claim(candidate) {
+                            // 競合で claim できず → 次の候補へ
+                            continue;
+                        }
                         let event_name = format!("terminal:sessionId:{terminal_id}");
-                        if let Err(e) = app.emit(&event_name, (*found).clone()) {
+                        if let Err(e) = app.emit(&event_name, candidate.clone()) {
                             tracing::warn!("[claude_watcher] emit failed: {e}");
                         } else {
                             tracing::info!(
                                 "[claude_watcher] sessionId detected tid={} sid={}",
                                 terminal_id,
-                                found
+                                candidate
                             );
                         }
                         return;
                     }
+                    // まだ自分の番が来ていない → snapshot を更新して次イベントを待つ。
+                    // (他の watcher が claim した id は snapshot に足し、次回の difference から除外する)
+                    snapshot.extend(current.into_iter());
                 }
                 Ok(Err(_)) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(_) => break,

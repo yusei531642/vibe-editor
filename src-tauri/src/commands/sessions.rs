@@ -3,6 +3,7 @@
 // ~/.claude/projects/<encoded-projectRoot>/*.jsonl を列挙し、
 // 各 jsonl から最初のユーザーメッセージ (=タイトル) と message count を抽出する。
 
+use crate::pty::path_norm::{encode_project_path, normalize_project_root};
 use serde::Serialize;
 use std::path::PathBuf;
 use tokio::io::AsyncBufReadExt;
@@ -17,13 +18,6 @@ pub struct SessionInfo {
     pub last_modified_at: String,
 }
 
-fn encode_project_path(root: &str) -> String {
-    // 旧 encodeProjectPath: 非英数を `-` に置換
-    root.chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect()
-}
-
 fn projects_dir(root: &str) -> PathBuf {
     let home = dirs::home_dir().unwrap_or_default();
     home.join(".claude").join("projects").join(encode_project_path(root))
@@ -36,6 +30,10 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
         Ok(r) => r,
         Err(_) => return vec![],
     };
+    // Issue #31: encode_project_path は非英数を '-' に潰すので、別 project が同じ
+    // encoded directory に衝突し得る (例: `C:\repo-a` と `C:\repo\a`)。
+    // jsonl 内に Claude Code が書き込む cwd を読んで、異なる project のものは除外する。
+    let requested_norm = normalize_project_root(&project_root);
     let mut sessions = vec![];
     while let Ok(Some(entry)) = rd.next_entry().await {
         let path = entry.path();
@@ -57,7 +55,16 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
             .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339())
             .unwrap_or_default();
 
-        let (title, count) = read_jsonl_summary(&path).await;
+        let (title, count, cwd) = read_jsonl_summary(&path).await;
+        // cwd が jsonl から取れたときだけ厳密チェック (取れないものは fail-open)
+        if let Some(ref c) = cwd {
+            if !c.trim().is_empty() && normalize_project_root(c) != requested_norm {
+                tracing::debug!(
+                    "[sessions] skipping colliding session {id}: cwd={c} != requested={project_root}"
+                );
+                continue;
+            }
+        }
         sessions.push(SessionInfo {
             id,
             path: path.to_string_lossy().into_owned(),
@@ -71,23 +78,33 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
     sessions
 }
 
-async fn read_jsonl_summary(path: &std::path::Path) -> (String, u32) {
+/// jsonl から (title, count, cwd) を抽出。cwd は最初に見つかった `cwd` フィールド。
+async fn read_jsonl_summary(path: &std::path::Path) -> (String, u32, Option<String>) {
     let f = match tokio::fs::File::open(path).await {
         Ok(f) => f,
-        Err(_) => return (String::new(), 0),
+        Err(_) => return (String::new(), 0, None),
     };
     let reader = tokio::io::BufReader::new(f);
     let mut lines = reader.lines();
     let mut title = String::new();
     let mut count = 0u32;
+    let mut cwd: Option<String> = None;
     while let Ok(Some(line)) = lines.next_line().await {
         if line.trim().is_empty() {
             continue;
         }
         count += 1;
-        if title.is_empty() {
+        if title.is_empty() || cwd.is_none() {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                if v.get("type").and_then(|t| t.as_str()) == Some("user") {
+                if cwd.is_none() {
+                    // Claude Code は meta entry や user entry に "cwd" を載せる
+                    if let Some(c) = v.get("cwd").and_then(|c| c.as_str()) {
+                        cwd = Some(c.to_string());
+                    }
+                }
+                if title.is_empty()
+                    && v.get("type").and_then(|t| t.as_str()) == Some("user")
+                {
                     if let Some(text) = v
                         .pointer("/message/content")
                         .and_then(|c| c.as_str())
@@ -102,5 +119,5 @@ async fn read_jsonl_summary(path: &std::path::Path) -> (String, u32) {
             }
         }
     }
-    (title, count)
+    (title, count, cwd)
 }

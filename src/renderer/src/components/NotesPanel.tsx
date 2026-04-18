@@ -22,6 +22,12 @@ export function NotesPanel(): JSX.Element {
   const [draft, setDraft] = useState<string>(settings.notepad ?? '');
   const debounceRef = useRef<number | null>(null);
   const lastSavedRef = useRef<string>(settings.notepad ?? '');
+  // Issue #26: unmount cleanup が初回 render の draft / update を capture したまま動くと
+  // 直近の入力が落ちる。ref に最新値を同期し、cleanup はそこから読む。
+  const draftRef = useRef<string>(draft);
+  draftRef.current = draft;
+  const updateRef = useRef(update);
+  updateRef.current = update;
 
   // 外部 (settings reload など) で notepad が変わったら同期
   useEffect(() => {
@@ -40,17 +46,18 @@ export function NotesPanel(): JSX.Element {
     }, SAVE_DEBOUNCE_MS);
   };
 
-  // unmount で確定保存
+  // unmount で確定保存 (最新 draft を ref 経由で読む)
   useEffect(() => {
     return () => {
       if (debounceRef.current !== null) {
         window.clearTimeout(debounceRef.current);
-        if (draft !== lastSavedRef.current) {
-          void update({ notepad: draft });
-        }
+      }
+      // debounce 発火前に unmount されても最新入力を確実に flush
+      if (draftRef.current !== lastSavedRef.current) {
+        void updateRef.current({ notepad: draftRef.current });
+        lastSavedRef.current = draftRef.current;
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onCopy = async (): Promise<void> => {

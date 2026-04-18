@@ -17,7 +17,12 @@ interface SettingsModalProps {
   initial: AppSettings;
   onClose: () => void;
   onApply: (next: AppSettings) => void;
-  onReset: () => void;
+  /**
+   * Issue #28 対応: 現在は未使用 (Reset ボタンは draft だけを戻し、永続化は Apply に委ねる)。
+   * 互換のためシグネチャは残している。将来「即時に保存したいリセット」導線が欲しくなったら
+   * 呼び出し元に戻せる。
+   */
+  onReset?: () => void;
 }
 
 type SectionId =
@@ -31,8 +36,7 @@ export function SettingsModal({
   open,
   initial,
   onClose,
-  onApply,
-  onReset
+  onApply
 }: SettingsModalProps): JSX.Element | null {
   const t = useT();
   const [draft, setDraft] = useState<AppSettings>(initial);
@@ -57,9 +61,10 @@ export function SettingsModal({
     onClose();
   };
 
+  // Issue #28: Reset は draft だけを DEFAULT_SETTINGS に戻す。
+  // 永続化は Apply / Cancel のタイミングに揃える (footer の 2 ボタンと整合)。
   const handleReset = (): void => {
     setDraft({ ...DEFAULT_SETTINGS });
-    onReset();
   };
 
   const isJa = draft.language === 'ja';
