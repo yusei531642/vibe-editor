@@ -10,6 +10,7 @@ import { CardFrame } from '../CardFrame';
 import { FileTreePanel } from '../../FileTreePanel';
 import { useCanvasStore } from '../../../stores/canvas';
 import { useSettings } from '../../../lib/settings-context';
+import { useT } from '../../../lib/i18n';
 
 interface FileTreePayload {
   projectRoot?: string;
@@ -17,7 +18,8 @@ interface FileTreePayload {
 }
 
 function FileTreeCardImpl({ id, data, positionAbsoluteX, positionAbsoluteY }: NodeProps): JSX.Element {
-  const { settings } = useSettings();
+  const { settings, update } = useSettings();
+  const t = useT();
   const payload = (data?.payload ?? {}) as FileTreePayload;
   // Issue #23: lastOpenedRoot (現在プロジェクト) を最優先、claudeCwd は fallback。
   const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || payload.projectRoot || '';
@@ -41,6 +43,25 @@ function FileTreeCardImpl({ id, data, positionAbsoluteX, positionAbsoluteY }: No
     [addCard, positionAbsoluteX, positionAbsoluteY]
   );
 
+  // Issue #73: Canvas でも workspace folder 操作を効かせる。
+  // 旧実装は両方 no-op だったため、Canvas 上の「追加」ボタン / 削除 × が silent に無反応だった。
+  const handleAddWorkspaceFolder = useCallback(async () => {
+    const picked = await window.api.dialog.openFolder(t('appMenu.addWorkspaceDialogTitle'));
+    if (!picked) return;
+    const current = settings.workspaceFolders ?? [];
+    if (current.includes(picked)) return;
+    await update({ workspaceFolders: [...current, picked] });
+  }, [settings.workspaceFolders, update, t]);
+
+  const handleRemoveWorkspaceFolder = useCallback(
+    async (path: string) => {
+      const current = settings.workspaceFolders ?? [];
+      if (!current.includes(path)) return;
+      await update({ workspaceFolders: current.filter((p) => p !== path) });
+    },
+    [settings.workspaceFolders, update]
+  );
+
   return (
     <>
       <Handle type="target" position={Position.Left} style={{ background: '#a7c8ff' }} />
@@ -51,12 +72,8 @@ function FileTreeCardImpl({ id, data, positionAbsoluteX, positionAbsoluteY }: No
             extraRoots={extraRoots}
             activeFilePath={null}
             onOpenFile={handleOpen}
-            onAddWorkspaceFolder={() => {
-              /* noop in canvas */
-            }}
-            onRemoveWorkspaceFolder={() => {
-              /* noop in canvas */
-            }}
+            onAddWorkspaceFolder={() => void handleAddWorkspaceFolder()}
+            onRemoveWorkspaceFolder={(p) => void handleRemoveWorkspaceFolder(p)}
           />
         </div>
       </CardFrame>

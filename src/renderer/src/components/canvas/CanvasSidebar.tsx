@@ -111,24 +111,14 @@ export function CanvasSidebar(): JSX.Element {
   );
 
   const handleResumeTeam = useCallback(
-    (entry: TeamHistoryEntry): void => {
+    async (entry: TeamHistoryEntry): Promise<void> => {
       const cwd = projectRoot || entry.projectRoot;
-      const cards = entry.members.map((m, i) => {
-        const agentId = `${m.role}-${i}-${entry.id}`;
-        const saved = entry.canvasState?.nodes.find((s) => s.agentId === agentId);
-        const pos = saved
-          ? { x: saved.x, y: saved.y }
-          : { x: (i % 3) * 520, y: Math.floor(i / 3) * 360 };
-        return {
-          type: 'agent' as const,
-          title: ROLE_META[m.role].label,
-          position: pos,
-          payload: { agent: m.agent, role: m.role, teamId: entry.id, agentId, cwd }
-        };
-      });
-      addCards(cards);
-      void window.api.app
-        .setupTeamMcp(
+      // Issue #72: agent を spawn する前に MCP 設定を反映する。
+      //   setupTeamMcp は ~/.claude.json の `mcpServers.vibe-team` を書き換えるため、
+      //   AgentNodeCard がマウント → usePtySession が Claude/Codex spawn する前に完了
+      //   させないと、初回の Claude 起動が vibe-team を認識せず team tool が使えない。
+      try {
+        await window.api.app.setupTeamMcp(
           cwd,
           entry.id,
           entry.name,
@@ -137,8 +127,27 @@ export function CanvasSidebar(): JSX.Element {
             role: m.role,
             agent: m.agent
           }))
-        )
-        .catch((err) => console.warn('[resume-team] setupTeamMcp failed:', err));
+        );
+      } catch (err) {
+        console.warn('[resume-team] setupTeamMcp failed:', err);
+        // MCP 設定失敗でも agent は起動する (ユーザーに部分的な UI だけでも提供)
+      }
+      const cards = entry.members.map((m, i) => {
+        const agentId = `${m.role}-${i}-${entry.id}`;
+        const saved = entry.canvasState?.nodes.find((s) => s.agentId === agentId);
+        const pos = saved
+          ? { x: saved.x, y: saved.y }
+          : { x: (i % 3) * 520, y: Math.floor(i / 3) * 360 };
+        // Issue #69: 未知 role (旧バージョン / 手編集の team-history) でもクラッシュさせない
+        const label = ROLE_META[m.role]?.label ?? m.role ?? 'Agent';
+        return {
+          type: 'agent' as const,
+          title: label,
+          position: pos,
+          payload: { agent: m.agent, role: m.role, teamId: entry.id, agentId, cwd }
+        };
+      });
+      addCards(cards);
     },
     [addCards, projectRoot]
   );
@@ -240,7 +249,7 @@ export function CanvasSidebar(): JSX.Element {
       onRefreshSessions={() => void refreshSessions()}
       onResumeSession={handleResumeSession}
       teamHistory={teamHistory}
-      onResumeTeam={handleResumeTeam}
+      onResumeTeam={(entry) => void handleResumeTeam(entry)}
       onDeleteTeamHistory={(id) => void handleDeleteTeamHistory(id)}
       recentProjects={recentProjects}
       onNewProject={() => void handleNewProject()}

@@ -22,6 +22,9 @@ interface TerminalPayload {
   /** Issue #22: Canvas から Resume 起動したときの Claude セッション id。
    *  Claude の場合は args に `--resume <id>` を追加して既存会話を再開する。 */
   resumeSessionId?: string | null;
+  /** Issue #63: Codex の role system prompt (一時ファイル化されて model_instructions_file へ)。
+   *  Canvas から team 外の Codex を起動するケースでも使えるよう payload 経由で渡せるようにする。 */
+  codexInstructions?: string;
 }
 
 function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
@@ -61,6 +64,8 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
           teamId={payload.teamId}
           agentId={payload.agentId}
           role={payload.role}
+          // Issue #63: payload.codexInstructions を TerminalView に伝播
+          codexInstructions={payload.codexInstructions}
           onStatus={setStatus}
         />
       </CardFrame>

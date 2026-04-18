@@ -246,11 +246,11 @@ export function CanvasLayout(): JSX.Element {
   }, [autoSaveKey, autoSavePayload, projectRoot, recent]);
 
   // ----- カスタムチーム作成 (TeamCreateModal からのコールバック) -----
-  const handleCreateCustomTeam = (
+  const handleCreateCustomTeam = async (
     teamName: string,
     leader: { agent: TerminalAgent },
     members: TeamMember[]
-  ): void => {
+  ): Promise<void> => {
     const teamId = `team-${Date.now().toString(36)}`;
     const cwd = projectRoot;
     // leader を含む全メンバー
@@ -258,20 +258,10 @@ export function CanvasLayout(): JSX.Element {
       { role: 'leader', agent: leader.agent },
       ...members.map((m) => ({ role: m.role, agent: m.agent }))
     ];
-    const cards = all.map((m, i) => {
-      const agentId = `${m.role}-${i}-${teamId}`;
-      const col = i % 3;
-      const row = Math.floor(i / 3);
-      return {
-        type: 'agent' as const,
-        title: ROLE_META[m.role].label,
-        position: presetPosition(col, row),
-        payload: { agent: m.agent, role: m.role, teamId, agentId, cwd }
-      };
-    });
-    addCards(cards);
-    void window.api.app
-      .setupTeamMcp(
+    // Issue #72: spawn する前に MCP 設定を反映させる。agent の PTY 起動前に
+    //            ~/.claude.json が更新されていないと team tool が 1 回目認識されない。
+    try {
+      await window.api.app.setupTeamMcp(
         cwd,
         teamId,
         teamName,
@@ -280,8 +270,25 @@ export function CanvasLayout(): JSX.Element {
           role: m.role,
           agent: m.agent
         }))
-      )
-      .catch((err) => console.warn('[custom-team] setupTeamMcp failed:', err));
+      );
+    } catch (err) {
+      console.warn('[custom-team] setupTeamMcp failed:', err);
+    }
+    const cards = all.map((m, i) => {
+      const agentId = `${m.role}-${i}-${teamId}`;
+      const col = i % 3;
+      const row = Math.floor(i / 3);
+      // Issue #69: 旧バージョンの team-history や手編集で未知 role が来ても落ちないように
+      //            optional chain + fallback。
+      const label = ROLE_META[m.role]?.label ?? m.role ?? 'Agent';
+      return {
+        type: 'agent' as const,
+        title: label,
+        position: presetPosition(col, row),
+        payload: { agent: m.agent, role: m.role, teamId, agentId, cwd }
+      };
+    });
+    addCards(cards);
     void loadRecent();
   };
 
@@ -305,23 +312,7 @@ export function CanvasLayout(): JSX.Element {
   const applyPreset = async (preset: WorkspacePreset): Promise<void> => {
     const teamId = `team-${Date.now().toString(36)}`;
     const cwd = projectRoot;
-    const cards = preset.members.map((m, i) => {
-      const agentId = `${m.role}-${i}-${teamId}`;
-      const meta = ROLE_META[m.role];
-      return {
-        type: 'agent' as const,
-        title: meta.label,
-        position: presetPosition(m.col, m.row),
-        payload: {
-          agent: m.agent,
-          role: m.role,
-          teamId,
-          agentId,
-          cwd
-        }
-      };
-    });
-    addCards(cards);
+    // Issue #72: setupTeamMcp を addCards より前に完了させる
     try {
       await window.api.app.setupTeamMcp(
         cwd,
@@ -336,33 +327,31 @@ export function CanvasLayout(): JSX.Element {
     } catch (err) {
       console.warn('[preset] setupTeamMcp failed:', err);
     }
-    setSpawnOpen(false);
-    void loadRecent();
-  };
-
-  const restoreRecent = async (entry: TeamHistoryEntry): Promise<void> => {
-    const cwd = projectRoot || entry.projectRoot;
-    const cards = entry.members.map((m, i) => {
-      const meta = ROLE_META[m.role];
-      const agentId = `${m.role}-${i}-${entry.id}`;
-      const saved = entry.canvasState?.nodes.find((s) => s.agentId === agentId);
-      const pos = saved
-        ? { x: saved.x, y: saved.y }
-        : presetPosition(i % 3, Math.floor(i / 3));
+    const cards = preset.members.map((m, i) => {
+      const agentId = `${m.role}-${i}-${teamId}`;
+      // Issue #69: 未知 role でもクラッシュしないよう fallback
+      const label = ROLE_META[m.role]?.label ?? m.role ?? 'Agent';
       return {
         type: 'agent' as const,
-        title: meta.label,
-        position: pos,
+        title: label,
+        position: presetPosition(m.col, m.row),
         payload: {
           agent: m.agent,
           role: m.role,
-          teamId: entry.id,
+          teamId,
           agentId,
           cwd
         }
       };
     });
     addCards(cards);
+    setSpawnOpen(false);
+    void loadRecent();
+  };
+
+  const restoreRecent = async (entry: TeamHistoryEntry): Promise<void> => {
+    const cwd = projectRoot || entry.projectRoot;
+    // Issue #72: agent spawn 前に MCP 設定を反映
     try {
       await window.api.app.setupTeamMcp(
         cwd,
@@ -377,6 +366,28 @@ export function CanvasLayout(): JSX.Element {
     } catch (err) {
       console.warn('[restore] setupTeamMcp failed:', err);
     }
+    const cards = entry.members.map((m, i) => {
+      const agentId = `${m.role}-${i}-${entry.id}`;
+      const saved = entry.canvasState?.nodes.find((s) => s.agentId === agentId);
+      const pos = saved
+        ? { x: saved.x, y: saved.y }
+        : presetPosition(i % 3, Math.floor(i / 3));
+      // Issue #69: 未知 role でも落ちないよう optional chain
+      const label = ROLE_META[m.role]?.label ?? m.role ?? 'Agent';
+      return {
+        type: 'agent' as const,
+        title: label,
+        position: pos,
+        payload: {
+          agent: m.agent,
+          role: m.role,
+          teamId: entry.id,
+          agentId,
+          cwd
+        }
+      };
+    });
+    addCards(cards);
     const updatedEntry: TeamHistoryEntry = {
       ...entry,
       lastUsedAt: new Date().toISOString()
@@ -537,7 +548,7 @@ export function CanvasLayout(): JSX.Element {
                       onClick={() => {
                         const leaderM = sp.members.find((m) => m.role === 'leader');
                         const others = sp.members.filter((m) => m.role !== 'leader');
-                        handleCreateCustomTeam(
+                        void handleCreateCustomTeam(
                           sp.name,
                           { agent: leaderM?.agent ?? 'claude' },
                           others
