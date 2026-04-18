@@ -263,12 +263,51 @@ pub fn app_get_user_info(app: tauri::AppHandle) -> AppUserInfo {
     }
 }
 
+/// Issue #49: 許可するスキームの allowlist。
+/// - `http`/`https`: 通常の Web ページ (Release ページ、ドキュメント等)
+/// - `mailto`: メール feedback
+/// それ以外 (`file:`, `javascript:`, `data:`, OS カスタムプロトコル) は拒否する。
+const ALLOWED_EXTERNAL_SCHEMES: &[&str] = &["http", "https", "mailto"];
+
+fn is_safe_external_url(url: &str) -> bool {
+    // scheme を手動抽出 (url crate を避け依存追加を不要にする)
+    let trimmed = url.trim();
+    if trimmed.is_empty() || trimmed.len() > 8192 {
+        return false;
+    }
+    let colon = match trimmed.find(':') {
+        Some(i) => i,
+        None => return false,
+    };
+    let scheme = &trimmed[..colon];
+    // scheme は ASCII 英数 + `-.+` のみが RFC 的に許容
+    if !scheme
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '-' || c == '.')
+    {
+        return false;
+    }
+    ALLOWED_EXTERNAL_SCHEMES
+        .iter()
+        .any(|s| scheme.eq_ignore_ascii_case(s))
+}
+
 #[tauri::command]
 pub async fn app_open_external(
     app: tauri::AppHandle,
     url: String,
 ) -> OpenExternalResult {
     use tauri_plugin_opener::OpenerExt;
+    // Issue #49: スキーム検証 — allowlist 外は即拒否
+    if !is_safe_external_url(&url) {
+        tracing::warn!("[app_open_external] rejected unsafe url scheme: {url}");
+        return OpenExternalResult {
+            ok: false,
+            error: Some(format!(
+                "disallowed url scheme (allowed: {ALLOWED_EXTERNAL_SCHEMES:?})"
+            )),
+        };
+    }
     match app.opener().open_url(&url, None::<&str>) {
         Ok(_) => OpenExternalResult {
             ok: true,
@@ -278,5 +317,27 @@ pub async fn app_open_external(
             ok: false,
             error: Some(e.to_string()),
         },
+    }
+}
+
+#[cfg(test)]
+mod open_external_tests {
+    use super::is_safe_external_url;
+
+    #[test]
+    fn accepts_http_https_mailto() {
+        assert!(is_safe_external_url("https://github.com/"));
+        assert!(is_safe_external_url("http://localhost:5173"));
+        assert!(is_safe_external_url("mailto:foo@example.com"));
+    }
+
+    #[test]
+    fn rejects_dangerous_schemes() {
+        assert!(!is_safe_external_url("file:///etc/passwd"));
+        assert!(!is_safe_external_url("javascript:alert(1)"));
+        assert!(!is_safe_external_url("data:text/html,<script>"));
+        assert!(!is_safe_external_url("ms-settings:privacy"));
+        assert!(!is_safe_external_url(""));
+        assert!(!is_safe_external_url("noscheme"));
     }
 }

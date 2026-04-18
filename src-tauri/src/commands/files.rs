@@ -51,7 +51,7 @@ pub struct FileWriteResult {
 ///   2. コンポーネントを `.` / `..` / 通常成分に分解し、`..` が stack を空にする前に現れたら拒否
 ///      (root を脱出する `..`)
 ///   3. その上で物理 canonicalize を試み、symlink 解決後も root 配下であることを再確認
-fn safe_join(root: &str, rel: &str) -> Option<PathBuf> {
+pub fn safe_join(root: &str, rel: &str) -> Option<PathBuf> {
     let root = Path::new(root).canonicalize().ok()?;
     let rel_path = Path::new(rel);
 

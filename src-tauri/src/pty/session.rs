@@ -118,6 +118,63 @@ pub fn resolve_valid_cwd(
 
 /// PTY を 1 つ生成、reader thread を起動、batcher を回し、exit watcher も spawn。
 /// 戻り値の SessionHandle は SessionRegistry に登録される。
+/// Issue #54: 子プロセスに渡さない環境変数を判定する。
+/// - 非 team 端末 (`is_team = false`) では `VIBE_TEAM_*` / `VIBE_AGENT_ID` も剥がす。
+///   team 端末では opts.env 経由で正しい値が後から差し込まれるのでここで剥がして問題ない。
+/// - シークレット接頭辞の denylist はエンドポイント毎に足し増やしていく。
+fn should_strip_env(key: &str, is_team: bool) -> bool {
+    // vibe-editor 内部 env: team 外には漏らさない
+    if !is_team && (key.starts_with("VIBE_TEAM_") || key == "VIBE_AGENT_ID") {
+        return true;
+    }
+    // 典型的シークレット接頭辞 / 完全一致 (ユーザー開発シェルからの漏出防止)
+    const SECRET_PREFIXES: &[&str] = &[
+        "AWS_",
+        "GITHUB_TOKEN",
+        "GH_TOKEN",
+        "OPENAI_",
+        "ANTHROPIC_",
+        "AZURE_",
+        "GCP_",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "CLOUDFLARE_",
+        "STRIPE_",
+        "NPM_TOKEN",
+        "HF_TOKEN",
+        "HUGGINGFACE_",
+    ];
+    SECRET_PREFIXES.iter().any(|p| key.starts_with(p))
+}
+
+#[cfg(test)]
+mod env_strip_tests {
+    use super::should_strip_env;
+
+    #[test]
+    fn strips_vibe_team_in_nonteam_mode() {
+        assert!(should_strip_env("VIBE_TEAM_TOKEN", false));
+        assert!(should_strip_env("VIBE_AGENT_ID", false));
+        assert!(!should_strip_env("VIBE_TEAM_TOKEN", true));
+    }
+
+    #[test]
+    fn strips_common_secrets() {
+        assert!(should_strip_env("AWS_SECRET_ACCESS_KEY", false));
+        assert!(should_strip_env("GITHUB_TOKEN", false));
+        assert!(should_strip_env("OPENAI_API_KEY", false));
+        assert!(should_strip_env("ANTHROPIC_API_KEY", false));
+    }
+
+    #[test]
+    fn keeps_ordinary_env() {
+        assert!(!should_strip_env("PATH", false));
+        assert!(!should_strip_env("HOME", false));
+        assert!(!should_strip_env("LANG", false));
+        assert!(!should_strip_env("USER", false));
+        assert!(!should_strip_env("TERM", false));
+    }
+}
+
 pub fn spawn_session(
     app: AppHandle,
     id: String,
@@ -141,8 +198,24 @@ pub fn spawn_session(
         cmd.arg(a);
     }
     cmd.cwd(&opts.cwd);
-    // 既存 env を継承しつつ上書き、最低限の TERM/COLORTERM を設定。
+    // 既存 env を継承しつつ上書きする。
+    // Issue #54: ただし機密が漏れる可能性があるもの (開発者シェルの API key や、
+    // 以前の team 端末が親 env に残した VIBE_TEAM_*) は明示的に除外する。
+    //
+    // 除外方針:
+    //   1. 典型的なシークレット接頭辞を denylist で落とす (AWS_, GITHUB_TOKEN, etc)
+    //   2. VIBE_TEAM_* / VIBE_AGENT_ID は team 用途なので、非 team 端末では必ず除去
+    //      (team 端末では opts.env で明示的に上書きされる)
+    //   3. HOME / PATH / USER / LANG 等の基本 env は継承する (whitelist にすると
+    //      SHELL 起動や npx 実行が動かなくなるので現実的ではない)
+    let is_team = opts
+        .env
+        .iter()
+        .any(|(k, _)| k == "VIBE_TEAM_TOKEN" || k == "VIBE_TEAM_SOCKET");
     for (k, v) in std::env::vars() {
+        if should_strip_env(&k, is_team) {
+            continue;
+        }
         cmd.env(k, v);
     }
     for (k, v) in &opts.env {

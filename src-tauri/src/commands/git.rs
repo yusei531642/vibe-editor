@@ -198,7 +198,30 @@ pub async fn git_diff(
     let is_new = matches!(&head, Err(e) if e.contains("does not exist") || e.contains("exists on disk, but not in"));
     let original = head.clone().unwrap_or_default();
 
-    let abs = std::path::Path::new(&project_root).join(&rel_path);
+    // Issue #36: rel_path が ".." を含むと project_root の外を読めてしまうため safe_join を通す。
+    // safe_join が None (= 境界外 / absolute / 不正) の場合は empty にしてエラー扱い。
+    let abs = match crate::commands::files::safe_join(&project_root, &rel_path) {
+        Some(p) => p,
+        None => {
+            return GitDiffResult {
+                ok: false,
+                error: Some("invalid relative path".into()),
+                path: rel_path,
+                ..Default::default()
+            };
+        }
+    };
+    // original_rel_path (rename 旧パス) も同様に境界チェックする。
+    if let Some(ref orig) = original_rel_path {
+        if crate::commands::files::safe_join(&project_root, orig).is_none() {
+            return GitDiffResult {
+                ok: false,
+                error: Some("invalid original relative path".into()),
+                path: rel_path,
+                ..Default::default()
+            };
+        }
+    }
     // Issue #35: read_to_string() は非 UTF-8 で失敗し、worktree 側が空文字になって
     // diff が「全削除」に見えてしまう。raw bytes → from_utf8_lossy で落としどころを作る。
     let (modified, worktree_is_lossy) = match tokio::fs::read(&abs).await {
