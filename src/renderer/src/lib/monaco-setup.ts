@@ -53,5 +53,67 @@ import 'monaco-editor/esm/vs/basic-languages/ini/ini.contribution';
 // @monaco-editor/react に「ネットワークから取得せず、バンドル済みのmonacoを使え」と指示する
 loader.config({ monaco });
 
+/*
+ * Claude 公式風カスタムテーマ (skill: claude-design 準拠)
+ *
+ *   - 背景 = bg-1 (warm near-black #171716 / warm off-white #f8f8f6)
+ *   - 前景 = text-1 (#f8f8f6 / #141413)
+ *   - diff 配色は成功緑 / 危険赤を 10% tint で (bg 薄色、ガター記号は鮮色)
+ *   - 他のトークン色は vs-dark / vs の安定色にフォールバック (上書き最小)
+ */
+monaco.editor.defineTheme('claude-dark', {
+  base: 'vs-dark',
+  inherit: true,
+  rules: [],
+  colors: {
+    'editor.background': '#171716',
+    'editor.foreground': '#f8f8f6',
+    'editor.lineHighlightBackground': '#1f1f1e',
+    'editor.lineHighlightBorder': '#00000000',
+    'editorCursor.foreground': '#d97757',
+    'editor.selectionBackground': '#2c2c2a',
+    'editor.inactiveSelectionBackground': '#24241f',
+    'editorLineNumber.foreground': '#6d6c66',
+    'editorLineNumber.activeForeground': '#c3c2b7',
+    'editorIndentGuide.background1': '#232321',
+    'editorIndentGuide.activeBackground1': '#373734',
+    // diff: 10% tint (skill セクション 6)
+    'diffEditor.insertedTextBackground': '#578a0019',
+    'diffEditor.removedTextBackground': '#cf3a3a19',
+    'diffEditor.insertedLineBackground': '#578a000d',
+    'diffEditor.removedLineBackground': '#cf3a3a0d',
+    'diffEditorGutter.insertedLineBackground': '#578a0033',
+    'diffEditorGutter.removedLineBackground': '#cf3a3a33',
+    'scrollbarSlider.background': '#2c2c2a80',
+    'scrollbarSlider.hoverBackground': '#373734a0',
+    'scrollbarSlider.activeBackground': '#373734cc'
+  }
+});
+
+monaco.editor.defineTheme('claude-light', {
+  base: 'vs',
+  inherit: true,
+  rules: [],
+  colors: {
+    'editor.background': '#f8f8f6',
+    'editor.foreground': '#141413',
+    'editor.lineHighlightBackground': '#efeeeb',
+    'editor.lineHighlightBorder': '#00000000',
+    'editorCursor.foreground': '#d97757',
+    'editor.selectionBackground': '#e6e5e0',
+    'editor.inactiveSelectionBackground': '#efeeeb',
+    'editorLineNumber.foreground': '#b5b3ac',
+    'editorLineNumber.activeForeground': '#373734',
+    'editorIndentGuide.background1': '#ece9e2',
+    'editorIndentGuide.activeBackground1': '#c3c2b7',
+    'diffEditor.insertedTextBackground': '#578a0019',
+    'diffEditor.removedTextBackground': '#cf3a3a19',
+    'diffEditor.insertedLineBackground': '#578a000d',
+    'diffEditor.removedLineBackground': '#cf3a3a0d',
+    'diffEditorGutter.insertedLineBackground': '#578a0033',
+    'diffEditorGutter.removedLineBackground': '#cf3a3a33'
+  }
+});
+
 // 初期化を確実に完了させる
 export const monacoReady = loader.init();

@@ -278,9 +278,10 @@
 .modal--settings .modal__label input[type='text']:focus-visible,
 .modal--settings .modal__label input[type='number']:focus-visible,
 .modal--settings .modal__label select:focus-visible {
-  box-shadow:
-    0 0 0 2px var(--bg-panel),
-    0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent);
+  /* Claude 公式風: brand 色 border + glow の単一 ring */
+  border-color: var(--claude-brand, var(--accent));
+  box-shadow: 0 0 0 3px var(--claude-brand-glow, rgba(217, 119, 87, 0.12));
+  outline: none;
 }
 
 .modal--settings .modal__note {
@@ -304,34 +305,36 @@
   gap: 12px;
 }
 
+/*
+ * Claude 公式風: theme/lang/density カード選択 UI をフラットに統一。
+ * hover で translate/shadow を付与せず、border/bg の微変化のみ。
+ * selected は brand-glow の ring で明示 (heavy shadow は禁止)。
+ */
 .modal--settings .theme-card,
 .modal--settings .lang-card,
 .modal--settings .density-card {
   padding: 14px;
   border-width: 1px;
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--bg-panel) 82%, transparent);
+  border-radius: var(--radius-md, 14px);
+  background: var(--bg-panel);
   transition:
-    background-color 120ms cubic-bezier(0.25, 1, 0.5, 1),
-    border-color 120ms cubic-bezier(0.25, 1, 0.5, 1),
-    transform 180ms cubic-bezier(0.34, 1.26, 0.64, 1),
-    box-shadow 180ms cubic-bezier(0.25, 1, 0.5, 1);
+    background-color var(--dur-fast, 180ms) var(--ease-standard),
+    border-color var(--dur-fast, 180ms) var(--ease-standard),
+    box-shadow var(--dur-fast, 180ms) var(--ease-standard);
 }
 
 .modal--settings .theme-card:hover,
 .modal--settings .lang-card:hover,
 .modal--settings .density-card:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-sm);
+  background: var(--bg-elev);
+  border-color: var(--border-strong);
 }
 
 .modal--settings .theme-card.is-selected,
 .modal--settings .lang-card.is-selected,
 .modal--settings .density-card.is-selected {
-  border-color: color-mix(in srgb, var(--accent) 24%, var(--border));
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent),
-    0 12px 24px color-mix(in srgb, black 10%, transparent);
+  border-color: var(--claude-brand, var(--accent));
+  box-shadow: 0 0 0 3px var(--claude-brand-glow, rgba(217, 119, 87, 0.12));
 }
 
 @media (max-width: 860px) {

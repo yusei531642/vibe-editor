@@ -313,23 +313,28 @@ body.is-resizing * {
   color: var(--text);
 }
 
+/*
+ * Claude 公式風: アクティブ表示は "左 2px brand バー + 淡い tint bg" の組合せ。
+ * shadow を重ねる擬似立体感は使わない。
+ */
 .sidebar-switcher__btn.is-active {
-  background: var(--bg-active);
+  background: var(--claude-brand-glow, var(--bg-active));
   color: var(--text);
   font-weight: 600;
-  box-shadow: inset 2px 0 0 var(--accent), var(--shadow-xs);
+  box-shadow: inset 2px 0 0 var(--claude-brand, var(--accent));
 }
 
 .sidebar-switcher__btn.is-active .sidebar-switcher__btn-icon {
-  color: var(--accent);
+  color: var(--claude-brand, var(--accent));
 }
 
-/* Claude テーマ: サイドバーにウォームグラデーション */
-:root[data-theme='claude-dark'] .sidebar {
-  background: linear-gradient(180deg, rgba(37, 36, 34, 0.72) 0%, var(--surface-glass) 100%);
-}
+/*
+ * Claude テーマは単色の warm surface に統一 (gradient 禁止)。
+ * glass 透過は残す (Tauri ウィンドウの透過を活かす設計)。
+ */
+:root[data-theme='claude-dark'] .sidebar,
 :root[data-theme='claude-light'] .sidebar {
-  background: linear-gradient(180deg, rgba(241, 239, 229, 0.72) 0%, var(--surface-glass) 100%);
+  background: var(--bg-sidebar);
 }
 
 .sidebar-switcher__badge {
@@ -338,21 +343,24 @@ body.is-resizing * {
   justify-content: center;
   min-width: 16px;
   height: 15px;
-  padding: 0 4px;
+  padding: 0 5px;
   margin-left: auto;
-  border-radius: 8px;
-  background: var(--bg-hover);
-  color: var(--accent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text-mute);
   font-size: 9px;
   font-weight: 600;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
   flex-shrink: 0;
 }
 
+/* active 時のみ solid brand bg — shadow なしのフラット表現 */
 .sidebar-switcher__btn.is-active .sidebar-switcher__badge {
-  background: var(--accent);
+  background: var(--claude-brand, var(--accent));
+  border-color: transparent;
   color: #fffdf7;
-  box-shadow: var(--shadow-xs);
 }
 
 /* サイドバー個別ビュー */
@@ -413,11 +421,15 @@ body.is-resizing * {
   font-size: 13px;
   padding: 2px 6px;
   font-family: inherit;
+  transition:
+    color var(--dur-fast) var(--ease-standard),
+    background-color var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard);
 }
 
 .sidebar__section-btn:hover {
   color: var(--text);
-  background: var(--bg-toolbar);
+  background: var(--bg-hover);
   border-color: var(--border);
 }
 
@@ -433,7 +445,8 @@ body.is-resizing * {
 }
 
 .sidebar__note--error {
-  color: #e09090;
+  color: var(--claude-danger, #cf3a3a);
+  font-style: normal;
 }
 
 .sidebar__note--dim {
@@ -499,14 +512,15 @@ body.is-resizing * {
   letter-spacing: 0.04em;
 }
 
+/* Claude 公式風: outline 形式 (hairline + brand 前景)、bg は極薄 tint のみ */
 .skill-item__badge--user {
-  background: #2d4a6b;
-  color: #9ac2e8;
+  background: rgba(56, 134, 229, 0.10);
+  color: var(--claude-accent-blue, #3886e5);
 }
 
 .skill-item__badge--project {
-  background: #4a3b1d;
-  color: #d9b86a;
+  background: rgba(168, 107, 0, 0.12);
+  color: var(--claude-warning, #a86b00);
 }
 
 .skill-item__desc {
@@ -596,8 +610,9 @@ body.is-resizing * {
   background: var(--bg-hover);
 }
 
+/* Claude 公式風: active の scale 擬似触感は使わない — 色変化のみ */
 .toolbar__btn:active:not(:disabled) {
-  transform: scale(0.98);
+  background: var(--bg-active);
 }
 
 .toolbar__btn:disabled {
@@ -609,12 +624,10 @@ body.is-resizing * {
   background: var(--accent);
   color: #fffdf7;
   font-weight: 600;
-  box-shadow: var(--shadow-xs);
 }
 
 .toolbar__btn--primary:hover:not(:disabled) {
   background: var(--accent-hover);
-  box-shadow: var(--shadow-sm);
 }
 
 .toolbar__btn--warning {
@@ -715,7 +728,7 @@ body.is-resizing * {
 @keyframes app-menu-in {
   from {
     opacity: 0;
-    transform: translateY(-8px) scale(0.96);
+    transform: translateY(-4px) scale(0.98);
   }
   to {
     opacity: 1;
@@ -950,9 +963,10 @@ body.is-resizing * {
   background: var(--bg-hover);
 }
 
+/* Claude 公式風: hover の translateY 撤去 — 色/bg の変化のみ */
 .tabbar__tab:hover {
-  color: var(--text-dim);
-  transform: translateY(-1px);
+  color: var(--text);
+  background: var(--bg-hover);
 }
 
 .tabbar__tab.is-active {
@@ -960,12 +974,7 @@ body.is-resizing * {
   background: var(--bg-hover);
   font-weight: 600;
   z-index: 2;
-  box-shadow: inset 0 -2px 0 var(--accent);
-  transform: translateY(0);
-}
-
-.tabbar__tab.is-active:hover {
-  transform: translateY(0);
+  box-shadow: inset 0 -2px 0 var(--claude-brand, var(--accent));
 }
 
 /* タブ内アイコンエリア */
@@ -1116,33 +1125,37 @@ body.is-resizing * {
   flex-shrink: 0;
 }
 
+/*
+ * Claude 公式風 git status badge: rgba 12% tint + 公式セマンティックトークンの前景。
+ * 固定 dark bg (#1e3a1e 等) は warm テーマで浮くので避ける。
+ */
 .gitfile__badge--added {
-  background: #1e3a1e;
-  color: #7ee07e;
+  background: rgba(87, 138, 0, 0.12);
+  color: var(--claude-success, #578a00);
 }
 
 .gitfile__badge--modified {
-  background: #3a2f1e;
-  color: #e0c97e;
+  background: rgba(168, 107, 0, 0.12);
+  color: var(--claude-warning, #a86b00);
 }
 
 .gitfile__badge--deleted {
-  background: #3a1e1e;
-  color: #e07e7e;
+  background: rgba(207, 58, 58, 0.12);
+  color: var(--claude-danger, #cf3a3a);
 }
 
 .gitfile__badge--renamed {
-  background: #1e2a3a;
-  color: #7ea0e0;
+  background: rgba(56, 134, 229, 0.12);
+  color: var(--claude-accent-blue, #3886e5);
 }
 
 .gitfile__badge--conflict {
-  background: #3a1e3a;
-  color: #e07ee0;
+  background: rgba(114, 97, 224, 0.12);
+  color: var(--claude-accent-violet, #7261e0);
 }
 
 .gitfile__badge--other {
-  background: #2a2a2a;
+  background: var(--bg-hover);
   color: var(--text-dim);
 }
 
@@ -1266,14 +1279,28 @@ body.is-resizing * {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   color: var(--text-mute);
   font-size: 13px;
   padding: 40px;
   text-align: center;
 }
 
+/*
+ * エラー表示 (skill: claude-design セクション 8 準拠):
+ *   - 左端 2px 赤バー + 淡い赤 bg (5%) + AlertCircle 風前景色
+ *   - モーダルやアラートに逃がさずインラインで示す
+ */
 .diffview__placeholder--error {
-  color: #e09090;
+  flex-direction: column;
+  color: var(--claude-danger, #cf3a3a);
+  background: rgba(207, 58, 58, 0.05);
+  border-left: 2px solid var(--claude-danger, #cf3a3a);
+  padding: 20px 24px;
+  margin: 16px;
+  border-radius: var(--radius-sm, 6px);
+  text-align: left;
+  align-items: flex-start;
 }
 
 /* ---------- エディタ領域 ---------- */
@@ -1316,35 +1343,11 @@ body.is-resizing * {
   position: relative;
 }
 
-/* アニメーション付きグラデーションオーブ背景 */
-.welcome::before {
-  content: '';
-  position: absolute;
-  width: 500px;
-  height: 500px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(217, 119, 87, 0.08) 0%, transparent 70%);
-  filter: blur(60px);
-  animation: welcome-orb 8s var(--ease-in-out) infinite alternate;
-  pointer-events: none;
-}
-
-@keyframes welcome-orb {
-  0% { transform: translate(-10%, -10%) scale(1); opacity: 0.6; }
-  50% { transform: translate(5%, 5%) scale(1.1); opacity: 0.8; }
-  100% { transform: translate(-5%, 10%) scale(0.95); opacity: 0.6; }
-}
-
-/* テーマ別オーブカラー */
-:root[data-theme='midnight'] .welcome::before {
-  background: radial-gradient(circle, rgba(124, 107, 255, 0.08) 0%, transparent 70%);
-}
-:root[data-theme='dark'] .welcome::before {
-  background: radial-gradient(circle, rgba(14, 99, 156, 0.08) 0%, transparent 70%);
-}
-:root[data-theme='light'] .welcome::before {
-  background: radial-gradient(circle, rgba(0, 95, 184, 0.06) 0%, transparent 70%);
-}
+/*
+ * welcome ambient orb は styles/components/welcome.css に SSOT 移譲済み。
+ * 旧 500px + blur(60px) + welcome-orb animation は Claude 公式のフラット哲学と合わず撤去。
+ * テーマ別色違い (midnight/dark/light の radial-gradient) も同時廃止。
+ */
 
 .welcome__inner {
   max-width: 520px;
@@ -1427,9 +1430,9 @@ body.is-resizing * {
 }
 
 .welcome__hints li:hover {
-  border-color: var(--accent);
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-lg);
+  /* Claude 公式風: hover で色だけ変える (translate/shadow 禁止) */
+  border-color: color-mix(in srgb, var(--claude-brand, var(--accent)) 40%, var(--border));
+  background: var(--bg-elev);
 }
 
 .welcome__hints li::before {
@@ -1446,7 +1449,8 @@ body.is-resizing * {
 .welcome__hints li:nth-child(4) { animation-delay: 340ms; }
 
 @keyframes welcome-hint-in {
-  from { opacity: 0; transform: translateY(12px); }
+  /* Claude 公式風: 移動量は ±2-4px 内に抑える */
+  from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
@@ -1679,8 +1683,9 @@ body.is-resizing * {
 }
 
 @keyframes dot-glow {
-  0%, 100% { opacity: 0.4; transform: scale(0.9); }
-  50%      { opacity: 1;   transform: scale(1.15); }
+  /* Claude 公式風: scale は 0.95-1.05 の穏やかな範囲に */
+  0%, 100% { opacity: 0.55; transform: scale(0.95); }
+  50%      { opacity: 1;    transform: scale(1.05); }
 }
 
 /* 終了時はグロー非表示 */
@@ -2045,7 +2050,8 @@ body.is-resizing * {
 }
 
 .terminal-tab__agent--codex {
-  background: rgba(16, 163, 127, 0.2);
+  /* Codex (OpenAI) のブランド緑。Claude brand と差別化のためこの色は維持 */
+  background: rgba(16, 163, 127, 0.12);
   color: #10a37f;
 }
 
@@ -2061,16 +2067,21 @@ body.is-resizing * {
   letter-spacing: 0.02em;
 }
 
-/* ロール別カラー */
-.terminal-tab__role--leader { background: rgba(245, 158, 11, 0.18); color: #f59e0b; }
-.terminal-tab__role--planner { background: rgba(59, 130, 246, 0.18); color: #3b82f6; }
-.terminal-tab__role--programmer { background: rgba(16, 185, 129, 0.18); color: #10b981; }
-.terminal-tab__role--researcher { background: rgba(139, 92, 246, 0.18); color: #8b5cf6; }
-.terminal-tab__role--reviewer { background: rgba(236, 72, 153, 0.18); color: #ec4899; }
+/*
+ * ロール別カラー:
+ *   ROLE_META (team-roles.ts) と完全一致。bg は rgba 12% tint + brand 前景。
+ *   18% から 12% へ下げてフラット寄りに (Claude 公式風)。
+ *   crown アイコンは leader の役割色と独立した "gold" 慣習色 (mustard) を維持。
+ */
+.terminal-tab__role--leader { background: rgba(167, 139, 250, 0.12); color: #a78bfa; }
+.terminal-tab__role--planner { background: rgba(122, 162, 255, 0.12); color: #7aa2ff; }
+.terminal-tab__role--programmer { background: rgba(57, 211, 159, 0.12); color: #39d39f; }
+.terminal-tab__role--researcher { background: rgba(245, 176, 72, 0.12); color: #f5b048; }
+.terminal-tab__role--reviewer { background: rgba(240, 96, 96, 0.12); color: #f06060; }
 
-/* Leader アイコン */
+/* Leader crown: 金冠の慣用色 (Claude mustard) */
 .terminal-tab__leader-icon {
-  color: #f59e0b;
+  color: var(--claude-dot-awaiting, #eec467);
   flex-shrink: 0;
 }
 
@@ -2126,9 +2137,10 @@ body.is-resizing * {
 
 /* ---------- Team Builder Leader 行 ---------- */
 
+/* Leader 行: crown 色 (mustard) の極薄 tint + hairline */
 .team-builder__row--leader {
-  background: rgba(245, 158, 11, 0.06);
-  border: 1px solid rgba(245, 158, 11, 0.2);
+  background: rgba(238, 196, 103, 0.06);
+  border: 1px solid rgba(238, 196, 103, 0.24);
   border-radius: var(--radius-sm);
   padding: 5px 8px;
 }
@@ -2136,7 +2148,7 @@ body.is-resizing * {
 .team-builder__label {
   font-size: 12px;
   font-weight: 600;
-  color: #f59e0b;
+  color: var(--claude-dot-awaiting, #eec467);
   min-width: 50px;
 }
 
@@ -2413,7 +2425,7 @@ body.is-resizing * {
 @keyframes context-menu-in {
   from {
     opacity: 0;
-    transform: scale(0.96) translateY(-4px);
+    transform: scale(0.98) translateY(-2px);
   }
   to {
     opacity: 1;
@@ -2647,13 +2659,15 @@ body.is-resizing * {
   transition: border-color 0.15s, transform 0.15s;
 }
 
+/* Claude 公式風: hover は bg/border のみ、選択は brand-glow ring */
 .theme-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-sm);
+  background: var(--bg-elev);
+  border-color: var(--border-strong);
 }
 
 .theme-card.is-selected {
-  border-color: var(--accent);
+  border-color: var(--claude-brand, var(--accent));
+  box-shadow: 0 0 0 3px var(--claude-brand-glow, rgba(217, 119, 87, 0.12));
 }
 
 .theme-card input[type='radio'] {
@@ -2758,78 +2772,20 @@ body.is-resizing * {
   line-height: 1.4;
 }
 
-/* Light / Claude Light テーマ時の微調整 */
+/*
+ * Claude 公式風:
+ *   gitfile / skill-item の badge は base 側 (rgba 12% tint + claude token) が
+ *   light/dark 両テーマで機能するため、テーマ別の badge 上書きは撤去。
+ *   以前あったダーク専用 #2a3a26 / ライト専用 #d6ead9 系の重複ルールは削除済み。
+ */
 
-:root[data-theme='light'] .gitfile__badge--added,
-:root[data-theme='claude-light'] .gitfile__badge--added {
-  background: #d6ead9;
-  color: #1e5e28;
-}
-:root[data-theme='light'] .gitfile__badge--modified,
-:root[data-theme='claude-light'] .gitfile__badge--modified {
-  background: #f5e0c4;
-  color: #7a4e00;
-}
-:root[data-theme='light'] .gitfile__badge--deleted,
-:root[data-theme='claude-light'] .gitfile__badge--deleted {
-  background: #f5cfcf;
-  color: #a02020;
-}
-:root[data-theme='light'] .gitfile__badge--renamed,
-:root[data-theme='claude-light'] .gitfile__badge--renamed {
-  background: #cedcf0;
-  color: #14468a;
-}
-
-:root[data-theme='light'] .skill-item__badge--user,
-:root[data-theme='claude-light'] .skill-item__badge--user {
-  background: #e4ddd0;
-  color: #604b2a;
-}
-:root[data-theme='light'] .skill-item__badge--project,
-:root[data-theme='claude-light'] .skill-item__badge--project {
-  background: #f5d9c7;
-  color: #8a3f1a;
-}
-
-/* Claude テーマ時: アクセントバッジを温かい差し色に */
-
-:root[data-theme='claude-dark'] .skill-item__badge--user,
-:root[data-theme='claude-dark'] .skill-item__badge--project {
-  background: #3c2e24;
-  color: #e0b592;
-}
-
-/* Claude テーマ: パネルヘッダーにウォームグラデーション */
-:root[data-theme='claude-dark'] .claude-code-panel__header {
-  background: linear-gradient(90deg, var(--bg-toolbar) 0%, rgba(217, 119, 87, 0.03) 100%);
-}
-
-/* Claude テーマ用: gitfile バッジをウォームパレットに */
-
-:root[data-theme='claude-dark'] .gitfile__badge--added {
-  background: #2a3a26;
-  color: #a6d39a;
-}
-:root[data-theme='claude-dark'] .gitfile__badge--modified {
-  background: #3e2e1e;
-  color: #d9b079;
-}
-:root[data-theme='claude-dark'] .gitfile__badge--deleted {
-  background: #3a2020;
-  color: #e09090;
-}
-:root[data-theme='claude-dark'] .gitfile__badge--renamed {
-  background: #2a2e38;
-  color: #9ab0d6;
-}
-
-/* Claude テーマの固有スタイル: 温かい見出し・微シャドウ */
-
+/*
+ * Claude テーマ: モーダルシャドウは共通トークン (--shadow-modal) に統一。
+ * 以前の巨大な 80px 影 + オレンジ擬似光は Claude 公式のフラット哲学に反するので撤去。
+ */
 :root[data-theme='claude-dark'] .modal,
 :root[data-theme='claude-light'] .modal {
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35),
-    0 2px 6px rgba(217, 119, 87, 0.08);
+  box-shadow: var(--shadow-modal);
 }
 
 :root[data-theme='claude-light'] .toolbar__btn--primary,
@@ -2917,13 +2873,14 @@ body.is-resizing * {
 }
 
 @keyframes pulse-soft {
+  /* Claude 公式風: scale は 0.97↔1.03 の穏やかな範囲 */
   0%, 100% {
-    opacity: 0.5;
-    transform: scale(0.9);
+    opacity: 0.6;
+    transform: scale(0.97);
   }
   50% {
     opacity: 1;
-    transform: scale(1.1);
+    transform: scale(1.03);
   }
 }
 
@@ -2954,8 +2911,9 @@ body.is-resizing * {
     filter: drop-shadow(0 0 0 rgba(217, 119, 87, 0));
   }
   30% {
-    transform: scale(1.08);
-    filter: drop-shadow(0 0 8px rgba(217, 119, 87, 0.55));
+    /* Claude 公式風: 一瞬だけ brand glow を光らせる (scale は控えめ) */
+    transform: scale(1.02);
+    filter: drop-shadow(0 0 6px rgba(217, 119, 87, 0.35));
   }
   100% {
     transform: scale(1);
@@ -3113,81 +3071,23 @@ body.is-resizing * {
 
 /* ---------- トースト ---------- */
 
+/*
+ * Toast の SSOT は styles/components/toast.css に移譲済み。
+ * 旧定義 (bottom-right コンテナ / backdrop-blur / toast-in keyframe / tone 別 border) は
+ * toast.css の top-center + hairline + 左 2px tone バー + 静的 fade-in に置き換えられた。
+ * animation: toast-in が cascade で漏れると二重アニメになるため、本ブロックは完全削除。
+ */
+
+/* --------- toast 最小限: コンテナ配置は toast.css が SSOT。fallback のみ残す --------- */
 .toast-container {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
   z-index: var(--z-toast);
   pointer-events: none;
 }
-
-.toast {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 300px;
-  max-width: 440px;
-  padding: 12px 16px;
-  background: var(--bg-panel);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-lg);
-  font-size: var(--text-base);
-  font-weight: 500;
-  pointer-events: auto;
-  backdrop-filter: blur(12px);
-  opacity: 1;
-  transform: translateX(0);
-  transition:
-    opacity var(--dur-normal) var(--ease-out-soft),
-    transform var(--dur-normal) var(--ease-out-soft);
-  animation: toast-in var(--dur-normal) var(--ease-spring);
-}
-
-.toast[data-state='exiting'] {
-  opacity: 0;
-  transform: translateX(24px);
-  animation: none;
-}
-
-.toast--error {
-  border-left-color: #e07e7e;
-}
-
-.toast--success {
-  border-left-color: #7ee09e;
-}
-
-.toast--warning {
-  border-left-color: var(--warning);
-}
-
 .toast__message {
   flex: 1;
 }
-
-.toast__action {
-  background: transparent;
-  color: var(--accent);
-  border: 1px solid var(--accent);
-  padding: 4px 10px;
-  font-size: 11px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font-family: inherit;
-  font-weight: 500;
-}
-
-.toast__action:hover {
-  background: var(--accent);
-  color: #fffdf7;
-}
-
 .toast__close {
   display: inline-flex;
   align-items: center;
@@ -3197,27 +3097,12 @@ body.is-resizing * {
   color: var(--text-mute);
   cursor: pointer;
   padding: 4px;
-  border-radius: 3px;
-  transition: background 0.1s, color 0.1s;
+  transition: background var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard);
 }
-
 .toast__close:hover {
   color: var(--text);
   background: var(--bg-hover);
-}
-
-@keyframes toast-in {
-  from {
-    opacity: 0;
-    transform: translateX(100%) scale(0.9);
-  }
-  60% {
-    transform: translateX(-4px) scale(1.02);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0) scale(1);
-  }
 }
 
 /* ---------- 密度カード / 自動保存チェックボックス ---------- */
@@ -3344,35 +3229,12 @@ body.is-resizing * {
     opacity var(--dur-fast) var(--ease-out-soft);
 }
 
-.toolbar__btn:active:not(:disabled),
-.modal__btn:active:not(:disabled),
-.app-menu__trigger:active,
-.app-menu__item:active,
-.context-menu__item:active,
-.sidebar-switcher__btn:active,
-.tabbar__close:active,
-.tabbar__pin-btn:active,
-.cmdp__item:active {
-  transform: scale(0.98);
-  transition-duration: var(--dur-instant);
-}
-
-.toolbar__btn--primary:hover:not(:disabled),
-.toolbar__btn--icon:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.toolbar__btn--primary:active:not(:disabled),
-.toolbar__btn--icon:active:not(:disabled) {
-  transform: translateY(0) scale(0.98);
-}
-
-.theme-card:active,
-.lang-card:active,
-.density-card:active {
-  transform: scale(0.98);
-  transition-duration: var(--dur-instant);
-}
+/*
+ * Claude 公式風 (skill: claude-design):
+ *   擬似触感のための transform (scale/translateY) は使わない。
+ *   active 状態は色の変化 (bg-active) のみで表現する。
+ *   以前あった toolbar/menu/tabbar/cmdp/theme-card の :active scale(0.98) は撤去済み。
+ */
 
 /* Close ボタン（モーダル）は小さいので scale のみ */
 .modal__close {
@@ -3734,7 +3596,7 @@ body.is-resizing * {
 }
 
 .filetree__error {
-  color: #e09090;
+  color: var(--claude-danger, #cf3a3a);
 }
 
 /* ---------- チーム履歴 ---------- */
@@ -3967,7 +3829,7 @@ body.is-resizing * {
 @keyframes user-menu-in {
   from {
     opacity: 0;
-    transform: translateY(4px) scale(0.98);
+    transform: translateY(2px) scale(0.99);
   }
   to {
     opacity: 1;

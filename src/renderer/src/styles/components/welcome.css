@@ -1,19 +1,22 @@
+/*
+ * Claude 公式風: Welcome は warm off-white / near-black にほんの淡いアクセントだけ。
+ * 大きな radial-gradient glow / blur は使わず、トップ左に極小ヒントに留める。
+ */
 .welcome {
   position: relative;
   padding: 40px 32px;
-  background:
-    radial-gradient(circle at top left, color-mix(in srgb, var(--accent) 18%, transparent) 0%, transparent 36%),
-    linear-gradient(180deg, color-mix(in srgb, var(--bg) 84%, transparent) 0%, transparent 100%);
+  background: var(--bg);
 }
 
 .welcome::before {
-  inset: auto auto 8% -10%;
-  width: 280px;
-  height: 280px;
-  border-radius: 999px;
+  inset: 0 auto auto 0;
+  width: 320px;
+  height: 320px;
   background:
-    radial-gradient(circle, color-mix(in srgb, var(--accent) 18%, transparent) 0%, transparent 70%);
-  filter: blur(12px);
+    radial-gradient(circle at top left,
+      color-mix(in srgb, var(--claude-brand, var(--accent)) 8%, transparent) 0%,
+      transparent 70%);
+  pointer-events: none;
 }
 
 .welcome__inner {
@@ -25,37 +28,44 @@
 }
 
 .welcome__hero {
+  /* Claude 公式風: hairline + フラット bg + 軽い shadow のみ */
   position: relative;
   padding: 28px;
   border: 1px solid var(--border);
-  border-radius: 24px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--bg-panel) 92%, white 8%) 0%, transparent 100%),
-    color-mix(in srgb, var(--bg-panel) 86%, transparent);
-  box-shadow: var(--shadow-lg);
+  border-radius: var(--radius-lg, 16px);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-sm);
   overflow: hidden;
 }
 
 .welcome__eyebrow {
+  /* Claude 公式風: 大面積の brand tint を避け、hairline + brand 前景のみ */
   display: inline-flex;
   align-items: center;
-  min-height: 28px;
+  min-height: 26px;
   padding: 0 12px;
+  border: 1px solid var(--claude-brand-glow, rgba(217, 119, 87, 0.12));
   border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-active) 68%, transparent);
-  color: var(--accent);
+  background: transparent;
+  color: var(--claude-brand, var(--accent));
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
+/*
+ * Claude 公式風: 大見出しは serif + 細字 (weight 330 相当) が特徴。
+ * Web フォントが無い環境でも高品位 serif にフォールバック。
+ */
 .welcome__title {
   margin: 18px 0 12px;
   max-width: 12ch;
+  font-family: var(--font-claude-response, var(--heading-font));
   font-size: clamp(42px, 6vw, 72px);
-  line-height: 0.96;
-  letter-spacing: -0.04em;
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
 }
 
 .welcome__subtitle {
@@ -91,9 +101,9 @@
   gap: 16px;
   padding: 22px;
   border: 1px solid var(--border);
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--bg-panel) 84%, transparent);
-  box-shadow: var(--shadow-md);
+  border-radius: var(--radius-lg, 16px);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-xs);
 }
 
 .welcome__section-head {
@@ -143,6 +153,9 @@
   grid-template-columns: 1fr;
 }
 
+/*
+ * Claude 公式風 card: フラット bg、hover で border が brand 寄りに滲むのみ (translate 禁止)。
+ */
 .welcome__card {
   display: flex;
   flex-direction: column;
@@ -150,19 +163,16 @@
   min-height: 126px;
   padding: 16px;
   border: 1px solid var(--border);
-  border-radius: 16px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg) 76%, transparent) 0%, transparent 100%);
+  border-radius: var(--radius-md, 14px);
+  background: var(--bg);
   transition:
-    border-color 120ms cubic-bezier(0.25, 1, 0.5, 1),
-    transform 180ms cubic-bezier(0.34, 1.26, 0.64, 1),
-    box-shadow 180ms cubic-bezier(0.25, 1, 0.5, 1);
+    background-color var(--dur-fast, 180ms) var(--ease-standard),
+    border-color var(--dur-fast, 180ms) var(--ease-standard);
 }
 
 .welcome__card:hover {
-  border-color: color-mix(in srgb, var(--accent) 18%, var(--border));
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-sm);
+  border-color: color-mix(in srgb, var(--claude-brand, var(--accent)) 30%, var(--border));
+  background: var(--bg-elev);
 }
 
 .welcome__card-label {
@@ -189,14 +199,17 @@
 }
 
 .welcome__hint-key {
+  /* Claude 公式風: outline 形式の chip。大面積 brand tint 禁止 */
   align-self: flex-start;
-  min-height: 28px;
+  min-height: 26px;
   padding: 0 10px;
+  border: 1px solid var(--claude-brand-glow, rgba(217, 119, 87, 0.12));
   border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-active) 70%, transparent);
-  color: var(--accent);
+  background: transparent;
+  color: var(--claude-brand, var(--accent));
   font-size: 12px;
-  font-weight: 700;
+  font-weight: 600;
+  font-family: var(--mono-font);
 }
 
 @media (max-width: 960px) {

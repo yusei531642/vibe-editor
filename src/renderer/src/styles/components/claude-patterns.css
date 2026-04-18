@@ -1,0 +1,147 @@
+/* ===========================================================================
+ * claude-patterns.css — Claude Code / Claude.ai 由来のビジュアルパターン
+ *
+ * skill: `.claude/skills/claude-design/SKILL.md` を実装側に落としたユーティリティ集。
+ * 新規コンポーネントでこのクラスを重ねるだけで「Claude 公式風」の表現になる。
+ *
+ * 提供クラス:
+ *   .cc-dot           — ⏺ アクセントドット (8px, brand 色 + glow)
+ *   .cc-spinner       — 6 フレーム flower アニメーション (·✻✽✶✳✢)
+ *   .cc-tool-output   — ⎿ ツール出力の引き込み線 (左 2px border + muted)
+ *   .cc-prompt        — 入力枠 (hairline + focus glow)
+ *   .cc-prompt::before → `›` インジケーター
+ * =========================================================================== */
+
+/* ---------- ⏺ メッセージ開始ドット ---------- */
+.cc-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--claude-brand, var(--accent));
+  box-shadow: 0 0 0 3px var(--claude-brand-glow, rgba(217, 119, 87, 0.12));
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+.cc-dot--muted {
+  background: var(--text-mute, #97958c);
+  box-shadow: none;
+}
+.cc-dot--success {
+  background: var(--claude-success, #578a00);
+  box-shadow: 0 0 0 3px rgba(87, 138, 0, 0.12);
+}
+.cc-dot--danger {
+  background: var(--claude-danger, #cf3a3a);
+  box-shadow: 0 0 0 3px rgba(207, 58, 58, 0.12);
+}
+
+/*
+ * ---------- Spinner (6 frame "flower") ----------
+ * Claude Code の録画から再構成した 6 コマアニメ: `·` → `✻` → `✽` → `✶` → `✳` → `✢` → loop。
+ * steps(6) を使うと各フレームがカクッと切り替わり CLI の挙動に近い表現になる。
+ */
+@keyframes cc-spinner-flower {
+  0%   { content: '·'; }
+  16%  { content: '✻'; }
+  33%  { content: '✽'; }
+  50%  { content: '✶'; }
+  66%  { content: '✳'; }
+  83%  { content: '✢'; }
+  100% { content: '·'; }
+}
+.cc-spinner {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  color: var(--claude-brand, var(--accent));
+  font-family: var(--mono-font);
+  line-height: 1;
+  user-select: none;
+}
+.cc-spinner::before {
+  content: '·';
+  animation: cc-spinner-flower 900ms steps(6, end) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .cc-spinner::before {
+    animation: none;
+    content: '·';
+  }
+}
+
+/*
+ * ---------- ⎿ ツール出力引き込み線 ----------
+ * Claude Code が `Bash(...)` 等の実行結果を字下げして表示する際の視覚パターン。
+ * Web では左 2px border + インデント + muted text で代替。
+ */
+.cc-tool-output {
+  border-left: 2px solid var(--border, rgba(255, 255, 255, 0.10));
+  padding: 2px 0 2px 12px;
+  margin-left: 8px;
+  color: var(--text-mute, #97958c);
+  font-family: var(--mono-font);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+/*
+ * ---------- Prompt 入力枠 ----------
+ * 左端に `›` インジケーター、focus 時のみ brand 色 + glow リング。
+ * input/textarea に `.cc-prompt` を付けて使う。`::before` 用のラッパ要素が必要な場合は
+ * `.cc-prompt-wrap` を親に付けて位置決めすること。
+ */
+.cc-prompt-wrap {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+}
+.cc-prompt-wrap::before {
+  content: '›';
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-mute, #97958c);
+  font-family: var(--mono-font);
+  font-size: 14px;
+  line-height: 1;
+  pointer-events: none;
+}
+.cc-prompt {
+  flex: 1;
+  padding: 10px 12px 10px 28px;
+  background: var(--bg-panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 10px);
+  font-family: var(--ui-font);
+  font-size: 14px;
+  line-height: 1.5;
+  outline: none;
+  transition:
+    border-color var(--dur-fast, 180ms) var(--ease-standard),
+    box-shadow var(--dur-fast, 180ms) var(--ease-standard);
+}
+.cc-prompt:focus {
+  border-color: var(--claude-brand, var(--accent));
+  box-shadow: 0 0 0 3px var(--claude-brand-glow, rgba(217, 119, 87, 0.12));
+}
+
+/*
+ * ---------- Status line (Claude Code 風 "✻ 思索中 3s · Esc で中断") ----------
+ * 先頭にスピナー、動名詞、経過時間・中断ヒントが続く構造をスタイル化。
+ */
+.cc-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--ui-font);
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.cc-status__hint {
+  color: var(--text-mute);
+  font-variant-numeric: tabular-nums;
+}

@@ -1,12 +1,14 @@
+/*
+ * Claude 公式風: Claude CLI 未検出時のガイダンス画面。
+ * 強い radial glow や gradient を避け、静かな instructional 構成に。
+ */
 .claude-not-found {
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 100%;
   padding: 28px;
-  background:
-    radial-gradient(circle at top, color-mix(in srgb, var(--accent) 12%, transparent) 0%, transparent 32%),
-    transparent;
+  background: var(--bg);
 }
 
 .claude-not-found__panel {
@@ -16,33 +18,43 @@
   gap: 16px;
   padding: 28px;
   border: 1px solid var(--border);
-  border-radius: 24px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 92%, white 8%) 0%, var(--bg-panel) 100%);
-  box-shadow: var(--shadow-lg);
+  border-radius: var(--radius-lg, 16px);
+  background: var(--bg-panel);
+  box-shadow: var(--shadow-sm);
 }
 
 .claude-not-found__icon {
-  width: 64px;
-  height: 64px;
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--bg-active) 72%, transparent);
-  color: var(--accent);
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--claude-brand-glow, rgba(217, 119, 87, 0.12));
+  color: var(--claude-brand, var(--accent));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
+/* Outline 形式の eyebrow: brand 前景 + hairline */
 .claude-not-found__eyebrow {
-  color: var(--accent);
+  align-self: flex-start;
+  padding: 2px 10px;
+  border: 1px solid var(--claude-brand-glow, rgba(217, 119, 87, 0.18));
+  border-radius: 999px;
+  color: var(--claude-brand, var(--accent));
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
+/* Claude 公式風: 大見出しは serif + 細字 */
 .claude-not-found__title {
   margin: 0;
-  font-size: 30px;
-  line-height: 1;
-  letter-spacing: -0.04em;
+  font-family: var(--font-claude-response, var(--heading-font));
+  font-size: 28px;
+  font-weight: 400;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
 }
 
 .claude-not-found__body {
@@ -54,10 +66,11 @@
 
 .claude-not-found__detail {
   margin: 0;
-  padding: 12px 14px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  border-left: 2px solid var(--claude-brand, var(--accent));
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg);
   color: var(--text-mute);
   font-family: var(--mono-font);
   font-size: 12px;
@@ -65,17 +78,17 @@
 
 .claude-not-found__steps {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .claude-not-found__step {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 12px;
-  padding: 14px;
+  padding: 12px 14px;
   border: 1px solid var(--border);
-  border-radius: 16px;
-  background: color-mix(in srgb, var(--bg-hover) 72%, transparent);
+  border-radius: var(--radius-md, 14px);
+  background: var(--bg);
 }
 
 .claude-not-found__step strong {
@@ -91,17 +104,20 @@
   line-height: 1.5;
 }
 
+/* Step 番号: Claude Code の ⏺ マーカーに着想 (円 + glow + brand 色の数字) */
 .claude-not-found__step-index {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-active) 76%, transparent);
-  color: var(--accent);
-  font-size: 12px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--claude-brand-glow, rgba(217, 119, 87, 0.12));
+  color: var(--claude-brand, var(--accent));
+  font-size: 11px;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
 }
 
 .claude-not-found__actions {
@@ -110,18 +126,18 @@
 
 .claude-not-found__install {
   align-self: flex-start;
-  min-height: 32px;
+  min-height: 30px;
   padding: 0 12px;
   border: 1px solid var(--border);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-hover) 72%, transparent);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--text);
   transition:
-    background-color 120ms cubic-bezier(0.25, 1, 0.5, 1),
-    border-color 120ms cubic-bezier(0.25, 1, 0.5, 1),
-    transform 180ms cubic-bezier(0.34, 1.26, 0.64, 1);
+    background-color var(--dur-fast, 180ms) var(--ease-standard),
+    border-color var(--dur-fast, 180ms) var(--ease-standard);
 }
 
 .claude-not-found__install:hover {
-  transform: translateY(-1px);
-  border-color: color-mix(in srgb, var(--accent) 16%, var(--border));
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
 }

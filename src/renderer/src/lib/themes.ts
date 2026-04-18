@@ -21,19 +21,25 @@ export interface ThemeVars {
   textMute: string;
   surfaceGlass: string;
   focusRing: string;
-  monacoTheme: 'vs-dark' | 'vs' | 'hc-black';
+  monacoTheme: 'vs-dark' | 'vs' | 'hc-black' | 'claude-dark' | 'claude-light';
 }
 
 export const THEMES: Record<ThemeName, ThemeVars> = {
   'claude-dark': {
-    bg: '#141413',
-    bgPanel: '#1f1e1d',
-    bgSidebar: '#191817',
-    bgToolbar: 'rgba(20, 20, 19, 0.62)',
-    bgElev: '#2a2826',
-    border: 'rgba(241, 239, 232, 0.08)',
-    borderStrong: 'rgba(241, 239, 232, 0.14)',
-    bgHover: 'rgba(241, 239, 232, 0.05)',
+    /*
+     * Claude.ai 本体の CSS 変数実測値に準拠:
+     *   app bg = --_gray-840 (#171716), surface1 = --_gray-800 (#1f1f1e),
+     *   deep   = --_gray-860 (#121212), surface raised = --_gray-750 (#2c2c2a),
+     *   text   = --_gray-20 (#f8f8f6) / 200 (#c3c2b7) / 350 (#97958c)
+     */
+    bg: '#171716',
+    bgPanel: '#1f1f1e',
+    bgSidebar: '#121212',
+    bgToolbar: 'rgba(23, 23, 22, 0.62)',
+    bgElev: '#2c2c2a',
+    border: 'rgba(248, 248, 246, 0.10)',
+    borderStrong: 'rgba(248, 248, 246, 0.16)',
+    bgHover: 'rgba(248, 248, 246, 0.06)',
     bgActive: 'rgba(217, 119, 87, 0.14)',
     accent: '#d97757',
     accentHover: '#e88a6a',
@@ -41,35 +47,39 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
     accentTint: 'rgba(217, 119, 87, 0.12)',
     warning: '#d4a27f',
     warningHover: '#e0b592',
-    text: '#f1efe8',
-    textDim: '#a8a69c',
-    textMute: '#6f6d64',
-    surfaceGlass: 'rgba(20, 20, 19, 0.62)',
-    focusRing: '0 0 0 1px rgba(20, 20, 19, 0.42), 0 0 0 3px rgba(217, 119, 87, 0.28)',
-    monacoTheme: 'vs-dark'
+    text: '#f8f8f6',
+    textDim: '#c3c2b7',
+    textMute: '#97958c',
+    surfaceGlass: 'rgba(23, 23, 22, 0.62)',
+    focusRing: '0 0 0 3px rgba(217, 119, 87, 0.28)',
+    monacoTheme: 'claude-dark'
   },
   'claude-light': {
-    bg: '#f5f4ed',
-    bgPanel: '#faf9f2',
-    bgSidebar: '#f0ece1',
-    bgToolbar: 'rgba(250, 249, 242, 0.68)',
+    /*
+     * Claude.ai 実測: bg-100=#f8f8f6 / bg-200=#f4f4f1 / bg-300=#efeeeb / bg-400=#e6e5e0,
+     * text=#141413 / #373734 / #7b7974, accent=#d97757 (hover #c6613f)
+     */
+    bg: '#f8f8f6',
+    bgPanel: '#ffffff',
+    bgSidebar: '#f4f4f1',
+    bgToolbar: 'rgba(248, 248, 246, 0.72)',
     bgElev: '#ffffff',
-    border: '#e8e3d4',
-    borderStrong: '#d6cfba',
-    bgHover: 'rgba(67, 51, 34, 0.05)',
-    bgActive: 'rgba(201, 100, 66, 0.12)',
-    accent: '#c96442',
-    accentHover: '#b5583a',
+    border: 'rgba(31, 30, 29, 0.10)',
+    borderStrong: 'rgba(31, 30, 29, 0.18)',
+    bgHover: 'rgba(31, 30, 29, 0.05)',
+    bgActive: 'rgba(217, 119, 87, 0.12)',
+    accent: '#d97757',
+    accentHover: '#c6613f',
     accentSoft: '#d97757',
-    accentTint: 'rgba(201, 100, 66, 0.10)',
-    warning: '#b87532',
-    warningHover: '#a46026',
+    accentTint: 'rgba(217, 119, 87, 0.10)',
+    warning: '#a86b00',
+    warningHover: '#8f5a00',
     text: '#141413',
-    textDim: '#6b6a63',
-    textMute: '#9c9a8f',
-    surfaceGlass: 'rgba(250, 249, 242, 0.68)',
-    focusRing: '0 0 0 1px rgba(255, 255, 255, 0.92), 0 0 0 3px rgba(201, 100, 66, 0.22)',
-    monacoTheme: 'vs'
+    textDim: '#373734',
+    textMute: '#7b7974',
+    surfaceGlass: 'rgba(248, 248, 246, 0.72)',
+    focusRing: '0 0 0 3px rgba(217, 119, 87, 0.22)',
+    monacoTheme: 'claude-light'
   },
   dark: {
     bg: '#0b0d12',
@@ -168,9 +178,16 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
 };
 
 const HEADING_FONT_SERIF =
-  "'Iowan Old Style', 'Source Serif 4', 'Source Serif Pro', Georgia, 'Times New Roman', 'Yu Mincho', serif";
+  "'Source Serif 4', 'Source Serif Pro', 'Iowan Old Style', Georgia, 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif";
 const HEADING_FONT_SANS =
   "'Geist', 'Inter', 'Inter Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', sans-serif";
+/*
+ * Claude 公式風: エージェント応答本文に使う書体。
+ * claude テーマでは serif (Claude.ai の返答表示と揃える)、それ以外のテーマでは sans に戻して
+ * 見た目のちぐはぐを避ける。コンポーネント側は `var(--font-claude-response)` で参照する。
+ */
+const CLAUDE_RESPONSE_SERIF = HEADING_FONT_SERIF;
+const CLAUDE_RESPONSE_SANS = HEADING_FONT_SANS;
 
 function isClaudeTheme(name: ThemeName): boolean {
   return name === 'claude-light' || name === 'claude-dark';
@@ -227,11 +244,24 @@ export function applyTheme(name: ThemeName, uiFontFamily: string, uiFontSize: nu
   root.style.setProperty('--ui-font', uiFontFamily);
   root.style.setProperty('--ui-font-size', `${uiFontSize}px`);
   root.style.setProperty('--heading-font', claudeTheme ? HEADING_FONT_SERIF : HEADING_FONT_SANS);
-  root.style.setProperty('--radius-sm', claudeTheme ? '10px' : '8px');
-  root.style.setProperty('--radius', claudeTheme ? '14px' : '12px');
+  // Claude 公式風: エージェント応答書体。claude テーマのみ serif。
+  root.style.setProperty(
+    '--font-claude-response',
+    claudeTheme ? CLAUDE_RESPONSE_SERIF : CLAUDE_RESPONSE_SANS
+  );
+  /*
+   * radius スケール (Claude.ai 実測準拠):
+   *   sm  6px  — button / chip
+   *   md 10px  — input (実測 9.6px ≒ 10px)
+   *   lg 14px  — card / panel
+   *   xl 16px  — modal
+   * 他テーマは従来どおり 8/12/16/20 系列を維持。
+   */
+  root.style.setProperty('--radius-sm', claudeTheme ? '6px' : '8px');
+  root.style.setProperty('--radius', claudeTheme ? '10px' : '12px');
   root.style.setProperty('--radius-md', claudeTheme ? '14px' : '12px');
-  root.style.setProperty('--radius-lg', claudeTheme ? '18px' : '16px');
-  root.style.setProperty('--radius-xl', claudeTheme ? '24px' : '20px');
+  root.style.setProperty('--radius-lg', claudeTheme ? '16px' : '16px');
+  root.style.setProperty('--radius-xl', claudeTheme ? '20px' : '20px');
   root.dataset.theme = name;
 }
 

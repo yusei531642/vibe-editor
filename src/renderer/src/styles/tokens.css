@@ -14,6 +14,15 @@
     'Hiragino Sans', 'Yu Gothic UI', sans-serif;
   --mono-font: 'Geist Mono', 'Cascadia Code', 'JetBrains Mono', 'SFMono-Regular', 'Consolas',
     'Liberation Mono', 'Menlo', monospace;
+  /*
+   * Claude 公式風: エージェント応答は serif、ユーザー入力・UI は sans。
+   * Web フォント未導入なので Source Serif 4 をまず期待し、OS 収録の高品位 serif にフォールバック。
+   * 本文で使う場合のみ `font-family: var(--font-claude-response)` を明示指定する。
+   * claude テーマ以外では applyTheme 側で sans 系に差し替え。
+   */
+  --font-claude-response:
+    'Source Serif 4', 'Source Serif Pro', 'Iowan Old Style', Georgia,
+    'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
   --ui-font-size: 14px;
 
   --text-xs: 11px;
@@ -51,16 +60,19 @@
   --shell-panel-w: var(--claude-code-width, 460px);
   --shell-panel-min: 320px;
 
-  /* ---------- Surface (default = claude-dark) ---------- */
-  --bg: #141413;
-  --bg-panel: #1f1e1d;
-  --bg-sidebar: #191817;
-  --bg-toolbar: rgba(20, 20, 19, 0.62);
-  --bg-elev: #2a2826;
-  --bg-hover: rgba(241, 239, 232, 0.05);
+  /* ---------- Surface (default = claude-dark)
+   * Claude.ai 実測値に準拠: warm near-black (色相 55°) の階段。
+   * 純黒 (#000) や純中立グレーは禁止 — warm tone で統一する。
+   */
+  --bg: #171716;           /* app background (Claude.ai: --_gray-840) */
+  --bg-panel: #1f1f1e;     /* surface 1 (Claude.ai: --_gray-800) */
+  --bg-sidebar: #121212;   /* deep surface (Claude.ai: --_gray-860) */
+  --bg-toolbar: rgba(23, 23, 22, 0.62);
+  --bg-elev: #2c2c2a;      /* raised / hover surface (Claude.ai: --_gray-750) */
+  --bg-hover: rgba(248, 248, 246, 0.06);
   --bg-active: rgba(217, 119, 87, 0.14);
-  --border: rgba(241, 239, 232, 0.08);
-  --border-strong: rgba(241, 239, 232, 0.14);
+  --border: rgba(248, 248, 246, 0.10);
+  --border-strong: rgba(248, 248, 246, 0.16);
   --surface-base: var(--bg);
   --surface-panel: var(--bg-panel);
   --surface-sidebar: var(--bg-sidebar);
@@ -77,10 +89,10 @@
   --glass-border: rgba(255, 255, 255, 0.06);
   --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 
-  /* ---------- Content ---------- */
-  --text: #f1efe8;
-  --text-dim: #a8a69c;
-  --text-mute: #6f6d64;
+  /* ---------- Content (Claude.ai 実測: --_gray-20/200/350) ---------- */
+  --text: #f8f8f6;
+  --text-dim: #c3c2b7;
+  --text-mute: #97958c;
   --text-strong: var(--text);
   --text-secondary: var(--text-dim);
   --text-subtle: var(--text-mute);
@@ -106,8 +118,26 @@
   --coral-600: #b5583a;
   --coral-800: #7c3d29;
 
+  /* ----------
+   * Claude ブランド・セマンティックトークン (skill: claude-design より)
+   * 背景の大面積塗りは禁止。CTA ボタン / 状態ドット / focus ring / リンクに限定。
+   * ---------- */
+  --claude-brand: #d97757;          /* terra cotta / Claude Orange */
+  --claude-brand-strong: #c6613f;   /* hover / pressed */
+  --claude-brand-glow: rgba(217, 119, 87, 0.12);
+  --claude-accent-blue: #3886e5;
+  --claude-accent-violet: #7261e0;
+
+  --claude-success: #578a00;
+  --claude-warning: #a86b00;
+  --claude-danger: #cf3a3a;
+
+  /* status dot (Claude.ai 実値) */
+  --claude-dot-ready: #70b8ff;
+  --claude-dot-awaiting: #eec467;
+
   /* ---------- Focus / Motion ---------- */
-  --focus-ring: 0 0 0 1px rgba(20, 20, 19, 0.42), 0 0 0 3px rgba(217, 119, 87, 0.28);
+  --focus-ring: 0 0 0 3px var(--claude-brand-glow);
 
   --dur-instant: 120ms;
   --dur-fast: 180ms;
@@ -128,21 +158,20 @@
   --ease-spring: cubic-bezier(0.34, 1.26, 0.64, 1);
   --ease-snap: cubic-bezier(0.22, 1, 0.36, 1);
 
-  /* ---------- Shadow ---------- */
-  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.03);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.42), 0 8px 16px rgba(0, 0, 0, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.48), 0 1px 2px rgba(0, 0, 0, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  --shadow-lg: 0 18px 36px rgba(0, 0, 0, 0.52), 0 6px 16px rgba(0, 0, 0, 0.28),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --shadow-xl: 0 28px 56px rgba(0, 0, 0, 0.58), 0 8px 20px rgba(0, 0, 0, 0.34),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4),
-    0 0 0 1px rgba(255, 255, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --shadow-popover: 0 0 0 1px var(--border), 0 16px 32px rgba(0, 0, 0, 0.48),
-    0 2px 8px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.04);
-  --shadow-accent: 0 0 24px rgba(217, 119, 87, 0.18);
+  /*
+   * ---------- Shadow ----------
+   * Claude.ai は原則フラット — シャドウは modal/dropdown 以外はほぼ使わない。
+   * 以前より全段階を約 40% 弱め、`inset highlight` を取り除いて "浮き" を抑制。
+   * 代わりに border (hairline) とレイヤー bg の階段で深度を作る。
+   */
+  --shadow-xs: 0 1px 1px rgba(0, 0, 0, 0.14);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.20);
+  --shadow-md: 0 2px 6px rgba(0, 0, 0, 0.22);
+  --shadow-lg: 0 6px 16px rgba(0, 0, 0, 0.28);
+  --shadow-xl: 0 12px 28px rgba(0, 0, 0, 0.34);
+  --shadow-modal: 0 12px 32px rgba(0, 0, 0, 0.40), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-popover: 0 0 0 1px var(--border), 0 8px 20px rgba(0, 0, 0, 0.28);
+  --shadow-accent: 0 0 0 3px var(--claude-brand-glow);
 
   /* ---------- Ambient ---------- */
   --noise-opacity: 0.02;

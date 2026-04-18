@@ -81,16 +81,21 @@
   color: var(--fg);
   background: transparent;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm, 6px);
   cursor: pointer;
   transition:
-    background-color 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
+    background-color var(--dur-fast, 180ms) var(--ease-standard),
+    border-color var(--dur-fast, 180ms) var(--ease-standard),
+    color var(--dur-fast, 180ms) var(--ease-standard);
 }
 .canvas-btn:hover {
   background: var(--bg-hover);
   border-color: var(--border-strong);
+}
+.canvas-btn:focus-visible {
+  outline: none;
+  border-color: var(--claude-brand, var(--accent));
+  box-shadow: 0 0 0 3px var(--claude-brand-glow, rgba(217, 119, 87, 0.12));
 }
 .canvas-btn:active {
   background: var(--bg-active);
@@ -100,12 +105,12 @@
   padding: 0;
 }
 .canvas-btn--primary {
-  background: var(--accent);
+  background: var(--claude-brand, var(--accent));
   border-color: transparent;
-  color: #fff;
+  color: #fffdf7;
 }
 .canvas-btn--primary:hover {
-  background: var(--accent-hover);
+  background: var(--claude-brand-strong, var(--accent-hover));
   border-color: transparent;
 }
 .canvas-btn--ghost {
@@ -128,10 +133,8 @@
   min-width: 240px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.12),
-    0 8px 24px rgba(0, 0, 0, 0.35);
+  border-radius: var(--radius-sm, 8px);
+  box-shadow: var(--shadow-popover);
   z-index: 20;
   overflow: hidden;
 }
@@ -162,7 +165,7 @@
 }
 .canvas-popover__tab.is-active {
   color: var(--fg);
-  border-bottom-color: var(--accent);
+  border-bottom-color: var(--claude-brand, var(--accent));
 }
 .canvas-popover__tab-badge {
   font-size: 9px;
@@ -194,10 +197,10 @@
 }
 .canvas-popover__item--emph {
   font-weight: 600;
-  color: var(--accent);
+  color: var(--claude-brand, var(--accent));
 }
 .canvas-popover__item--emph:hover {
-  background: var(--accent-tint);
+  background: var(--claude-brand-glow, var(--accent-tint));
 }
 .canvas-popover__section {
   padding: 6px 12px;
@@ -307,7 +310,13 @@
   color: var(--fg);
 }
 
-/* ---------- agent card (Linear/Raycast 風にトーンダウン) ---------- */
+/* ----------
+ * Agent card — Claude 公式風 (skill: claude-design 準拠)
+ *
+ *   - フラット (heavy shadow 禁止)、hairline border + 左端 2px ロール色バー
+ *   - radius は --radius-md (claude テーマで 14px)
+ *   - hover でのみ border が accent 寄りに滲む。発光やスケール変化はしない
+ * ---------- */
 .canvas-agent-card {
   /* --agent-accent は AgentNodeCard 側で style として注入する */
   width: 100%;
@@ -316,11 +325,11 @@
   flex-direction: column;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-md, 14px);
   overflow: hidden;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-sm);
   position: relative;
-  transition: border-color 160ms ease;
+  transition: border-color var(--dur-fast, 180ms) var(--ease-standard, cubic-bezier(0.4, 0, 0.2, 1));
 }
 /* 左端 2px のロール色バー (ボーダー発光の代替) */
 .canvas-agent-card::before {
@@ -334,7 +343,7 @@
   opacity: 0.75;
 }
 .canvas-agent-card:hover {
-  border-color: color-mix(in srgb, var(--agent-accent, var(--accent)) 40%, var(--border));
+  border-color: color-mix(in srgb, var(--agent-accent, var(--accent)) 35%, var(--border));
 }
 
 .canvas-agent-card__header {
@@ -359,21 +368,39 @@
   gap: 8px;
   min-width: 0;
 }
+/*
+ * Avatar: Claude Code の `⏺` メッセージマーカーに着想。
+ * 円形 + ロール色 + 微弱な glow リング。文字は role glyph (P/R/... 1 文字)。
+ */
 .canvas-agent-card__avatar {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
   background: var(--agent-accent, var(--accent));
   color: #0a0a0d;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
   flex-shrink: 0;
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--agent-accent, var(--accent)) 18%, transparent);
+  transition: box-shadow var(--dur-fast, 180ms) var(--ease-standard);
 }
+.canvas-agent-card:hover .canvas-agent-card__avatar {
+  box-shadow: 0 0 0 4px
+    color-mix(in srgb, var(--agent-accent, var(--accent)) 26%, transparent);
+}
+/*
+ * Title: Claude 公式風に serif。
+ * claude テーマ時は --font-claude-response が serif、それ以外は sans に解決される
+ * (themes.ts の applyTheme で動的切替)。
+ */
 .canvas-agent-card__title {
-  font-weight: 600;
+  font-family: var(--font-claude-response, var(--ui-font));
+  font-weight: 500;
+  letter-spacing: var(--tracking-tight);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -451,7 +478,8 @@
   animation: canvas-agent-pulse 0.9s ease-in-out infinite;
 }
 .canvas-agent-status--thinking .canvas-agent-status__dot {
-  background: #f5b048;
+  /* Claude.ai 実測: --dot-awaiting (#eec467) の淡いマスタード */
+  background: var(--claude-dot-awaiting, #eec467);
 }
 @keyframes canvas-agent-pulse {
   0%, 100% { opacity: 1; }
@@ -471,10 +499,10 @@
   background: var(--bg-panel);
   color: var(--fg-muted);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-sm, 8px);
   cursor: pointer;
   z-index: var(--z-canvas-toggle);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2), 0 6px 18px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow-sm);
   transition:
     color 120ms ease,
     border-color 120ms ease,

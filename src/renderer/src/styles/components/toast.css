@@ -10,41 +10,44 @@
   z-index: var(--z-toast-top);
 }
 
+/*
+ * Claude 公式風: toast は gradient/blur を使わず、hairline + フラット bg + popover shadow。
+ * 左端 2px のロール色バーで種別 (success/warning/error) を表現。
+ */
 .toast {
   width: 100%;
   min-width: 0;
   max-width: 100%;
-  padding: 12px 14px;
-  border-left: none;
-  border-radius: 16px;
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 94%, white 6%) 0%, var(--bg-panel) 100%);
+  padding: 12px 14px 12px 16px;
+  border: 1px solid var(--border);
+  border-left: 2px solid var(--claude-brand, var(--accent));
+  border-radius: var(--radius-md, 14px);
+  background: var(--bg-panel);
   box-shadow: var(--shadow-popover);
-  backdrop-filter: blur(18px);
   opacity: 0;
-  transform: translateY(-10px) scale(0.98);
+  transform: translateY(-8px);
   transition:
-    opacity 320ms cubic-bezier(0.16, 1, 0.3, 1),
-    transform 320ms cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 180ms cubic-bezier(0.25, 1, 0.5, 1);
+    opacity var(--dur-normal, 240ms) var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1)),
+    transform var(--dur-normal, 240ms) var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1));
 }
 
 .toast[data-state='open'] {
   opacity: 1;
-  transform: translateY(0) scale(1);
+  transform: translateY(0);
 }
 
 .toast[data-state='exiting'] {
   opacity: 0;
-  transform: translateY(-8px) scale(0.985);
+  transform: translateY(-6px);
 }
 
+/* ⏺ スタイルの 8px インジケータドット (Claude Code 風) */
 .toast__indicator {
-  width: 10px;
-  height: 10px;
-  border-radius: 999px;
-  background: var(--accent);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--claude-brand, var(--accent));
+  box-shadow: 0 0 0 3px var(--claude-brand-glow, rgba(217, 119, 87, 0.12));
 }
 
 .toast__body {
@@ -72,38 +75,50 @@
 
 .toast__action,
 .toast__close {
-  border-radius: 10px;
+  border-radius: var(--radius-sm, 6px);
 }
 
 .toast__action {
-  min-height: 30px;
+  min-height: 28px;
   padding: 0 10px;
-  border-color: color-mix(in srgb, var(--accent) 18%, var(--border));
-  background: color-mix(in srgb, var(--bg-hover) 70%, transparent);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--claude-brand, var(--accent));
+  transition: background-color var(--dur-fast, 180ms) var(--ease-standard);
 }
 
 .toast__action:hover {
-  transform: translateY(-1px);
+  background: var(--claude-brand-glow, rgba(217, 119, 87, 0.12));
 }
 
 .toast__close {
-  min-width: 30px;
-  min-height: 30px;
+  min-width: 28px;
+  min-height: 28px;
 }
 
+/*
+ * tone 別の左バー + ドット色 (Claude 公式風: success=オリーブ緑 / warning=マスタード / error=赤)
+ */
+.toast--success {
+  border-left-color: var(--claude-success, #578a00);
+}
 .toast--success .toast__indicator {
-  background: #0ecb81;
-  box-shadow: 0 0 0 4px rgba(14, 203, 129, 0.18);
+  background: var(--claude-success, #578a00);
+  box-shadow: 0 0 0 3px rgba(87, 138, 0, 0.12);
 }
-
+.toast--warning {
+  border-left-color: var(--claude-warning, #a86b00);
+}
 .toast--warning .toast__indicator {
-  background: var(--warning);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--warning) 18%, transparent);
+  background: var(--claude-warning, #a86b00);
+  box-shadow: 0 0 0 3px rgba(168, 107, 0, 0.12);
 }
-
+.toast--error {
+  border-left-color: var(--claude-danger, #cf3a3a);
+}
 .toast--error .toast__indicator {
-  background: #ff4c4c;
-  box-shadow: 0 0 0 4px rgba(255, 76, 76, 0.16);
+  background: var(--claude-danger, #cf3a3a);
+  box-shadow: 0 0 0 3px rgba(207, 58, 58, 0.12);
 }
 
 @media (max-width: 640px) {

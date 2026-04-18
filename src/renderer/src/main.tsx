@@ -22,6 +22,7 @@ import './styles/components/menu.css';
 import './styles/components/toast.css';
 import './styles/components/claude-not-found.css';
 import './styles/components/canvas.css';
+import './styles/components/claude-patterns.css';
 
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('#root が見つかりません');

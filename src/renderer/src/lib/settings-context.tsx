@@ -117,7 +117,7 @@ export function useSettings(): SettingsContextValue {
 }
 
 /** アクティブな Monaco テーマ名を返す簡易フック */
-export function useMonacoTheme(): 'vs-dark' | 'vs' | 'hc-black' {
+export function useMonacoTheme(): 'vs-dark' | 'vs' | 'hc-black' | 'claude-dark' | 'claude-light' {
   const { settings } = useSettings();
   return THEMES[settings.theme].monacoTheme;
 }

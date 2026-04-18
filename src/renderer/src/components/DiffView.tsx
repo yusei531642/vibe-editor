@@ -25,7 +25,14 @@ export function DiffView({
     return (
       <div className="diffview">
         <div className="diffview__placeholder">
-          {loading ? 'diff を読み込み中…' : '差分を表示するファイルを選択してください'}
+          {loading ? (
+            <>
+              <span className="cc-spinner" aria-hidden="true" />
+              <span>diff を読み込み中…</span>
+            </>
+          ) : (
+            '差分を表示するファイルを選択してください'
+          )}
         </div>
       </div>
     );

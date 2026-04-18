@@ -1,38 +1,25 @@
+/*
+ * Claude 公式風: menu 系は完全フラット。
+ * hover の translateY / active の scale は撤去 (「浮き/沈み」の擬似触感を使わない)。
+ */
 .app-menu__trigger,
 .user-menu__trigger,
 .user-menu__theme-toggle,
 .context-menu__item {
   transition:
-    background-color 120ms cubic-bezier(0.25, 1, 0.5, 1),
-    border-color 120ms cubic-bezier(0.25, 1, 0.5, 1),
-    color 120ms cubic-bezier(0.25, 1, 0.5, 1),
-    transform 180ms cubic-bezier(0.34, 1.26, 0.64, 1),
-    box-shadow 180ms cubic-bezier(0.25, 1, 0.5, 1);
+    background-color var(--dur-fast, 180ms) var(--ease-standard),
+    border-color var(--dur-fast, 180ms) var(--ease-standard),
+    color var(--dur-fast, 180ms) var(--ease-standard);
 }
 
-.app-menu__trigger:hover,
-.user-menu__trigger:hover,
-.user-menu__theme-toggle:hover,
-.context-menu__item:hover:not(:disabled) {
-  transform: translateY(-1px);
-}
-
-.app-menu__trigger:active,
-.user-menu__trigger:active,
-.user-menu__theme-toggle:active,
-.context-menu__item:active:not(:disabled) {
-  transform: scale(0.98);
-}
-
+/* Claude 公式風: フラットな bg (gradient/blur 禁止)、radius は統一トークン */
 .app-menu__dropdown,
 .user-menu__dropdown,
 .context-menu {
-  border-radius: 16px;
+  border-radius: var(--radius-md, 14px);
   border: 1px solid var(--border);
-  background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg-panel) 94%, white 6%) 0%, var(--bg-panel) 100%);
+  background: var(--bg-panel);
   box-shadow: var(--shadow-popover);
-  backdrop-filter: blur(20px);
 }
 
 .app-menu__dropdown,
@@ -67,14 +54,14 @@
   min-width: 32px;
   justify-content: center;
   border: 1px solid transparent;
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--bg-panel) 66%, transparent);
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
 }
 
 .app-menu__trigger:hover,
 .app-menu__trigger.is-open {
-  border-color: color-mix(in srgb, var(--accent) 12%, var(--border));
-  background: color-mix(in srgb, var(--bg-active) 72%, transparent);
+  border-color: var(--border);
+  background: var(--bg-hover);
 }
 
 .app-menu__trigger.is-open {
@@ -101,22 +88,24 @@
 .app-menu__item {
   grid-template-columns: 22px minmax(0, 1fr) auto;
   gap: 12px;
-  padding: 11px 12px;
-  border: 1px solid transparent;
-  border-radius: 12px;
+  padding: 10px 12px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm, 6px);
 }
 
 .app-menu__item:hover {
-  background: color-mix(in srgb, var(--bg-active) 72%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 14%, var(--border));
+  background: var(--bg-hover);
+  border-left-color: var(--claude-brand, var(--accent));
 }
 
 .app-menu__item-icon {
   color: var(--text-mute);
+  transition: color var(--dur-fast, 180ms) var(--ease-standard);
 }
 
 .app-menu__item:hover .app-menu__item-icon {
-  color: var(--accent);
+  color: var(--claude-brand, var(--accent));
 }
 
 .app-menu__item-label {
@@ -143,9 +132,9 @@
 .user-menu__trigger,
 .user-menu__theme-toggle {
   min-height: 40px;
-  border: 1px solid transparent;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--bg-panel) 64%, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 10px);
+  background: transparent;
 }
 
 .user-menu__trigger {
@@ -156,8 +145,8 @@
 .user-menu__trigger:hover,
 .user-menu__trigger.is-open,
 .user-menu__theme-toggle:hover {
-  border-color: color-mix(in srgb, var(--accent) 12%, var(--border));
-  background: color-mix(in srgb, var(--bg-active) 68%, transparent);
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
 }
 
 .user-menu__identity {
@@ -208,16 +197,17 @@
 .user-menu__sub-item {
   min-height: 36px;
   padding: 8px 10px;
-  border: 1px solid transparent;
-  border-radius: 12px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm, 6px);
 }
 
 .user-menu__item:hover,
 .user-menu__item:focus-visible,
 .user-menu__item--sub.is-open,
 .user-menu__sub-item:hover {
-  background: color-mix(in srgb, var(--bg-active) 72%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 12%, var(--border));
+  background: var(--bg-hover);
+  border-left-color: var(--claude-brand, var(--accent));
 }
 
 .user-menu__sub {
@@ -226,9 +216,14 @@
   border-left: 1px solid var(--border);
 }
 
+/*
+ * アクティブな選択 (現在のテーマ/言語) は brand-glow の淡い bg + 左 2px バーで明示。
+ * 浮かせず、hover との差は "bar + tint" のみ。
+ */
 .user-menu__sub-item.is-active {
-  background: color-mix(in srgb, var(--bg-active) 80%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 18%, var(--border));
+  background: var(--claude-brand-glow, rgba(217, 119, 87, 0.12));
+  border-left-color: var(--claude-brand, var(--accent));
+  color: var(--text);
 }
 
 .user-menu__footer {
@@ -252,15 +247,16 @@
 }
 
 .context-menu__item {
-  min-height: 36px;
+  min-height: 32px;
   padding: 0 12px;
-  border: 1px solid transparent;
-  border-radius: 12px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: var(--radius-sm, 6px);
 }
 
 .context-menu__item:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--bg-active) 72%, transparent);
-  border-color: color-mix(in srgb, var(--accent) 12%, var(--border));
+  background: var(--bg-hover);
+  border-left-color: var(--claude-brand, var(--accent));
 }
 
 .context-menu__divider {
