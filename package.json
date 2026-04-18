@@ -1,6 +1,6 @@
 {
   "name": "vibe-editor",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "private": true,
   "description": "Tauri ベースの Claude Code / Codex 専用エディタ",
   "scripts": {
