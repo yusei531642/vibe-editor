@@ -136,8 +136,14 @@ export const api = {
       invoke('files_list', { projectRoot, relPath }),
     read: (projectRoot: string, relPath: string): Promise<FileReadResult> =>
       invoke('files_read', { projectRoot, relPath }),
-    write: (projectRoot: string, relPath: string, content: string): Promise<FileWriteResult> =>
-      invoke('files_write', { projectRoot, relPath, content })
+    /** Issue #65: expectedMtimeMs を渡すと Rust 側で external change 検出する */
+    write: (
+      projectRoot: string,
+      relPath: string,
+      content: string,
+      expectedMtimeMs?: number
+    ): Promise<FileWriteResult> =>
+      invoke('files_write', { projectRoot, relPath, content, expectedMtimeMs })
   },
 
   sessions: {

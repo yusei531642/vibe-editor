@@ -131,6 +131,22 @@ pub fn run() {
                     window.open_devtools();
                 }
             }
+
+            // Issue #55: メイン window の CloseRequested で PTY と TeamHub を明示 cleanup する。
+            // portable-pty (Windows ConPTY) は親が落ちても子が残る場合があるので、
+            // 明示的に kill_all を呼んで Claude / Codex プロセスが孤立しないようにする。
+            if let Some(main_window) = app.get_webview_window("main") {
+                let app_handle = app.handle().clone();
+                main_window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::CloseRequested { .. } = event {
+                        tracing::info!("[lifecycle] window close — running cleanup");
+                        let state = app_handle.state::<state::AppState>();
+                        state.pty_registry.kill_all();
+                        // MCP エントリは残しておく (次回起動時に reclaim されるので副作用なし)
+                        // team-bridge.js は ~/.vibe-editor/ に置いたまま (再利用のため)
+                    }
+                });
+            }
             Ok(())
         });
 

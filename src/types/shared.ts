@@ -227,11 +227,17 @@ export interface FileReadResult {
   isBinary: boolean;
   /** UTF-8以外で読み取った場合の警告用 */
   encoding: string;
+  /** Issue #65: 読み取った時点の mtime (ms since epoch)。save 時の external-change 検出に使う */
+  mtimeMs?: number;
 }
 
 export interface FileWriteResult {
   ok: boolean;
   error?: string;
+  /** Issue #65: 書き込み後の mtime。次回 save 時の比較基準に使う */
+  mtimeMs?: number;
+  /** Issue #65: expected mtime と現状が食い違った場合 true。ok=false かつ conflict=true でユーザーに確認 */
+  conflict?: boolean;
 }
 
 // ---------- ターミナル ----------

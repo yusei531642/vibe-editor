@@ -64,6 +64,8 @@ interface EditorTab {
    * 編集は許可しない (保存すると lossy 変換後の UTF-8 で上書きされ、元 encoding を失うため)。
    */
   lossyEncoding: boolean;
+  /** Issue #65: 開いた時点の mtime (ms since epoch)。save 時の external-change 検出に使う */
+  mtimeMs?: number;
   loading: boolean;
   error: string | null;
   pinned: boolean;
@@ -861,7 +863,8 @@ export function App(): JSX.Element {
                   content: res.content,
                   originalContent: res.content,
                   isBinary: res.isBinary,
-                  lossyEncoding: lossy
+                  lossyEncoding: lossy,
+                  mtimeMs: res.mtimeMs
                 }
               : tab
           )
@@ -898,11 +901,30 @@ export function App(): JSX.Element {
       }
       if (tab.content === tab.originalContent) return;
       try {
-        const res = await window.api.files.write(targetRoot, tab.relPath, tab.content);
+        // Issue #65: expectedMtimeMs を渡し、外部変更があれば conflict=true で弾かれる
+        let res = await window.api.files.write(
+          targetRoot,
+          tab.relPath,
+          tab.content,
+          tab.mtimeMs
+        );
+        if (res.conflict) {
+          // ユーザーに確認 → OK なら再度 mtime チェック無しで書き込む
+          const overwrite = window.confirm(
+            t('editor.externalChangeConfirm', { path: tab.relPath })
+          );
+          if (!overwrite) {
+            showToast(t('editor.saveAborted', { path: tab.relPath }), { tone: 'warning' });
+            return;
+          }
+          res = await window.api.files.write(targetRoot, tab.relPath, tab.content);
+        }
         if (res.ok) {
           setEditorTabs((prev) =>
             prev.map((t) =>
-              t.id === id ? { ...t, originalContent: t.content } : t
+              t.id === id
+                ? { ...t, originalContent: t.content, mtimeMs: res.mtimeMs }
+                : t
             )
           );
           showToast(t('editor.saved', { path: tab.relPath }), { tone: 'success' });

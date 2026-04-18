@@ -4,6 +4,7 @@
 // camelCase JSON 互換のため、各 command struct/enum には #[serde(rename_all = "camelCase")] を付与する。
 
 pub mod app;
+pub mod atomic_write;
 pub mod dialog;
 pub mod files;
 pub mod git;

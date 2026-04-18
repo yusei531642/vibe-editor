@@ -49,7 +49,9 @@ pub async fn setup(bridge_path: &str) -> Result<()> {
     let section = format!(
         "\n[{SECTION}]\ncommand = \"node\"\nargs = [\"{escaped}\"]\nenv_vars = [\"VIBE_TEAM_ID\", \"VIBE_TEAM_ROLE\", \"VIBE_AGENT_ID\", \"VIBE_TEAM_SOCKET\", \"VIBE_TEAM_TOKEN\"]\n",
     );
-    fs::write(&path, content + &section).await?;
+    // Issue #37: ~/.codex/config.toml も他アプリと共有なので atomic に上書き
+    let data = (content + &section).into_bytes();
+    crate::commands::atomic_write::atomic_write(&path, &data).await?;
     Ok(())
 }
 
@@ -62,6 +64,6 @@ pub async fn cleanup() -> Result<()> {
     let stripped = remove_toml_section(&content, SECTION);
     let stripped = remove_toml_section(&stripped, LEGACY_SECTION);
     let cleaned = format!("{}\n", stripped.trim_end());
-    fs::write(&path, cleaned).await?;
+    crate::commands::atomic_write::atomic_write(&path, cleaned.as_bytes()).await?;
     Ok(())
 }

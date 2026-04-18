@@ -39,8 +39,20 @@ impl SessionRegistry {
 
     pub fn insert(&self, id: String, handle: SessionHandle) {
         let mut g = recover(self.inner.lock());
+        // Issue #42: 同じ agent_id で再 spawn されると、旧 session_id を by_agent が手放した後も
+        // by_id に旧 SessionHandle が残り続け、以後 kill されない孤立 PTY になる。
+        // insert 時点で同 agent_id の旧 session があれば、by_id から取り出して kill + drop する。
         if let Some(aid) = handle.agent_id.clone() {
-            g.by_agent.insert(aid, id.clone());
+            if let Some(prev_sid) = g.by_agent.insert(aid, id.clone()) {
+                if prev_sid != id {
+                    if let Some(old) = g.by_id.remove(&prev_sid) {
+                        tracing::info!(
+                            "[registry] replacing session {prev_sid} with {id} — killing old PTY"
+                        );
+                        let _ = old.kill();
+                    }
+                }
+            }
         }
         g.by_id.insert(id, Arc::new(handle));
     }

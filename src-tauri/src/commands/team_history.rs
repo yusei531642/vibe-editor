@@ -89,13 +89,11 @@ async fn load_all() -> Vec<TeamHistoryEntry> {
 
 async fn save_all(entries: &[TeamHistoryEntry]) -> Result<(), String> {
     let path = store_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .await
-            .map_err(|e| e.to_string())?;
-    }
     let json = serde_json::to_vec_pretty(entries).map_err(|e| e.to_string())?;
-    fs::write(&path, json).await.map_err(|e| e.to_string())
+    // Issue #37: クラッシュ耐性のため atomic write を使う
+    crate::commands::atomic_write::atomic_write(&path, &json)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -115,13 +113,24 @@ pub async fn team_history_save(entry: TeamHistoryEntry) -> MutationResult {
     let _g = LOCK.lock().await;
     let mut all = load_all().await;
     all.retain(|e| e.id != entry.id);
-    all.insert(0, entry);
+
+    // Issue #46: 新エントリは必ず残す。従来は「挿入 → 全ソート → 先頭 20 件」だったため、
+    // 新エントリの last_used_at が古い場合に新エントリ自身が truncate で落ちていた。
+    //
+    // 新方針:
+    //   1. 同 project の既存エントリを last_used_at 降順に並べ、(MAX-1) 件まで残す
+    //   2. 新エントリを必ず 1 枠分先頭に確保
+    //   3. 他 project は各々 MAX 件まで残す
+    let new_entry = entry; // 意味を明示
+    let new_entry_key = normalize_project_root(&new_entry.project_root);
     all.sort_by(|a, b| b.last_used_at.cmp(&a.last_used_at));
 
-    // Issue #27: 20 件上限は project ごとに掛ける。
-    // normalize 後のキーでグループ化し、同一 project 内で 20 件を超えた分だけ削除する。
-    let mut kept: Vec<TeamHistoryEntry> = Vec::with_capacity(all.len());
+    let mut kept: Vec<TeamHistoryEntry> = Vec::with_capacity(all.len() + 1);
+    // 新エントリを先頭に置いてから他を追加すれば、その後 per_project_count が
+    // MAX で止まるときに新エントリは必ず残る。
+    kept.push(new_entry);
     let mut per_project_count: HashMap<String, usize> = HashMap::new();
+    per_project_count.insert(new_entry_key, 1);
     for e in all.into_iter() {
         let key = normalize_project_root(&e.project_root);
         let count = per_project_count.entry(key).or_insert(0);
@@ -130,6 +139,8 @@ pub async fn team_history_save(entry: TeamHistoryEntry) -> MutationResult {
             kept.push(e);
         }
     }
+    // 保存は last_used_at 降順で
+    kept.sort_by(|a, b| b.last_used_at.cmp(&a.last_used_at));
 
     match save_all(&kept).await {
         Ok(_) => MutationResult {

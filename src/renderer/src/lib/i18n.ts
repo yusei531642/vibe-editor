@@ -84,6 +84,9 @@ const ja: Dict = {
     '非 UTF-8 として読み込みました ({path}) — 保存すると元のエンコーディングを失うため編集不可にしています。',
   'editor.nonUtf8SaveBlocked': '保存は無効化されています (非 UTF-8): {path}',
   'editor.nonUtf8ReadOnly': '読み取り専用 (非 UTF-8)',
+  'editor.externalChangeConfirm':
+    '{path} は開いた後にディスク上で更新されています。このまま保存すると外部の変更を上書きします。続行しますか?',
+  'editor.saveAborted': '保存を中止しました: {path}',
   'editor.saved': '保存しました: {path}',
   'editor.saveFailed': '保存失敗: {error}',
   'editor.discardSingle': '未保存の変更があります。このファイルを閉じますか？\n\n{path}',
@@ -325,6 +328,9 @@ const en: Dict = {
     'Opened with lossy encoding ({path}) — saving would lose the original encoding so editing is disabled.',
   'editor.nonUtf8SaveBlocked': 'Save is disabled (non-UTF-8): {path}',
   'editor.nonUtf8ReadOnly': 'read-only (non-UTF-8)',
+  'editor.externalChangeConfirm':
+    '{path} has been modified on disk since you opened it. Save anyway and overwrite external changes?',
+  'editor.saveAborted': 'Save aborted: {path}',
   'editor.saved': 'Saved: {path}',
   'editor.saveFailed': 'Save failed: {error}',
   'editor.discardSingle': 'This file has unsaved changes. Close it anyway?\n\n{path}',

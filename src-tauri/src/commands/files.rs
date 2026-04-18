@@ -31,6 +31,9 @@ pub struct FileReadResult {
     pub content: String,
     pub is_binary: bool,
     pub encoding: String,
+    /// Issue #65: open 時の mtime (ms since epoch)。save で外部変更検出に使う。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mtime_ms: Option<u64>,
 }
 
 #[derive(Serialize, Default)]
@@ -38,6 +41,20 @@ pub struct FileReadResult {
 pub struct FileWriteResult {
     pub ok: bool,
     pub error: Option<String>,
+    /// Issue #65: 書き込み後の mtime。次回 save 時の比較基準になる。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mtime_ms: Option<u64>,
+    /// Issue #65: 期待する mtime と現状が食い違った場合に true を返す。
+    /// ok=false + conflict=true でフロントはユーザーに確認ダイアログを出す。
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub conflict: bool,
+}
+
+fn mtime_ms_of(meta: &std::fs::Metadata) -> Option<u64> {
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
 }
 
 /// 相対パスを root 配下に閉じ込める形で解決する。
@@ -234,6 +251,8 @@ pub async fn files_read(project_root: String, rel_path: String) -> FileReadResul
             Err(_) => (String::from_utf8_lossy(&bytes).into_owned(), "lossy".to_string()),
         }
     };
+    // Issue #65: 開いた時点の mtime を返して、save 時の external-change 検出に使う
+    let mtime_ms = tokio::fs::metadata(&abs).await.ok().and_then(|m| mtime_ms_of(&m));
     FileReadResult {
         ok: true,
         error: None,
@@ -241,6 +260,7 @@ pub async fn files_read(project_root: String, rel_path: String) -> FileReadResul
         content,
         is_binary,
         encoding,
+        mtime_ms,
     }
 }
 
@@ -249,6 +269,9 @@ pub async fn files_write(
     project_root: String,
     rel_path: String,
     content: String,
+    // Issue #65: 前回 read 時の mtime_ms。指定時は save 直前に現在 mtime と比較して
+    // 食い違いを検出する。未指定 (None) なら後方互換で検出をスキップ。
+    expected_mtime_ms: Option<u64>,
 ) -> FileWriteResult {
     let abs = match safe_join(&project_root, &rel_path) {
         Some(p) => p,
@@ -256,25 +279,54 @@ pub async fn files_write(
             return FileWriteResult {
                 ok: false,
                 error: Some("invalid path".into()),
+                ..Default::default()
             }
         }
     };
+
+    // Issue #65: expected_mtime_ms が指定されていて、ファイルが既にあるなら現在 mtime と比較
+    if let Some(expected) = expected_mtime_ms {
+        if let Ok(meta) = tokio::fs::metadata(&abs).await {
+            if let Some(current) = mtime_ms_of(&meta) {
+                // 1 秒未満の誤差は無視 (FS によって ms 精度が無いため)
+                let diff = current.saturating_sub(expected);
+                if diff > 1000 {
+                    return FileWriteResult {
+                        ok: false,
+                        error: Some(
+                            "file changed on disk since it was opened".into(),
+                        ),
+                        mtime_ms: Some(current),
+                        conflict: true,
+                    };
+                }
+            }
+        }
+    }
+
     if let Some(parent) = abs.parent() {
         if let Err(e) = tokio::fs::create_dir_all(parent).await {
             return FileWriteResult {
                 ok: false,
                 error: Some(e.to_string()),
+                ..Default::default()
             };
         }
     }
     match tokio::fs::write(&abs, content).await {
-        Ok(_) => FileWriteResult {
-            ok: true,
-            error: None,
-        },
+        Ok(_) => {
+            let mtime_ms = tokio::fs::metadata(&abs).await.ok().and_then(|m| mtime_ms_of(&m));
+            FileWriteResult {
+                ok: true,
+                error: None,
+                mtime_ms,
+                conflict: false,
+            }
+        }
         Err(e) => FileWriteResult {
             ok: false,
             error: Some(e.to_string()),
+            ..Default::default()
         },
     }
 }

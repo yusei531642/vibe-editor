@@ -38,7 +38,8 @@ pub async fn setup(desired: &Value) -> Result<bool> {
     }
     servers_obj.insert(ENTRY.into(), desired.clone());
     let json = serde_json::to_vec_pretty(&config)?;
-    fs::write(&path, json).await?;
+    // Issue #37: ~/.claude.json は他アプリとも共有。半端書き込みで全消失するのを避けるため atomic に。
+    crate::commands::atomic_write::atomic_write(&path, &json).await?;
     Ok(true)
 }
 
