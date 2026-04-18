@@ -79,7 +79,15 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
 }
 
 /// jsonl から (title, count, cwd) を抽出。cwd は最初に見つかった `cwd` フィールド。
+///
+/// Issue #43: 大きなセッション (数百 MB) の jsonl を毎回全行読みすると list API が
+/// 数秒〜十数秒ブロックする。
+///   - title / cwd は先頭付近 (1〜8 行目) にしか出ないので早期 break する
+///   - message_count の「正確な数」は UI で "500+" 等と見せれば十分なので、
+///     先頭 HEAD_LIMIT_LINES = 2000 行まで数え、超えたら上限値を返す
+///     (正確な行数は fs::metadata の行数相当だと OS 依存で取れないので割り切る)
 async fn read_jsonl_summary(path: &std::path::Path) -> (String, u32, Option<String>) {
+    const HEAD_LIMIT_LINES: u32 = 2000;
     let f = match tokio::fs::File::open(path).await {
         Ok(f) => f,
         Err(_) => return (String::new(), 0, None),
@@ -94,10 +102,10 @@ async fn read_jsonl_summary(path: &std::path::Path) -> (String, u32, Option<Stri
             continue;
         }
         count += 1;
-        if title.is_empty() || cwd.is_none() {
+        // 先頭 8 行だけ serde_json で parse (title / cwd 抽出用)
+        if count <= 8 && (title.is_empty() || cwd.is_none()) {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                 if cwd.is_none() {
-                    // Claude Code は meta entry や user entry に "cwd" を載せる
                     if let Some(c) = v.get("cwd").and_then(|c| c.as_str()) {
                         cwd = Some(c.to_string());
                     }
@@ -117,6 +125,10 @@ async fn read_jsonl_summary(path: &std::path::Path) -> (String, u32, Option<Stri
                     }
                 }
             }
+        }
+        // title/cwd が揃い、かつ上限行数まで数えたら break する
+        if count >= HEAD_LIMIT_LINES && !title.is_empty() && cwd.is_some() {
+            break;
         }
     }
     (title, count, cwd)

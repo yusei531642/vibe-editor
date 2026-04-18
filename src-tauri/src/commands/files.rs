@@ -57,6 +57,137 @@ fn mtime_ms_of(meta: &std::fs::Metadata) -> Option<u64> {
         .map(|d| d.as_millis() as u64)
 }
 
+/// Issue #45: UTF-16 / UTF-32 / CP932 等も「テキスト」として扱えるよう拡張した判定。
+/// 戻り値: (is_binary, content, encoding)
+fn detect_text_or_binary(bytes: &[u8]) -> (bool, String, String) {
+    // --- BOM による UTF-16/32 判定 ---
+    if bytes.starts_with(&[0xFF, 0xFE, 0x00, 0x00]) {
+        // UTF-32 LE BOM (UTF-16 LE と prefix 被るので先にチェック)
+        return utf32_decode(&bytes[4..], true)
+            .map(|s| (false, s, "utf-32le".to_string()))
+            .unwrap_or((true, String::new(), "binary".to_string()));
+    }
+    if bytes.starts_with(&[0x00, 0x00, 0xFE, 0xFF]) {
+        return utf32_decode(&bytes[4..], false)
+            .map(|s| (false, s, "utf-32be".to_string()))
+            .unwrap_or((true, String::new(), "binary".to_string()));
+    }
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        return utf16_decode(&bytes[2..], true)
+            .map(|s| (false, s, "utf-16le".to_string()))
+            .unwrap_or((true, String::new(), "binary".to_string()));
+    }
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        return utf16_decode(&bytes[2..], false)
+            .map(|s| (false, s, "utf-16be".to_string()))
+            .unwrap_or((true, String::new(), "binary".to_string()));
+    }
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        // UTF-8 BOM
+        let body = &bytes[3..];
+        return match std::str::from_utf8(body) {
+            Ok(s) => (false, s.to_string(), "utf-8".to_string()),
+            Err(_) => (
+                false,
+                String::from_utf8_lossy(body).into_owned(),
+                "lossy".to_string(),
+            ),
+        };
+    }
+
+    // --- BOM なし: 非テキスト control char の割合で判定 ---
+    // 先頭 8KB をサンプリング
+    let sample = &bytes[..bytes.len().min(8192)];
+    let non_text = sample
+        .iter()
+        .filter(|&&b| {
+            b == 0x00
+                || (b < 0x09)
+                || b == 0x0B
+                || b == 0x0C
+                || (b >= 0x0E && b < 0x20 && b != 0x1B) // ESC (0x1B) は xterm 系で許容
+        })
+        .count();
+    // 非テキスト率が 30% を超えるなら binary とみなす
+    if sample.len() > 0 && non_text * 100 / sample.len() >= 30 {
+        return (true, String::new(), "binary".to_string());
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(s) => (false, s.to_string(), "utf-8".to_string()),
+        Err(_) => (
+            false,
+            String::from_utf8_lossy(bytes).into_owned(),
+            "lossy".to_string(),
+        ),
+    }
+}
+
+fn utf16_decode(bytes: &[u8], little_endian: bool) -> Option<String> {
+    if bytes.len() % 2 != 0 {
+        return None;
+    }
+    let mut units = Vec::with_capacity(bytes.len() / 2);
+    for chunk in bytes.chunks_exact(2) {
+        let u = if little_endian {
+            u16::from_le_bytes([chunk[0], chunk[1]])
+        } else {
+            u16::from_be_bytes([chunk[0], chunk[1]])
+        };
+        units.push(u);
+    }
+    String::from_utf16(&units).ok()
+}
+
+fn utf32_decode(bytes: &[u8], little_endian: bool) -> Option<String> {
+    if bytes.len() % 4 != 0 {
+        return None;
+    }
+    let mut out = String::with_capacity(bytes.len() / 4);
+    for chunk in bytes.chunks_exact(4) {
+        let u = if little_endian {
+            u32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
+        } else {
+            u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
+        };
+        match char::from_u32(u) {
+            Some(c) => out.push(c),
+            None => return None,
+        }
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod detect_tests {
+    use super::detect_text_or_binary;
+
+    #[test]
+    fn utf8_ascii_is_text() {
+        let (bin, _, enc) = detect_text_or_binary(b"hello world");
+        assert!(!bin);
+        assert_eq!(enc, "utf-8");
+    }
+
+    #[test]
+    fn utf16_le_with_bom_is_text() {
+        // "hi" in UTF-16 LE with BOM
+        let bytes = [0xFF, 0xFE, b'h', 0x00, b'i', 0x00];
+        let (bin, content, enc) = detect_text_or_binary(&bytes);
+        assert!(!bin);
+        assert_eq!(content, "hi");
+        assert_eq!(enc, "utf-16le");
+    }
+
+    #[test]
+    fn pure_binary_is_binary() {
+        // mostly control bytes
+        let bytes: Vec<u8> = (0u8..40).collect();
+        let (bin, _, enc) = detect_text_or_binary(&bytes);
+        assert!(bin);
+        assert_eq!(enc, "binary");
+    }
+}
+
 /// 相対パスを root 配下に閉じ込める形で解決する。
 ///
 /// 旧実装は `joined.canonicalize()` が失敗 (= 未作成ファイル) したとき `joined` をそのまま
@@ -242,15 +373,11 @@ pub async fn files_read(project_root: String, rel_path: String) -> FileReadResul
             }
         }
     };
-    let is_binary = bytes.contains(&0u8);
-    let (content, encoding) = if is_binary {
-        (String::new(), "binary".to_string())
-    } else {
-        match std::str::from_utf8(&bytes) {
-            Ok(s) => (s.to_string(), "utf-8".to_string()),
-            Err(_) => (String::from_utf8_lossy(&bytes).into_owned(), "lossy".to_string()),
-        }
-    };
+    // Issue #45: 単純に NUL を含む = バイナリにすると UTF-16 / UTF-32 テキストが開けない。
+    //   - UTF-16/32 は BOM (0xFF 0xFE, 0xFE 0xFF, 0x00 0x00 0xFE 0xFF 等) を持つので BOM 検出を優先
+    //   - それ以外は「非テキスト char の割合」で判定: NUL の他に 0x01..0x08/0x0B/0x0E..0x1F を含む
+    //     バイト比率が高いときだけバイナリ扱い。偽陽性を減らす。
+    let (is_binary, content, encoding) = detect_text_or_binary(&bytes);
     // Issue #65: 開いた時点の mtime を返して、save 時の external-change 検出に使う
     let mtime_ms = tokio::fs::metadata(&abs).await.ok().and_then(|m| mtime_ms_of(&m));
     FileReadResult {

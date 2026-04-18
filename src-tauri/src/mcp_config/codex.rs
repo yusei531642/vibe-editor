@@ -7,6 +7,29 @@ use tokio::fs;
 const SECTION: &str = "mcp_servers.vibe-team";
 const LEGACY_SECTION: &str = "mcp_servers.vive-team";
 
+/// Issue #44: TOML basic string の正式な escape。
+/// `"`, `\`, 制御文字 (U+0000..U+001F / U+007F) をバックスラッシュシーケンスに変換する。
+/// これをやらないと、bridge_path に `"` が含まれた瞬間に config.toml が壊れる。
+fn toml_escape_basic_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\u{0008}' => out.push_str("\\b"),
+            '\t' => out.push_str("\\t"),
+            '\n' => out.push_str("\\n"),
+            '\u{000C}' => out.push_str("\\f"),
+            '\r' => out.push_str("\\r"),
+            c if (c as u32) < 0x20 || c as u32 == 0x7f => {
+                out.push_str(&format!("\\u{:04X}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 fn config_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_default()
@@ -45,7 +68,11 @@ pub async fn setup(bridge_path: &str) -> Result<()> {
     };
     content = remove_toml_section(&content, SECTION);
     content = remove_toml_section(&content, LEGACY_SECTION);
-    let escaped = bridge_path.replace('\\', "/");
+    // Issue #44: bridge_path を TOML basic string 用に正規 escape。
+    // まず Windows の `\` → `/` に変えて (node 側に渡すときの可搬性優先)、その上で
+    // 万が一 `"` 等を含むパスが来ても構文を壊さないように basic escape を通す。
+    let normalized = bridge_path.replace('\\', "/");
+    let escaped = toml_escape_basic_string(&normalized);
     let section = format!(
         "\n[{SECTION}]\ncommand = \"node\"\nargs = [\"{escaped}\"]\nenv_vars = [\"VIBE_TEAM_ID\", \"VIBE_TEAM_ROLE\", \"VIBE_AGENT_ID\", \"VIBE_TEAM_SOCKET\", \"VIBE_TEAM_TOKEN\"]\n",
     );

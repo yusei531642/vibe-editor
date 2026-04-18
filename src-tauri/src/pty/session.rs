@@ -236,14 +236,18 @@ pub fn spawn_session(
     let data_event = format!("terminal:data:{id}");
     let exit_event = format!("terminal:exit:{id}");
 
-    let (tx, rx) = mpsc::unbounded_channel::<Vec<u8>>();
+    // Issue #53: bounded channel で reader → batcher に backpressure をかける。
+    //   reader (std::thread) は `blocking_send` でチャネル満杯時に待機 → OS 側で PTY
+    //   への入力が詰まれば子プロセスが書き込み待ちに入るので、メモリ無限膨張を防げる。
+    let (tx, rx) = mpsc::channel::<Vec<u8>>(crate::pty::batcher::PTY_CHANNEL_CAPACITY);
     std::thread::spawn(move || {
         let mut buf = [0u8; 8192];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
-                    if tx.send(buf[..n].to_vec()).is_err() {
+                    // blocking_send: async runtime 外でも動く tokio API
+                    if tx.blocking_send(buf[..n].to_vec()).is_err() {
                         break;
                     }
                 }

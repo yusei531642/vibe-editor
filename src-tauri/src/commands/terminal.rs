@@ -193,13 +193,49 @@ pub async fn terminal_kill(state: State<'_, AppState>, id: String) -> Result<(),
     Ok(())
 }
 
+/// Issue #40: mime_type から拡張子を決める。未知 mime は .png にフォールバック。
+fn extension_for_mime(mime: &str) -> &'static str {
+    match mime.trim().to_ascii_lowercase().as_str() {
+        "image/jpeg" | "image/jpg" => "jpg",
+        "image/webp" => "webp",
+        "image/gif" => "gif",
+        "image/bmp" => "bmp",
+        "image/tiff" => "tiff",
+        "image/svg+xml" => "svg",
+        _ => "png",
+    }
+}
+
+/// Issue #41: paste-images/ 配下のうち mtime が 7 日以上古いファイルを削除。
+/// paste の度に best-effort で呼ばれ、長期利用時のゴミ蓄積を防ぐ。
+async fn cleanup_old_paste_images(dir: &std::path::Path) {
+    const TTL_SECS: u64 = 7 * 24 * 60 * 60;
+    let mut rd = match tokio::fs::read_dir(dir).await {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    let now = std::time::SystemTime::now();
+    while let Ok(Some(entry)) = rd.next_entry().await {
+        let path = entry.path();
+        let Ok(meta) = entry.metadata().await else {
+            continue;
+        };
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
+        let age = now.duration_since(modified).unwrap_or_default();
+        if age.as_secs() > TTL_SECS {
+            let _ = tokio::fs::remove_file(&path).await;
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn terminal_save_pasted_image(
     base64: String,
     mime_type: String,
 ) -> SavePastedImageResult {
     use base64::Engine;
-    let _ = mime_type;
     let bytes = match base64::engine::general_purpose::STANDARD.decode(base64.as_bytes()) {
         Ok(b) => b,
         Err(e) => {
@@ -221,7 +257,13 @@ pub async fn terminal_save_pasted_image(
             error: Some(e.to_string()),
         };
     }
-    let name = format!("paste-{}.png", uuid::Uuid::new_v4());
+
+    // Issue #41: 古い画像を best-effort cleanup
+    cleanup_old_paste_images(&dir).await;
+
+    // Issue #40: mime から拡張子を選ぶ
+    let ext = extension_for_mime(&mime_type);
+    let name = format!("paste-{}.{ext}", uuid::Uuid::new_v4());
     let path = dir.join(&name);
     if let Err(e) = tokio::fs::write(&path, bytes).await {
         return SavePastedImageResult {
@@ -234,5 +276,20 @@ pub async fn terminal_save_pasted_image(
         ok: true,
         path: Some(path.to_string_lossy().into_owned()),
         error: None,
+    }
+}
+
+#[cfg(test)]
+mod mime_ext_tests {
+    use super::extension_for_mime;
+    #[test]
+    fn maps_common_image_mimes() {
+        assert_eq!(extension_for_mime("image/png"), "png");
+        assert_eq!(extension_for_mime("image/jpeg"), "jpg");
+        assert_eq!(extension_for_mime("image/jpg"), "jpg");
+        assert_eq!(extension_for_mime("image/webp"), "webp");
+        assert_eq!(extension_for_mime("image/gif"), "gif");
+        assert_eq!(extension_for_mime("IMAGE/JPEG"), "jpg");
+        assert_eq!(extension_for_mime("application/x-mystery"), "png"); // fallback
     }
 }

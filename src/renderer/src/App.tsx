@@ -1445,7 +1445,14 @@ export function App(): JSX.Element {
         return;
       }
       if (e.key === 'w' || e.key === 'W') {
-        if (activeTabId) {
+        // Issue #38: フォーカスが xterm (Claude / Codex / シェル) の中にあるときは
+        // Ctrl+W を「直前の単語を削除」として PTY に素通しさせる。
+        // DOM tree で ".xterm" 祖先がいるかで判定 (xterm.js は focusable な
+        // textarea を .xterm の中に配置するため、activeElement がそこに入る)。
+        const active = document.activeElement as HTMLElement | null;
+        const inTerminal = active?.closest?.('.xterm') !== undefined &&
+          active?.closest?.('.xterm') !== null;
+        if (!inTerminal && activeTabId) {
           e.preventDefault();
           e.stopPropagation();
           closeTab(activeTabId);
