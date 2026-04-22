@@ -83,6 +83,11 @@ export function CardFrame({ id, title, accent, children }: CardFrameProps): JSX.
       </header>
       <div
         className="nodrag nowheel"
+        // React Flow は親の onMouseDown で node selection / drag 開始を拾うため、
+        // body 内のクリックが選択に変換され、内部の xterm が focus を奪えないケースがある。
+        // 選択フローを完全に遮断して、クリックはそのまま子 (xterm 等) に届ける。
+        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
         style={{
           flex: 1,
           minHeight: 0,

@@ -198,6 +198,14 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       []
     );
 
-    return <div className="terminal-view" ref={containerRef} />;
+    return (
+      <div
+        className="terminal-view"
+        ref={containerRef}
+        // Canvas の TerminalCard 内では、xterm のテキストエリアに focus が入らず
+        // キー入力が届かない現象がある。空白領域をクリックしても明示的に focus を奪う。
+        onMouseDown={() => termRef.current?.focus()}
+      />
+    );
   }
 );
