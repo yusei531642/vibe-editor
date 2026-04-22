@@ -1028,7 +1028,7 @@ body.is-resizing * {
 }
 
 .tabbar__title {
-  max-width: 240px;
+  max-width: 360px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4007,9 +4007,21 @@ body.is-resizing * {
 [data-theme="glass"] .context-menu,
 [data-theme="glass"] .canvas-agent-card,
 [data-theme="glass"] .canvas-toolbar,
+[data-theme="glass"] .layout,
+[data-theme="glass"] .main,
+[data-theme="glass"] .content-area,
+[data-theme="glass"] .sidebar-view,
+[data-theme="glass"] .pane,
+[data-theme="glass"] .terminal-pane,
+[data-theme="glass"] .terminal-pane__header,
+[data-theme="glass"] .claude-code-panel,
+[data-theme="glass"] .claude-code-panel__header,
+[data-theme="glass"] .claude-code-panel__body,
+[data-theme="glass"] .notes-panel,
+[data-theme="glass"] .filetree,
 [data-theme="glass"] .filetree__header {
-  -webkit-backdrop-filter: blur(22px) saturate(160%);
-  backdrop-filter: blur(22px) saturate(160%);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
 }
 
 /* glass テーマでは modal-backdrop / cmdp-backdrop の暗幕を弱め、
