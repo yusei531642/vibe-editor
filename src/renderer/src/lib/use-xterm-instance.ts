@@ -2,9 +2,21 @@ import { useEffect, useRef } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import type { AppSettings } from '../../../types/shared';
 import { buildXtermTheme } from './xterm-theme';
+
+/*
+ * 多数ターミナル同時起動の軽量化 (30 本以上想定):
+ *   - Scrollback を 5000 → 2000 行に縮小。30 本 × 5000 = 150k 行相当の DOM を抱えていた
+ *   - WebGL レンダラを loadAddon。DOM renderer の 3-5 倍速く、GPU で描画するので
+ *     メインスレッドを奪わない → 多数インスタンス同時で "めちゃくちゃ重い" を解消する。
+ *   - WebGL コンテキストが作れない環境 (GPU なし / 古い WebView2) では自動で
+ *     デフォルトの DOM renderer にフォールバックする。Tauri の WebView2 (Chromium 系)
+ *     は通常 WebGL2 が使えるので基本は WebGL 経路で動作する。
+ */
+const SCROLLBACK_LINES = 2000;
 
 /**
  * xterm.js `Terminal` インスタンスと `FitAddon` をマウント中 1 回だけ生成し、
@@ -38,17 +50,35 @@ export function useXtermInstance(settings: AppSettings): {
       cursorBlink: true,
       allowProposedApi: true,
       theme: buildXtermTheme(initial.theme),
-      scrollback: 5000,
+      scrollback: SCROLLBACK_LINES,
       convertEol: false
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(container);
 
+    // WebGL レンダラ (主ケース): DOM renderer を GPU 描画に置き換え。
+    // 環境 (headless / GPU 無効 / context lost) で失敗したら try/catch + webgl "contextlost"
+    // イベントで dispose し、xterm が自動的に DOM renderer へフォールバックする。
+    let webgl: WebglAddon | null = null;
+    try {
+      webgl = new WebglAddon();
+      webgl.onContextLoss(() => {
+        webgl?.dispose();
+        webgl = null;
+      });
+      term.loadAddon(webgl);
+    } catch (err) {
+      // 例: WebGL 作成不可 → DOM renderer で続行 (問題なく動作する)
+      console.warn('[xterm] WebGL addon 初期化失敗 → DOM renderer にフォールバック:', err);
+      webgl = null;
+    }
+
     termRef.current = term;
     fitRef.current = fit;
 
     return () => {
+      webgl?.dispose();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;

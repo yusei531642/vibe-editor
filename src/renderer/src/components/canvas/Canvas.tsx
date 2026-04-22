@@ -31,6 +31,8 @@ import FileTreeCard from './cards/FileTreeCard';
 import ChangesCard from './cards/ChangesCard';
 import HandoffEdge from './HandoffEdge';
 import { QuickNav } from './QuickNav';
+import { LeaderGlow } from './LeaderGlow';
+import { StageHud } from './StageHud';
 import { useCanvasStore, type CardData } from '../../stores/canvas';
 import { colorOf } from '../../lib/team-roles';
 import { KEYS, useKeybinding } from '../../lib/keybindings';
@@ -145,8 +147,15 @@ function FlowApp(): JSX.Element {
   useKeybinding(KEYS.toggleIde, () => setViewMode('ide'));
   useKeybinding(KEYS.newTerminal, handleAddClaudeAgent);
 
+  const stageView = useCanvasStore((s) => s.stageView);
+
   return (
-    <div style={{ position: 'absolute', inset: 0 }}>
+    <div
+      className="tc-stage-root"
+      data-view={stageView}
+      style={{ position: 'absolute', inset: 0 }}
+    >
+      <LeaderGlow />
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -177,7 +186,51 @@ function FlowApp(): JSX.Element {
         />
       </ReactFlow>
 
+      {stageView === 'list' ? <StageListOverlay /> : null}
+      <StageHud />
       <QuickNav open={quickNavOpen} onClose={() => setQuickNavOpen(false)} />
+    </div>
+  );
+}
+
+/** stageView === 'list' のときに ReactFlow の代わりに表示する簡易ロスター。
+ *  Canvas 上の agent ノードを一覧化する。 */
+function StageListOverlay(): JSX.Element {
+  const nodes = useCanvasStore((s) => s.nodes);
+  const agentNodes = nodes.filter((n) => (n.data as CardData | undefined)?.cardType === 'agent');
+  return (
+    <div className="tc-list-overlay">
+      <div className="tc-list-overlay__inner">
+        <div className="tc-list-overlay__head">
+          <h2 className="tc-list-overlay__title">チーム</h2>
+          <span className="tc-list-overlay__sub">{agentNodes.length} agents</span>
+        </div>
+        {agentNodes.length === 0 ? (
+          <div className="tc-list-overlay__empty">まだエージェントが配置されていません</div>
+        ) : (
+          agentNodes.map((n) => {
+            const payload = (n.data as CardData | undefined)?.payload as
+              | { role?: string; agentId?: string; agent?: string }
+              | undefined;
+            const color = colorOf(payload?.role);
+            return (
+              <div key={n.id} className="tc-list-row" style={{ ['--role-color' as string]: color }}>
+                <span className="tc-list-row__avatar">
+                  {(payload?.role ?? '?').charAt(0).toUpperCase()}
+                </span>
+                <div className="tc-list-row__id">
+                  <span className="tc-list-row__name">{(n.data as CardData | undefined)?.title}</span>
+                  <span className="tc-list-row__role">{payload?.role ?? 'unassigned'}</span>
+                </div>
+                <span className="tc-list-row__status">
+                  <span className="tc-list-row__status-dot" aria-hidden="true" />
+                  {payload?.agent === 'codex' ? 'codex' : 'claude'}
+                </span>
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }

@@ -17,6 +17,14 @@ interface UiState {
   /** 共通サイドバーから「設定」を開くためのグローバルフラグ */
   settingsOpen: boolean;
   setSettingsOpen: (open: boolean) => void;
+  /** Redesign: 右ドロワーの Activity (handoff feed) 表示フラグ */
+  activityOpen: boolean;
+  setActivityOpen: (open: boolean) => void;
+  toggleActivity: () => void;
+  /** Redesign: Tweaks 軽量パネル (テーマ/アクセント等) 表示フラグ */
+  tweaksOpen: boolean;
+  setTweaksOpen: (open: boolean) => void;
+  toggleTweaks: () => void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -26,11 +34,17 @@ export const useUiStore = create<UiState>()(
       setViewMode: (m) => set({ viewMode: m }),
       toggleViewMode: () => set({ viewMode: get().viewMode === 'ide' ? 'canvas' : 'ide' }),
       settingsOpen: false,
-      setSettingsOpen: (open) => set({ settingsOpen: open })
+      setSettingsOpen: (open) => set({ settingsOpen: open }),
+      activityOpen: false,
+      setActivityOpen: (open) => set({ activityOpen: open }),
+      toggleActivity: () => set({ activityOpen: !get().activityOpen }),
+      tweaksOpen: false,
+      setTweaksOpen: (open) => set({ tweaksOpen: open }),
+      toggleTweaks: () => set({ tweaksOpen: !get().tweaksOpen })
     }),
     {
       name: 'vibe-editor:ui',
-      partialize: (s) => ({ viewMode: s.viewMode })
+      partialize: (s) => ({ viewMode: s.viewMode, activityOpen: s.activityOpen })
     }
   )
 );

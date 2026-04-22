@@ -41,7 +41,12 @@ interface CanvasState {
   /** 一時的な hand-off edge を追加し N ms 後に自動削除 */
   pulseEdge: (edge: Edge, ttlMs?: number) => void;
   clear: () => void;
+  /** Canvas の見え方切替: stage=ラジアル / list=リスト / focus=フォーカス */
+  stageView: StageView;
+  setStageView: (v: StageView) => void;
 }
+
+export type StageView = 'stage' | 'list' | 'focus';
 
 const NODE_W = 480;
 const NODE_H = 320;
@@ -121,12 +126,14 @@ export const useCanvasStore = create<CanvasState>()(
           set({ edges: get().edges.filter((e) => e.id !== edge.id) });
         }, ttlMs);
       },
-      clear: () => set({ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } })
+      clear: () => set({ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }),
+      stageView: 'stage',
+      setStageView: (v) => set({ stageView: v })
     }),
     {
       name: 'vibe-editor:canvas',
-      // 永続化: nodes と viewport のみ。edges は一時的な hand-off アニメに使うので含めない
-      partialize: (s) => ({ nodes: s.nodes, viewport: s.viewport })
+      // 永続化: nodes / viewport / stageView のみ。edges は一時的な hand-off アニメに使うので含めない
+      partialize: (s) => ({ nodes: s.nodes, viewport: s.viewport, stageView: s.stageView })
     }
   )
 );

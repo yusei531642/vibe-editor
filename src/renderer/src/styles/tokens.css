@@ -60,6 +60,33 @@
   --shell-panel-w: var(--claude-code-width, 460px);
   --shell-panel-min: 320px;
 
+  /* ---------- Redesign Shell Layout (2026-04)
+   * Claude Design バンドル "vibe-editor Redesign" 準拠。
+   * 6 領域: topbar(44) / rail(56) / dock(320) / stage / activity(300) / status(26)
+   */
+  --shell-rail: 56px;
+  --shell-header: 44px;
+  --shell-dock: 320px;
+  --shell-activity: 300px;
+  --shell-status: 26px;
+
+  /* ---------- Role Colors (team canvas) ----------
+   * ROLE_META (team-roles.ts) の hex とは別に、UI surface 側で参照する
+   * soft パレット。node border / feed dot / edge stroke 等の装飾用。
+   */
+  --role-leader: #c9a8ff;
+  --role-planner: #9bb9ff;
+  --role-programmer: #7dd5ae;
+  --role-researcher: #f5c57a;
+  --role-reviewer: #f08a8a;
+
+  /* accent tint の参照エイリアス (role ごとに差し替えたい場合に利用) */
+  --role-tint-leader: rgba(201, 168, 255, 0.14);
+  --role-tint-planner: rgba(155, 185, 255, 0.14);
+  --role-tint-programmer: rgba(125, 213, 174, 0.14);
+  --role-tint-researcher: rgba(245, 197, 122, 0.14);
+  --role-tint-reviewer: rgba(240, 138, 138, 0.14);
+
   /* ---------- Surface (default = claude-dark)
    * Claude.ai 実測値に準拠: warm near-black (色相 55°) の階段。
    * 純黒 (#000) や純中立グレーは禁止 — warm tone で統一する。

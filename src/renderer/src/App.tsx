@@ -15,7 +15,12 @@ import type {
 } from '../../types/shared';
 import { Sidebar, type SidebarView } from './components/Sidebar';
 import { TabBar, type TabItem } from './components/TabBar';
-import { Toolbar } from './components/Toolbar';
+import { Topbar } from './components/shell/Topbar';
+import { Rail } from './components/shell/Rail';
+import { StatusBar } from './components/shell/StatusBar';
+import { ActivityPanel } from './components/shell/ActivityPanel';
+import { useActivityFeed } from './lib/use-activity-feed';
+import { TweaksPanel } from './components/overlays/TweaksPanel';
 import { DiffView } from './components/DiffView';
 import { EditorView } from './components/EditorView';
 import { TerminalView, type TerminalViewHandle } from './components/TerminalView';
@@ -28,6 +33,7 @@ import { TeamCreateModal } from './components/TeamCreateModal';
 import { useT } from './lib/i18n';
 import { useSettings } from './lib/settings-context';
 import { useToast } from './lib/toast-context';
+import { useUiStore } from './stores/ui';
 import { parseShellArgs } from './lib/parse-args';
 import { dedupPrepend, listContainsPath } from './lib/path-norm';
 import type { Command } from './lib/commands';
@@ -178,6 +184,9 @@ export function App(): JSX.Element {
   } = useSettings();
   const { showToast } = useToast();
   const t = useT();
+  // Canvas モードでは App が裏で常時マウントされるが、下の初回タブ生成
+  // useEffect を抑制して "迷子ターミナル" が裏で起動しないようにする。
+  const viewMode = useUiStore((s) => s.viewMode);
   const [projectRoot, setProjectRoot] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
@@ -1600,12 +1609,20 @@ export function App(): JSX.Element {
     []
   );
 
-  // 初回タブ作成: Claude OK かつ projectRoot 設定済みでタブなし
+  // 初回タブ作成: Claude OK かつ projectRoot 設定済みでタブなし。
+  // Canvas モードでは App は不可視の裏マウントなので、ここでターミナルを生やすと
+  // Rust 側で無駄な PTY が常駐し、IDE へ切り替えたときにも "迷子ターミナル" として現れる。
+  // → viewMode === 'ide' のときだけ自動生成する。
   useEffect(() => {
-    if (claudeCheck.state === 'ok' && projectRoot && terminalTabs.length === 0) {
+    if (
+      claudeCheck.state === 'ok' &&
+      projectRoot &&
+      terminalTabs.length === 0 &&
+      viewMode === 'ide'
+    ) {
       addTerminalTab();
     }
-  }, [claudeCheck.state, projectRoot, terminalTabs.length, addTerminalTab]);
+  }, [claudeCheck.state, projectRoot, terminalTabs.length, addTerminalTab, viewMode]);
 
   // ---------- チーム作成 ----------
 
@@ -1972,8 +1989,30 @@ export function App(): JSX.Element {
   const projectName = projectRoot.split(/[\\/]/).pop() || 'no project';
   const activeTab = terminalTabs.find((t) => t.id === activeTerminalTabId) ?? null;
 
+  const totalHistoryCount = sessions.length + teamHistoryEntries.length;
+  const gitChangeCount = gitStatus?.ok ? gitStatus.files.length : 0;
+  const userInitial = (settings.language === 'ja' ? 'ユ' : 'U');
+
+  const activityFeed = useActivityFeed();
+  const activityOpen = useUiStore((s) => s.activityOpen);
+  const setActivityOpen = useUiStore((s) => s.setActivityOpen);
+
   return (
-    <div className={`layout${hasActiveContent ? '' : ' layout--terminal-full'}`}>
+    <div className={`layout layout--redesign${hasActiveContent ? '' : ' layout--terminal-full'}`}>
+      <Topbar
+        projectRoot={projectRoot}
+        status={status}
+        onRestart={handleRestart}
+        onOpenPalette={() => setPaletteOpen(true)}
+        userInitial={userInitial}
+      />
+      <Rail
+        sidebarView={sidebarView}
+        onSidebarViewChange={setSidebarView}
+        changeCount={gitChangeCount}
+        historyCount={totalHistoryCount}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
       <Sidebar
         view={sidebarView}
         onViewChange={setSidebarView}
@@ -2006,13 +2045,6 @@ export function App(): JSX.Element {
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <main className="main">
-        <Toolbar
-          projectRoot={projectRoot}
-          onRestart={handleRestart}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onOpenPalette={() => setPaletteOpen(true)}
-          status={status}
-        />
         {tabs.length > 0 && (
           <TabBar
             tabs={tabs}
@@ -2352,6 +2384,22 @@ export function App(): JSX.Element {
         currentTabCount={terminalTabs.length}
         existingTeams={teams}
       />
+
+      <StatusBar
+        gitStatus={gitStatus}
+        activeFilePath={activeFilePath}
+        terminalCount={terminalTabs.length}
+      />
+
+      {activityOpen ? (
+        <ActivityPanel
+          className="activity--drawer"
+          events={activityFeed.events}
+          onClose={() => setActivityOpen(false)}
+        />
+      ) : null}
+
+      <TweaksPanel />
     </div>
   );
 }

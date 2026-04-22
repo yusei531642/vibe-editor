@@ -16,6 +16,49 @@ const ja: Dict = {
   'toolbar.palette.title': 'コマンドパレット (Ctrl+Shift+P)',
   'toolbar.settings.title': '設定 (Ctrl+,)',
 
+  // ---------- Topbar (redesign shell) ----------
+  'topbar.searchHint': 'コマンドを検索…',
+  'topbar.mode.canvas': 'Canvas',
+  'topbar.mode.ide': 'IDE',
+  'topbar.mode.terminal': 'Terminal',
+
+  // ---------- Status bar ----------
+  'status.branch': 'ブランチ',
+  'status.changes': '変更',
+  'status.lang': '言語',
+  'status.theme': 'テーマ',
+  'status.ready': '準備完了',
+
+  // ---------- Activity feed ----------
+  'activity.title': 'アクティビティ',
+  'activity.live': 'ライブ',
+  'activity.filter.all': 'すべて',
+  'activity.filter.handoff': 'ハンドオフ',
+  'activity.filter.tool': 'ツール',
+  'activity.filter.error': 'エラー',
+  'activity.empty': 'まだアクティビティはありません',
+  'activity.groupNow': 'たった今',
+  'activity.groupMinute': '数分前',
+  'activity.groupHour': '本日',
+  'activity.groupEarlier': 'それ以前',
+
+  // ---------- Tweaks panel ----------
+  'tweaks.title': 'Tweaks',
+  'tweaks.theme': 'テーマ',
+  'tweaks.accent': 'アクセント',
+  'tweaks.density': '密度',
+  'tweaks.language': '言語',
+  'tweaks.open': 'クイック調整',
+  'tweaks.close': '閉じる',
+
+  // ---------- Canvas HUD ----------
+  'canvas.hud.stage': 'ステージ',
+  'canvas.hud.list': 'リスト',
+  'canvas.hud.focus': 'フォーカス',
+  'canvas.hud.fit': 'フィット',
+  'canvas.hud.zoomIn': 'ズームイン',
+  'canvas.hud.zoomOut': 'ズームアウト',
+
   // ---------- AppMenu ----------
   'appMenu.title': 'プロジェクトメニュー',
   'appMenu.new': '新規プロジェクト…',
@@ -334,6 +377,49 @@ const en: Dict = {
   'toolbar.restart.title': 'Restart app',
   'toolbar.palette.title': 'Command palette (Ctrl+Shift+P)',
   'toolbar.settings.title': 'Settings (Ctrl+,)',
+
+  // ---------- Topbar (redesign shell) ----------
+  'topbar.searchHint': 'Search commands…',
+  'topbar.mode.canvas': 'Canvas',
+  'topbar.mode.ide': 'IDE',
+  'topbar.mode.terminal': 'Terminal',
+
+  // ---------- Status bar ----------
+  'status.branch': 'branch',
+  'status.changes': 'changes',
+  'status.lang': 'lang',
+  'status.theme': 'theme',
+  'status.ready': 'Ready',
+
+  // ---------- Activity feed ----------
+  'activity.title': 'Activity',
+  'activity.live': 'Live',
+  'activity.filter.all': 'All',
+  'activity.filter.handoff': 'Handoffs',
+  'activity.filter.tool': 'Tools',
+  'activity.filter.error': 'Errors',
+  'activity.empty': 'No activity yet',
+  'activity.groupNow': 'Just now',
+  'activity.groupMinute': 'Minutes ago',
+  'activity.groupHour': 'Earlier today',
+  'activity.groupEarlier': 'Earlier',
+
+  // ---------- Tweaks panel ----------
+  'tweaks.title': 'Tweaks',
+  'tweaks.theme': 'Theme',
+  'tweaks.accent': 'Accent',
+  'tweaks.density': 'Density',
+  'tweaks.language': 'Language',
+  'tweaks.open': 'Quick tweaks',
+  'tweaks.close': 'Close',
+
+  // ---------- Canvas HUD ----------
+  'canvas.hud.stage': 'Stage',
+  'canvas.hud.list': 'List',
+  'canvas.hud.focus': 'Focus',
+  'canvas.hud.fit': 'Fit',
+  'canvas.hud.zoomIn': 'Zoom in',
+  'canvas.hud.zoomOut': 'Zoom out',
 
   // ---------- AppMenu ----------
   'appMenu.title': 'Project menu',

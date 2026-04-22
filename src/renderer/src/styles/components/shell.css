@@ -1,0 +1,657 @@
+/*
+ * shell.css — Redesign shell (Topbar / Rail / StatusBar / ActivityPanel)
+ *
+ * Claude Design バンドル "vibe-editor Redesign" の styles/app.css から
+ * .topbar / .rail / .status / .activity セクションを移植。
+ * 値は tokens.css のエイリアス (--shell-header/rail/dock/activity/status,
+ * --bg / --border / --accent 等) を参照する。
+ */
+
+/* ==================== TOP BAR ==================== */
+.topbar {
+  height: var(--shell-header);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 14px 0 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-toolbar);
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  position: relative;
+  z-index: var(--z-nav);
+  -webkit-app-region: drag;
+  flex-shrink: 0;
+}
+
+.topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--font-claude-response);
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  padding: 0 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.topbar__brand-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  background: radial-gradient(circle at 30% 30%, #f3a07e 0%, #d97757 55%, #a14b2d 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.15);
+}
+
+.topbar__project {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  font-size: 12.5px;
+  transition: background 160ms var(--ease-out), color 160ms var(--ease-out);
+  cursor: pointer;
+  white-space: nowrap;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar__project:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.topbar__project-parent {
+  color: var(--text-faint, var(--text-mute));
+}
+.topbar__project-sep {
+  color: var(--text-faint, var(--text-mute));
+  opacity: 0.6;
+}
+.topbar__project-name {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.topbar__spacer {
+  flex: 1;
+}
+
+.topbar__modes {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  font-size: 11.5px;
+  flex-shrink: 0;
+}
+.topbar__mode {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 12px;
+  border-radius: var(--radius-pill);
+  color: var(--text-mute);
+  transition: all 180ms var(--ease-out);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.topbar__mode.is-active {
+  background: var(--bg-panel);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--border-strong), 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+.topbar__mode:hover:not(.is-active) {
+  color: var(--text-dim);
+}
+
+.topbar__search {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 240px;
+  max-width: 360px;
+  flex: 0 1 auto;
+  padding: 5px 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-mute);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 160ms, color 160ms;
+}
+.topbar__search:hover {
+  border-color: var(--border-strong);
+  color: var(--text-dim);
+}
+.topbar__search-icon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.topbar__search-hint {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+.topbar__search-kbd {
+  margin-left: auto;
+  font-family: var(--mono-font);
+  font-size: 10.5px;
+  color: var(--text-faint, var(--text-mute));
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.topbar__status {
+  -webkit-app-region: no-drag;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-mute);
+  max-width: 220px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.topbar__status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--success);
+  flex-shrink: 0;
+}
+.topbar__status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topbar__icons {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.topbar__iconbtn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-mute);
+  transition: all 160ms var(--ease-out);
+  cursor: pointer;
+}
+.topbar__iconbtn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.topbar__iconbtn.is-active {
+  background: var(--bg-active);
+  color: var(--accent);
+}
+
+.topbar__user {
+  -webkit-app-region: no-drag;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #d97757 0%, #b5583a 100%);
+  color: white;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+  flex-shrink: 0;
+}
+
+/* ==================== LEFT RAIL ==================== */
+.rail {
+  width: var(--shell-rail);
+  background: var(--bg-sidebar, var(--bg-deep));
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 10px 0;
+  gap: 4px;
+  flex-shrink: 0;
+  z-index: 1;
+}
+.rail__btn {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  color: var(--text-mute);
+  position: relative;
+  transition: all 180ms var(--ease-out);
+  cursor: pointer;
+}
+.rail__btn:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.rail__btn.is-active {
+  color: var(--text);
+  background: var(--bg-panel);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.rail__btn.is-active::before {
+  content: '';
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+}
+.rail__divider {
+  width: 22px;
+  height: 1px;
+  background: var(--border);
+  margin: 6px 0;
+}
+.rail__badge {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 0 2px var(--bg-sidebar, var(--bg-deep));
+}
+.rail__spacer {
+  flex: 1;
+}
+
+/* ==================== STATUS BAR ==================== */
+.status {
+  height: var(--shell-status);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 14px;
+  background: var(--bg-sidebar, var(--bg-deep));
+  border-top: 1px solid var(--border);
+  font-family: var(--mono-font);
+  font-size: 10.5px;
+  color: var(--text-mute);
+  flex-shrink: 0;
+  z-index: 2;
+}
+.status__item {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.status__item--truncate {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+}
+.status__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--success);
+}
+.status__label {
+  color: var(--text-faint, var(--text-mute));
+  opacity: 0.7;
+}
+.status__spacer {
+  flex: 1;
+}
+
+/* ==================== RESPONSIVE ==================== */
+@media (max-width: 1100px) {
+  .topbar__search {
+    min-width: 160px;
+  }
+  .topbar__status {
+    display: none;
+  }
+}
+@media (max-width: 900px) {
+  .topbar__search {
+    display: none;
+  }
+  .topbar__project {
+    max-width: 180px;
+  }
+}
+@media (max-width: 720px) {
+  .topbar__mode span {
+    display: none;
+  }
+  .topbar__mode {
+    padding: 4px 8px;
+  }
+  .status__item--truncate {
+    display: none;
+  }
+}
+
+/* ==================== ACTIVITY PANEL ==================== */
+.activity {
+  width: var(--shell-activity);
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  z-index: 2;
+}
+
+/* Drawer モード: App ルートから直接 absolute で差し込む */
+.activity--drawer {
+  position: fixed;
+  top: var(--shell-header);
+  right: 0;
+  bottom: var(--shell-status);
+  box-shadow: var(--shadow-lg);
+  z-index: 600;
+  animation: activityDrawerIn 280ms var(--ease-spring);
+}
+@keyframes activityDrawerIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0.4;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+.activity__header {
+  padding: 12px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.activity__header-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.activity__title {
+  font-family: var(--font-claude-response);
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  margin: 0;
+  flex: 1;
+}
+.activity__close {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  color: var(--text-mute);
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+.activity__close:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.activity__sub {
+  font-size: 11px;
+  color: var(--text-mute);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.activity__live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(111, 166, 95, 0.18);
+  animation: activityPulseDot 1.8s var(--ease-out) infinite;
+}
+@keyframes activityPulseDot {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px rgba(111, 166, 95, 0.18);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(111, 166, 95, 0.04);
+  }
+}
+.activity__filters {
+  display: flex;
+  gap: 4px;
+  padding: 8px 14px 6px;
+  flex-wrap: wrap;
+}
+.activity__filter {
+  padding: 3px 9px;
+  font-size: 11px;
+  border-radius: 999px;
+  color: var(--text-mute);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 160ms var(--ease-out);
+}
+.activity__filter:hover {
+  color: var(--text-dim);
+  border-color: var(--border-strong);
+}
+.activity__filter.is-active {
+  background: var(--bg-active);
+  color: var(--accent);
+  border-color: rgba(217, 119, 87, 0.4);
+}
+.activity__body {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 14px 18px;
+}
+.activity__empty {
+  padding: 32px 14px;
+  color: var(--text-mute);
+  font-size: 12px;
+  text-align: center;
+  font-family: var(--font-claude-response);
+  font-style: italic;
+}
+
+.feed-group {
+  margin-left: 10px;
+  padding-left: 22px;
+  position: relative;
+  margin-top: 6px;
+}
+.feed-group__label {
+  font-family: var(--mono-font);
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-faint, var(--text-mute));
+  margin: 12px 0 4px -22px;
+  padding-left: 22px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.feed-group__label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.feed-item {
+  position: relative;
+  padding: 8px 0 10px 22px;
+  border-left: 1px dashed var(--border);
+  margin-left: 0;
+}
+.feed-item:last-child {
+  border-left-color: transparent;
+}
+.feed-item__dot {
+  position: absolute;
+  left: -5px;
+  top: 12px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--role-color, var(--accent));
+  box-shadow: 0 0 0 3px var(--bg-panel), 0 0 0 4px var(--border);
+}
+.feed-item__time {
+  font-family: var(--mono-font);
+  font-size: 10px;
+  color: var(--text-faint, var(--text-mute));
+  margin-bottom: 2px;
+}
+.feed-item__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+.feed-item__role {
+  font-family: var(--mono-font);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--role-color, var(--accent));
+  font-weight: 600;
+}
+.feed-item__arrow {
+  color: var(--text-faint, var(--text-mute));
+}
+.feed-item__target {
+  color: var(--text);
+  font-weight: 500;
+}
+.feed-item__body {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: var(--font-claude-response);
+  line-height: 1.5;
+  padding: 7px 10px;
+  background: var(--bg-sidebar, var(--bg-deep));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.feed-item__body.is-task {
+  font-family: var(--ui-font);
+}
+
+/* ==================== LAYOUT INTEGRATION ==================== */
+/* Redesign shell は 3 段 x 5 列:
+ *   row 1: topbar (全幅)
+ *   row 2: rail | sidebar | main | resize | panel
+ *   row 3: status (全幅)
+ * 既存 .layout (index.css:102) のカラム定義を上書きする。
+ * .layout--terminal-full との両立にも追加ルールで対応。
+ */
+.layout.layout--redesign {
+  display: grid;
+  grid-template-rows: var(--shell-header) minmax(0, 1fr) var(--shell-status);
+  grid-template-columns:
+    var(--shell-rail)
+    var(--shell-sidebar-w)
+    minmax(0, 1fr)
+    5px
+    var(--claude-code-width, 460px);
+}
+.layout.layout--redesign > .topbar {
+  grid-row: 1;
+  grid-column: 1 / -1;
+}
+.layout.layout--redesign > .rail {
+  grid-row: 2;
+  grid-column: 1;
+}
+.layout.layout--redesign > .sidebar {
+  grid-row: 2;
+  grid-column: 2;
+}
+.layout.layout--redesign > .main {
+  grid-row: 2;
+  grid-column: 3;
+}
+.layout.layout--redesign > .resize-handle {
+  grid-row: 2;
+  grid-column: 4;
+}
+.layout.layout--redesign > .claude-code-panel {
+  grid-row: 2;
+  grid-column: 5;
+}
+.layout.layout--redesign > .status {
+  grid-row: 3;
+  grid-column: 1 / -1;
+}
+
+/* terminal-full (アクティブコンテンツ無) モード: main/handle を 0 幅に畳み panel 拡張 */
+.layout.layout--redesign.layout--terminal-full {
+  grid-template-columns:
+    var(--shell-rail)
+    var(--shell-sidebar-w)
+    0
+    0
+    minmax(0, 1fr);
+}
+
+/* 狭幅: rail 折りたたみ */
+@media (max-width: 1024px) {
+  .layout.layout--redesign {
+    grid-template-columns:
+      0
+      var(--shell-sidebar-w)
+      minmax(0, 1fr)
+      5px
+      var(--claude-code-width, 460px);
+  }
+  .layout.layout--redesign > .rail {
+    display: none;
+  }
+  .layout.layout--redesign.layout--terminal-full {
+    grid-template-columns:
+      0
+      var(--shell-sidebar-w)
+      0
+      0
+      minmax(0, 1fr);
+  }
+}

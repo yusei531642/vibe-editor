@@ -1,4 +1,3 @@
-import { Files, GitBranch, History, StickyNote } from 'lucide-react';
 import type {
   GitFileChange,
   GitStatus,
@@ -11,7 +10,6 @@ import { FileTreePanel } from './FileTreePanel';
 import { NotesPanel } from './NotesPanel';
 import { AppMenu } from './AppMenu';
 import { UserMenu } from './UserMenu';
-import { useT } from '../lib/i18n';
 
 export type SidebarView = 'files' | 'changes' | 'sessions' | 'notes';
 
@@ -48,41 +46,6 @@ interface SidebarProps {
 }
 
 export function Sidebar(props: SidebarProps): JSX.Element {
-  const t = useT();
-  const projectName = props.projectRoot.split(/[\\/]/).filter(Boolean).pop() ?? t('appMenu.title');
-  const totalHistory = props.sessions.length + props.teamHistory.length;
-  const changeCount = props.gitStatus?.ok ? props.gitStatus.files.length : 0;
-
-  const navItems: Array<{
-    view: SidebarView;
-    label: string;
-    count?: number;
-    icon: JSX.Element;
-  }> = [
-    {
-      view: 'files',
-      label: t('sidebar.files'),
-      icon: <Files size={15} strokeWidth={1.85} />
-    },
-    {
-      view: 'changes',
-      label: t('sidebar.changes'),
-      count: changeCount > 0 ? changeCount : undefined,
-      icon: <GitBranch size={15} strokeWidth={1.85} />
-    },
-    {
-      view: 'sessions',
-      label: t('sidebar.history'),
-      count: totalHistory > 0 ? totalHistory : undefined,
-      icon: <History size={15} strokeWidth={1.85} />
-    },
-    {
-      view: 'notes',
-      label: t('sidebar.notes'),
-      icon: <StickyNote size={15} strokeWidth={1.85} />
-    }
-  ];
-
   return (
     <aside className="sidebar">
       <div className="sidebar__header">
@@ -95,38 +58,7 @@ export function Sidebar(props: SidebarProps): JSX.Element {
           onOpenRecent={props.onOpenRecent}
           onClearRecent={props.onClearRecent}
         />
-        <div className="sidebar__brand" title={props.projectRoot || projectName}>
-          <span>vibe-editor</span>
-          <span className="sidebar__brand-project">{projectName}</span>
-        </div>
       </div>
-
-      <nav className="sidebar-switcher" role="tablist" aria-label="Sidebar view">
-        {navItems.map((item) => {
-          const active = props.view === item.view;
-          return (
-            <button
-              key={item.view}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              aria-current={active ? 'page' : undefined}
-              className={`sidebar-switcher__btn ${active ? 'is-active' : ''}`}
-              onClick={() => props.onViewChange(item.view)}
-            >
-              <span className="sidebar-switcher__btn-icon" aria-hidden="true">
-                {item.icon}
-              </span>
-              <span className="sidebar-switcher__btn-label">{item.label}</span>
-              {item.count ? (
-                <span className="sidebar-switcher__badge">
-                  {item.count > 99 ? '99+' : item.count}
-                </span>
-              ) : null}
-            </button>
-          );
-        })}
-      </nav>
 
       <div className="sidebar__body" key={props.view}>
         {props.view === 'files' ? (
