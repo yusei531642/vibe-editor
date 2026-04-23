@@ -177,6 +177,8 @@ export interface TeamHistoryMember {
   agent: TerminalAgent;
   /** Claude Code の出力から抽出したセッションID。Codex や未キャプチャは null */
   sessionId: string | null;
+  /** ユーザーが手動でリネームしたタブ名。resume 時に復元する。null/未指定なら自動生成名 */
+  customLabel?: string | null;
 }
 
 /** 保存されるチーム履歴エントリ。プロジェクト単位で格納 */

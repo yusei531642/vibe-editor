@@ -1860,7 +1860,7 @@ body.is-resizing * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 120px;
+  max-width: 280px;
   cursor: default;
 }
 
@@ -1871,7 +1871,7 @@ body.is-resizing * {
   border: 1px solid var(--accent);
   border-radius: 2px;
   padding: 0 3px;
-  width: 100px;
+  width: 220px;
   outline: none;
   font-family: var(--ui-font);
 }
@@ -1910,123 +1910,98 @@ body.is-resizing * {
   width: 100%;
 }
 
-/* ---------- ターミナルタブバー ---------- */
+/* ---------- プロセス終了 (exited) 表示 ---------- */
 
-.terminal-tabs {
-  display: flex;
-  align-items: stretch;
-  gap: 0;
-  padding: 0 4px;
-  height: 30px;
-  background: var(--bg-panel);
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-  overflow-x: auto;
-}
-
-.terminal-tabs::-webkit-scrollbar {
-  display: none;
-}
-
-.terminal-tab {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 12px;
-  font-size: 11px;
-  font-weight: 500;
-  color: var(--text-mute);
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  cursor: pointer;
-  white-space: nowrap;
-  position: relative;
-  user-select: none;
-  transition:
-    color var(--dur-fast) var(--ease-out-soft),
-    background var(--dur-fast) var(--ease-out-soft),
-    border-color var(--dur-normal) var(--ease-out-soft);
-}
-
-.terminal-tab:hover {
-  color: var(--text-dim);
-  background: var(--bg-hover);
-}
-
-.terminal-tab.is-active {
-  color: var(--text);
-  border-bottom-color: var(--accent);
-}
-
-.terminal-tab.is-exited {
-  opacity: 0.5;
-}
-
-.terminal-tab__activity {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--accent);
-  flex-shrink: 0;
-  animation: pulse-soft 2s ease-in-out infinite;
-}
-
-.terminal-tab__close {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 16px;
-  height: 16px;
-  border-radius: 4px;
-  background: transparent;
-  border: none;
-  color: var(--text-mute);
-  cursor: pointer;
-  font-size: 13px;
+.terminal-pane__exit-badge {
+  font-size: 9px;
   line-height: 1;
-  padding: 0;
-  opacity: 0;
-  transition:
-    opacity var(--dur-fast) var(--ease-out),
-    background var(--dur-fast) var(--ease-out),
-    color var(--dur-fast) var(--ease-out);
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--danger, #d73a49) 18%, transparent);
+  color: var(--danger, #d73a49);
+  border: 1px solid color-mix(in srgb, var(--danger, #d73a49) 35%, transparent);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
 }
 
-.terminal-tab:hover .terminal-tab__close,
-.terminal-tab.is-active .terminal-tab__close {
-  opacity: 1;
-}
-
-.terminal-tab__close:hover {
-  background: var(--bg-hover);
-  color: var(--text);
-}
-
-.terminal-tabs__add {
+.terminal-pane__restart {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
   padding: 0;
   background: transparent;
   border: none;
+  border-radius: 3px;
   color: var(--text-mute);
   cursor: pointer;
-  font-size: 16px;
-  font-weight: 400;
-  transition: color var(--dur-fast) var(--ease-out);
+  transition: background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out);
 }
 
-.terminal-tabs__add:hover:not(:disabled) {
+.terminal-pane__restart:hover {
+  background: var(--bg-hover);
   color: var(--accent);
 }
 
-.terminal-tabs__add:disabled {
-  opacity: 0.3;
-  cursor: not-allowed;
+.terminal-pane__exit-banner {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: color-mix(in srgb, var(--bg-panel) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger, #d73a49) 45%, transparent);
+  border-left: 3px solid var(--danger, #d73a49);
+  border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  z-index: 5;
+  font-size: 11px;
+  color: var(--text);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.terminal-pane__exit-banner-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-pane__exit-banner-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: var(--accent);
+  color: #fffdf7;
+  font-weight: 600;
+  border: none;
+  border-radius: 3px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: filter var(--dur-fast) var(--ease-out);
+}
+
+.terminal-pane__exit-banner-btn:hover {
+  filter: brightness(1.1);
+}
+
+.terminal-pane__exit-banner-btn--ghost {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+.terminal-pane__exit-banner-btn--ghost:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+  filter: none;
 }
 
 /* エージェントバッジ（C / X） */
@@ -2083,30 +2058,6 @@ body.is-resizing * {
 .terminal-tab__leader-icon {
   color: var(--claude-dot-awaiting, #eec467);
   flex-shrink: 0;
-}
-
-/* ---------- チームグループ ---------- */
-
-.terminal-tabs__team-group {
-  display: flex;
-  align-items: stretch;
-  border-left: 2px solid rgba(245, 158, 11, 0.35);
-  margin-left: 4px;
-  padding-left: 2px;
-  gap: 0;
-}
-
-.terminal-tabs__team-name {
-  display: flex;
-  align-items: center;
-  padding: 0 6px;
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--text-mute);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  white-space: nowrap;
-  user-select: none;
 }
 
 /* ---------- Leader 閉じ確認 ---------- */

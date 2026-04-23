@@ -21,6 +21,9 @@ pub struct TeamHistoryMember {
     pub role: String,
     pub agent: String,
     pub session_id: Option<String>,
+    /// ユーザーが手動でリネームしたタブ名 (resume 時に復元する。null なら自動生成名)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_label: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

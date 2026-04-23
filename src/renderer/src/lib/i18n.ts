@@ -340,6 +340,13 @@ const ja: Dict = {
   'cmd.terminal.createTeam': 'Team を作成…',
   'cmd.terminal.closeTab': 'アクティブなターミナルタブを閉じる',
   'cmd.terminal.restart': 'ターミナルを再起動',
+
+  // ---------- Terminal pane (exit handling) ----------
+  'terminal.exited': '終了',
+  'terminal.exitedTitle': 'プロセスが終了しています',
+  'terminal.exitedBanner': 'プロセスが終了しました ({status})',
+  'terminal.restart': '再起動',
+  'terminal.closeTab': '閉じる',
   'cmd.settings.open': '設定を開く',
   'cmd.settings.cycleDensity': '情報密度を切り替え',
   'cmd.settings.cycleDensitySub': '現在: {density}',
@@ -704,6 +711,13 @@ const en: Dict = {
   'cmd.terminal.createTeam': 'Create team…',
   'cmd.terminal.closeTab': 'Close active terminal tab',
   'cmd.terminal.restart': 'Restart terminal',
+
+  // ---------- Terminal pane (exit handling) ----------
+  'terminal.exited': 'exited',
+  'terminal.exitedTitle': 'Process has exited',
+  'terminal.exitedBanner': 'Process exited ({status})',
+  'terminal.restart': 'Restart',
+  'terminal.closeTab': 'Close',
   'cmd.settings.open': 'Open settings',
   'cmd.settings.cycleDensity': 'Cycle density',
   'cmd.settings.cycleDensitySub': 'Current: {density}',

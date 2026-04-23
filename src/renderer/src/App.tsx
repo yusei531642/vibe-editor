@@ -97,8 +97,10 @@ interface TerminalTab {
   hasActivity: boolean;
   /** チーム履歴で使う member インデックス。未所属タブは null */
   teamHistoryMemberIdx: number | null;
-  /** ユーザー向け表示ラベル（自動生成 or 手動リネーム） */
+  /** 自動生成されたデフォルトラベル（"Claude #1" / "Programmer A" など） */
   label: string;
+  /** ユーザーが手動でリネームした値。空入力で blur すると null に戻り label が表示される */
+  customLabel: string | null;
 }
 
 /** ロール別の短い説明（チームプロンプト内で使用） */
@@ -298,6 +300,8 @@ export function App(): JSX.Element {
       resumeSessionId?: string | null;
       agentId?: string;
       teamHistoryMemberIdx?: number | null;
+      /** team-history からの resume 時に復元する手動リネーム名 */
+      customLabel?: string | null;
     }): number | null => {
       const id = nextTerminalIdRef.current++;
       const agentType = opts?.agent ?? 'claude';
@@ -328,7 +332,8 @@ export function App(): JSX.Element {
           resumeSessionId: opts?.resumeSessionId ?? null,
           hasActivity: false,
           teamHistoryMemberIdx: opts?.teamHistoryMemberIdx ?? null,
-          label
+          label,
+          customLabel: opts?.customLabel ?? null
         };
         if (prev.length >= MAX_TERMINALS) {
           showToast(`ターミナル上限（${MAX_TERMINALS}）に達しました`, { tone: 'warning' });
@@ -369,7 +374,8 @@ export function App(): JSX.Element {
           resumeSessionId: null,
           hasActivity: false,
           teamHistoryMemberIdx: null,
-          label: 'Claude #1'
+          label: 'Claude #1',
+          customLabel: null
         };
         setActiveTerminalTabId(newId);
         return [fresh];
@@ -405,7 +411,8 @@ export function App(): JSX.Element {
             resumeSessionId: null,
             hasActivity: false,
             teamHistoryMemberIdx: null,
-            label: 'Claude #1'
+            label: 'Claude #1',
+            customLabel: null
           };
           setActiveTerminalTabId(newId);
           return [fresh];
@@ -653,7 +660,8 @@ export function App(): JSX.Element {
             resumeSessionId: null,
             hasActivity: false,
             teamHistoryMemberIdx: null,
-            label: 'Claude #1'
+            label: 'Claude #1',
+            customLabel: null
           }
         ]);
         setActiveTerminalTabId(newId);
@@ -1821,7 +1829,7 @@ export function App(): JSX.Element {
         );
       }
 
-      // 各メンバーをタブとしてスポーン（sessionId があれば --resume 付き）
+      // 各メンバーをタブとしてスポーン（sessionId があれば --resume 付き、customLabel があれば復元）
       for (let i = 0; i < entry.members.length; i++) {
         const m = entry.members[i];
         addTerminalTab({
@@ -1830,7 +1838,8 @@ export function App(): JSX.Element {
           teamId: entry.id,
           agentId: allMembers[i].agentId,
           resumeSessionId: m.sessionId ?? null,
-          teamHistoryMemberIdx: i
+          teamHistoryMemberIdx: i,
+          customLabel: m.customLabel ?? null
         });
       }
 
@@ -1900,6 +1909,39 @@ export function App(): JSX.Element {
         if (entry.members[memberIdx].sessionId === sessionId) return prev;
         const nextMembers = entry.members.map((m, i) =>
           i === memberIdx ? { ...m, sessionId } : m
+        );
+        const nextEntry: TeamHistoryEntry = {
+          ...entry,
+          members: nextMembers,
+          lastUsedAt: new Date().toISOString()
+        };
+        saveTeamHistory(nextEntry);
+        const copy = [...prev];
+        copy[idx] = nextEntry;
+        return copy;
+      });
+    },
+    [saveTeamHistory]
+  );
+
+  /**
+   * タブの手動リネーム結果を team-history に反映する。
+   * チーム所属タブのみ対象。スタンドアロンタブはメモリ揮発なのでスキップ。
+   * trimmed が空文字なら customLabel = null (= 自動生成名へ復帰) として保存。
+   */
+  const persistTerminalCustomLabel = useCallback(
+    (tab: TerminalTab, trimmed: string) => {
+      if (!tab.teamId || tab.teamHistoryMemberIdx == null) return;
+      const next: string | null = trimmed === '' ? null : trimmed;
+      setTeamHistoryEntries((prev) => {
+        const idx = prev.findIndex((e) => e.id === tab.teamId);
+        if (idx < 0) return prev;
+        const entry = prev[idx];
+        const memberIdx = tab.teamHistoryMemberIdx!;
+        if (memberIdx < 0 || memberIdx >= entry.members.length) return prev;
+        if ((entry.members[memberIdx].customLabel ?? null) === next) return prev;
+        const nextMembers = entry.members.map((m, i) =>
+          i === memberIdx ? { ...m, customLabel: next } : m
         );
         const nextEntry: TeamHistoryEntry = {
           ...entry,
@@ -2099,7 +2141,13 @@ export function App(): JSX.Element {
       <aside className={`claude-code-panel${hasActiveContent ? '' : ' claude-code-panel--full'}`}>
         <header className="claude-code-panel__header">
           <div className="claude-code-panel__title-wrap">
-            <span className="claude-code-panel__dot" />
+            <span
+              className={`claude-code-panel__dot${
+                terminalTabs.length > 0 && terminalTabs.every((tab) => tab.exited)
+                  ? ' is-exited'
+                  : ''
+              }`}
+            />
             <span className="claude-code-panel__title">{t('claudePanel.title')}</span>
           </div>
           <div className="claude-code-panel__header-right">
@@ -2277,12 +2325,22 @@ export function App(): JSX.Element {
                     {editingLabelTabId === tab.id ? (
                       <input
                         className="terminal-pane__label-input"
-                        defaultValue={tab.label}
+                        defaultValue={tab.customLabel ?? tab.label}
                         autoFocus
+                        placeholder={tab.label}
                         onClick={(e) => e.stopPropagation()}
                         onBlur={(e) => {
-                          const v = e.currentTarget.value.trim() || tab.label;
-                          setTerminalTabs((prev) => prev.map((t) => t.id === tab.id ? { ...t, label: v } : t));
+                          const trimmed = e.currentTarget.value.trim();
+                          // 空入力 → customLabel を null に戻し、自動生成 label を再表示
+                          setTerminalTabs((prev) =>
+                            prev.map((t) =>
+                              t.id === tab.id
+                                ? { ...t, customLabel: trimmed === '' ? null : trimmed }
+                                : t
+                            )
+                          );
+                          // チーム所属なら team-history.json にも保存して resume 時に復元できるようにする
+                          persistTerminalCustomLabel(tab, trimmed);
                           setEditingLabelTabId(null);
                         }}
                         onKeyDown={(e) => {
@@ -2294,12 +2352,26 @@ export function App(): JSX.Element {
                       <span
                         className="terminal-pane__label"
                         onDoubleClick={(e) => { e.stopPropagation(); setEditingLabelTabId(tab.id); }}
-                        title={tab.label}
+                        title={tab.customLabel ?? tab.label}
                       >
-                        {tab.label}
+                        {tab.customLabel ?? tab.label}
+                      </span>
+                    )}
+                    {tab.exited && (
+                      <span className="terminal-pane__exit-badge" title={t('terminal.exitedTitle')}>
+                        {t('terminal.exited')}
                       </span>
                     )}
                     <span style={{ flex: 1 }} />
+                    {tab.exited && (
+                      <button
+                        className="terminal-pane__restart"
+                        onClick={(e) => { e.stopPropagation(); restartTerminalTab(tab.id); }}
+                        title={t('terminal.restart')}
+                      >
+                        <RotateCw size={12} strokeWidth={2} />
+                      </button>
+                    )}
                     <button
                       className="terminal-pane__close"
                       onClick={(e) => { e.stopPropagation(); closeTerminalTab(tab.id); }}
@@ -2341,6 +2413,26 @@ export function App(): JSX.Element {
                   }
                   onSessionId={(sid) => handleTerminalSessionId(tab, sid)}
                 />
+                {tab.exited && (
+                  <div className="terminal-pane__exit-banner" onClick={(e) => e.stopPropagation()}>
+                    <span className="terminal-pane__exit-banner-text">
+                      {t('terminal.exitedBanner', { status: tab.status || t('terminal.exited') })}
+                    </span>
+                    <button
+                      className="terminal-pane__exit-banner-btn"
+                      onClick={() => restartTerminalTab(tab.id)}
+                    >
+                      <RotateCw size={12} strokeWidth={2.25} />
+                      {t('terminal.restart')}
+                    </button>
+                    <button
+                      className="terminal-pane__exit-banner-btn terminal-pane__exit-banner-btn--ghost"
+                      onClick={() => closeTerminalTab(tab.id)}
+                    >
+                      {t('terminal.closeTab')}
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
         </div>
