@@ -2268,8 +2268,11 @@ export function App(): JSX.Element {
                 className={`terminal-pane${tab.id === activeTerminalTabId ? ' is-active' : ''}${dragOverTabId === tab.id && dragTabId !== tab.id ? ' drag-over' : ''}`}
                 onClick={() => setActiveTerminalTabId(tab.id)}
               >
-                {/* ペインヘッダー（エージェント + ロール + 閉じる） */}
-                {(terminalTabs.length > 1 || tab.teamId) && (
+                {/* ペインヘッダー（エージェント + ロール + 閉じる）。
+                    1 タブ + スタンドアロンではヘッダーを隠すが、カスタムタイトルが
+                    設定されている場合は隠すと編集手段 (double-click) を失うので常に表示する。
+                    Issue #91 */}
+                {(terminalTabs.length > 1 || tab.teamId || tab.customLabel) && (
                   <div
                     className="terminal-pane__header"
                     draggable

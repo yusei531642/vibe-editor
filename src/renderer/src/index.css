@@ -1594,6 +1594,16 @@ body.is-resizing * {
   background-color: var(--bg) !important;
 }
 
+/* Glass テーマ時は xterm を透過させて親の backdrop-filter を活かす (Issue #89)。
+   `.terminal-view` の solid 背景と `.xterm-viewport` の `!important` 背景を両方打ち消す。 */
+[data-theme="glass"] .terminal-view {
+  background: transparent;
+}
+
+[data-theme="glass"] .terminal-view .xterm-viewport {
+  background-color: transparent !important;
+}
+
 /* ---------- 右側固定 Claude Code パネル ---------- */
 
 .claude-code-panel {

@@ -49,6 +49,9 @@ export function useXtermInstance(settings: AppSettings): {
       lineHeight: 1.2,
       cursorBlink: true,
       allowProposedApi: true,
+      // glass テーマで xterm キャンバスを透過させるために必要 (Issue #89)。
+      // 他テーマでも不透明色を渡しているので挙動は変わらない。
+      allowTransparency: true,
       theme: buildXtermTheme(initial.theme),
       scrollback: SCROLLBACK_LINES,
       convertEol: false
