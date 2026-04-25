@@ -156,14 +156,28 @@ export const api = {
       invoke('files_list', { projectRoot, relPath }),
     read: (projectRoot: string, relPath: string): Promise<FileReadResult> =>
       invoke('files_read', { projectRoot, relPath }),
-    /** Issue #65: expectedMtimeMs を渡すと Rust 側で external change 検出する */
+    /**
+     * Issue #65 / #104 / #102: external-change 検出と元 encoding の保持。
+     *   - expectedMtimeMs: 開いた時点の mtime
+     *   - expectedSizeBytes: 開いた時点の size (mtime 解像度の補完)
+     *   - encoding: 開いたときに検出した encoding。指定するとその encoding で再エンコードされる
+     */
     write: (
       projectRoot: string,
       relPath: string,
       content: string,
-      expectedMtimeMs?: number
+      expectedMtimeMs?: number,
+      expectedSizeBytes?: number,
+      encoding?: string
     ): Promise<FileWriteResult> =>
-      invoke('files_write', { projectRoot, relPath, content, expectedMtimeMs })
+      invoke('files_write', {
+        projectRoot,
+        relPath,
+        content,
+        expectedMtimeMs,
+        expectedSizeBytes,
+        encoding
+      })
   },
 
   sessions: {

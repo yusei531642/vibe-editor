@@ -90,8 +90,15 @@ interface EditorTab {
    * 編集は許可しない (保存すると lossy 変換後の UTF-8 で上書きされ、元 encoding を失うため)。
    */
   lossyEncoding: boolean;
+  /**
+   * Issue #102: read 時に検出した encoding。save 時にこの encoding で再エンコードして
+   * 書き戻すことで UTF-16/UTF-32/UTF-8 BOM が UTF-8 にロスっと変換されるのを防ぐ。
+   */
+  encoding: string;
   /** Issue #65: 開いた時点の mtime (ms since epoch)。save 時の external-change 検出に使う */
   mtimeMs?: number;
+  /** Issue #104: 開いた時点の size。mtime 解像度の粗い FS 用に併用検出する */
+  sizeBytes?: number;
   loading: boolean;
   error: string | null;
   pinned: boolean;
@@ -954,6 +961,7 @@ export function App(): JSX.Element {
             originalContent: '',
             isBinary: false,
             lossyEncoding: false,
+            encoding: 'utf-8',
             loading: true,
             error: null,
             pinned: false
@@ -981,7 +989,9 @@ export function App(): JSX.Element {
                   originalContent: res.content,
                   isBinary: res.isBinary,
                   lossyEncoding: lossy,
-                  mtimeMs: res.mtimeMs
+                  encoding: res.encoding || 'utf-8',
+                  mtimeMs: res.mtimeMs,
+                  sizeBytes: res.sizeBytes
                 }
               : tab
           )
@@ -1018,15 +1028,18 @@ export function App(): JSX.Element {
       }
       if (tab.content === tab.originalContent) return;
       try {
-        // Issue #65: expectedMtimeMs を渡し、外部変更があれば conflict=true で弾かれる
+        // Issue #65 / #104 / #102: mtime + size + encoding を渡して、external-change と
+        // 元 encoding の両方を保護する
         let res = await window.api.files.write(
           targetRoot,
           tab.relPath,
           tab.content,
-          tab.mtimeMs
+          tab.mtimeMs,
+          tab.sizeBytes,
+          tab.encoding
         );
         if (res.conflict) {
-          // ユーザーに確認 → OK なら再度 mtime チェック無しで書き込む
+          // ユーザーに確認 → OK なら再度 mtime/size チェック無しで書き込む
           const overwrite = window.confirm(
             t('editor.externalChangeConfirm', { path: tab.relPath })
           );
@@ -1034,13 +1047,25 @@ export function App(): JSX.Element {
             showToast(t('editor.saveAborted', { path: tab.relPath }), { tone: 'warning' });
             return;
           }
-          res = await window.api.files.write(targetRoot, tab.relPath, tab.content);
+          res = await window.api.files.write(
+            targetRoot,
+            tab.relPath,
+            tab.content,
+            undefined,
+            undefined,
+            tab.encoding
+          );
         }
         if (res.ok) {
           setEditorTabs((prev) =>
             prev.map((t) =>
               t.id === id
-                ? { ...t, originalContent: t.content, mtimeMs: res.mtimeMs }
+                ? {
+                    ...t,
+                    originalContent: t.content,
+                    mtimeMs: res.mtimeMs,
+                    sizeBytes: res.sizeBytes
+                  }
                 : t
             )
           );

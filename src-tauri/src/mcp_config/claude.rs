@@ -61,7 +61,10 @@ pub async fn cleanup() -> Result<bool> {
         .unwrap_or(false);
     if removed {
         let json = serde_json::to_vec_pretty(&config)?;
-        fs::write(&path, json).await?;
+        // Issue #108: setup と同じく cleanup も atomic_write を使う。
+        // 直接 fs::write で上書きすると、書き込み中のクラッシュで `~/.claude.json` が
+        // 空 / 半端な状態で残り、Claude Code 全体の設定が失われる事故になる。
+        crate::commands::atomic_write::atomic_write(&path, &json).await?;
     }
     Ok(removed)
 }
