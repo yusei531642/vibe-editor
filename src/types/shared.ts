@@ -203,7 +203,58 @@ export interface SessionInfo {
  */
 export type TerminalAgent = string;
 
-export type TeamRole = 'leader' | 'planner' | 'programmer' | 'researcher' | 'reviewer';
+/**
+ * 旧固定 5 種ロール。後方互換のため string alias を維持しつつ、
+ * 実体は `RoleProfile.id` (任意文字列) で識別される。
+ */
+export type TeamRole = string;
+
+/** ロールプロファイル — チームメンバーの役割テンプレ。
+ *  built-in (アプリ同梱) と user (~/.vibe-editor/role-profiles.json) の合成で運用。 */
+export interface RoleProfile {
+  schemaVersion: 1;
+  id: string;
+  /** built-in (同梱) か user (ユーザー定義 / override) か */
+  source: 'builtin' | 'user';
+  i18n: {
+    en: { label: string; description: string };
+    ja?: { label: string; description: string };
+  };
+  visual: {
+    /** #rrggbb */
+    color: string;
+    /** 1 char glyph */
+    glyph: string;
+  };
+  prompt: {
+    /** placeholder: {teamName} {selfLabel} {selfDescription} {roster} {tools} {globalPreamble} */
+    template: string;
+    /** 日本語版テンプレ (任意)。無ければ template を流用 */
+    templateJa?: string;
+  };
+  permissions: {
+    canRecruit: boolean;
+    canDismiss: boolean;
+    canAssignTasks: boolean;
+    canCreateRoleProfile: boolean;
+  };
+  defaultEngine: 'claude' | 'codex';
+  /** チーム内で唯一しか居られない (Leader 用) */
+  singleton?: boolean;
+}
+
+/** ~/.vibe-editor/role-profiles.json のスキーマ */
+export interface RoleProfilesFile {
+  schemaVersion: 1;
+  /** built-in を id ベースで部分上書き */
+  overrides?: Record<string, Partial<Omit<RoleProfile, 'id' | 'source' | 'schemaVersion'>>>;
+  /** 完全に新規追加された role profile (source: 'user') */
+  custom?: RoleProfile[];
+  /** 全エージェント共通の preamble (任意) */
+  globalPreamble?: { en?: string; ja?: string };
+  /** 受信時のメッセージタグ書式。default = "[Team <- {fromLabel}] {message}" */
+  messageTagFormat?: string;
+}
 
 /** ランタイムのみ（永続化不要）。チーム所属タブは teamId で紐付く */
 export interface Team {

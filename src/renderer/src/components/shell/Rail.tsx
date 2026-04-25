@@ -31,6 +31,22 @@ export function Rail({
   const t = useT();
   const viewMode = useUiStore((s) => s.viewMode);
   const setViewMode = useUiStore((s) => s.setViewMode);
+  const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
+  const setSidebarCollapsed = useUiStore((s) => s.setSidebarCollapsed);
+  const toggleSidebar = useUiStore((s) => s.toggleSidebar);
+
+  // tab クリックの挙動 (VS Code 互換):
+  //   - アクティブタブ + sidebar 開 → 折り畳み
+  //   - アクティブタブ + sidebar 閉 → 開く
+  //   - 別タブ → そのタブに切替 (折り畳まれていたら開く)
+  const handleTabClick = (view: SidebarView): void => {
+    if (sidebarView === view) {
+      toggleSidebar();
+      return;
+    }
+    onSidebarViewChange(view);
+    if (sidebarCollapsed) setSidebarCollapsed(false);
+  };
 
   const items: Array<{
     view: SidebarView;
@@ -62,13 +78,14 @@ export function Rail({
   return (
     <nav className="rail" aria-label="Primary navigation">
       {items.map((item) => {
-        const active = sidebarView === item.view;
+        // sidebar 折り畳み中は「アクティブ表示」にしない (どれも開いていないので誤解の元)
+        const active = !sidebarCollapsed && sidebarView === item.view;
         return (
           <button
             key={item.view}
             type="button"
             className={`rail__btn${active ? ' is-active' : ''}`}
-            onClick={() => onSidebarViewChange(item.view)}
+            onClick={() => handleTabClick(item.view)}
             title={item.label}
             aria-label={item.label}
             aria-current={active ? 'page' : undefined}

@@ -52,6 +52,8 @@ pub fn run() {
             commands::app::app_get_team_file_path,
             commands::app::app_get_mcp_server_path,
             commands::app::app_get_team_hub_info,
+            commands::app::app_set_role_profile_summary,
+            commands::app::app_cancel_recruit,
             commands::app::app_get_user_info,
             commands::app::app_open_external,
             // ---- git ----
@@ -74,6 +76,9 @@ pub fn run() {
             // ---- settings ----
             commands::settings::settings_load,
             commands::settings::settings_save,
+            // ---- role profiles ----
+            commands::role_profiles::role_profiles_load,
+            commands::role_profiles::role_profiles_save,
             // ---- terminal ----
             commands::terminal::terminal_create,
             commands::terminal::terminal_write,

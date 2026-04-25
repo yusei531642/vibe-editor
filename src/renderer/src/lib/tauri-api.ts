@@ -48,12 +48,27 @@ import {
   type FileWriteResult,
   type GitDiffResult,
   type GitStatus,
+  type RoleProfilesFile,
   type SessionInfo,
   type TeamHistoryEntry,
   type TerminalCreateOptions,
   type TerminalCreateResult,
   type TerminalExitInfo
 } from '../../../types/shared';
+
+/** Tauri 側 TeamHub に同期する role profile の要約形 */
+export interface RoleProfileSummary {
+  id: string;
+  labelEn: string;
+  labelJa?: string;
+  descriptionEn: string;
+  descriptionJa?: string;
+  canRecruit: boolean;
+  canDismiss: boolean;
+  canAssignTasks: boolean;
+  defaultEngine: string;
+  singleton: boolean;
+}
 
 interface TeamMcpMember {
   agentId: string;
@@ -116,6 +131,12 @@ export const api = {
       invoke('app_get_team_file_path', { teamId }),
     getMcpServerPath: (): Promise<string> => invoke('app_get_mcp_server_path'),
     getTeamHubInfo: (): Promise<TeamHubInfo> => invoke('app_get_team_hub_info'),
+    /** RoleProfile summary を Hub へ同期 (team_list_role_profiles / permissions 検証用) */
+    setRoleProfileSummary: (summary: RoleProfileSummary[]): Promise<void> =>
+      invoke('app_set_role_profile_summary', { summary }),
+    /** recruit を手動キャンセル (timeout 待ち中にユーザーがカードを × で閉じた等) */
+    cancelRecruit: (agentId: string): Promise<void> =>
+      invoke('app_cancel_recruit', { agentId }),
     getUserInfo: (): Promise<AppUserInfo> => invoke('app_get_user_info'),
     openExternal: (url: string): Promise<OpenExternalResult> => invoke('app_open_external', { url })
   },
@@ -174,6 +195,11 @@ export const api = {
       return { ...DEFAULT_SETTINGS, ...(raw ?? {}) };
     },
     save: (settings: AppSettings): Promise<void> => invoke('settings_save', { settings })
+  },
+
+  roleProfiles: {
+    load: (): Promise<RoleProfilesFile | null> => invoke('role_profiles_load'),
+    save: (file: RoleProfilesFile): Promise<void> => invoke('role_profiles_save', { file })
   },
 
   terminal: {

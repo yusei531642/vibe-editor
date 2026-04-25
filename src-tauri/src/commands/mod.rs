@@ -9,6 +9,7 @@ pub mod dialog;
 pub mod files;
 pub mod fs_watch;
 pub mod git;
+pub mod role_profiles;
 pub mod sessions;
 pub mod settings;
 pub mod team_history;

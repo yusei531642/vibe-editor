@@ -9,6 +9,7 @@ import { LanguageSection } from './settings/LanguageSection';
 import { ThemeSection } from './settings/ThemeSection';
 import { FontFamilySection } from './settings/FontFamilySection';
 import { TerminalSection } from './settings/TerminalSection';
+import { RoleProfilesSection } from './settings/RoleProfilesSection';
 import { DensitySection } from './settings/DensitySection';
 import { CommandOptionsSection } from './settings/CommandOptionsSection';
 import { CustomAgentEditor } from './settings/CustomAgentEditor';
@@ -92,6 +93,7 @@ export function SettingsModal({
         fonts: { label: 'フォント', title: 'フォント', desc: 'UI / エディタ / ターミナルのフォント' },
         claude: { label: 'Claude Code', title: 'Claude Code', desc: '起動コマンドと引数' },
         codex: { label: 'Codex', title: 'Codex', desc: '起動コマンドと引数' },
+        roles: { label: 'ロール定義', title: 'ロール定義', desc: 'チームメンバーの役割テンプレ' },
         mcp: { label: 'MCP', title: 'MCP', desc: 'vibe-team MCP の導入方法' }
       }
     : {
@@ -100,6 +102,7 @@ export function SettingsModal({
         fonts: { label: 'Fonts', title: 'Typography', desc: 'UI / editor / terminal fonts' },
         claude: { label: 'Claude Code', title: 'Claude Code', desc: 'Launch command and args' },
         codex: { label: 'Codex', title: 'Codex', desc: 'Launch command and args' },
+        roles: { label: 'Role profiles', title: 'Role profiles', desc: 'Team member role templates' },
         mcp: { label: 'MCP', title: 'MCP', desc: 'How to install vibe-team MCP' }
       };
 
@@ -151,6 +154,7 @@ export function SettingsModal({
         '__addCustom'
       ]
     },
+    { label: isJa ? 'チーム' : 'Team', items: ['roles'] },
     { label: 'MCP', items: ['mcp'] }
   ];
 
@@ -235,6 +239,8 @@ export function SettingsModal({
             update={update}
           />
         );
+      case 'roles':
+        return <RoleProfilesSection />;
       case 'mcp':
         return <McpSection draft={draft} update={update} />;
       default:

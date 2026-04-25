@@ -1,3 +1,4 @@
+import { type ReactNode } from 'react';
 import {
   Activity as ActivityIcon,
   Command as CommandIcon,
@@ -14,6 +15,8 @@ interface TopbarProps {
   onRestart: () => void;
   onOpenPalette: () => void;
   userInitial?: string;
+  /** 左側に置く自作メニューバー (File / View / Help…) */
+  menuBar?: ReactNode;
 }
 
 /**
@@ -27,7 +30,8 @@ export function Topbar({
   status,
   onRestart,
   onOpenPalette,
-  userInitial = 'U'
+  userInitial = 'U',
+  menuBar
 }: TopbarProps): JSX.Element {
   const t = useT();
   const segments = projectRoot.split(/[\\/]/).filter(Boolean);
@@ -52,6 +56,8 @@ export function Topbar({
         />
         <span>vibe-editor</span>
       </div>
+
+      {menuBar}
 
       {projectRoot ? (
         <button

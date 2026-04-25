@@ -87,6 +87,15 @@ export function DiffView({
           modified={result.modified}
           language={language}
           theme={theme}
+          /*
+           * StrictMode + @monaco-editor/react の DiffEditor は unmount 時に
+           * `TextModel got disposed before DiffEditorWidget model got reset` という
+           * 順序 race を起こす (dev 限定、本番では発生しない)。
+           * 両 model を keep に切り替えると dispose を遅らせて race を回避できる。
+           * モデル参照は次回マウント時に新規作成されるので「leak」にはならない。
+           */
+          keepCurrentOriginalModel
+          keepCurrentModifiedModel
           options={{
             readOnly: true,
             renderSideBySide: sideBySide,

@@ -25,6 +25,9 @@ Thumbs.db
 .idea/
 # Claude Code の per-session lock (sessionId/pid/acquiredAt が毎回書き換わる)
 .claude/scheduled_tasks.lock
+# Claude Code のローカル作業ディレクトリ (worktree / design bundle 等)
+.claude/worktrees/
+.claude/design-bundle/
 # 実験用 POC / スクラッチ (ADR 本体は tasks/ に置いてある)
 experiments/
 # Tauri のビルド中間生成物

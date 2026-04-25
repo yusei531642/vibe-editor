@@ -13,13 +13,14 @@ pub mod protocol;
 
 use crate::pty::SessionRegistry;
 use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::{oneshot, Mutex, Semaphore};
 
 /// Issue #51: ハンドシェイクに要する最大時間。超過したら接続を切る。
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -66,6 +67,31 @@ struct HubState {
     bridge_path: PathBuf,
     /// agent_id → 現在進行中の inject タスク数 (cancel 用には含めない、レート制限用)
     pending_injects: HashMap<String, usize>,
+    /// agent_id → 待機中の recruit oneshot (handshake 完了で resolve)
+    pending_recruits: HashMap<String, oneshot::Sender<RecruitOutcome>>,
+    /// renderer から同期された role profile 一覧 (team_list_role_profiles で返す)
+    role_profile_summary: Vec<RoleProfileSummary>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoleProfileSummary {
+    pub id: String,
+    pub label_en: String,
+    pub label_ja: Option<String>,
+    pub description_en: String,
+    pub description_ja: Option<String>,
+    pub can_recruit: bool,
+    pub can_dismiss: bool,
+    pub can_assign_tasks: bool,
+    pub default_engine: String, // "claude" | "codex"
+    pub singleton: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct RecruitOutcome {
+    pub agent_id: String,
+    pub role_profile_id: String,
 }
 
 #[derive(Default, Clone)]
@@ -115,9 +141,49 @@ impl TeamHub {
                 token: String::new(),
                 bridge_path: PathBuf::new(),
                 pending_injects: HashMap::new(),
+                pending_recruits: HashMap::new(),
+                role_profile_summary: Vec::new(),
             })),
             app_handle: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// renderer から role profile summary を同期 (team_list_role_profiles の戻り値)
+    pub async fn set_role_profile_summary(&self, summary: Vec<RoleProfileSummary>) {
+        let mut s = self.state.lock().await;
+        s.role_profile_summary = summary;
+    }
+
+    pub async fn get_role_profile_summary(&self) -> Vec<RoleProfileSummary> {
+        self.state.lock().await.role_profile_summary.clone()
+    }
+
+    /// recruit が要求された agent_id を pending に登録。handshake 完了で resolve する。
+    pub async fn register_pending_recruit(
+        &self,
+        agent_id: String,
+    ) -> oneshot::Receiver<RecruitOutcome> {
+        let (tx, rx) = oneshot::channel();
+        let mut s = self.state.lock().await;
+        s.pending_recruits.insert(agent_id, tx);
+        rx
+    }
+
+    /// handshake 内で agent_id がマッチしたら呼ぶ。recruit が待機中ならここで resolve。
+    pub async fn resolve_pending_recruit(&self, agent_id: &str, role_profile_id: &str) {
+        let mut s = self.state.lock().await;
+        if let Some(tx) = s.pending_recruits.remove(agent_id) {
+            let _ = tx.send(RecruitOutcome {
+                agent_id: agent_id.to_string(),
+                role_profile_id: role_profile_id.to_string(),
+            });
+        }
+    }
+
+    /// timeout 等でキャンセル: pending を破棄 (送信側 dropped で recv が Err になる)
+    pub async fn cancel_pending_recruit(&self, agent_id: &str) {
+        let mut s = self.state.lock().await;
+        s.pending_recruits.remove(agent_id);
     }
 
     /// setup 後に AppHandle を注入 (event::emit で使う)
@@ -308,6 +374,8 @@ async fn handle_client(
         ctx.role,
         ctx.agent_id
     );
+    // 待機中の team_recruit があればここで resolve (caller への MCP response が解放される)
+    hub.resolve_pending_recruit(&ctx.agent_id, &ctx.role).await;
 
     let mut lines = reader.lines();
 

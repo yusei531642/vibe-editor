@@ -8,14 +8,14 @@ import { ChangesPanel } from './ChangesPanel';
 import { SessionsPanel } from './SessionsPanel';
 import { FileTreePanel } from './FileTreePanel';
 import { NotesPanel } from './NotesPanel';
-import { AppMenu } from './AppMenu';
 import { UserMenu } from './UserMenu';
 
 export type SidebarView = 'files' | 'changes' | 'sessions' | 'notes';
 
 interface SidebarProps {
   view: SidebarView;
-  onViewChange: (view: SidebarView) => void;
+  /** Sidebar 内ではビュー切替はせず Rail が担当するため未使用。型互換のため残置。 */
+  onViewChange?: (view: SidebarView) => void;
   projectRoot: string;
   workspaceFolders: string[];
   onRemoveWorkspaceFolder: (path: string) => void;
@@ -36,30 +36,12 @@ interface SidebarProps {
   teamHistory: TeamHistoryEntry[];
   onResumeTeam: (entry: TeamHistoryEntry) => void;
   onDeleteTeamHistory: (id: string) => void;
-  recentProjects: string[];
-  onNewProject: () => void;
-  onOpenFolder: () => void;
-  onOpenFileDialog: () => void;
-  onOpenRecent: (path: string) => void;
-  onClearRecent: () => void;
   onOpenSettings: () => void;
 }
 
 export function Sidebar(props: SidebarProps): JSX.Element {
   return (
     <aside className="sidebar">
-      <div className="sidebar__header">
-        <AppMenu
-          recentProjects={props.recentProjects}
-          onNewProject={props.onNewProject}
-          onOpenFolder={props.onOpenFolder}
-          onOpenFile={props.onOpenFileDialog}
-          onAddToWorkspace={props.onAddWorkspaceFolder}
-          onOpenRecent={props.onOpenRecent}
-          onClearRecent={props.onClearRecent}
-        />
-      </div>
-
       <div className="sidebar__body" key={props.view}>
         {props.view === 'files' ? (
           <FileTreePanel

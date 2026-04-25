@@ -106,6 +106,7 @@ export function CanvasLayout(): JSX.Element {
   const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || '';
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
+  const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const [spawnOpen, setSpawnOpen] = useState(false);
   const [addCardOpen, setAddCardOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('preset');
@@ -652,13 +653,15 @@ export function CanvasLayout(): JSX.Element {
           onOpenSettings={() => setSettingsOpen(true)}
           hasGitRepo={railHasGitRepo}
         />
-        <CanvasSidebar
-          view={sidebarView}
-          onViewChange={setSidebarView}
-          onChangeCount={setRailChangeCount}
-          onHistoryCount={setRailHistoryCount}
-          onGitOk={setRailHasGitRepo}
-        />
+        {!sidebarCollapsed && (
+          <CanvasSidebar
+            view={sidebarView}
+            onViewChange={setSidebarView}
+            onChangeCount={setRailChangeCount}
+            onHistoryCount={setRailHistoryCount}
+            onGitOk={setRailHasGitRepo}
+          />
+        )}
         <div className="canvas-layout__stage">
           <Canvas />
         </div>

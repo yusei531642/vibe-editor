@@ -177,7 +177,15 @@ export function CanvasSidebar({
           type: 'agent' as const,
           title: label,
           position: pos,
-          payload: { agent: m.agent, role: m.role, teamId: entry.id, agentId, cwd }
+          payload: {
+            agent: m.agent,
+            // 新スキーマは roleProfileId、旧コード互換のため role も書いておく
+            roleProfileId: m.role,
+            role: m.role,
+            teamId: entry.id,
+            agentId,
+            cwd
+          }
         };
       });
       addCards(cards);
@@ -284,12 +292,6 @@ export function CanvasSidebar({
       teamHistory={teamHistory}
       onResumeTeam={(entry) => void handleResumeTeam(entry)}
       onDeleteTeamHistory={(id) => void handleDeleteTeamHistory(id)}
-      recentProjects={recentProjects}
-      onNewProject={() => void handleNewProject()}
-      onOpenFolder={() => void handleOpenFolder()}
-      onOpenFileDialog={() => void handleOpenFileDialog()}
-      onOpenRecent={(p) => void handleOpenRecent(p)}
-      onClearRecent={() => void handleClearRecent()}
       onOpenSettings={() => setSettingsOpen(true)}
     />
   );

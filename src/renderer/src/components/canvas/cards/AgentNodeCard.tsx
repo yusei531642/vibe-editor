@@ -10,22 +10,19 @@
  */
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
-import type { TeamRole } from '../../../../../types/shared';
 import { TerminalView, type TerminalViewHandle } from '../../TerminalView';
 import { useT } from '../../../lib/i18n';
 import { useSettings } from '../../../lib/settings-context';
 import { useCanvasStore } from '../../../stores/canvas';
-import {
-  buildTeamSystemPrompt,
-  colorOf,
-  metaOf,
-  type TeamMemberSeed
-} from '../../../lib/team-roles';
+import { fallbackProfile, profileText, renderSystemPrompt, useRoleProfiles } from '../../../lib/role-profiles-context';
 import { parseShellArgs } from '../../../lib/parse-args';
 import { resolveAgentConfig } from '../../../lib/agent-resolver';
 
 interface AgentPayload {
   agent?: 'claude' | 'codex';
+  /** 新スキーマ: ロール識別子。未設定時は legacy `role` をフォールバックとして読む。 */
+  roleProfileId?: string;
+  /** @deprecated 旧フィールド。canvas store v2 マイグレーションで roleProfileId に移行済み */
   role?: string;
   teamId?: string;
   agentId?: string;
@@ -81,9 +78,14 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const setCardTitle = useCanvasStore((s) => s.setCardTitle);
   const setCardPayload = useCanvasStore((s) => s.setCardPayload);
   const payload = (data?.payload ?? {}) as AgentPayload;
-  const meta = metaOf(payload.role);
-  const accent = colorOf(payload.role);
-  const title = (data?.title as string) ?? meta?.label ?? 'Agent';
+  // 新スキーマ roleProfileId を優先、無ければ legacy role を読む
+  const roleProfileId = payload.roleProfileId ?? payload.role ?? 'leader';
+  const profilesById = useRoleProfiles().byId;
+  const globalPreamble = useRoleProfiles().file.globalPreamble;
+  const profile = profilesById[roleProfileId] ?? fallbackProfile(roleProfileId);
+  const accent = profile.visual.color;
+  const meta = profileText(profile, settings.language);
+  const title = (data?.title as string) ?? meta.label;
   const [status, setStatus] = useState<string>('');
   // Phase 4: ステータスバッジ。出力を最近受け取ったら typing、暫く来なければ idle。
   const [activity, setActivity] = useState<AgentStatus>('idle');
@@ -156,36 +158,47 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     for (const n of s.nodes) {
       if (n.type !== 'agent') continue;
       const p = n.data?.payload as AgentPayload | undefined;
-      if (!p || p.teamId !== payload.teamId || !p.agentId || !p.role) continue;
-      sigs.push(`${p.agentId}:${p.role}:${p.agent ?? 'claude'}`);
+      const rp = p?.roleProfileId ?? p?.role;
+      if (!p || p.teamId !== payload.teamId || !p.agentId || !rp) continue;
+      sigs.push(`${p.agentId}:${rp}:${p.agent ?? 'claude'}`);
     }
     return sigs.join(';');
   });
-  const teamMembers = useMemo<TeamMemberSeed[] | null>(() => {
+  const teamMembers = useMemo(() => {
     if (!payload.teamId) return null;
-    if (teamMembersSig === '') return [];
+    if (teamMembersSig === '') return [] as { agentId: string; roleProfileId: string; agent: 'claude' | 'codex' }[];
     return teamMembersSig.split(';').map((s) => {
-      const [agentId, role, agent] = s.split(':');
+      const [agentId, roleProfileId, agent] = s.split(':');
       return {
         agentId,
-        role: role as TeamRole,
+        roleProfileId,
         agent: agent as 'claude' | 'codex'
       };
     });
   }, [teamMembersSig, payload.teamId]);
 
   const sysPrompt = useMemo(() => {
-    if (!teamMembers || !payload.teamId || !payload.agentId || !payload.role) return undefined;
-    if (teamMembers.length < 2) return undefined; // 1 人だけならチームではない
-    return buildTeamSystemPrompt(
-      payload.agentId,
-      payload.role as TeamRole,
-      title,
-      teamMembers,
-      // Issue #70: UI 言語に合わせて system prompt も切り替える
-      settings.language
-    );
-  }, [teamMembers, payload.teamId, payload.agentId, payload.role, title, settings.language]);
+    // 旧仕様 (teamMembers >= 2 必須) を撤廃: Leader 単独でも recruit 用にプロンプトを与える
+    if (!payload.teamId || !payload.agentId || !teamMembers) return undefined;
+    return renderSystemPrompt({
+      profile,
+      profilesById,
+      teamName: title,
+      selfAgentId: payload.agentId,
+      members: teamMembers,
+      globalPreamble,
+      language: settings.language
+    });
+  }, [
+    profile,
+    profilesById,
+    payload.teamId,
+    payload.agentId,
+    teamMembers,
+    title,
+    globalPreamble,
+    settings.language
+  ]);
 
   // Claude: --append-system-prompt でシステム指示を渡す
   // Codex: codexInstructions (一時ファイル化されて model_instructions_file へ)
@@ -253,10 +266,10 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
         <header className="canvas-agent-card__header">
           <span className="canvas-agent-card__title-row">
             <span aria-hidden="true" className="canvas-agent-card__avatar">
-              {meta?.glyph ?? 'A'}
+              {profile.visual.glyph}
             </span>
             <span className="canvas-agent-card__title">{title}</span>
-            {meta && <span className="canvas-agent-card__role">{meta.label}</span>}
+            <span className="canvas-agent-card__role">{meta.label}</span>
           </span>
           <span className="canvas-agent-card__actions">
             <StatusBadge state={activity} label={t(`agentStatus.${activity}`)} />
@@ -287,7 +300,7 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
             visible={true}
             teamId={payload.teamId}
             agentId={payload.agentId}
-            role={payload.role}
+            role={roleProfileId}
             onStatus={setStatus}
             onActivity={handleActivity}
             onUserInput={handleUserInput}

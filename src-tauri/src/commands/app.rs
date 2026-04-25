@@ -258,6 +258,28 @@ pub async fn app_get_team_hub_info(
     })
 }
 
+/// renderer 側で構築した role profile summary を TeamHub に同期する。
+/// MCP の team_list_role_profiles と permissions 検証で参照される。
+#[tauri::command]
+pub async fn app_set_role_profile_summary(
+    state: State<'_, AppState>,
+    summary: Vec<crate::team_hub::RoleProfileSummary>,
+) -> Result<(), String> {
+    state.team_hub.set_role_profile_summary(summary).await;
+    Ok(())
+}
+
+/// recruit 完了時 / cancel 時に renderer から呼ぶ。
+/// 主に手動 cancel (ユーザーがカードを × で閉じた等) に使う。
+#[tauri::command]
+pub async fn app_cancel_recruit(
+    state: State<'_, AppState>,
+    agent_id: String,
+) -> Result<(), String> {
+    state.team_hub.cancel_pending_recruit(&agent_id).await;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn app_get_user_info(app: tauri::AppHandle) -> AppUserInfo {
     tracing::info!("[IPC] app_get_user_info called");

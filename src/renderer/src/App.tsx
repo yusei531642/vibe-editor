@@ -1,5 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Command as CommandIcon, Crown, Plus, RotateCw, Settings as SettingsIcon, Users } from 'lucide-react';
+import {
+  Clock,
+  Command as CommandIcon,
+  Crown,
+  ExternalLink,
+  File as FileIcon,
+  Folder as FolderIcon,
+  FolderPlus,
+  LayoutGrid,
+  Plus,
+  PanelLeft,
+  RefreshCw,
+  RotateCw,
+  Settings as SettingsIcon,
+  Users
+} from 'lucide-react';
 import type {
   GitDiffResult,
   GitFileChange,
@@ -29,6 +44,8 @@ import { CommandPalette } from './components/CommandPalette';
 import { WelcomePane } from './components/WelcomePane';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
+import { MenuBar, MenuItem, MenuDivider, MenuSection } from './components/shell/MenuBar';
+import { useRecruitListener } from './lib/use-recruit-listener';
 import { ClaudeNotFound } from './components/ClaudeNotFound';
 import { TeamCreateModal } from './components/TeamCreateModal';
 import { useT } from './lib/i18n';
@@ -2113,17 +2130,155 @@ export function App(): JSX.Element {
   }, []);
 
   const activityFeed = useActivityFeed();
+  // Phase 6: vibe-canvas:recruit/dismiss イベントを listen して canvas store に反映
+  useRecruitListener();
   const activityOpen = useUiStore((s) => s.activityOpen);
   const setActivityOpen = useUiStore((s) => s.setActivityOpen);
+  const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useUiStore((s) => s.toggleSidebar);
+
+  // Ctrl+B (Cmd+B on macOS) で sidebar を toggle
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const mod = e.ctrlKey || e.metaKey;
+      if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
+        toggleSidebar();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [toggleSidebar]);
 
   return (
-    <div className={`layout layout--redesign${hasActiveContent ? '' : ' layout--terminal-full'}`}>
+    <div
+      className={
+        `layout layout--redesign` +
+        (hasActiveContent ? '' : ' layout--terminal-full') +
+        (sidebarCollapsed ? ' layout--sidebar-collapsed' : '')
+      }
+    >
       <Topbar
         projectRoot={projectRoot}
         status={status}
         onRestart={handleRestart}
         onOpenPalette={() => setPaletteOpen(true)}
         userInitial={userInitial}
+        menuBar={
+          <MenuBar
+            items={[
+              {
+                label: t('menubar.file'),
+                children: (
+                  <>
+                    <MenuItem
+                      icon={<FolderPlus size={14} strokeWidth={1.8} />}
+                      label={t('appMenu.new')}
+                      onClick={() => void handleNewProject()}
+                    />
+                    <MenuItem
+                      icon={<FolderIcon size={14} strokeWidth={1.8} />}
+                      label={t('appMenu.openFolder')}
+                      onClick={() => void handleOpenFolder()}
+                    />
+                    <MenuItem
+                      icon={<FileIcon size={14} strokeWidth={1.8} />}
+                      label={t('appMenu.openFile')}
+                      onClick={() => void handleOpenFile()}
+                    />
+                    <MenuItem
+                      icon={<FolderPlus size={14} strokeWidth={1.8} />}
+                      label={t('appMenu.addToWorkspace')}
+                      onClick={() => void handleAddWorkspaceFolder()}
+                    />
+                    {(settings.recentProjects ?? []).length > 0 && (
+                      <>
+                        <MenuDivider />
+                        <MenuSection label={t('appMenu.recent')} />
+                        {(settings.recentProjects ?? []).slice(0, 6).map((p) => (
+                          <MenuItem
+                            key={p}
+                            icon={<Clock size={13} strokeWidth={1.8} />}
+                            label={p.split(/[\\/]/).filter(Boolean).pop() ?? p}
+                            onClick={() => handleOpenRecent(p)}
+                          />
+                        ))}
+                      </>
+                    )}
+                    <MenuDivider />
+                    <MenuItem
+                      icon={<RotateCw size={14} strokeWidth={1.8} />}
+                      label={t('menubar.restart')}
+                      onClick={() => void handleRestart()}
+                    />
+                  </>
+                )
+              },
+              {
+                label: t('menubar.view'),
+                children: (
+                  <>
+                    <MenuItem
+                      icon={<PanelLeft size={14} strokeWidth={1.8} />}
+                      label={t('menubar.toggleSidebar')}
+                      shortcut="Ctrl+B"
+                      onClick={() => toggleSidebar()}
+                    />
+                    <MenuItem
+                      icon={<LayoutGrid size={14} strokeWidth={1.8} />}
+                      label={t('menubar.toggleCanvas')}
+                      shortcut="Ctrl+Shift+M"
+                      onClick={() => useUiStore.getState().toggleViewMode()}
+                    />
+                    <MenuDivider />
+                    <MenuItem
+                      icon={<CommandIcon size={14} strokeWidth={1.8} />}
+                      label={t('menubar.openPalette')}
+                      shortcut="Ctrl+Shift+P"
+                      onClick={() => setPaletteOpen(true)}
+                    />
+                  </>
+                )
+              },
+              {
+                label: t('menubar.help'),
+                children: (
+                  <>
+                    <MenuItem
+                      icon={<RefreshCw size={14} strokeWidth={1.8} />}
+                      label={t('updater.checkNow')}
+                      onClick={() => {
+                        void import('./lib/updater-check').then((m) =>
+                          m.checkForUpdates({
+                            language: settings.language,
+                            showToast,
+                            dismissToast,
+                            manual: true,
+                            runningTaskCount: terminalTabs.length
+                          })
+                        );
+                      }}
+                    />
+                    <MenuItem
+                      icon={<ExternalLink size={14} strokeWidth={1.8} />}
+                      label={t('menubar.openGithub')}
+                      onClick={() => {
+                        void window.api.app.openExternal('https://github.com/yusei531642/vibe-editor');
+                      }}
+                    />
+                    <MenuDivider />
+                    <MenuItem
+                      icon={<SettingsIcon size={14} strokeWidth={1.8} />}
+                      label={t('menubar.openSettings')}
+                      shortcut="Ctrl+,"
+                      onClick={() => setSettingsOpen(true)}
+                    />
+                  </>
+                )
+              }
+            ]}
+          />
+        }
       />
       <Rail
         sidebarView={sidebarView}
@@ -2156,12 +2311,6 @@ export function App(): JSX.Element {
         teamHistory={teamHistoryEntries}
         onResumeTeam={(entry) => void handleResumeTeam(entry)}
         onDeleteTeamHistory={(id) => void handleDeleteTeamHistory(id)}
-        recentProjects={settings.recentProjects ?? []}
-        onNewProject={handleNewProject}
-        onOpenFolder={handleOpenFolder}
-        onOpenFileDialog={handleOpenFile}
-        onOpenRecent={handleOpenRecent}
-        onClearRecent={handleClearRecent}
         onOpenSettings={() => setSettingsOpen(true)}
       />
       <main className="main">

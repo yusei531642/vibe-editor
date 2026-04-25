@@ -1,12 +1,17 @@
 // MCP JSON-RPC プロトコルハンドラ
 //
 // 旧 team-hub.ts の handleMcpRequest 等価。
-// initialize / tools/list / tools/call (team_send 等 7 ツール) を実装。
+// initialize / tools/list / tools/call (team_send 等 7 ツール + 新 recruit 系) を実装。
 
 use crate::team_hub::{inject, CallContext, TeamHub, TeamMessage, TeamTask};
 use chrono::Utc;
 use serde_json::{json, Value};
+use std::time::Duration;
 use tauri::Emitter;
+use uuid::Uuid;
+
+const RECRUIT_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_MEMBERS_PER_TEAM: usize = 12;
 
 pub async fn handle(hub: &TeamHub, ctx: &CallContext, req: &Value) -> Option<Value> {
     let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("");
@@ -140,6 +145,34 @@ fn tool_defs() -> Value {
                 },
                 "required": ["task_id", "status"]
             }
+        },
+        {
+            "name": "team_recruit",
+            "description": "Spawn a new team member with the given role profile. Returns when the new agent has joined (up to 30s).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "role_profile_id": { "type": "string" },
+                    "engine": { "type": "string", "enum": ["claude", "codex"] },
+                    "agent_label_hint": { "type": "string" },
+                    "custom_instructions": { "type": "string" }
+                },
+                "required": ["role_profile_id"]
+            }
+        },
+        {
+            "name": "team_dismiss",
+            "description": "Remove a team member from the canvas. Closes their card and terminates their session.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "agent_id": { "type": "string" } },
+                "required": ["agent_id"]
+            }
+        },
+        {
+            "name": "team_list_role_profiles",
+            "description": "List all available role profiles (id, label, permissions). Useful before calling team_recruit.",
+            "inputSchema": { "type": "object", "properties": {} }
         }
     ])
 }
@@ -158,8 +191,212 @@ async fn dispatch_tool(
         "team_assign_task" => team_assign_task(hub, ctx, args).await,
         "team_get_tasks" => team_get_tasks(hub, ctx).await,
         "team_update_task" => team_update_task(hub, ctx, args).await,
+        "team_recruit" => team_recruit(hub, ctx, args).await,
+        "team_dismiss" => team_dismiss(hub, ctx, args).await,
+        "team_list_role_profiles" => team_list_role_profiles(hub).await,
         other => Err(format!("Unknown tool: {other}")),
     }
+}
+
+/// caller の role が要求された permission を持つか検証する。
+/// renderer が同期した role_profile_summary を参照。
+async fn caller_has_permission(
+    hub: &TeamHub,
+    caller_role: &str,
+    perm: &str,
+) -> bool {
+    let summary = hub.get_role_profile_summary().await;
+    if let Some(p) = summary.iter().find(|p| p.id == caller_role) {
+        match perm {
+            "canRecruit" => p.can_recruit,
+            "canDismiss" => p.can_dismiss,
+            "canAssignTasks" => p.can_assign_tasks,
+            _ => false,
+        }
+    } else {
+        // role_profile が summary に無い (古い builtin 等) → 安全側で false。
+        // ただし後方互換のため、leader だけは canRecruit/canDismiss を許可する。
+        match (caller_role, perm) {
+            ("leader", "canRecruit") => true,
+            ("leader", "canDismiss") => true,
+            ("leader", "canAssignTasks") => true,
+            _ => false,
+        }
+    }
+}
+
+/// team_recruit: 新メンバーをチームに追加する。Renderer に event::emit でカード生成を依頼し、
+/// その新 agentId が handshake してくるまで oneshot で待機 (timeout 30s)。
+async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
+    if !caller_has_permission(hub, &ctx.role, "canRecruit").await {
+        return Err(format!(
+            "permission denied: role '{}' cannot recruit",
+            ctx.role
+        ));
+    }
+    let role_profile_id = args
+        .get("role_profile_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if role_profile_id.is_empty() {
+        return Err("role_profile_id is required".into());
+    }
+    let engine = args
+        .get("engine")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let agent_label_hint = args
+        .get("agent_label_hint")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let custom_instructions = args
+        .get("custom_instructions")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    // role profile の検証 (summary から)
+    let summary = hub.get_role_profile_summary().await;
+    let target = summary
+        .iter()
+        .find(|p| p.id == role_profile_id)
+        .ok_or_else(|| format!("unknown role_profile_id: {role_profile_id}"))?;
+
+    // singleton 検証 (同 role が既に居たら拒否)
+    if target.singleton {
+        let members = hub.registry.list_team_members(&ctx.team_id);
+        if members.iter().any(|(_, role)| role == &role_profile_id) {
+            return Err(format!(
+                "singleton role '{role_profile_id}' is already filled in this team"
+            ));
+        }
+    }
+
+    // チーム上限
+    let current_count = hub.registry.list_team_members(&ctx.team_id).len();
+    if current_count >= MAX_MEMBERS_PER_TEAM {
+        return Err(format!(
+            "team is full ({current_count}/{MAX_MEMBERS_PER_TEAM} members)"
+        ));
+    }
+
+    // engine: 引数省略時は role profile の default
+    let resolved_engine = if engine.is_empty() {
+        target.default_engine.clone()
+    } else {
+        engine
+    };
+
+    // 新 agentId を採番 (vc- prefix で他システムと区別)
+    let new_agent_id = format!("vc-{}", Uuid::new_v4());
+
+    // pending に登録
+    let rx = hub.register_pending_recruit(new_agent_id.clone()).await;
+
+    // Renderer にカード生成を依頼
+    let app = hub.app_handle.lock().await.clone();
+    if let Some(app) = &app {
+        let payload = json!({
+            "teamId": ctx.team_id,
+            "requesterAgentId": ctx.agent_id,
+            "requesterRole": ctx.role,
+            "newAgentId": new_agent_id,
+            "roleProfileId": role_profile_id,
+            "engine": resolved_engine,
+            "agentLabelHint": agent_label_hint,
+            "customInstructions": custom_instructions,
+        });
+        if let Err(e) = app.emit("team:recruit-request", payload) {
+            hub.cancel_pending_recruit(&new_agent_id).await;
+            return Err(format!("failed to emit recruit-request: {e}"));
+        }
+    } else {
+        hub.cancel_pending_recruit(&new_agent_id).await;
+        return Err("renderer not available (canvas mode required)".into());
+    }
+
+    // handshake 完了を待つ
+    match tokio::time::timeout(RECRUIT_TIMEOUT, rx).await {
+        Ok(Ok(outcome)) => Ok(json!({
+            "success": true,
+            "agentId": outcome.agent_id,
+            "roleProfileId": outcome.role_profile_id,
+        })),
+        Ok(Err(_)) => {
+            // sender dropped
+            Err("recruit cancelled".into())
+        }
+        Err(_) => {
+            // timeout
+            hub.cancel_pending_recruit(&new_agent_id).await;
+            // renderer にも cancel イベントを emit してカードを撤収させる
+            if let Some(app) = &app {
+                let _ = app.emit(
+                    "team:recruit-cancelled",
+                    json!({ "newAgentId": new_agent_id, "reason": "timeout" }),
+                );
+            }
+            Err(format!(
+                "recruit timeout (>{}s); the spawned agent failed to handshake",
+                RECRUIT_TIMEOUT.as_secs()
+            ))
+        }
+    }
+}
+
+async fn team_dismiss(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
+    if !caller_has_permission(hub, &ctx.role, "canDismiss").await {
+        return Err(format!(
+            "permission denied: role '{}' cannot dismiss",
+            ctx.role
+        ));
+    }
+    let agent_id = args
+        .get("agent_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    if agent_id.is_empty() {
+        return Err("agent_id is required".into());
+    }
+    if agent_id == ctx.agent_id {
+        return Err("cannot dismiss yourself".into());
+    }
+    // チーム所属チェック
+    let members = hub.registry.list_team_members(&ctx.team_id);
+    if !members.iter().any(|(aid, _)| aid == &agent_id) {
+        return Err(format!("agent '{agent_id}' is not in this team"));
+    }
+    // Renderer に閉じてもらう
+    let app = hub.app_handle.lock().await.clone();
+    if let Some(app) = &app {
+        let _ = app.emit(
+            "team:dismiss-request",
+            json!({ "teamId": ctx.team_id, "agentId": agent_id }),
+        );
+    }
+    Ok(json!({ "success": true, "agentId": agent_id }))
+}
+
+async fn team_list_role_profiles(hub: &TeamHub) -> Result<Value, String> {
+    let summary = hub.get_role_profile_summary().await;
+    Ok(json!({
+        "profiles": summary.iter().map(|p| json!({
+            "id": p.id,
+            "label": p.label_en,
+            "labelJa": p.label_ja,
+            "description": p.description_en,
+            "descriptionJa": p.description_ja,
+            "canRecruit": p.can_recruit,
+            "canDismiss": p.can_dismiss,
+            "canAssignTasks": p.can_assign_tasks,
+            "defaultEngine": p.default_engine,
+            "singleton": p.singleton,
+        })).collect::<Vec<_>>()
+    }))
 }
 
 async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {

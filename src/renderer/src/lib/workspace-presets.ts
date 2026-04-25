@@ -28,6 +28,28 @@ export interface WorkspacePreset {
 
 export const BUILTIN_PRESETS: WorkspacePreset[] = [
   {
+    // 新仕様の主役: Leader 1 体だけ起動して、必要なメンバーは team_recruit で動的に追加。
+    // Leader 自身に canRecruit / canDismiss / canCreateRoleProfile 全部の権限がある。
+    id: 'dynamic-leader',
+    name: 'Leader Only (Dynamic)',
+    description:
+      'Leader だけ起動。必要なメンバーは Leader が team_recruit で動的に呼び出す。',
+    category: 'team',
+    members: [{ role: 'leader', agent: 'claude', col: 0, row: 0 }]
+  },
+  {
+    // HR 経由で動的に組成するパターン
+    id: 'dynamic-hr',
+    name: 'Leader + HR (Dynamic)',
+    description:
+      'Leader + HR (人事)。HR が役割に応じて team_recruit で専門家を呼び出す。',
+    category: 'team',
+    members: [
+      { role: 'leader', agent: 'claude', col: 0, row: 0 },
+      { role: 'hr', agent: 'claude', col: 1, row: 0 }
+    ]
+  },
+  {
     id: 'bug-fix',
     name: 'Bug Fix',
     description: 'Researcher が原因調査、Programmer が修正。Reviewer が確認。',

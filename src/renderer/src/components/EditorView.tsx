@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { Editor } from '@monaco-editor/react';
-import { Save } from 'lucide-react';
+import { Code2, Eye, Save } from 'lucide-react';
 import '../lib/monaco-setup';
 import { detectLanguage } from '../lib/language';
 import { useMonacoTheme, useSettings } from '../lib/settings-context';
 import { useT } from '../lib/i18n';
+import { MarkdownPreview } from './MarkdownPreview';
 
 interface EditorViewProps {
   path: string;
@@ -65,6 +67,10 @@ export function EditorView({
   }
 
   const language = detectLanguage(path);
+  const isMarkdown = language === 'markdown';
+  // .md ファイルは既定でプレビュー表示。トグルでコード編集に切替。
+  const [previewMode, setPreviewMode] = useState<boolean>(true);
+  const showPreview = isMarkdown && previewMode;
 
   return (
     <div className="diffview">
@@ -82,6 +88,22 @@ export function EditorView({
             </span>
           )}
         </span>
+        {isMarkdown && (
+          <button
+            type="button"
+            className="toolbar__btn toolbar__btn--icon"
+            onClick={() => setPreviewMode((v) => !v)}
+            title={previewMode ? t('editor.viewSource') : t('editor.viewPreview')}
+            aria-label={previewMode ? t('editor.viewSource') : t('editor.viewPreview')}
+            aria-pressed={previewMode}
+          >
+            {previewMode ? (
+              <Code2 size={15} strokeWidth={1.75} />
+            ) : (
+              <Eye size={15} strokeWidth={1.75} />
+            )}
+          </button>
+        )}
         <button
           type="button"
           className="toolbar__btn toolbar__btn--icon"
@@ -94,22 +116,26 @@ export function EditorView({
         </button>
       </div>
       <div className="diffview__editor">
-        <Editor
-          value={content}
-          language={language}
-          theme={theme}
-          onChange={(v) => onChange(v ?? '')}
-          options={{
-            readOnly,
-            minimap: { enabled: false },
-            scrollBeyondLastLine: false,
-            fontSize: settings.editorFontSize,
-            fontFamily: settings.editorFontFamily,
-            wordWrap: 'on',
-            tabSize: 2,
-            automaticLayout: true
-          }}
-        />
+        {showPreview ? (
+          <MarkdownPreview source={content} />
+        ) : (
+          <Editor
+            value={content}
+            language={language}
+            theme={theme}
+            onChange={(v) => onChange(v ?? '')}
+            options={{
+              readOnly,
+              minimap: { enabled: false },
+              scrollBeyondLastLine: false,
+              fontSize: settings.editorFontSize,
+              fontFamily: settings.editorFontFamily,
+              wordWrap: 'on',
+              tabSize: 2,
+              automaticLayout: true
+            }}
+          />
+        )}
       </div>
     </div>
   );

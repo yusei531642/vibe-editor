@@ -185,6 +185,23 @@ export const useCanvasStore = create<CanvasState>()(
     }),
     {
       name: 'vibe-editor:canvas',
+      version: 2,
+      migrate: (persisted, fromVersion) => {
+        // v1 → v2: payload.role を payload.roleProfileId にリネーム
+        // (role と roleProfileId 双方で参照される過渡期があるので、両方残す)
+        if (fromVersion < 2 && persisted && typeof persisted === 'object' && 'nodes' in persisted) {
+          const p = persisted as { nodes?: Array<Record<string, unknown>> };
+          p.nodes = (p.nodes ?? []).map((n) => {
+            const data = (n.data ?? {}) as Record<string, unknown>;
+            const payload = (data.payload ?? {}) as Record<string, unknown>;
+            if (typeof payload.role === 'string' && !payload.roleProfileId) {
+              payload.roleProfileId = payload.role;
+            }
+            return { ...n, data: { ...data, payload } };
+          });
+        }
+        return persisted as CanvasState;
+      },
       // 永続化: nodes / viewport / stageView / teamLocks。
       // edges は一時的な hand-off アニメに使うので含めない。
       partialize: (s) => ({

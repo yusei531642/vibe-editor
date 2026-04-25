@@ -7,6 +7,128 @@
  * --bg / --border / --accent 等) を参照する。
  */
 
+/* ==================== MENU BAR (Topbar 左側に並べるカスタムメニューバー) ==================== */
+.menubar {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+}
+.menubar__entry {
+  position: relative;
+}
+.menubar__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 9px;
+  height: 26px;
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text-dim);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  transition: background-color 120ms var(--ease-out), color 120ms var(--ease-out);
+  cursor: pointer;
+}
+.menubar__trigger:hover,
+.menubar__trigger.is-open {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.menubar__trigger.is-open {
+  background: var(--bg-active);
+}
+.menubar__caret {
+  opacity: 0.55;
+}
+.menubar__trigger.is-open .menubar__caret {
+  opacity: 0.9;
+}
+
+.menubar__dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 240px;
+  max-width: 360px;
+  padding: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md, 10px);
+  box-shadow: var(--shadow-popover);
+  z-index: var(--z-popover, 80);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  animation: menubar-pop 130ms var(--ease-out-soft, cubic-bezier(0.34, 1.26, 0.64, 1));
+}
+@keyframes menubar-pop {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.menubar__item {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text);
+  font-size: 12.5px;
+  text-align: left;
+  transition: background-color 100ms var(--ease-out);
+  cursor: pointer;
+}
+.menubar__item:hover {
+  background: var(--bg-hover);
+}
+.menubar__item:disabled,
+.menubar__item[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.menubar__item-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-mute);
+}
+.menubar__item:hover .menubar__item-icon {
+  color: var(--text-dim);
+}
+.menubar__item-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.menubar__item-shortcut {
+  font-size: 10.5px;
+  color: var(--text-mute);
+  font-family: var(--mono-font);
+  letter-spacing: -0.02em;
+  margin-left: 12px;
+}
+
+.menubar__divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 2px;
+}
+.menubar__section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 8px 4px;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-mute);
+}
+
 /* ==================== TOP BAR ==================== */
 .topbar {
   height: var(--shell-header);
@@ -674,6 +796,29 @@
     0
     0
     minmax(0, 1fr);
+}
+
+/* Sidebar 折り畳み: column 2 を 0 幅にして main / panel を広げる。
+   .sidebar 自体は visibility:hidden で要素ライフサイクルを保ちつつ非表示にする。 */
+.layout.layout--redesign.layout--sidebar-collapsed {
+  grid-template-columns:
+    var(--shell-rail)
+    0
+    minmax(0, 1fr)
+    5px
+    var(--claude-code-width, 460px);
+}
+.layout.layout--redesign.layout--sidebar-collapsed.layout--terminal-full {
+  grid-template-columns:
+    var(--shell-rail)
+    0
+    0
+    0
+    minmax(0, 1fr);
+}
+.layout.layout--redesign.layout--sidebar-collapsed > .sidebar {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 /* 狭幅: rail 折りたたみ */
