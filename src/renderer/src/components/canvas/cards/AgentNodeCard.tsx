@@ -176,7 +176,11 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
 
   const sysPrompt = useMemo(() => {
     if (!teamMembers || !payload.teamId || !payload.agentId || !payload.role) return undefined;
-    if (teamMembers.length < 2) return undefined; // 1 人だけならチームではない
+    if (teamMembers.length === 0) return undefined;
+    // 以前は length < 2 で skip していたが、これは「Leader が canvas に
+    // 1 番目に置かれた瞬間 teamMembers=[self] → undefined」となり、Leader が
+    // team プロンプト無しで起動する競合の原因になっていた。teamId が付いている
+    // 時点でチーム所属なので、メンバー 1 人でも roster を含むプロンプトを出す。
     return buildTeamSystemPrompt(
       payload.agentId,
       payload.role as TeamRole,

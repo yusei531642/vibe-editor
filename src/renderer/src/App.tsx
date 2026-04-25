@@ -10,6 +10,7 @@ import type {
   TeamMember,
   TeamPreset,
   TeamRole,
+  TeamRosterMember,
   TerminalAgent,
   ThemeName
 } from '../../types/shared';
@@ -124,40 +125,47 @@ const ROLE_ORDER: Record<string, number> = {
 };
 
 /** 重複ロールにレター接尾辞を付けた表示名を返す (例: "programmer A") */
-function getRoleDisplayLabel(tab: TerminalTab, allTabs: TerminalTab[]): string {
-  if (!tab.role) return '';
-  if (!tab.teamId) return tab.role;
-  const sameRole = allTabs
-    .filter((t) => t.teamId === tab.teamId && t.role === tab.role)
+function getRoleDisplayLabel(
+  member: TeamRosterMember,
+  allMembers: TeamRosterMember[]
+): string {
+  const sameRole = allMembers
+    .filter((m) => m.role === member.role)
+    .slice()
     .sort((a, b) => a.agentId.localeCompare(b.agentId));
-  if (sameRole.length <= 1) return tab.role;
-  const idx = sameRole.findIndex((t) => t.id === tab.id);
-  return `${tab.role} ${String.fromCharCode(65 + idx)}`;
+  if (sameRole.length <= 1) return member.role;
+  const idx = sameRole.findIndex((m) => m.agentId === member.agentId);
+  return `${member.role} ${String.fromCharCode(65 + idx)}`;
 }
 
-/** チームのシステムプロンプト（--append-system-prompt 用） */
+/** チームのシステムプロンプト（--append-system-prompt 用）。
+ *  roster は team.members (作成時に確定) から組み立てるので、staggered spawn で
+ *  まだ mount していないメンバーがあっても完全な roster になる。
+ *  以前は terminalTabs を filter して roster を作っていたため、Leader が単独で
+ *  spawn → snapRef で固定 → 後から増えるメンバーが prompt に含まれない、という
+ *  競合が発生していた。 */
 function generateTeamSystemPrompt(
   tab: TerminalTab,
-  allTabs: TerminalTab[],
   team: Team | null
 ): string | undefined {
   if (!tab.role || !tab.teamId || !team) return undefined;
+  const members = team.members ?? [];
+  if (members.length === 0) return undefined;
 
-  const teamTabs = allTabs
-    .filter((t) => t.teamId === tab.teamId)
+  const sorted = members
     .slice()
     .sort((a, b) => {
-      const ra = ROLE_ORDER[a.role ?? ''] ?? 99;
-      const rb = ROLE_ORDER[b.role ?? ''] ?? 99;
+      const ra = ROLE_ORDER[a.role] ?? 99;
+      const rb = ROLE_ORDER[b.role] ?? 99;
       if (ra !== rb) return ra - rb;
       return a.agentId.localeCompare(b.agentId);
     });
-  const roster = teamTabs
-    .map((t) => {
-      const agent = t.agent === 'claude' ? 'Claude Code' : 'Codex';
-      const you = t.id === tab.id ? ' ← あなた' : '';
-      const roleLabel = getRoleDisplayLabel(t, allTabs);
-      return `${roleLabel || 'member'}(${agent})${you}`;
+  const roster = sorted
+    .map((m) => {
+      const agent = m.agent === 'claude' ? 'Claude Code' : 'Codex';
+      const you = m.agentId === tab.agentId ? ' ← あなた' : '';
+      const roleLabel = getRoleDisplayLabel(m, members);
+      return `${roleLabel}(${agent})${you}`;
     })
     .join(', ');
 
@@ -1599,7 +1607,7 @@ export function App(): JSX.Element {
       // Claude のチーム指示は --append-system-prompt で直接渡す。
       if (!isCodex && tab.teamId) {
         const team = teams.find((t) => t.id === tab.teamId) ?? null;
-        const sysPrompt = generateTeamSystemPrompt(tab, terminalTabs, team);
+        const sysPrompt = generateTeamSystemPrompt(tab, team);
         if (sysPrompt) {
           base.push('--append-system-prompt', sysPrompt);
         }
@@ -1626,9 +1634,9 @@ export function App(): JSX.Element {
     (tab: TerminalTab): string | undefined => {
       if (tab.agent !== 'codex' || !tab.teamId) return undefined;
       const team = teams.find((t) => t.id === tab.teamId) ?? null;
-      return generateTeamSystemPrompt(tab, terminalTabs, team);
+      return generateTeamSystemPrompt(tab, team);
     },
-    [teams, terminalTabs]
+    [teams]
   );
 
   /** TeamHub 接続情報（アプリ起動時に1回だけ解決） */
@@ -1695,17 +1703,20 @@ export function App(): JSX.Element {
       // 同時作成レース対策: これ以前の staggered spawn 予約は全て中断する
       clearSpawnTimers();
 
-      setTeams((prev) => [...prev, { id: teamId, name: teamName }]);
-
       // MCP 用のメンバー一覧を事前構築
-      const allMembers = [
-        { agentId: `${teamId}-leader`, role: 'leader', agent: leader.agent },
+      const allMembers: TeamRosterMember[] = [
+        { agentId: `${teamId}-leader`, role: 'leader' as TeamRole, agent: leader.agent },
         ...members.map((m, i) => ({
           agentId: `${teamId}-${m.role}-${i}`,
           role: m.role,
           agent: m.agent
         }))
       ];
+
+      // roster は Team に同梱して保存。staggered spawn で snapRef が固まる前に
+      // teams state が完全な members を持っているので、各タブの sysPrompt が
+      // 「自分一人だけ」になってしまう競合を避けられる。
+      setTeams((prev) => [...prev, { id: teamId, name: teamName, members: allMembers }]);
 
       // MCP サーバーをセットアップ（Claude Code / Codex MCP 設定）
       // mcpAutoSetup === false なら自動書換を一切行わない (設定 → MCP タブで OFF 時)。
@@ -1849,19 +1860,22 @@ export function App(): JSX.Element {
       ]);
       saveTeamHistory(updated);
 
-      // ランタイム Team として登録（既に同じ teamId があればそのまま）
-      setTeams((prev) =>
-        prev.some((t) => t.id === entry.id)
-          ? prev
-          : [...prev, { id: entry.id, name: entry.name }]
-      );
-
-      // MCP は現行の TeamHub 情報で確実に再登録する
-      const allMembers = entry.members.map((m, i) => ({
+      // MCP / spawn 用 roster を先に組んで Team に同梱する。
+      // (setTeams が members を含んだ状態で先に走らないと、resume 直後に最初の
+      //  TerminalView が mount したとき team.members が空で sysPrompt が
+      //  単独 roster になってしまう)
+      const allMembers: TeamRosterMember[] = entry.members.map((m, i) => ({
         agentId: `${entry.id}-${m.role}-${i}`,
         role: m.role,
         agent: m.agent
       }));
+
+      // ランタイム Team として登録（既に同じ teamId があればそのまま）
+      setTeams((prev) =>
+        prev.some((t) => t.id === entry.id)
+          ? prev
+          : [...prev, { id: entry.id, name: entry.name, members: allMembers }]
+      );
       let mcpChanged = false;
       if (settings.mcpAutoSetup !== false) {
         try {

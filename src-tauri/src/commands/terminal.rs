@@ -2,11 +2,6 @@
 //
 // portable-pty 経由で PTY を spawn、SessionRegistry に登録、
 // terminal:data:{id} / terminal:exit:{id} イベントを emit する。
-//
-// **既知の Phase 1 後半 TODO**:
-// - Claude Code セッション ID watcher (~/.claude/projects/<encoded>/*.jsonl 監視)
-// - Codex 用 model_instructions_file 一時書き出し
-// - PATH 解決 (resolve-command 移植)
 
 use crate::pty::{spawn_session, SpawnOptions};
 use crate::state::AppState;
@@ -65,15 +60,76 @@ fn resolve_command(command: Option<String>, args: Option<Vec<String>>) -> (Strin
     (cmd, args.unwrap_or_default())
 }
 
+/// Codex 用 model_instructions_file を一時パスに書き出す。
+/// `~/.vibe-editor/codex-instructions/<uuid>.md` を返す。
+/// 失敗しても PTY spawn 自体は止めず、warn ログだけ残して None を返す。
+fn write_codex_instructions(content: &str) -> Option<std::path::PathBuf> {
+    let dir = dirs::home_dir()?
+        .join(".vibe-editor")
+        .join("codex-instructions");
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        tracing::warn!("[codex-instructions] mkdir failed: {e}");
+        return None;
+    }
+    let path = dir.join(format!("{}.md", Uuid::new_v4()));
+    if let Err(e) = std::fs::write(&path, content) {
+        tracing::warn!("[codex-instructions] write failed: {e}");
+        return None;
+    }
+    Some(path)
+}
+
+/// 過去に書き出した codex-instructions ファイルのうち 1 日以上古いものを削除。
+/// PTY 終了時の cleanup は ChildKiller を kill した直後では正確に取れない (Codex
+/// が PTY を握ったまま再起動するケースもある) ため、TTL ベースで掃除する。
+fn cleanup_old_codex_instructions(dir: &std::path::Path) {
+    const TTL_SECS: u64 = 24 * 60 * 60;
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for entry in rd.flatten() {
+        let Ok(meta) = entry.metadata() else { continue };
+        let Ok(modified) = meta.modified() else { continue };
+        let age = now.duration_since(modified).unwrap_or_default();
+        if age.as_secs() > TTL_SECS {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn terminal_create(
     app: AppHandle,
     state: State<'_, AppState>,
     opts: TerminalCreateOptions,
 ) -> Result<TerminalCreateResult, String> {
-    let (command, args) = resolve_command(opts.command, opts.args);
+    let (command, mut args) = resolve_command(opts.command, opts.args);
     let (cwd, warning) =
         crate::pty::session::resolve_valid_cwd(&opts.cwd, opts.fallback_cwd.as_deref());
+
+    // Codex の team プロンプト: 一時ファイル化して `-c model_instructions_file=<path>`
+    // を args 先頭に積む。Codex は CLI 引数経由で system instructions を直接渡せない
+    // ため、ファイルに書いて -c で渡すのが唯一の経路。
+    // この処理が無かったため Codex のチームメンバーは team プロンプトを完全に
+    // 受け取れていなかった (TerminalCreateOptions に codex_instructions は来ていたが
+    // 関数内で読まれていない不在実装だった)。
+    if let Some(content) = opts
+        .codex_instructions
+        .as_ref()
+        .filter(|s| !s.trim().is_empty())
+    {
+        if let Some(path) = write_codex_instructions(content) {
+            // ベスト努力で古いファイルを掃除 (paste-images と同じ TTL 方式)。
+            if let Some(parent) = path.parent() {
+                cleanup_old_codex_instructions(parent);
+            }
+            // -c の値部分はクオート不要 (Codex 側で文字列パース)。
+            // 先頭に積むのは、ユーザー指定の -c で上書きされるのを許すため。
+            args.insert(0, format!("model_instructions_file={}", path.display()));
+            args.insert(0, "-c".to_string());
+        }
+    }
 
     tracing::info!(
         "[IPC] terminal_create command={command} args={args:?} cwd={cwd} cols={} rows={}",

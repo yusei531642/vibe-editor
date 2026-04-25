@@ -205,10 +205,20 @@ export type TerminalAgent = string;
 
 export type TeamRole = 'leader' | 'planner' | 'programmer' | 'researcher' | 'reviewer';
 
-/** ランタイムのみ（永続化不要）。チーム所属タブは teamId で紐付く */
+/** Team の roster 1 エントリ。system prompt 構築に必要な最小構成。 */
+export interface TeamRosterMember {
+  agentId: string;
+  role: TeamRole;
+  agent: TerminalAgent;
+}
+
+/** ランタイムのみ（永続化不要）。チーム所属タブは teamId で紐付く。
+ *  members はチーム作成/復元時に確定し、以後不変。
+ *  system prompt の roster はここから引く (terminalTabs の spawn タイミングに依存しない)。 */
 export interface Team {
   id: string;
   name: string;
+  members: TeamRosterMember[];
 }
 
 export interface TeamMember {
