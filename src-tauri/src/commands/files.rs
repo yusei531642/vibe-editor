@@ -310,6 +310,12 @@ mod encode_tests {
 ///   2. コンポーネントを `.` / `..` / 通常成分に分解し、`..` が stack を空にする前に現れたら拒否
 ///      (root を脱出する `..`)
 ///   3. その上で物理 canonicalize を試み、symlink 解決後も root 配下であることを再確認
+///
+/// Issue #101: 未作成パスのとき、旧実装は「直接の親」しか canonicalize しなかったため、
+/// `link/new-dir/file.txt` (link は外部を指す symlink/junction) のような「symlink 配下に
+/// 多段ネストした未作成パス」で親 (`link/new-dir`) が canonicalize 失敗 → raw path の
+/// starts_with だけで素通りしていた。本実装では「存在する最深祖先」まで遡って canonicalize し、
+/// 祖先解決後のパスが root 配下かどうかで判定する。
 pub fn safe_join(root: &str, rel: &str) -> Option<PathBuf> {
     let root = Path::new(root).canonicalize().ok()?;
     let rel_path = Path::new(rel);
@@ -350,14 +356,37 @@ pub fn safe_join(root: &str, rel: &str) -> Option<PathBuf> {
         return None;
     }
 
-    // 未作成ファイル → 親ディレクトリを canonicalize して確認
-    match joined.parent().and_then(|p| p.canonicalize().ok()) {
-        Some(parent_canonical) if parent_canonical.starts_with(&root) => {
-            // 親が root 配下なら joined (ファイル名成分を付け直した絶対パス) を返す
-            let name = joined.file_name()?;
-            Some(parent_canonical.join(name))
+    // (4) 未作成パス: 存在する最深祖先を canonicalize し、その祖先が root 配下なら
+    //     祖先 canonical + (祖先より深い未作成成分) を返す。
+    //     symlink/junction が途中に挟まっていても、ここで実体パスへ展開されるため
+    //     未作成パス経由の脱出を確実に弾ける。
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    let mut probe = joined.clone();
+    loop {
+        match probe.canonicalize() {
+            Ok(canonical) => {
+                if !canonical.starts_with(&root) {
+                    return None;
+                }
+                let mut result = canonical;
+                for name in tail.iter().rev() {
+                    result.push(name);
+                }
+                return Some(result);
+            }
+            Err(_) => {
+                let name = probe.file_name().map(|n| n.to_os_string());
+                let parent = probe.parent().map(|p| p.to_path_buf());
+                match (name, parent) {
+                    (Some(n), Some(p)) if !p.as_os_str().is_empty() => {
+                        tail.push(n);
+                        probe = p;
+                    }
+                    // どこまで遡っても canonicalize できない (root 自体も canonicalize 失敗)
+                    _ => return None,
+                }
+            }
         }
-        _ => Some(joined).filter(|p| p.starts_with(&root)),
     }
 }
 
@@ -398,6 +427,50 @@ mod safe_join_tests {
         assert!(safe_join(&root_str, "sub/file.txt").is_some());
         assert!(safe_join(&root_str, "a/../b.txt").is_some()); // 中間の .. は OK
         assert!(safe_join(&root_str, "./nested/./file.txt").is_some());
+    }
+
+    /// Issue #101: symlink 配下にある「未作成」のネストパスが、symlink 先 (= 外部)
+    /// を解決できないことを利用して safe_join を素通りしないことを確認する。
+    #[cfg(unix)]
+    #[test]
+    fn rejects_uncreated_path_under_symlink_to_outside() {
+        use std::os::unix::fs::symlink as unix_symlink;
+
+        let root = std::env::temp_dir().join(format!(
+            "vibe-safe-join-symlink-{}",
+            std::process::id()
+        ));
+        let outside = std::env::temp_dir().join(format!(
+            "vibe-safe-join-outside-{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+
+        // root 配下に外部を指す symlink を作る
+        let link = root.join("link");
+        unix_symlink(&outside, &link).unwrap();
+
+        let root_str = root.canonicalize().unwrap().to_string_lossy().into_owned();
+
+        // link は外部を指すので link/new-dir/file.txt は拒否されるべき
+        assert!(safe_join(&root_str, "link/new-dir/file.txt").is_none());
+        // link 自体も外部解決されるので拒否
+        assert!(safe_join(&root_str, "link/file.txt").is_none());
+
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&outside);
+    }
+
+    /// 多段ネストの未作成パスが root 配下なら通ること (Issue #101 修正の non-regression)。
+    #[test]
+    fn allows_uncreated_nested_path_inside_root() {
+        let root = tempdir();
+        let root_str = root.to_string_lossy();
+        // root 配下に未作成のディレクトリ階層を含むパス
+        assert!(safe_join(&root_str, "a/b/c/file.txt").is_some());
     }
 }
 

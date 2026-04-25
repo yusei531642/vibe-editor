@@ -2,9 +2,17 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Issue #98: meta CSP は HTML レイヤーの保険。tauri.conf.json の app.security.csp が
+      Tauri 起動時に注入されるが、両方で許可した値の AND が effective CSP になるため、
+      ここではより厳しい (= 許可範囲が狭い) 値を置く。
+        - connect-src は dev (Vite HMR) 用に localhost:5173 のみ許可。任意の ws:/http://localhost:*
+          を許す旧設定は内部スキャナ等の任意エンドポイントに繋ぎに行けるので外す。
+        - script-src 'self' のみ。inline スクリプトは禁止。
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: http://localhost:* ws://localhost:* http://ipc.localhost ipc: http://tauri.localhost https://tauri.localhost"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://tauri.localhost https://tauri.localhost ws://localhost:5173 http://localhost:5173 https://github.com https://api.github.com; worker-src 'self' blob:; frame-src 'none'; object-src 'none'"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/vibe-editor.png" />

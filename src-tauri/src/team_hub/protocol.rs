@@ -12,6 +12,14 @@ use uuid::Uuid;
 
 const RECRUIT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_MEMBERS_PER_TEAM: usize = 12;
+/// Issue #107: team_send 1 message の最大長。これ以上は呼び出し側を拒否する
+/// (単に切ると context が崩れて user 体験が悪いので reject に倒す)。
+const MAX_MESSAGE_LEN: usize = 64 * 1024; // 64 KiB
+/// Issue #107: チームごとに保持する message 履歴の上限。超過分は古い順に破棄。
+/// 件数ベースで持つことで、Hub の長期常駐でメモリが青天井に伸びるのを防ぐ。
+const MAX_MESSAGES_PER_TEAM: usize = 1000;
+/// Issue #107: チームごとに保持する task の上限。超過分は古い順に破棄。
+const MAX_TASKS_PER_TEAM: usize = 500;
 
 pub async fn handle(hub: &TeamHub, ctx: &CallContext, req: &Value) -> Option<Value> {
     let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("");
@@ -405,6 +413,14 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
     if to.is_empty() || message.is_empty() {
         return Err("to and message are required".into());
     }
+    // Issue #107: 1 メッセージの上限を超えるものは拒否 (途中で truncate すると意味が壊れる)
+    if message.len() > MAX_MESSAGE_LEN {
+        return Err(format!(
+            "message too large: {} bytes (limit {} bytes)",
+            message.len(),
+            MAX_MESSAGE_LEN
+        ));
+    }
 
     // メッセージ履歴に追加
     let timestamp = Utc::now().to_rfc3339();
@@ -426,6 +442,11 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         timestamp: timestamp.clone(),
         read_by: vec![ctx.agent_id.clone()],
     });
+    // Issue #107: 上限超過分は古い順に破棄してメモリ青天井を防ぐ。
+    // Vec::remove(0) は O(n) だが MAX_MESSAGES_PER_TEAM 程度なら許容できる。
+    while team.messages.len() > MAX_MESSAGES_PER_TEAM {
+        team.messages.remove(0);
+    }
     drop(state);
 
     // 宛先 PTY に inject
@@ -577,6 +598,10 @@ async fn team_assign_task(
             created_by: ctx.role.clone(),
             created_at: timestamp,
         });
+        // Issue #107: tasks も件数上限で古い順に破棄
+        while team.tasks.len() > MAX_TASKS_PER_TEAM {
+            team.tasks.remove(0);
+        }
     }
     // 通知を team_send 経由で送る
     let notify_args = json!({ "to": assignee, "message": format!("[Task #{task_id}] {description}") });

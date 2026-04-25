@@ -30,6 +30,10 @@ const HANDSHAKE_LINE_LIMIT: usize = 1024;
 const MAX_CONCURRENT_CLIENTS: usize = 32;
 /// Issue #50: 認証失敗時の固定 sleep (ブルートフォース抑制 + タイミングノイズ)
 const AUTH_FAIL_DELAY: Duration = Duration::from_millis(300);
+/// Issue #107: handshake 後の JSON-RPC 1 行あたりの最大バイト長。
+/// localhost の信頼前提でも巨大 line を投げ続ければ Hub のメモリを使い果たせるため、
+/// 上限超過は parse error を返してその行を破棄する。
+pub(crate) const RPC_LINE_LIMIT: usize = 256 * 1024; // 256 KiB / line
 
 /// Issue #50: 固定長バイト列の constant-time 比較。
 /// 先頭一致 prefix の長さに処理時間が依存しないようにする。
@@ -377,15 +381,70 @@ async fn handle_client(
     // 待機中の team_recruit があればここで resolve (caller への MCP response が解放される)
     hub.resolve_pending_recruit(&ctx.agent_id, &ctx.role).await;
 
-    let mut lines = reader.lines();
+    // Issue #107: BufReader::lines() は行サイズに上限が無く、`\n` 無しの巨大 line で
+    // メモリ DoS になる。1 byte ずつ BufReader 経由で読み (内部 4KB buffer でまとめ取り
+    // されるので syscall コストは無視できる)、RPC_LINE_LIMIT を超えたら行を破棄しつつ
+    // \n まで読み捨てて接続維持する。
+    use tokio::io::AsyncReadExt;
+    let mut buf: Vec<u8> = Vec::with_capacity(4096);
+    loop {
+        buf.clear();
+        let mut overflowed = false;
+        loop {
+            let mut byte = [0u8; 1];
+            match reader.read_exact(&mut byte).await {
+                Ok(_) => {}
+                Err(_) => return Ok(()), // EOF / 切断
+            }
+            if byte[0] == b'\n' {
+                break;
+            }
+            if !overflowed {
+                if buf.len() >= RPC_LINE_LIMIT {
+                    overflowed = true;
+                    buf.clear();
+                } else {
+                    buf.push(byte[0]);
+                }
+            }
+            // overflowed の場合は buf に push しない (= \n まで読み捨て)
+        }
 
-    // 以降は JSON-RPC 行
-    while let Some(line) = lines.next_line().await? {
-        let trimmed = line.trim_end_matches('\r');
-        if trimmed.is_empty() {
+        if overflowed {
+            tracing::warn!(
+                "[teamhub] dropping RPC line: exceeded {RPC_LINE_LIMIT} bytes"
+            );
+            let err = serde_json::json!({
+                "jsonrpc": "2.0",
+                "id": null,
+                "error": { "code": -32700, "message": "Parse error: line too long" }
+            });
+            wr.write_all(err.to_string().as_bytes()).await?;
+            wr.write_all(b"\n").await?;
             continue;
         }
-        let req: serde_json::Value = match serde_json::from_str(trimmed) {
+
+        // \r で終わっていたら除去
+        if buf.last() == Some(&b'\r') {
+            buf.pop();
+        }
+        if buf.is_empty() {
+            continue;
+        }
+        let line_str = match std::str::from_utf8(&buf) {
+            Ok(s) => s,
+            Err(_) => {
+                let err = serde_json::json!({
+                    "jsonrpc": "2.0",
+                    "id": null,
+                    "error": { "code": -32700, "message": "Parse error: invalid utf-8" }
+                });
+                wr.write_all(err.to_string().as_bytes()).await?;
+                wr.write_all(b"\n").await?;
+                continue;
+            }
+        };
+        let req: serde_json::Value = match serde_json::from_str(line_str) {
             Ok(v) => v,
             Err(_) => {
                 let err = serde_json::json!({
@@ -403,5 +462,4 @@ async fn handle_client(
             wr.write_all(b"\n").await?;
         }
     }
-    Ok(())
 }

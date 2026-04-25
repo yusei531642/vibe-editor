@@ -1,21 +1,18 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "vibe-editor renderer permissions: 全 IPC + event listen を許可。Phase 1 では全 #[tauri::command] を allowlist する",
+  "description": "vibe-editor renderer permissions. Issue #98: renderer から emit / shell 直接実行は使っていないので最小化する。process は updater の relaunch で必要。",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:event:default",
     "core:event:allow-listen",
-    "core:event:allow-emit",
-    "core:event:allow-emit-to",
     "core:event:allow-unlisten",
     "core:webview:default",
     "core:window:default",
     "core:window:allow-set-title",
     "core:app:default",
     "dialog:default",
-    "shell:default",
     "opener:default",
     "process:default",
     "updater:default"
