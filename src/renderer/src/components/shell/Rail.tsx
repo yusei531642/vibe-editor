@@ -53,16 +53,13 @@ export function Rail({
   return (
     <nav className="rail" aria-label="Primary navigation">
       {items.map((item) => {
-        const active = sidebarView === item.view && viewMode !== 'canvas';
+        const active = sidebarView === item.view;
         return (
           <button
             key={item.view}
             type="button"
             className={`rail__btn${active ? ' is-active' : ''}`}
-            onClick={() => {
-              if (viewMode === 'canvas') setViewMode('ide');
-              onSidebarViewChange(item.view);
-            }}
+            onClick={() => onSidebarViewChange(item.view)}
             title={item.label}
             aria-label={item.label}
             aria-current={active ? 'page' : undefined}

@@ -137,14 +137,14 @@ pub async fn app_check_claude(command: String) -> ClaudeCheckResult {
 }
 
 #[tauri::command]
-pub fn app_set_zoom_level(_window: tauri::WebviewWindow, _level: f64) -> Result<(), String> {
-    // Tauri 2 の zoom 制御は webview2 native API 経由 → Phase 1 後半で実装
+pub fn app_set_zoom_level(window: tauri::WebviewWindow, level: f64) -> Result<(), String> {
+    // Tauri 2: WebviewWindow::set_zoom でネイティブ zoom を適用。
+    // 引数は Electron の webFrame.setZoomFactor 相当の factor (1.0 = 100%)。
+    // 再レイアウトを伴うので CSS transform: scale() と違いテキストがピクセル完全描画される。
+    // get API は WebView2 / wry に無いため、フロント (webview-zoom.ts) で last-set 値を保持する。
+    let clamped = level.clamp(0.3, 3.0);
+    window.set_zoom(clamped).map_err(|e| e.to_string())?;
     Ok(())
-}
-
-#[tauri::command]
-pub fn app_get_zoom_level(_window: tauri::WebviewWindow) -> f64 {
-    1.0
 }
 
 #[tauri::command]

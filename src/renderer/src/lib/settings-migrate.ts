@@ -62,7 +62,29 @@ export function migrateSettings(raw: unknown): AppSettings {
     }
   }
 
-  // 将来のマイグレーションはここに: if (version < 2) { ... }
+  // --- Version 1 → 2: 初回オンボーディングフラグの導入 ---
+  // 既に何らかのプロジェクト履歴がある = 旧バージョンからの移行 → true にしてウィザードを出さない。
+  // まっさらな settings (空 or 履歴なし) は false のままで、初回ウィザードが表示される。
+  if (version < 2) {
+    const hasHistory =
+      (typeof data.lastOpenedRoot === 'string' && data.lastOpenedRoot.length > 0) ||
+      (Array.isArray(data.recentProjects) && data.recentProjects.length > 0);
+    if (typeof data.hasCompletedOnboarding !== 'boolean') {
+      data.hasCompletedOnboarding = hasHistory;
+    }
+  }
+
+  // --- Version 2 → 3: カスタムエージェント + MCP 自動セットアップトグル ---
+  if (version < 3) {
+    if (!Array.isArray(data.customAgents)) {
+      data.customAgents = [];
+    }
+    if (typeof data.mcpAutoSetup !== 'boolean') {
+      // 既存ユーザーは従来どおり自動で動いていたので true にしておく。
+      // 不安定で困ったら設定モーダル → MCP タブで OFF にする想定。
+      data.mcpAutoSetup = true;
+    }
+  }
 
   data.schemaVersion = APP_SETTINGS_SCHEMA_VERSION;
   // 最終マージで欠損フィールドを DEFAULT_SETTINGS で埋める

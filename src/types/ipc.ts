@@ -36,7 +36,6 @@ export const IPC_CHANNELS = {
   APP_SET_WINDOW_TITLE: 'app:setWindowTitle',
   APP_CHECK_CLAUDE: 'app:checkClaude',
   APP_SET_ZOOM_LEVEL: 'app:setZoomLevel',
-  APP_GET_ZOOM_LEVEL: 'app:getZoomLevel',
   APP_SETUP_TEAM_MCP: 'app:setupTeamMcp',
   APP_CLEANUP_TEAM_MCP: 'app:cleanupTeamMcp',
   APP_GET_TEAM_FILE_PATH: 'app:getTeamFilePath',

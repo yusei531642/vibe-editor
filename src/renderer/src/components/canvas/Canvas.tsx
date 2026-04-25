@@ -166,12 +166,21 @@ function FlowApp(): JSX.Element {
         onConnect={onConnect}
         onMoveEnd={(_, vp) => setViewport(vp)}
         defaultViewport={initialViewport}
-        // xterm はコンテナの CSS 座標で文字セルを計算するが、React Flow の
-        // CSS transform: scale() による zoom は xterm の getBoundingClientRect と
-        // 内部 cell width の比率を破壊する。実用範囲に絞ることで誤差を抑える。
-        minZoom={0.5}
+        // --- zoom / pan の挙動 ---
+        // Figma/Miro 風のカメラ zoom を React Flow 本来の挙動として復活。
+        //   - wheel (ホイール) = カーソル位置中心にズーム (cards は相対的に動く)
+        //   - pinch = ズーム
+        //   - ドラッグ (左・中・右) = パン
+        // transform: scale() の副作用で zoom > 1 のときテキストが若干滲む。
+        // これは React Flow の DOM ベース描画では不可避だが、maxZoom を 1.5 に抑え、
+        // font-smoothing / text-rendering の CSS ヒント (canvas.css) で最小化済み。
+        minZoom={0.3}
         maxZoom={1.5}
         fitView={nodes.length > 0}
+        zoomOnScroll
+        zoomOnPinch
+        zoomOnDoubleClick={false}
+        panOnDrag={[0, 1, 2]}
         onlyRenderVisibleElements
         proOptions={{ hideAttribution: true }}
       >

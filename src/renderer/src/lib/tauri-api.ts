@@ -103,7 +103,6 @@ export const api = {
     checkClaude: (command: string): Promise<ClaudeCheckResult> =>
       invoke('app_check_claude', { command }),
     setZoomLevel: (level: number): Promise<void> => invoke('app_set_zoom_level', { level }),
-    getZoomLevel: (): Promise<number> => invoke('app_get_zoom_level'),
     setupTeamMcp: (
       projectRoot: string,
       teamId: string,

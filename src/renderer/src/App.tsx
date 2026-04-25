@@ -27,6 +27,7 @@ import { TerminalView, type TerminalViewHandle } from './components/TerminalView
 import { SettingsModal } from './components/SettingsModal';
 import { CommandPalette } from './components/CommandPalette';
 import { WelcomePane } from './components/WelcomePane';
+import { OnboardingWizard } from './components/OnboardingWizard';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { ClaudeNotFound } from './components/ClaudeNotFound';
 import { TeamCreateModal } from './components/TeamCreateModal';
@@ -34,6 +35,7 @@ import { useT } from './lib/i18n';
 import { useSettings } from './lib/settings-context';
 import { useToast } from './lib/toast-context';
 import { useUiStore } from './stores/ui';
+import { webviewZoom } from './lib/webview-zoom';
 import { parseShellArgs } from './lib/parse-args';
 import { dedupPrepend, listContainsPath } from './lib/path-norm';
 import type { Command } from './lib/commands';
@@ -630,10 +632,13 @@ export function App(): JSX.Element {
           window.api.sessions.list(root)
         ]);
         // MCP 初期化は await する（新規タブ spawn より前に claude.json を確定）
-        try {
-          await window.api.app.setupTeamMcp(root, '_init', '', []);
-        } catch (err) {
-          console.warn('[loadProject] setupTeamMcp failed:', err);
+        // settings.mcpAutoSetup === false の場合は MCP 自動書換を全てスキップする
+        if (settings.mcpAutoSetup !== false) {
+          try {
+            await window.api.app.setupTeamMcp(root, '_init', '', []);
+          } catch (err) {
+            console.warn('[loadProject] setupTeamMcp failed:', err);
+          }
         }
 
         setGitStatus(gs);
@@ -713,10 +718,12 @@ export function App(): JSX.Element {
           window.api.sessions.list(root)
         ]);
         // MCP 初期化は await する（新規タブ spawn より前に claude.json を確定）
-        try {
-          await window.api.app.setupTeamMcp(root, '_init', '', []);
-        } catch (err) {
-          console.warn('[init] setupTeamMcp failed:', err);
+        if (settings.mcpAutoSetup !== false) {
+          try {
+            await window.api.app.setupTeamMcp(root, '_init', '', []);
+          } catch (err) {
+            console.warn('[init] setupTeamMcp failed:', err);
+          }
         }
         if (cancelled) return;
         setGitStatus(gs);
@@ -1459,17 +1466,14 @@ export function App(): JSX.Element {
     diffTabs.length
   ]);
 
-  // ---------- Shift+ホイールでアプリ全体のズーム ----------
-
+  // ---------- Shift+ホイールで webview zoom ----------
+  // webviewZoom (factor 0.5-3.0) に委譲。Ctrl+=/-/0 と同じ値を共有するので
+  // 両方の経路を混ぜて操作しても状態が食い違わない。
   useEffect(() => {
-    let zoomLevel = 0;
-    void window.api.app.getZoomLevel().then((l) => { zoomLevel = l; });
     const handler = (e: WheelEvent): void => {
       if (!e.shiftKey) return;
       e.preventDefault();
-      const delta = e.deltaY > 0 ? -0.5 : 0.5;
-      zoomLevel = Math.max(-4, Math.min(4, zoomLevel + delta));
-      void window.api.app.setZoomLevel(zoomLevel);
+      webviewZoom.adjust(e.deltaY > 0 ? -webviewZoom.STEP : webviewZoom.STEP);
     };
     window.addEventListener('wheel', handler, { passive: false });
     return () => window.removeEventListener('wheel', handler);
@@ -1659,8 +1663,9 @@ export function App(): JSX.Element {
       ];
 
       // MCP サーバーをセットアップ（Claude Code / Codex MCP 設定）
+      // mcpAutoSetup === false なら自動書換を一切行わない (設定 → MCP タブで OFF 時)。
       let mcpChanged = false;
-      if (projectRoot) {
+      if (projectRoot && settings.mcpAutoSetup !== false) {
         try {
           const res = await window.api.app.setupTeamMcp(
             projectRoot,
@@ -1813,11 +1818,13 @@ export function App(): JSX.Element {
         agent: m.agent
       }));
       let mcpChanged = false;
-      try {
-        const res = await window.api.app.setupTeamMcp(projectRoot, entry.id, entry.name, allMembers);
-        mcpChanged = res.changed === true;
-      } catch (err) {
-        console.warn('[resume team] setupTeamMcp failed:', err);
+      if (settings.mcpAutoSetup !== false) {
+        try {
+          const res = await window.api.app.setupTeamMcp(projectRoot, entry.id, entry.name, allMembers);
+          mcpChanged = res.changed === true;
+        } catch (err) {
+          console.warn('[resume team] setupTeamMcp failed:', err);
+        }
       }
       if (mcpChanged) {
         setTerminalTabs((prev) =>
@@ -2033,7 +2040,23 @@ export function App(): JSX.Element {
 
   const totalHistoryCount = sessions.length + teamHistoryEntries.length;
   const gitChangeCount = gitStatus?.ok ? gitStatus.files.length : 0;
-  const userInitial = (settings.language === 'ja' ? 'ユ' : 'U');
+  const [userInitial, setUserInitial] = useState<string>('');
+  useEffect(() => {
+    let cancelled = false;
+    window.api.app
+      .getUserInfo()
+      .then((info) => {
+        if (cancelled) return;
+        const first = (info.username || '').trim().slice(0, 1);
+        setUserInitial(first ? first.toUpperCase() : '?');
+      })
+      .catch(() => {
+        if (!cancelled) setUserInitial('?');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const activityFeed = useActivityFeed();
   const activityOpen = useUiStore((s) => s.activityOpen);
@@ -2451,6 +2474,9 @@ export function App(): JSX.Element {
         onReset={() => {
           void resetSettings();
         }}
+        onReplayOnboarding={() => {
+          void updateSettings({ hasCompletedOnboarding: false });
+        }}
       />
 
       <CommandPalette
@@ -2495,6 +2521,14 @@ export function App(): JSX.Element {
       ) : null}
 
       <TweaksPanel />
+
+      {!settingsLoading && !settings.hasCompletedOnboarding && (
+        <OnboardingWizard
+          onComplete={async (patch) => {
+            await updateSettings({ ...patch, hasCompletedOnboarding: true });
+          }}
+        />
+      )}
     </div>
   );
 }

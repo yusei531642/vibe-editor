@@ -359,6 +359,29 @@ const ja: Dict = {
   'settings.command': 'コマンド',
   'settings.argsUnterminatedQuote': 'ダブルクォート (") が閉じていません。引数が誤って解釈される可能性があります。',
 
+  // ---------- Custom agents ----------
+  'settings.customAgents.title': 'カスタムエージェント',
+  'settings.customAgents.add': '+ カスタムエージェントを追加',
+  'settings.customAgents.name': '表示名',
+  'settings.customAgents.remove': '削除',
+  'settings.customAgents.untitled': '（無名）',
+
+  // ---------- MCP tab ----------
+  'settings.mcp.autoTitle': '自動セットアップ',
+  'settings.mcp.autoLabel': 'Team 起動時に vibe-team MCP を自動で登録する',
+  'settings.mcp.autoHint':
+    '~/.claude.json や ~/.codex/config.toml を書き換えます。書き込みに失敗する場合は OFF にして、下の手順で自分で入れてください。',
+  'settings.mcp.aiTitle': 'AI エージェントに入れさせる',
+  'settings.mcp.aiDesc':
+    '以下のプロンプトを Claude Code / Codex に貼り付けて実行させると、vibe-team MCP がセットアップされます。',
+  'settings.mcp.manualTitle': '手動で入れる',
+  'settings.mcp.manualDesc': '好みのエディタで設定ファイルを開いて、以下の断片をマージしてください。',
+  'settings.mcp.manualStep1': '~/.claude.json を開く (無ければ新規作成)。',
+  'settings.mcp.manualStep2': '最上位の "mcpServers" オブジェクトに "vibe-team" エントリを追加。',
+  'settings.mcp.manualStep3': 'Codex を使う場合は ~/.codex/config.toml に同等の [mcp_servers.vibe-team] を追加。',
+  'settings.mcp.copy': 'コピー',
+  'settings.mcp.copied': 'コピーしました',
+
   // ---------- Updater (Issue #59) ----------
   'updater.confirm': 'vibe-editor v{version} が利用可能です。今すぐ更新しますか?',
 
@@ -373,7 +396,39 @@ const ja: Dict = {
   'status.loading': 'プロジェクト読み込み中…',
   'status.templateInserted': 'テンプレートを挿入しました（まだ保存されていません）',
   'status.initError': '初期化エラー: {err}',
-  'status.loadError': '読み込みエラー: {err}'
+  'status.loadError': '読み込みエラー: {err}',
+
+  // ---------- Onboarding ----------
+  'onboarding.step': '{current} / {total}',
+  'onboarding.back': '戻る',
+  'onboarding.next': '次へ',
+  'onboarding.skip': 'あとでにする',
+  'onboarding.replay': 'セットアップをもう一度',
+  'onboarding.welcome.eyebrow': 'vibe-editor',
+  'onboarding.welcome.title': '静かな集中の、新しい入口。',
+  'onboarding.welcome.subtitle':
+    'Claude Code と Codex のための、穏やかな IDE。数ステップだけ、ご一緒させてください。',
+  'onboarding.welcome.cta': 'はじめる',
+  'onboarding.appearance.eyebrow': 'Appearance',
+  'onboarding.appearance.title': '見た目を選ぶ',
+  'onboarding.appearance.subtitle': '言語とテーマは、あとで設定からいつでも変えられます。',
+  'onboarding.appearance.language': '言語',
+  'onboarding.appearance.theme': 'テーマ',
+  'onboarding.workspace.eyebrow': 'Workspace',
+  'onboarding.workspace.title': '最初のフォルダを開く',
+  'onboarding.workspace.subtitle':
+    'プロジェクトの場所を選ぶと、次回以降も自動で開きます。あとから追加してもかまいません。',
+  'onboarding.workspace.choose': 'フォルダを選ぶ',
+  'onboarding.workspace.change': '別のフォルダを選ぶ',
+  'onboarding.workspace.picked': '選択したフォルダ',
+  'onboarding.done.eyebrow': 'Ready',
+  'onboarding.done.title': '準備ができました',
+  'onboarding.done.subtitle': '落ち着いた画面で、今日の一行を書きはじめましょう。',
+  'onboarding.done.summaryLanguage': '言語',
+  'onboarding.done.summaryTheme': 'テーマ',
+  'onboarding.done.summaryFolder': 'フォルダ',
+  'onboarding.done.summaryFolderNone': 'あとで開く',
+  'onboarding.done.cta': 'エディタを開く'
 };
 
 const en: Dict = {
@@ -731,6 +786,31 @@ const en: Dict = {
   'settings.argsUnterminatedQuote':
     'Unterminated double quote (") — arguments may be parsed incorrectly.',
 
+  // ---------- Custom agents ----------
+  'settings.customAgents.title': 'Custom agents',
+  'settings.customAgents.add': '+ Add custom agent',
+  'settings.customAgents.name': 'Display name',
+  'settings.customAgents.remove': 'Remove',
+  'settings.customAgents.untitled': '(untitled)',
+
+  // ---------- MCP tab ----------
+  'settings.mcp.autoTitle': 'Auto setup',
+  'settings.mcp.autoLabel': 'Automatically register vibe-team MCP when a team starts',
+  'settings.mcp.autoHint':
+    'Rewrites ~/.claude.json and ~/.codex/config.toml. If that is unreliable, turn it off and install the server manually below.',
+  'settings.mcp.aiTitle': 'Have your AI agent install it',
+  'settings.mcp.aiDesc':
+    'Paste the following prompt into Claude Code or Codex and let it install the vibe-team MCP for you.',
+  'settings.mcp.manualTitle': 'Install manually',
+  'settings.mcp.manualDesc':
+    'Open the config files in your editor and merge the snippets below.',
+  'settings.mcp.manualStep1': 'Open ~/.claude.json (create it if missing).',
+  'settings.mcp.manualStep2': 'Add a "vibe-team" entry under the top-level "mcpServers" object.',
+  'settings.mcp.manualStep3':
+    'For Codex, add the equivalent [mcp_servers.vibe-team] section to ~/.codex/config.toml.',
+  'settings.mcp.copy': 'Copy',
+  'settings.mcp.copied': 'Copied',
+
   // ---------- Updater (Issue #59) ----------
   'updater.confirm': 'vibe-editor v{version} is available. Install it now?',
 
@@ -744,7 +824,40 @@ const en: Dict = {
   'status.loading': 'Loading project…',
   'status.templateInserted': 'Template inserted (not saved yet)',
   'status.initError': 'Init error: {err}',
-  'status.loadError': 'Load error: {err}'
+  'status.loadError': 'Load error: {err}',
+
+  // ---------- Onboarding ----------
+  'onboarding.step': '{current} / {total}',
+  'onboarding.back': 'Back',
+  'onboarding.next': 'Next',
+  'onboarding.skip': 'Skip for now',
+  'onboarding.replay': 'Run setup again',
+  'onboarding.welcome.eyebrow': 'vibe-editor',
+  'onboarding.welcome.title': 'A calmer entry to deep work.',
+  'onboarding.welcome.subtitle':
+    'A quiet IDE tailored for Claude Code and Codex. Just a couple of steps to get going.',
+  'onboarding.welcome.cta': 'Get started',
+  'onboarding.appearance.eyebrow': 'Appearance',
+  'onboarding.appearance.title': 'Choose your look',
+  'onboarding.appearance.subtitle':
+    'Language and theme can be changed anytime from settings.',
+  'onboarding.appearance.language': 'Language',
+  'onboarding.appearance.theme': 'Theme',
+  'onboarding.workspace.eyebrow': 'Workspace',
+  'onboarding.workspace.title': 'Open your first folder',
+  'onboarding.workspace.subtitle':
+    'Pick a project folder and we will reopen it next time. You can always add more later.',
+  'onboarding.workspace.choose': 'Choose folder',
+  'onboarding.workspace.change': 'Choose a different folder',
+  'onboarding.workspace.picked': 'Selected folder',
+  'onboarding.done.eyebrow': 'Ready',
+  'onboarding.done.title': 'You are all set',
+  'onboarding.done.subtitle': 'A calm workspace for today’s first line.',
+  'onboarding.done.summaryLanguage': 'Language',
+  'onboarding.done.summaryTheme': 'Theme',
+  'onboarding.done.summaryFolder': 'Folder',
+  'onboarding.done.summaryFolderNone': 'Open later',
+  'onboarding.done.cta': 'Open editor'
 };
 
 const translations: Record<Language, Dict> = { ja, en };

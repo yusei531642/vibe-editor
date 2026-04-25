@@ -57,6 +57,49 @@ body,
   height: 100%;
   width: 100%;
   overflow: hidden;
+  /* tauri.conf.json で transparent: true にしているため、
+     通常テーマではここで背景を塗らないと desktop が透けてしまう。 */
+  background: var(--bg);
+}
+
+/* ---------- Glass テーマ: OS アクリルを透かす ---------- */
+:root[data-theme='glass'],
+:root[data-theme='glass'] body,
+:root[data-theme='glass'] #root {
+  background: transparent !important;
+}
+
+/* Canvas モード時は IDE レイヤを不可視化 (PTY / state は保持したまま)。
+   これをやらないと、glass テーマで Canvas の背景が透明になって IDE が透けて見える。
+   非 glass でも常に隠すことで、z-index で重なっていた時の微妙な滲みも無くなる。 */
+:root[data-view-mode='canvas'] .layout {
+  visibility: hidden;
+}
+
+/* IDE / Canvas いずれのルートも透過。アプリ内の panel/sidebar/toolbar は
+   各自の rgba 背景を持っているので、下地にだけ OS アクリルが滲む。 */
+:root[data-theme='glass'] .layout,
+:root[data-theme='glass'] .canvas-layout {
+  background: transparent;
+}
+
+/* Glass 時は panel / sidebar / toolbar に backdrop-blur を乗せてアクリル感を強化 */
+:root[data-theme='glass'] .sidebar,
+:root[data-theme='glass'] .filetree,
+:root[data-theme='glass'] .rail,
+:root[data-theme='glass'] .topbar,
+:root[data-theme='glass'] .statusbar,
+:root[data-theme='glass'] .canvas-header,
+:root[data-theme='glass'] .main,
+:root[data-theme='glass'] .claude-code-panel {
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+
+/* ノイズオーバーレイは glass では控えめに (アクリル質感を邪魔しない) */
+:root[data-theme='glass'] .layout::before,
+:root[data-theme='glass'] .canvas-layout::before {
+  opacity: 0;
 }
 
 /* ---------- グレイン/ノイズオーバーレイ (Linear / Notion 風) ---------- */
@@ -3346,12 +3389,12 @@ body.is-resizing * {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 12px 6px 12px;
+  padding: 6px 12px 8px 12px;
   color: var(--text-mute);
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .filetree__header .filetree__root {
@@ -3374,13 +3417,13 @@ body.is-resizing * {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 4px 6px 4px 4px;
+  padding: 6px 6px 6px 6px;
   margin: 2px 0 0 0;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: 0;
   border-top: 1px solid transparent;
   min-width: 0;
 }
@@ -3425,6 +3468,17 @@ body.is-resizing * {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* プライマリルートの先頭に付くテラコッタドット */
+.filetree__root-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--claude-brand-glow, rgba(217, 119, 87, 0.16));
+  flex-shrink: 0;
+  margin-right: 2px;
 }
 
 .filetree__root-remove {
@@ -3473,27 +3527,37 @@ body.is-resizing * {
 }
 
 .filetree__body::-webkit-scrollbar {
-  width: 6px;
+  width: 8px;
+}
+
+.filetree__body::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+
+.filetree__body::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
 }
 
 .filetree__row {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 6px;
   width: 100%;
   background-color: transparent;
   color: var(--text);
   border: none;
   text-align: left;
-  padding: 4px 8px 4px 6px;
-  font-size: 12.5px;
+  padding: 5px 10px 5px 8px;
+  font-size: 13px;
   cursor: pointer;
   border-radius: var(--radius-sm);
   white-space: nowrap;
   overflow: hidden;
   transition: background-color var(--dur-fast) var(--ease-out-soft),
-    color var(--dur-fast) var(--ease-out-soft);
+    color var(--dur-fast) var(--ease-out-soft),
+    box-shadow var(--dur-fast) var(--ease-out-soft);
 }
 
 /* Issue #18: ファイルツリーインデントガイドの色 (テーマ別に上書き) */
@@ -3503,26 +3567,33 @@ body.is-resizing * {
 [data-theme='claude-dark'],
 [data-theme='dark'],
 [data-theme='midnight'] {
-  --filetree-guide: rgba(255, 255, 255, 0.07);
+  --filetree-guide: rgba(255, 255, 255, 0.1);
 }
 [data-theme='claude-light'],
 [data-theme='light'] {
-  --filetree-guide: rgba(0, 0, 0, 0.08);
+  --filetree-guide: rgba(0, 0, 0, 0.1);
 }
 
 .filetree__row:hover {
   background: var(--bg-hover);
+  color: var(--text);
+}
+
+.filetree__row:hover .filetree__icon,
+.filetree__row:hover .filetree__chevron {
+  color: var(--text-dim);
 }
 
 .filetree__row.is-active {
   background: var(--bg-active);
   color: var(--text);
-  box-shadow: inset 2px 0 0 var(--accent);
+  font-weight: 500;
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .filetree__chevron {
   color: var(--text-mute);
-  transition: transform 120ms ease;
+  transition: transform 120ms ease, color var(--dur-fast) var(--ease-out-soft);
   flex-shrink: 0;
 }
 
@@ -3532,13 +3603,37 @@ body.is-resizing * {
 
 .filetree__chevron-spacer {
   display: inline-block;
-  width: 12px;
+  width: 13px;
   flex-shrink: 0;
 }
 
 .filetree__icon {
-  color: var(--text-mute);
+  /* fill currentColor + 塗り opacity で固形感、stroke は text で輪郭を強める */
+  color: var(--text);
   flex-shrink: 0;
+  opacity: 0.92;
+}
+
+/* 開フォルダはテラコッタで点灯。fill もテラコッタ opacity 0.22 で乗る */
+.filetree__icon--open {
+  color: var(--accent);
+  opacity: 1;
+}
+
+.filetree__row:hover .filetree__icon {
+  opacity: 1;
+}
+
+/* ファイル種別ごとの lucide アイコン (Material Icon Theme 風) */
+.filetree__file-icon {
+  flex-shrink: 0;
+  opacity: 0.92;
+  transition: opacity 120ms var(--ease-out-soft);
+}
+
+.filetree__row:hover .filetree__file-icon,
+.filetree__row.is-active .filetree__file-icon {
+  opacity: 1;
 }
 
 .filetree__name {

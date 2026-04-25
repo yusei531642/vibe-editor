@@ -128,28 +128,31 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
     monacoTheme: 'vs-dark'
   },
   glass: {
-    // Issue #16: すりガラス風テーマ。半透明 + backdrop-filter で奥行きを出す。
-    // bg は solid に近い値 (壁紙が見えなくても破綻しないため)。パネル類は半透明。
-    bg: '#0d1018',
-    bgPanel: 'rgba(22, 26, 38, 0.55)',
-    bgSidebar: 'rgba(18, 22, 33, 0.50)',
-    bgToolbar: 'rgba(14, 17, 26, 0.48)',
-    bgElev: 'rgba(28, 33, 48, 0.70)',
+    /*
+     * Issue #16: アクリル風テーマ。OS 側 (Windows acrylic / macOS vibrancy) が
+     * 背後のぼかしを担い、アプリ側は半透明の黒系サーフェスを重ねるだけ。
+     * 青くせず、claude-dark と同じテラコッタ accent に揃える。
+     */
+    bg: 'rgba(0, 0, 0, 0)',
+    bgPanel: 'rgba(20, 20, 20, 0.42)',
+    bgSidebar: 'rgba(14, 14, 14, 0.38)',
+    bgToolbar: 'rgba(10, 10, 10, 0.34)',
+    bgElev: 'rgba(30, 30, 30, 0.58)',
     border: 'rgba(255, 255, 255, 0.10)',
     borderStrong: 'rgba(255, 255, 255, 0.18)',
-    bgHover: 'rgba(255, 255, 255, 0.06)',
-    bgActive: 'rgba(120, 145, 255, 0.18)',
-    accent: '#7891ff',
-    accentHover: '#8aa1ff',
-    accentSoft: '#a8b8ff',
-    accentTint: 'rgba(120, 145, 255, 0.20)',
-    warning: '#f5a623',
-    warningHover: '#f7b955',
-    text: '#f0f3ff',
-    textDim: '#aab2c9',
-    textMute: '#737a92',
-    surfaceGlass: 'rgba(14, 17, 26, 0.40)',
-    focusRing: '0 0 0 1px rgba(13, 16, 24, 0.6), 0 0 0 3px rgba(120, 145, 255, 0.32)',
+    bgHover: 'rgba(255, 255, 255, 0.07)',
+    bgActive: 'rgba(217, 119, 87, 0.16)',
+    accent: '#d97757',
+    accentHover: '#e88a6a',
+    accentSoft: '#d97757',
+    accentTint: 'rgba(217, 119, 87, 0.14)',
+    warning: '#d4a27f',
+    warningHover: '#e0b592',
+    text: '#f6f6f5',
+    textDim: '#c3c2b7',
+    textMute: '#97958c',
+    surfaceGlass: 'rgba(10, 10, 10, 0.30)',
+    focusRing: '0 0 0 3px rgba(217, 119, 87, 0.30)',
     monacoTheme: 'vs-dark'
   },
   light: {

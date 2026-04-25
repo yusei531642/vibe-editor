@@ -1,7 +1,8 @@
 import { Crown, Plus, X } from 'lucide-react';
 import type { TerminalAgent } from '../../../../types/shared';
 import { useT } from '../../lib/i18n';
-import { AGENTS, MEMBER_ROLES } from '../../lib/team-presets';
+import { useSettings } from '../../lib/settings-context';
+import { getAgents, MEMBER_ROLES } from '../../lib/team-presets';
 import type { TeamBuilderActions, TeamBuilderForm } from '../../lib/use-team-builder';
 
 interface Props {
@@ -18,6 +19,8 @@ export function TeamMemberBuilder({
   remaining
 }: Props): JSX.Element {
   const t = useT();
+  const { settings } = useSettings();
+  const AGENTS = getAgents(settings);
   return (
     <section className="modal__section">
       <h3>{t('team.custom')}</h3>

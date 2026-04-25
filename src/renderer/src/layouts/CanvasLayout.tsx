@@ -34,6 +34,8 @@ import type {
 } from '../../../types/shared';
 import { Canvas } from '../components/canvas/Canvas';
 import { CanvasSidebar } from '../components/canvas/CanvasSidebar';
+import { Rail } from '../components/shell/Rail';
+import type { SidebarView } from '../components/Sidebar';
 import { SettingsModal } from '../components/SettingsModal';
 import { TeamCreateModal } from '../components/TeamCreateModal';
 import { useT } from '../lib/i18n';
@@ -103,6 +105,9 @@ export function CanvasLayout(): JSX.Element {
   const [tab, setTab] = useState<Tab>('preset');
   const [recent, setRecent] = useState<TeamHistoryEntry[]>([]);
   const [teamModalOpen, setTeamModalOpen] = useState(false);
+  const [sidebarView, setSidebarView] = useState<SidebarView>('files');
+  const [railChangeCount, setRailChangeCount] = useState(0);
+  const [railHistoryCount, setRailHistoryCount] = useState(0);
   const addPopoverRef = useRef<HTMLDivElement>(null);
   const spawnPopoverRef = useRef<HTMLDivElement>(null);
   const locale = localeOf(settings.language);
@@ -260,19 +265,22 @@ export function CanvasLayout(): JSX.Element {
     ];
     // Issue #72: spawn する前に MCP 設定を反映させる。agent の PTY 起動前に
     //            ~/.claude.json が更新されていないと team tool が 1 回目認識されない。
-    try {
-      await window.api.app.setupTeamMcp(
-        cwd,
-        teamId,
-        teamName,
-        all.map((m, i) => ({
-          agentId: `${m.role}-${i}-${teamId}`,
-          role: m.role,
-          agent: m.agent
-        }))
-      );
-    } catch (err) {
-      console.warn('[custom-team] setupTeamMcp failed:', err);
+    // mcpAutoSetup === false なら自動書換を完全スキップ (MCP タブで OFF 時)。
+    if (settings.mcpAutoSetup !== false) {
+      try {
+        await window.api.app.setupTeamMcp(
+          cwd,
+          teamId,
+          teamName,
+          all.map((m, i) => ({
+            agentId: `${m.role}-${i}-${teamId}`,
+            role: m.role,
+            agent: m.agent
+          }))
+        );
+      } catch (err) {
+        console.warn('[custom-team] setupTeamMcp failed:', err);
+      }
     }
     const cards = all.map((m, i) => {
       const agentId = `${m.role}-${i}-${teamId}`;
@@ -313,19 +321,21 @@ export function CanvasLayout(): JSX.Element {
     const teamId = `team-${Date.now().toString(36)}`;
     const cwd = projectRoot;
     // Issue #72: setupTeamMcp を addCards より前に完了させる
-    try {
-      await window.api.app.setupTeamMcp(
-        cwd,
-        teamId,
-        preset.name,
-        preset.members.map((m, i) => ({
-          agentId: `${m.role}-${i}-${teamId}`,
-          role: m.role,
-          agent: m.agent
-        }))
-      );
-    } catch (err) {
-      console.warn('[preset] setupTeamMcp failed:', err);
+    if (settings.mcpAutoSetup !== false) {
+      try {
+        await window.api.app.setupTeamMcp(
+          cwd,
+          teamId,
+          preset.name,
+          preset.members.map((m, i) => ({
+            agentId: `${m.role}-${i}-${teamId}`,
+            role: m.role,
+            agent: m.agent
+          }))
+        );
+      } catch (err) {
+        console.warn('[preset] setupTeamMcp failed:', err);
+      }
     }
     const cards = preset.members.map((m, i) => {
       const agentId = `${m.role}-${i}-${teamId}`;
@@ -352,19 +362,21 @@ export function CanvasLayout(): JSX.Element {
   const restoreRecent = async (entry: TeamHistoryEntry): Promise<void> => {
     const cwd = projectRoot || entry.projectRoot;
     // Issue #72: agent spawn 前に MCP 設定を反映
-    try {
-      await window.api.app.setupTeamMcp(
-        cwd,
-        entry.id,
-        entry.name,
-        entry.members.map((m, i) => ({
-          agentId: `${m.role}-${i}-${entry.id}`,
-          role: m.role,
-          agent: m.agent
-        }))
-      );
-    } catch (err) {
-      console.warn('[restore] setupTeamMcp failed:', err);
+    if (settings.mcpAutoSetup !== false) {
+      try {
+        await window.api.app.setupTeamMcp(
+          cwd,
+          entry.id,
+          entry.name,
+          entry.members.map((m, i) => ({
+            agentId: `${m.role}-${i}-${entry.id}`,
+            role: m.role,
+            agent: m.agent
+          }))
+        );
+      } catch (err) {
+        console.warn('[restore] setupTeamMcp failed:', err);
+      }
     }
     const cards = entry.members.map((m, i) => {
       const agentId = `${m.role}-${i}-${entry.id}`;
@@ -614,7 +626,19 @@ export function CanvasLayout(): JSX.Element {
         </button>
       </header>
       <div className="canvas-layout__body">
-        <CanvasSidebar />
+        <Rail
+          sidebarView={sidebarView}
+          onSidebarViewChange={setSidebarView}
+          changeCount={railChangeCount}
+          historyCount={railHistoryCount}
+          onOpenSettings={() => setSettingsOpen(true)}
+        />
+        <CanvasSidebar
+          view={sidebarView}
+          onViewChange={setSidebarView}
+          onChangeCount={setRailChangeCount}
+          onHistoryCount={setRailHistoryCount}
+        />
         <div className="canvas-layout__stage">
           <Canvas />
         </div>

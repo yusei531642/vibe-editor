@@ -14,10 +14,12 @@ import { useT } from './lib/i18n';
 import { SettingsProvider } from './lib/settings-context';
 import { ToastProvider } from './lib/toast-context';
 import { useUiStore } from './stores/ui';
+import { webviewZoom } from './lib/webview-zoom';
 import './index.css';
 import './styles/components/palette.css';
 import './styles/components/modal.css';
 import './styles/components/welcome.css';
+import './styles/components/onboarding.css';
 import './styles/components/menu.css';
 import './styles/components/toast.css';
 import './styles/components/claude-not-found.css';
@@ -42,17 +44,46 @@ function Root(): JSX.Element {
 
   // Phase 4: グローバルキーバインド (両モード共通)
   //   Ctrl+Shift+M / Cmd+Shift+M → Canvas / IDE モード切替
+  //   Ctrl+= / Ctrl+- / Ctrl+0 → webview ネイティブ zoom (webviewZoom に委譲)
+  // Ctrl+wheel は Canvas の React Flow ネイティブ zoom と競合するので奪わない。
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.shiftKey && e.key.toLowerCase() === 'm') {
         e.preventDefault();
         setViewMode(useUiStore.getState().viewMode === 'canvas' ? 'ide' : 'canvas');
+        return;
+      }
+      // zoom in: Ctrl+= / Ctrl++ / Ctrl+;  (US/JIS 両対応)
+      if (mod && (e.key === '=' || e.key === '+' || (e.shiftKey && e.key === ';'))) {
+        e.preventDefault();
+        webviewZoom.in();
+        return;
+      }
+      // zoom out: Ctrl+-
+      if (mod && (e.key === '-' || e.key === '_')) {
+        e.preventDefault();
+        webviewZoom.out();
+        return;
+      }
+      // reset: Ctrl+0
+      if (mod && e.key === '0') {
+        e.preventDefault();
+        webviewZoom.reset();
+        return;
       }
     };
     window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+    };
   }, [setViewMode]);
+
+  // viewMode を html 属性に同期。CSS から canvas/ide の切り替えを検知できるようにする。
+  // 特に glass テーマで Canvas の背景が透けるとき、IDE レイヤを visibility:hidden する用途。
+  useEffect(() => {
+    document.documentElement.dataset.viewMode = viewMode;
+  }, [viewMode]);
 
   // bug_027 対策: <App/> を unmount すると全 PTY が kill され、未保存エディタも失われる。
   // そこで <App/> は常時マウントし、Canvas モードではその上に CanvasLayout を

@@ -1,9 +1,13 @@
-import type { TeamMember, TeamRole, TerminalAgent } from '../../../types/shared';
+import type { AppSettings, TeamMember, TeamRole, TerminalAgent } from '../../../types/shared';
+import { allAgentOptions, type AgentOption } from './agent-resolver';
 
-export const AGENTS: { value: TerminalAgent; label: string }[] = [
-  { value: 'claude', label: 'Claude Code' },
-  { value: 'codex', label: 'Codex' }
-];
+/**
+ * 選択可能なエージェント一覧。built-in (claude/codex) + settings.customAgents を結合。
+ * 旧 AGENTS 定数は customAgents 対応で削除し、settings を受ける関数化した。
+ */
+export function getAgents(settings: AppSettings): AgentOption[] {
+  return allAgentOptions(settings);
+}
 
 /** Leader 以外のロール */
 export const MEMBER_ROLES: { value: TeamRole; label: string }[] = [

@@ -36,6 +36,37 @@
   min-width: 0;
 }
 
+/* ---------- React Flow zoom 時の文字ぼやけ対策 ----------
+ * Chromium は `will-change: transform` や `translateZ(0)` を付けた要素を合成レイヤへ
+ * 昇格させ、1 度だけラスタしたビットマップを以後はバイリニア補間で拡大/縮小する。
+ * zoom > 1 のとき、このビットマップが自身の natural pixel より大きく表示されるため
+ * テキストが滲む。
+ *
+ * 方針: viewport / node のどこにも GPU 昇格ヒントを付けず、毎フレーム paint させる。
+ *       pan のジャダーは若干増えるが、zoom 中のテキストがネイティブ解像度で描画される。
+ *       font-smoothing / text-rendering は明示的に高品質指示。
+ */
+.react-flow__viewport,
+.react-flow__renderer,
+.react-flow__pane,
+.react-flow__node {
+  will-change: auto;
+  backface-visibility: visible;
+  -webkit-backface-visibility: visible;
+}
+
+.react-flow__node {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+}
+
+.react-flow__node img,
+.react-flow__node svg,
+.react-flow__node canvas {
+  image-rendering: -webkit-optimize-contrast;
+}
+
 /* ---------- top header ---------- */
 .canvas-header {
   display: flex;

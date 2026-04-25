@@ -1,0 +1,92 @@
+# Release build — Linux / macOS / Windows
+#
+# トリガー: `v*` タグの push のみ (例: v1.1.6)。通常の main push では走らない。
+# 手動実行したい時は GitHub Actions タブから "Run workflow" もしくは
+# `gh workflow run release.yml` で起動可能 (workflow_dispatch)。
+#
+# 成果物: tauri-apps/tauri-action が GitHub Release を draft で作成し、
+#   - Windows: .exe (NSIS インストーラ)
+#   - macOS:   .dmg (universal: x86_64 + aarch64)
+#   - Linux:   .AppImage / .deb
+# を upload する。確認後、Releases ページで手動 publish する。
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: '--target universal-apple-darwin'
+          - platform: ubuntu-22.04
+            args: ''
+          - platform: windows-latest
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # macOS universal は両方の target を必要とする
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install Linux deps
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev
+
+      - name: Install npm deps
+        run: npm ci
+
+      - name: Build & release
+        uses: tauri-apps/tauri-action@v0.5.22
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # tauri 自動アップデート用の署名鍵 (GitHub Secrets から)
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          # tag 名そのものを Release タグに使う
+          tagName: ${{ github.ref_name }}
+          releaseName: 'vibe-editor ${{ github.ref_name }}'
+          releaseBody: |
+            自動ビルド成果物。
+
+            - Windows: `.exe` (NSIS インストーラ)
+            - macOS:   `.dmg` (Intel + Apple Silicon universal)
+            - Linux:   `.AppImage` / `.deb`
+
+            動作確認後にこの draft を publish してください。
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+          args: ${{ matrix.args }}

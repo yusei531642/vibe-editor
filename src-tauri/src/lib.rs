@@ -47,7 +47,6 @@ pub fn run() {
             commands::app::app_set_window_title,
             commands::app::app_check_claude,
             commands::app::app_set_zoom_level,
-            commands::app::app_get_zoom_level,
             commands::app::app_setup_team_mcp,
             commands::app::app_cleanup_team_mcp,
             commands::app::app_get_team_file_path,

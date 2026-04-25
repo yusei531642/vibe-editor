@@ -44,7 +44,12 @@ export function Topbar({
   return (
     <div className="topbar" role="banner">
       <div className="topbar__brand" title="vibe-editor">
-        <span className="topbar__brand-dot" aria-hidden="true" />
+        <img
+          className="topbar__brand-logo"
+          src="/vibe-editor.png"
+          alt="vibe-editor"
+          draggable={false}
+        />
         <span>vibe-editor</span>
       </div>
 

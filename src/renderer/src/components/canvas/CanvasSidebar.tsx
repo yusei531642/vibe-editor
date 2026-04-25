@@ -15,7 +15,22 @@ import { useT } from '../../lib/i18n';
 import { useUiStore } from '../../stores/ui';
 import { ROLE_META } from '../../lib/team-roles';
 
-export function CanvasSidebar(): JSX.Element {
+interface CanvasSidebarProps {
+  /** 外部 (CanvasLayout の Rail) から制御したい場合に渡す。省略時はローカル state */
+  view?: SidebarView;
+  onViewChange?: (v: SidebarView) => void;
+  /** 親で gitStatus の変更件数を表示する用のコールバック */
+  onChangeCount?: (n: number) => void;
+  /** 親で session + teamHistory の合計件数を表示する用のコールバック */
+  onHistoryCount?: (n: number) => void;
+}
+
+export function CanvasSidebar({
+  view: viewProp,
+  onViewChange,
+  onChangeCount,
+  onHistoryCount
+}: CanvasSidebarProps = {}): JSX.Element {
   const { settings, update } = useSettings();
   const t = useT();
   // Issue #23: projectRoot は「現在開いているプロジェクト」= lastOpenedRoot を優先。
@@ -27,7 +42,9 @@ export function CanvasSidebar(): JSX.Element {
   const addCard = useCanvasStore((s) => s.addCard);
   const addCards = useCanvasStore((s) => s.addCards);
 
-  const [view, setView] = useState<SidebarView>('files');
+  const [localView, setLocalView] = useState<SidebarView>('files');
+  const view = viewProp ?? localView;
+  const setView = onViewChange ?? setLocalView;
   const [workspaceFolders, setWorkspaceFolders] = useState<string[]>(
     settings.workspaceFolders ?? []
   );
@@ -75,6 +92,14 @@ export function CanvasSidebar(): JSX.Element {
     void refreshSessions();
   }, [refreshGit, refreshSessions]);
 
+  // 親 (CanvasLayout) の Rail バッジに件数を通知
+  useEffect(() => {
+    onChangeCount?.(gitStatus?.ok ? gitStatus.files.length : 0);
+  }, [gitStatus, onChangeCount]);
+  useEffect(() => {
+    onHistoryCount?.(sessions.length + teamHistory.length);
+  }, [sessions.length, teamHistory.length, onHistoryCount]);
+
   // ---- Canvas-aware open handlers ----
   const handleOpenFile = useCallback(
     (rootPath: string, relPath: string): void => {
@@ -117,20 +142,23 @@ export function CanvasSidebar(): JSX.Element {
       //   setupTeamMcp は ~/.claude.json の `mcpServers.vibe-team` を書き換えるため、
       //   AgentNodeCard がマウント → usePtySession が Claude/Codex spawn する前に完了
       //   させないと、初回の Claude 起動が vibe-team を認識せず team tool が使えない。
-      try {
-        await window.api.app.setupTeamMcp(
-          cwd,
-          entry.id,
-          entry.name,
-          entry.members.map((m, i) => ({
-            agentId: `${m.role}-${i}-${entry.id}`,
-            role: m.role,
-            agent: m.agent
-          }))
-        );
-      } catch (err) {
-        console.warn('[resume-team] setupTeamMcp failed:', err);
-        // MCP 設定失敗でも agent は起動する (ユーザーに部分的な UI だけでも提供)
+      // mcpAutoSetup === false なら全スキップ (設定 → MCP タブ)。
+      if (settings.mcpAutoSetup !== false) {
+        try {
+          await window.api.app.setupTeamMcp(
+            cwd,
+            entry.id,
+            entry.name,
+            entry.members.map((m, i) => ({
+              agentId: `${m.role}-${i}-${entry.id}`,
+              role: m.role,
+              agent: m.agent
+            }))
+          );
+        } catch (err) {
+          console.warn('[resume-team] setupTeamMcp failed:', err);
+          // MCP 設定失敗でも agent は起動する (ユーザーに部分的な UI だけでも提供)
+        }
       }
       const cards = entry.members.map((m, i) => {
         const agentId = `${m.role}-${i}-${entry.id}`;

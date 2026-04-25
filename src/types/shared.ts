@@ -13,7 +13,24 @@ export type Density = 'compact' | 'normal' | 'comfortable';
 export type Language = 'ja' | 'en';
 
 /** Issue #75: AppSettings の現在スキーマ。破壊変更時に上げる。 */
-export const APP_SETTINGS_SCHEMA_VERSION = 1;
+export const APP_SETTINGS_SCHEMA_VERSION = 3;
+
+/**
+ * ユーザーが自由に追加できるエージェントの設定。
+ * built-in の claude / codex 以外を登録するためのレコード。
+ *  - id: 起動時の識別子。'claude' / 'codex' は予約語 (バリデーションで弾く)
+ *  - name: UI 表示名 (Canvas / Team ビルダーに出る)
+ *  - command / args / cwd: pty spawn 用の起動パラメータ
+ *  - color: Canvas カードの accent カラー (省略時は --accent)
+ */
+export interface AgentConfig {
+  id: string;
+  name: string;
+  command: string;
+  args: string;
+  cwd?: string;
+  color?: string;
+}
 
 export interface AppSettings {
   /** Issue #75: スキーマ番号。未設定 (旧データ) は 0 扱い */
@@ -61,6 +78,23 @@ export interface AppSettings {
    * 入力中も自動保存し、再起動しても残る。
    */
   notepad: string;
+  /**
+   * 初回セットアップウィザードを完了したか。
+   * false / undefined の場合、起動時にウィザードを表示する。
+   * 設定モーダルから再実行するとこの値が false に戻る。
+   */
+  hasCompletedOnboarding?: boolean;
+  /**
+   * Claude / Codex 以外のカスタムエージェント。
+   * 設定モーダルの「エージェント」グループで CRUD できる。
+   */
+  customAgents?: AgentConfig[];
+  /**
+   * Team 起動時に vibe-team MCP を自動セットアップするか。
+   * false のとき setupTeamMcp 呼び出しがスキップされ、ユーザーは MCP タブの
+   * 手順に従って手動で ~/.claude.json / ~/.codex/config.toml を編集する。
+   */
+  mcpAutoSetup?: boolean;
 }
 
 export interface ClaudeCheckResult {
@@ -105,7 +139,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   codexCommand: 'codex',
   codexArgs: '',
   teamPresets: [],
-  notepad: ''
+  notepad: '',
+  hasCompletedOnboarding: false,
+  customAgents: [],
+  mcpAutoSetup: true
 };
 
 /** git status --porcelain のエントリ */
@@ -150,7 +187,12 @@ export interface SessionInfo {
 
 // ---------- エージェント & チーム ----------
 
-export type TerminalAgent = 'claude' | 'codex';
+/**
+ * エージェント識別子。
+ * built-in の 'claude' / 'codex' に加えて、customAgents の id (任意文字列) も取り得る。
+ * 以前は literal union だったが、カスタムエージェント対応のため string に緩めた。
+ */
+export type TerminalAgent = string;
 
 export type TeamRole = 'leader' | 'planner' | 'programmer' | 'researcher' | 'reviewer';
 

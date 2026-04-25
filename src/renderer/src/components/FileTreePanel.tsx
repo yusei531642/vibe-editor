@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   ChevronDown,
   ChevronRight,
-  File as FileIcon,
+  File as DefaultFileIcon,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import type { FileNode } from '../../../types/shared';
 import { useT } from '../lib/i18n';
-import { fileIconColor } from '../lib/file-icon-color';
+import { fileIcon } from '../lib/file-icon-color';
 
 interface FileTreePanelProps {
   /** メインのプロジェクトルート(ターミナル/Git 等はこちら基準で動作する) */
@@ -283,6 +283,7 @@ export function FileTreePanel({
                   onClick={() => toggleRoot(root)}
                   aria-expanded={!collapsed}
                 >
+                  {isPrimary && <span className="filetree__root-dot" aria-hidden />}
                   {collapsed ? (
                     <ChevronRight size={12} strokeWidth={2} />
                   ) : (
@@ -339,7 +340,9 @@ function FileTreeNode({
 }: FileTreeNodeProps): JSX.Element {
   const isOpen = expanded.has(dirKey(rootPath, node.path));
   const isActive = !node.isDir && activeFilePath === node.path;
-  const iconColor = node.isDir ? undefined : fileIconColor(node.name);
+  const fileIconDef = node.isDir ? undefined : fileIcon(node.name);
+  const FileTypeIcon = fileIconDef?.Icon ?? DefaultFileIcon;
+  const fileTypeColor = fileIconDef?.color;
 
   const handleClick = (): void => {
     if (node.isDir) onToggle(rootPath, node);
@@ -371,24 +374,37 @@ function FileTreeNode({
         {node.isDir ? (
           <>
             <ChevronRight
-              size={12}
-              strokeWidth={2}
+              size={13}
+              strokeWidth={2.25}
               className={`filetree__chevron${isOpen ? ' is-open' : ''}`}
             />
             {isOpen ? (
-              <FolderOpen size={13} strokeWidth={1.75} className="filetree__icon" />
+              <FolderOpen
+                size={14}
+                strokeWidth={2}
+                fill="currentColor"
+                fillOpacity={0.22}
+                className="filetree__icon filetree__icon--open"
+              />
             ) : (
-              <Folder size={13} strokeWidth={1.75} className="filetree__icon" />
+              <Folder
+                size={14}
+                strokeWidth={2}
+                fill="currentColor"
+                fillOpacity={0.18}
+                className="filetree__icon"
+              />
             )}
           </>
         ) : (
           <>
             <span className="filetree__chevron-spacer" />
-            <FileIcon
-              size={13}
-              strokeWidth={1.75}
-              className="filetree__icon"
-              style={iconColor ? { color: iconColor } : undefined}
+            <FileTypeIcon
+              size={14}
+              strokeWidth={2}
+              className="filetree__file-icon"
+              style={fileTypeColor ? { color: fileTypeColor } : undefined}
+              aria-hidden
             />
           </>
         )}

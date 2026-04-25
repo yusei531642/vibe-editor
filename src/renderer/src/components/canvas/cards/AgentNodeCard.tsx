@@ -22,6 +22,7 @@ import {
   type TeamMemberSeed
 } from '../../../lib/team-roles';
 import { parseShellArgs } from '../../../lib/parse-args';
+import { resolveAgentConfig } from '../../../lib/agent-resolver';
 
 interface AgentPayload {
   agent?: 'claude' | 'codex';
@@ -129,12 +130,13 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     }
   };
 
-  // Issue #23: 現在開いているプロジェクト (lastOpenedRoot) を最優先。
-  // claudeCwd は Claude CLI の作業ディレクトリ設定としての意味なので fallback。payload.cwd は legacy。
-  // 変更時は usePtySession (deps=[cwd, command]) が PTY を kill → 新しい cwd で re-spawn する。
-  const cwd = settings.lastOpenedRoot || settings.claudeCwd || payload.cwd || '';
-  const command =
-    payload.command ?? (payload.agent === 'codex' ? settings.codexCommand : settings.claudeCommand);
+  // Issue #23 + カスタムエージェント対応:
+  // agent-resolver 経由で built-in (claude/codex) + customAgents のコマンド/引数/cwd を解決する。
+  // lastOpenedRoot を最優先とし、エージェント固有 cwd があればそれを fallback として使う。
+  // payload.command / payload.cwd が先に指定されていればそちらを優先 (legacy 互換)。
+  const resolved = resolveAgentConfig(payload.agent ?? 'claude', settings);
+  const cwd = settings.lastOpenedRoot || resolved.cwd || payload.cwd || '';
+  const command = payload.command ?? resolved.command;
 
   // ----- チームのシステムプロンプトを構築 -----
   // 同 teamId の AgentNode カード群から roster を作成。
@@ -173,12 +175,18 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
 
   // Claude: --append-system-prompt でシステム指示を渡す
   // Codex: codexInstructions (一時ファイル化されて model_instructions_file へ)
+  // Custom: resolved.args をそのまま使い、system prompt 連携は行わない (カスタム CLI は
+  //          プロンプト注入方法が不明のため、チーム役割分担の注入はスキップ)
+  const isClaude = payload.agent === 'claude' || !payload.agent;
   const isCodex = payload.agent === 'codex';
   const args = useMemo<string[] | undefined>(() => {
-    const base = parseShellArgs(
-      isCodex ? settings.codexArgs || '' : settings.claudeArgs || ''
-    );
-    if (!isCodex && sysPrompt) {
+    const rawArgs = isClaude
+      ? settings.claudeArgs || ''
+      : isCodex
+        ? settings.codexArgs || ''
+        : resolved.args;
+    const base = parseShellArgs(rawArgs);
+    if (isClaude && sysPrompt) {
       base.push('--append-system-prompt', sysPrompt);
     }
     if (isCodex && payload.teamId) {
@@ -188,7 +196,15 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
       }
     }
     return base.length > 0 ? base : undefined;
-  }, [isCodex, sysPrompt, payload.teamId, settings.claudeArgs, settings.codexArgs]);
+  }, [
+    isClaude,
+    isCodex,
+    resolved.args,
+    sysPrompt,
+    payload.teamId,
+    settings.claudeArgs,
+    settings.codexArgs
+  ]);
 
   const codexInstructions = isCodex ? sysPrompt : undefined;
 
