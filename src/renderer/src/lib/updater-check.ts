@@ -101,7 +101,10 @@ export async function checkForUpdates(deps: UpdaterDeps): Promise<void> {
   let total = 0;
   let downloaded = 0;
   let lastBucket = -1;
-  const progressId = showToast(translate(language, 'updater.downloading'), {
+  // Issue #121: 「最新の」進捗 toast id を保持して、新しい toast を出す前に必ず dismiss する。
+  // 旧実装は初回 toast の id (progressId) しか覚えておらず、10% 刻みで新規 toast を作り続けた結果
+  // ダウンロード中ずっと info toast が積み上がっていた。currentToastId をローカル変数で更新する。
+  let currentToastId: number = showToast(translate(language, 'updater.downloading'), {
     tone: 'info',
     // 進捗 toast は完了 / エラー時に dismiss するので長めに
     duration: 600_000
@@ -119,23 +122,27 @@ export async function checkForUpdates(deps: UpdaterDeps): Promise<void> {
           const bucket = Math.floor(pct / 10);
           if (bucket > lastBucket) {
             lastBucket = bucket;
-            dismissToast?.(progressId);
-            showToast(translate(language, 'updater.downloadProgress', { pct }), {
-              tone: 'info',
-              duration: 600_000
-            });
+            // Issue #121: 直前の toast を dismiss してから新しい toast を出し、id を更新する。
+            dismissToast?.(currentToastId);
+            currentToastId = showToast(
+              translate(language, 'updater.downloadProgress', { pct }),
+              {
+                tone: 'info',
+                duration: 600_000
+              }
+            );
           }
         }
       } else if (event.event === 'Finished') {
-        dismissToast?.(progressId);
-        showToast(translate(language, 'updater.installing'), {
+        dismissToast?.(currentToastId);
+        currentToastId = showToast(translate(language, 'updater.installing'), {
           tone: 'info',
           duration: 30_000
         });
       }
     });
   } catch (err) {
-    dismissToast?.(progressId);
+    dismissToast?.(currentToastId);
     showToast(translate(language, 'updater.downloadFailed', { error: String(err) }), {
       tone: 'error',
       duration: 8_000

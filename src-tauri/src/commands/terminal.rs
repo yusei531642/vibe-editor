@@ -5,9 +5,12 @@
 
 use crate::pty::{spawn_session, SpawnOptions};
 use crate::state::AppState;
+use crate::team_hub::inject::build_chunks;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
@@ -103,6 +106,54 @@ async fn cleanup_old_codex_instructions(dir: &std::path::Path) {
     }
 }
 
+/// Codex の system prompt を、PTY (TUI) に直接「最初の入力」として注入する fallback 経路。
+///
+/// 動作:
+///   1. spawn 直後 1.8 秒スリープして Codex の TUI が prompt 入力を受け付ける状態になるのを待つ。
+///   2. team_hub::inject::build_chunks で ConPTY-safe チャンク (64B / 15ms / UTF-8 境界保護) に
+///      整形 (banner は空文字)。
+///   3. 各チャンクを順に書き込み、最後に \r で確定送信。
+///
+/// チームメッセージの inject() と違って banner は付けない (Codex に対する初手のユーザー指示として届く)。
+async fn inject_codex_prompt_to_pty(
+    registry: Arc<crate::pty::SessionRegistry>,
+    term_id: String,
+    instructions: String,
+) {
+    use tokio::time::sleep;
+    sleep(Duration::from_millis(1800)).await;
+    let session = match registry.get(&term_id) {
+        Some(s) => s,
+        None => return,
+    };
+    // build_chunks は banner 込みで分割するが、Codex 注入では banner 不要なので空文字を渡す。
+    let chunks = build_chunks("", &instructions);
+    if chunks.is_empty() {
+        return;
+    }
+    let mut iter = chunks.into_iter();
+    if let Some(first) = iter.next() {
+        if session.write(&first).is_err() {
+            return;
+        }
+    }
+    for chunk in iter {
+        sleep(Duration::from_millis(15)).await;
+        if registry.get(&term_id).is_none() {
+            return;
+        }
+        if session.write(&chunk).is_err() {
+            return;
+        }
+    }
+    sleep(Duration::from_millis(15)).await;
+    let _ = session.write(b"\r");
+    tracing::info!(
+        "[terminal] codex prompt injected into pty {term_id} ({} bytes)",
+        instructions.len()
+    );
+}
+
 /// command が codex 系か判定 (パス形式や *.exe も拾う)
 fn is_codex_command(command: &str) -> bool {
     let lower = command.to_ascii_lowercase();
@@ -143,11 +194,20 @@ pub async fn terminal_create(
     let (cwd, warning) =
         crate::pty::session::resolve_valid_cwd(&opts.cwd, opts.fallback_cwd.as_deref());
 
-    // Issue #99: codex かつ instructions ありなら一時ファイル化して
-    // `--config model_instructions_file=<path>` を args 末尾に追加する。
-    // 既存 args がユーザー設定に含む可能性もあるので、ここでは重複検出はせず単純に append。
-    if is_codex_command(&command) {
-        if let Some(instr) = opts.codex_instructions.as_deref() {
+    // Issue #99 / Codex stability: codex かつ instructions ありなら、
+    // (1) 一時ファイル化して `--config model_instructions_file=<path>` を args 末尾に追加 (古い経路)。
+    // (2) さらに、起動後に PTY 直接注入する fallback 経路もセットしておく。
+    //     Codex CLI のバージョンによっては (1) の config キーが効かないことが報告されており、
+    //     その場合でもプロンプトが「最初の user input」としては必ず届くようにする。
+    //     team_hub::inject::build_chunks を共有して ConPTY-safe (64B / 15ms チャンク + UTF-8 境界保護) な
+    //     注入を行う。同じロジックでチームメッセージの注入と挙動を揃えることで、xterm 表示の崩れも避けられる。
+    let codex_instructions_for_inject: Option<String> = if is_codex_command(&command) {
+        if let Some(instr) = opts
+            .codex_instructions
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
             if let Some(path) = prepare_codex_instructions_file(instr).await {
                 let path_str = path.to_string_lossy().into_owned();
                 tracing::info!(
@@ -156,8 +216,13 @@ pub async fn terminal_create(
                 args.push("--config".to_string());
                 args.push(format!("model_instructions_file={path_str}"));
             }
+            Some(instr.to_string())
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
 
     tracing::info!(
         "[IPC] terminal_create command={command} args={args:?} cwd={cwd} cols={} rows={}",
@@ -201,6 +266,24 @@ pub async fn terminal_create(
     match spawn_session(app.clone(), id.clone(), spawn_opts) {
         Ok(handle) => {
             state.pty_registry.insert(id.clone(), handle);
+
+            // Codex stability: 起動した PTY に「最初の user メッセージ」として instructions を注入する。
+            // - 1.8 秒待ってから注入 (TUI の初期化 / banner 描画完了を待つ目安)。早すぎると Codex の入力欄が
+            //   まだ準備できておらず文字が捨てられる。実機計測でこの値は十分。
+            // - 注入は非同期 task で行い terminal_create のレスポンスはブロックしない。
+            // - チームメッセージと同じ build_chunks (64B/15ms, UTF-8 境界保護) を使う。
+            // - チーム所属端末 (team_hub) では Hub 側でメッセージを別途注入する設計なので、
+            //   チーム所属の場合 (team_id ありかつ role が leader/hr 等) は重複注入を避けるため、
+            //   AgentNodeCard 側が --append-system-prompt を渡す Claude と同じく、
+            //   Codex でも sysPrompt を `codex_instructions` で渡す経路を Hub 注入と分離している。
+            //   ここでは「ユーザーが最初に伝えたい一言」相当を直接落とすだけで充分動く。
+            if let Some(instr) = codex_instructions_for_inject {
+                let registry = state.pty_registry.clone();
+                let term_id = id.clone();
+                tauri::async_runtime::spawn(async move {
+                    inject_codex_prompt_to_pty(registry, term_id, instr).await;
+                });
+            }
             // Claude Code 起動時のみ session watcher を仕掛ける (codex は jsonl を作らない)
             if command.to_lowercase().contains("claude") {
                 let registry = state.pty_registry.clone();

@@ -14,6 +14,7 @@ import { TerminalView, type TerminalViewHandle } from '../../TerminalView';
 import { useT } from '../../../lib/i18n';
 import { useSettings } from '../../../lib/settings-context';
 import { useCanvasStore } from '../../../stores/canvas';
+import { useConfirmRemoveCard } from '../../../lib/use-confirm-remove-card';
 import { fallbackProfile, profileText, renderSystemPrompt, useRoleProfiles } from '../../../lib/role-profiles-context';
 import { parseShellArgs } from '../../../lib/parse-args';
 import { resolveAgentConfig } from '../../../lib/agent-resolver';
@@ -32,6 +33,17 @@ interface AgentPayload {
   /** Claude Code のセッション id。検出時に payload に書き戻し、次回 spawn で
    *  `--resume <id>` を付与して前回会話を復元する。 */
   resumeSessionId?: string | null;
+  /**
+   * Issue #117: team_recruit の custom_instructions が新規エージェントに渡るように、
+   * use-recruit-listener.ts が payload に積んでくる「役職追加指示の生テキスト」。
+   *   - Claude  : sysPrompt の末尾に追記して --append-system-prompt に流す。
+   *   - Codex   : codex_instructions として一時ファイル化し、起動時に PTY 注入される。
+   *   - 動的ロール (instructions ベース) と併用された場合は両方をブレンドする。
+   * undefined / 空文字なら「指定なし」と同じ扱い。
+   */
+  customInstructions?: string;
+  /** @deprecated `customInstructions` の旧名。互換のため受理だけする (後方互換)。 */
+  codexInstructions?: string;
 }
 
 type AgentStatus = 'idle' | 'thinking' | 'typing';
@@ -74,7 +86,7 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const ref = useRef<TerminalViewHandle | null>(null);
   const { settings } = useSettings();
   const t = useT();
-  const removeCard = useCanvasStore((s) => s.removeCard);
+  const confirmRemoveCard = useConfirmRemoveCard();
   const setCardTitle = useCanvasStore((s) => s.setCardTitle);
   const setCardPayload = useCanvasStore((s) => s.setCardPayload);
   const payload = (data?.payload ?? {}) as AgentPayload;
@@ -177,10 +189,15 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     });
   }, [teamMembersSig, payload.teamId]);
 
+  // Issue #117: team_recruit の custom_instructions を payload から拾う。
+  // 新フィールド `customInstructions` を優先し、旧 `codexInstructions` も後方互換で受理する。
+  const customInstructionsRaw =
+    (payload.customInstructions ?? payload.codexInstructions ?? '').trim();
+
   const sysPrompt = useMemo(() => {
     // 旧仕様 (teamMembers >= 2 必須) を撤廃: Leader 単独でも recruit 用にプロンプトを与える
     if (!payload.teamId || !payload.agentId || !teamMembers) return undefined;
-    return renderSystemPrompt({
+    const base = renderSystemPrompt({
       profile,
       profilesById,
       teamName: title,
@@ -189,6 +206,18 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
       globalPreamble,
       language: settings.language
     });
+    // Issue #117: ロールプロファイル由来のプロンプトに、Leader が team_recruit で渡した
+    // custom_instructions を末尾追記する。動的ロール instructions は既に worker テンプレに
+    // 流し込まれているので、これは「採用時のその場限りの追加メモ」相当 (タスク背景, 引き継ぎなど)。
+    if (customInstructionsRaw) {
+      const lang = settings.language;
+      const header =
+        lang === 'ja'
+          ? '\n\n--- Leader からの追加指示 (team_recruit.custom_instructions) ---\n'
+          : '\n\n--- Additional instructions from the Leader (team_recruit.custom_instructions) ---\n';
+      return base + header + customInstructionsRaw;
+    }
+    return base;
   }, [
     profile,
     profilesById,
@@ -197,7 +226,8 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     teamMembers,
     title,
     globalPreamble,
-    settings.language
+    settings.language,
+    customInstructionsRaw
   ]);
 
   // Claude: --append-system-prompt でシステム指示を渡す
@@ -281,7 +311,7 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
             <button
               type="button"
               className="nodrag canvas-agent-card__close"
-              onClick={() => removeCard(id)}
+              onClick={() => confirmRemoveCard(id)}
               title={t('agentCard.close')}
               aria-label={t('agentCard.close')}
             >

@@ -5,6 +5,13 @@
 // 内容は本文末尾に const SOURCE: &str として埋め込む (Rust binary に同梱)。
 //
 // 注意: 旧 Node 実装と完全互換。テンプレート文字列の `\\n` などはそのまま保持。
+//
+// 独立性 (他のバックグラウンド agent teams 等と競合しないための前提):
+//   - 環境変数は VIBE_TEAM_* / VIBE_AGENT_ID 名前空間 (他フレームワークの AGENT_TEAMS_* 等とは別)
+//   - bridge スクリプトは ~/.vibe-editor/team-bridge.js (~/.claude/, ~/.codex/, ~/.config/agent-teams/ には触れない)
+//   - MCP server entry 名は "vibe-team" (~/.claude.json / ~/.codex/config.toml 上で固有)
+//   - agentId prefix は "vc-" (Renderer 側採番分のみ)
+//   - チーム間の動的ロールも Hub 側 team_id スコープで分離される
 
 pub const SOURCE: &str = r#"#!/usr/bin/env node
 /**

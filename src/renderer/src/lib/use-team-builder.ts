@@ -39,7 +39,10 @@ export interface TeamBuilderActions {
   resetAfterCreate: () => void;
 }
 
-const DEFAULT_MEMBER: TeamMember = { agent: 'claude', role: 'programmer' };
+// v3 (architecture rework): 固定ワーカーロールは撤廃。Leader が team_recruit で動的に
+// 役職を作る前提なので、TeamCreateModal が事前に追加するメンバーは "worker" 仮ラベル
+// (実体は動的ロールに置き換わる) を持たせる。
+const DEFAULT_MEMBER: TeamMember = { agent: 'claude', role: 'worker' };
 const makeDraftMember = (m: TeamMember = DEFAULT_MEMBER): MemberDraft => ({
   ...m,
   _uid: nextMemberUid()

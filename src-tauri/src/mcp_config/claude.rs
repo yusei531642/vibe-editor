@@ -43,6 +43,32 @@ pub async fn setup(desired: &Value) -> Result<bool> {
     Ok(true)
 }
 
+/// Issue #118: setup/cleanup の rollback 用に、現状のファイル内容を丸ごとスナップショット。
+/// `Ok(None)` はファイル未存在 (= 元々何も無い)。restore() で None を渡すとファイル削除で原状回復する。
+pub async fn snapshot() -> Result<Option<Vec<u8>>> {
+    let path = config_path();
+    match fs::read(&path).await {
+        Ok(b) => Ok(Some(b)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+/// Issue #118: snapshot() で取った状態へ atomic に書き戻す。
+pub async fn restore(snap: Option<Vec<u8>>) -> Result<()> {
+    let path = config_path();
+    match snap {
+        Some(bytes) => {
+            crate::commands::atomic_write::atomic_write(&path, &bytes).await?;
+        }
+        None => {
+            // 元々ファイルが無かった場合は削除して原状回復
+            let _ = fs::remove_file(&path).await;
+        }
+    }
+    Ok(())
+}
+
 pub async fn cleanup() -> Result<bool> {
     let path = config_path();
     let bytes = match fs::read(&path).await {

@@ -14,6 +14,7 @@ pub mod sessions;
 pub mod settings;
 pub mod team_history;
 pub mod terminal;
+pub mod vibe_team_skill;
 
 #[tauri::command]
 pub fn ping() -> &'static str {

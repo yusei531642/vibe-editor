@@ -135,20 +135,10 @@ function FeedItem({ event }: { event: ActivityEvent }): JSX.Element {
 
 function roleColorVar(role: TeamRole | string | null | undefined): string {
   if (!role) return 'var(--accent)';
-  switch (role as string) {
-    case 'leader':
-      return 'var(--role-leader)';
-    case 'planner':
-      return 'var(--role-planner)';
-    case 'programmer':
-      return 'var(--role-programmer)';
-    case 'researcher':
-      return 'var(--role-researcher)';
-    case 'reviewer':
-      return 'var(--role-reviewer)';
-    default:
-      return 'var(--accent)';
-  }
+  // v3: 固定ワーカーロール撤廃。leader 以外は動的ロールなので accent にフォールバック。
+  // RoleProfilesContext を使えば正確な色が取れるが、ActivityPanel は静的色だけで十分。
+  if ((role as string) === 'leader') return 'var(--role-leader)';
+  return 'var(--accent)';
 }
 
 function groupLabel(

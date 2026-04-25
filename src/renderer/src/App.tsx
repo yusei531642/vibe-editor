@@ -99,6 +99,8 @@ interface EditorTab {
   mtimeMs?: number;
   /** Issue #104: 開いた時点の size。mtime 解像度の粗い FS 用に併用検出する */
   sizeBytes?: number;
+  /** Issue #119: 開いた時点の SHA-256 (hex)。同サイズ・1 秒以内の外部変更を検出するのに使う */
+  contentHash?: string;
   loading: boolean;
   error: string | null;
   pinned: boolean;
@@ -129,22 +131,17 @@ interface TerminalTab {
   customLabel: string | null;
 }
 
-/** ロール別の短い説明（チームプロンプト内で使用） */
+/** ロール別の短い説明（チームプロンプト内で使用、leader 以外は動的ロール由来）。 */
 const ROLE_DESC: Record<TeamRole, string> = {
-  leader: '全体の調整・指示・タスク割り振り',
-  planner: '実装計画の作成・タスク分解・アーキテクチャ設計',
-  programmer: '計画に基づいた高品質なコード実装',
-  researcher: 'コードベース調査・ドキュメント確認・API調査',
-  reviewer: 'コードレビュー・バグ特定・改善提案'
+  leader: '全体の調整・指示・タスク割り振り'
 };
 
-/** ロスター表示用の固定順。並び替えの影響を受けないようにする */
+/**
+ * ロスター表示用の固定順。leader を最優先に、それ以外は登場順。
+ * vibe-team のロールは Leader が動的に作成するため、固定リスト化はしない。
+ */
 const ROLE_ORDER: Record<string, number> = {
-  leader: 0,
-  planner: 1,
-  programmer: 2,
-  researcher: 3,
-  reviewer: 4
+  leader: 0
 };
 
 /** 重複ロールにレター接尾辞を付けた表示名を返す (例: "programmer A") */
@@ -186,14 +183,38 @@ function generateTeamSystemPrompt(
     .join(', ');
 
   const mcpTools =
-    'MCP vibe-team ツール: team_send(to,message) / team_assign_task(assignee,description) / team_get_tasks() / team_update_task(task_id,status) / team_info() / team_status(status) / team_read(). ' +
-    'team_send/team_assign_task で送ったメッセージは相手のプロンプトにリアルタイム注入されるので、受信側はポーリング不要。受信時は [Team ← <role>] プレフィックス付きで入力に届く。';
+    'MCP vibe-team ツール: team_recruit(role_id,engine,label?,description?,instructions?) / team_dismiss / team_send(to,message) / team_read / team_info / team_status / team_assign_task(assignee,description) / team_get_tasks / team_update_task / team_list_role_profiles。' +
+    'team_send/team_assign_task は相手のプロンプトにリアルタイム注入される。受信時は [Team ← <role>] プレフィックス付きで届く。';
 
   if (tab.role === 'leader') {
-    return `あなたはチーム「${team.name}」のLeader。構成: ${roster}。${mcpTools} 重要: ユーザーから最初の指示が来るまで何もせず待機してください。自分からプロジェクト調査やタスク割振を開始してはいけません。ユーザー指示を受け取ってから、1)必要に応じて調査 2)計画立案 3)team_assign_taskで割振 4)結果は [Team ← ...] で届くので都度レビューし team_send で追指示 の順で進めてください。`;
+    return (
+      `あなたはチーム「${team.name}」のLeader。構成: ${roster}。${mcpTools}\n` +
+      `【絶対遵守ルール — 外部ファイルを読む前に先に従うこと】\n` +
+      `1. ユーザーから最初の指示が来るまで何もせず待機する。自分からプロジェクト調査やファイル読みを開始しない。\n` +
+      `2. ユーザー指示が届いたら、最初のツール呼び出しは必ず team_recruit にして専門家を最低 1 名採用する。` +
+      `Read / Edit / Write / Bash / Grep / Glob などの作業系ツールを Leader 自身が呼ぶことは禁止。Leader の仕事は計画・委譲・レビュー。\n` +
+      `3. team_recruit は「ロール設計＋採用」を 1 コールで行う。新規ロール作成時の必須引数: role_id (snake_case), label, description, instructions, engine。` +
+      `既存ロール (hr や自分が作成済みの role_id) の再採用は role_id + engine だけで OK。\n` +
+      `4. 3 名以上必要なときは、まず team_recruit({role_id:"hr", engine:"claude"}) で HR を採用し、team_send("hr", "採用してほしい: ...") で一括採用を委譲する。\n` +
+      `5. チームが揃ったら team_assign_task で割り振り、結果は [Team ← <role>] で届くので都度レビュー、追指示は team_send で行う。\n` +
+      `6. 【長文ペイロード・ルール】MCP 引数に長文を直接書かない。team_recruit.instructions / team_send.message / team_assign_task.description が 5 行 / 400 文字を超えるなら、Write で .vibe-team/tmp/<short_id>.md に書き出してから、引数には「サマリ + ファイルパス」だけを渡す。\n` +
+      `設計思想や応用パターンの詳細は .claude/skills/vibe-team/SKILL.md を Read ツールで参照可 (補助情報、必須ではない)。`
+    );
   }
 
-  return `あなたはチーム「${team.name}」の${tab.role}。役割:${ROLE_DESC[tab.role]}。構成: ${roster}。${mcpTools} 重要: Leaderからの指示を受け取るまで何もせず待機してください。自分からプロジェクト調査やコード変更を始めてはいけません。Leaderからの指示は [Team ← leader] 形式で入力に届くので、それを受け取ってから作業を開始し、完了後は team_send('leader', ...) で報告してください。`;
+  // leader 以外: 役割の詳細はロールプロファイル (動的生成可能) 側で管理されるため、
+  // ここでは固定の汎用文だけを返す。IDE 旧仕様の fallback。Canvas 側は AgentNodeCard が
+  // renderSystemPrompt() で動的ロール instructions を含むプロンプトを組み立てる。
+  const roleDesc = ROLE_DESC[tab.role] ?? `${tab.role}としての担当作業`;
+  return (
+    `あなたはチーム「${team.name}」の${tab.role}。役割:${roleDesc}。構成: ${roster}。${mcpTools}\n` +
+    `【絶対ルール】\n` +
+    `1. 指示が [Team ← leader] (または [Team ← <role>]) で届くまで何もしない。自発的な調査・コード変更は禁止。\n` +
+    `2. 指示が届いたら作業を完遂し、直後に team_send('leader', "完了報告: ...") で簡潔に結果を返す。\n` +
+    `3. 報告後は静かなアイドル状態に戻る。ポーリング・「承認待ち」表示・自発的な追加質問は禁止。次の指示は [Team ← ...] で自動的に届く。\n` +
+    `4. 自分から他メンバーにタスクを割り振ってはいけない (それは Leader の仕事)。\n` +
+    `5. 【長文ペイロード・ルール】team_send で長文を送るときは message に詰めず、Write で .vibe-team/tmp/<short_id>.md に書き出してからパスだけ渡す。`
+  );
 }
 
 /** 短いアクション指示（initialMessage 用）。
@@ -991,7 +1012,8 @@ export function App(): JSX.Element {
                   lossyEncoding: lossy,
                   encoding: res.encoding || 'utf-8',
                   mtimeMs: res.mtimeMs,
-                  sizeBytes: res.sizeBytes
+                  sizeBytes: res.sizeBytes,
+                  contentHash: res.contentHash
                 }
               : tab
           )
@@ -1028,18 +1050,19 @@ export function App(): JSX.Element {
       }
       if (tab.content === tab.originalContent) return;
       try {
-        // Issue #65 / #104 / #102: mtime + size + encoding を渡して、external-change と
-        // 元 encoding の両方を保護する
+        // Issue #65 / #104 / #102 / #119: mtime + size + encoding + content_hash を渡して、
+        // 同サイズかつ秒精度で見逃す外部変更も内容ハッシュで検出する。
         let res = await window.api.files.write(
           targetRoot,
           tab.relPath,
           tab.content,
           tab.mtimeMs,
           tab.sizeBytes,
-          tab.encoding
+          tab.encoding,
+          tab.contentHash
         );
         if (res.conflict) {
-          // ユーザーに確認 → OK なら再度 mtime/size チェック無しで書き込む
+          // ユーザーに確認 → OK なら再度 mtime/size/hash チェック無しで書き込む
           const overwrite = window.confirm(
             t('editor.externalChangeConfirm', { path: tab.relPath })
           );
@@ -1053,7 +1076,8 @@ export function App(): JSX.Element {
             tab.content,
             undefined,
             undefined,
-            tab.encoding
+            tab.encoding,
+            undefined
           );
         }
         if (res.ok) {
@@ -1064,7 +1088,8 @@ export function App(): JSX.Element {
                     ...t,
                     originalContent: t.content,
                     mtimeMs: res.mtimeMs,
-                    sizeBytes: res.sizeBytes
+                    sizeBytes: res.sizeBytes,
+                    contentHash: res.contentHash
                   }
                 : t
             )

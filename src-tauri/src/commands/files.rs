@@ -3,6 +3,7 @@
 // 通常の fs 操作。tokio::fs を使い、エラーを ok=false で返す既存契約を維持。
 
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Serialize, Default)]
@@ -38,6 +39,12 @@ pub struct FileReadResult {
     /// FS の mtime 解像度 (1 秒単位など) では 1 秒以内の変更を取り逃すため、size を併用する。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<u64>,
+    /// Issue #119: open 時のファイル内容の SHA-256 (hex)。
+    /// FS が秒精度しか持たず、かつ同サイズで上書きされた場合は mtime / size の両方で
+    /// 検出を取りこぼすので、内容ハッシュを併用して conflict を見落とさないようにする。
+    /// クライアントは write 時にこの値を `expected_content_hash` で送り返す。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
 }
 
 #[derive(Serialize, Default)]
@@ -51,10 +58,25 @@ pub struct FileWriteResult {
     /// Issue #104: 書き込み後のファイルサイズ。次回 save の比較基準になる。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub size_bytes: Option<u64>,
+    /// Issue #119: 書き込み後のファイル内容の SHA-256 (hex)。次回 save の比較基準。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
     /// Issue #65: 期待する mtime と現状が食い違った場合に true を返す。
     /// ok=false + conflict=true でフロントはユーザーに確認ダイアログを出す。
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub conflict: bool,
+}
+
+/// Issue #119: バイト列の SHA-256 を 16 進文字列で返す。
+fn sha256_hex(bytes: &[u8]) -> String {
+    let mut h = Sha256::new();
+    h.update(bytes);
+    let digest = h.finalize();
+    let mut out = String::with_capacity(digest.len() * 2);
+    for b in digest.iter() {
+        out.push_str(&format!("{:02x}", b));
+    }
+    out
 }
 
 fn mtime_ms_of(meta: &std::fs::Metadata) -> Option<u64> {
@@ -106,6 +128,17 @@ fn encode_for_save(content: &str, encoding: &str) -> Result<Vec<u8>, String> {
                 out.extend_from_slice(&(c as u32).to_be_bytes());
             }
             Ok(out)
+        }
+        // Issue #120: CP932 / Shift_JIS の round-trip 保存。
+        // encoding_rs の SHIFT_JIS encoder は CP932 互換 (Windows の機種依存文字も扱える)。
+        // unmappable がある場合は HTML 数値参照になるが、それは文字情報を失わずに残せるため
+        // 「lossy 拒否」よりも実用的。
+        "shift_jis" | "shift-jis" | "sjis" | "cp932" | "windows-31j" => {
+            let (cow, _enc, had_unmappable) = encoding_rs::SHIFT_JIS.encode(content);
+            // had_unmappable は HTML 数値参照に置換されていることを意味する。それでも書き込みは続行する
+            // (元 encoding を維持したい意図のほうが強いケースが多いため)。
+            let _ = had_unmappable;
+            Ok(cow.into_owned())
         }
         "lossy" => Err(
             "cannot save: file was decoded with replacement characters (original encoding lost)"
@@ -174,11 +207,23 @@ fn detect_text_or_binary(bytes: &[u8]) -> (bool, String, String) {
     }
     match std::str::from_utf8(bytes) {
         Ok(s) => (false, s.to_string(), "utf-8".to_string()),
-        Err(_) => (
-            false,
-            String::from_utf8_lossy(bytes).into_owned(),
-            "lossy".to_string(),
-        ),
+        Err(_) => {
+            // Issue #120: UTF-8 として無効なら CP932 (Shift_JIS) として復号を試みる。
+            // encoding_rs の Shift_JIS は CP932 互換で、Windows の機種依存文字も含む。
+            // had_errors=false なら全バイトが妥当な CP932 シーケンスとして解釈できたので
+            // テキスト扱いし、save 時も同じ encoding で書き戻して round-trip を成立させる。
+            let (cow, _enc, had_errors) = encoding_rs::SHIFT_JIS.decode(bytes);
+            if !had_errors {
+                (false, cow.into_owned(), "shift_jis".to_string())
+            } else {
+                // 最後の砦: UTF-8 lossy で読む。保存は拒否される (元 encoding 不明)。
+                (
+                    false,
+                    String::from_utf8_lossy(bytes).into_owned(),
+                    "lossy".to_string(),
+                )
+            }
+        }
     }
 }
 
@@ -563,9 +608,12 @@ pub async fn files_read(project_root: String, rel_path: String) -> FileReadResul
     //     バイト比率が高いときだけバイナリ扱い。偽陽性を減らす。
     let (is_binary, content, encoding) = detect_text_or_binary(&bytes);
     // Issue #65 / #104: 開いた時点の mtime と size を返して、save 時の external-change 検出に使う
+    // Issue #119: 加えて内容の SHA-256 を返す。FS が秒精度しか無く、かつ同サイズで書き換えられた
+    // 場合に mtime/size 両方で見逃しても、内容ハッシュの不一致で conflict を確定できる。
     let meta = tokio::fs::metadata(&abs).await.ok();
     let mtime_ms = meta.as_ref().and_then(mtime_ms_of);
     let size_bytes = meta.as_ref().map(|m| m.len());
+    let content_hash = if !is_binary { Some(sha256_hex(&bytes)) } else { None };
     FileReadResult {
         ok: true,
         error: None,
@@ -575,6 +623,7 @@ pub async fn files_read(project_root: String, rel_path: String) -> FileReadResul
         encoding,
         mtime_ms,
         size_bytes,
+        content_hash,
     }
 }
 
@@ -592,6 +641,9 @@ pub async fn files_write(
     // Issue #102: read 時の encoding。指定時はその encoding で再エンコードして書き戻す。
     // 未指定なら従来通り UTF-8。
     encoding: Option<String>,
+    // Issue #119: 前回 read 時の SHA-256 (hex)。指定時は save 直前に現在ファイルの hash と比較し、
+    // mtime/size を見逃した「同サイズ・1 秒以内」変更でも conflict を確定する。
+    expected_content_hash: Option<String>,
 ) -> FileWriteResult {
     let abs = match safe_join(&project_root, &rel_path) {
         Some(p) => p,
@@ -632,6 +684,7 @@ pub async fn files_write(
                         mtime_ms: Some(current),
                         size_bytes: Some(meta.len()),
                         conflict: true,
+                        ..Default::default()
                     };
                 }
             }
@@ -645,7 +698,25 @@ pub async fn files_write(
                     mtime_ms: mtime_ms_of(&meta),
                     size_bytes: Some(meta.len()),
                     conflict: true,
+                    ..Default::default()
                 };
+            }
+        }
+        // Issue #119: 同サイズかつ 1 秒以内の編集は mtime/size 両方で見逃すため、
+        // 期待ハッシュが渡ってきていれば現在ファイル内容とハッシュ比較する。
+        if let Some(expected_hash) = expected_content_hash.as_deref() {
+            if let Ok(current_bytes) = tokio::fs::read(&abs).await {
+                let current_hash = sha256_hex(&current_bytes);
+                if current_hash != expected_hash {
+                    return FileWriteResult {
+                        ok: false,
+                        error: Some("file content changed on disk since it was opened".into()),
+                        mtime_ms: mtime_ms_of(&meta),
+                        size_bytes: Some(meta.len()),
+                        content_hash: Some(current_hash),
+                        conflict: true,
+                    };
+                }
             }
         }
     }
@@ -683,11 +754,14 @@ pub async fn files_write(
     let new_meta = tokio::fs::metadata(&target_path).await.ok();
     let mtime_ms = new_meta.as_ref().and_then(mtime_ms_of);
     let size_bytes = new_meta.as_ref().map(|m| m.len());
+    // Issue #119: 書き込み後の hash も返す。次回 save の比較基準に使う。
+    let content_hash = Some(sha256_hex(&bytes));
     FileWriteResult {
         ok: true,
         error: None,
         mtime_ms,
         size_bytes,
+        content_hash,
         conflict: false,
     }
 }

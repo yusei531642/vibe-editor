@@ -3,7 +3,7 @@
 // 旧 team-hub.ts の handleMcpRequest 等価。
 // initialize / tools/list / tools/call (team_send 等 7 ツール + 新 recruit 系) を実装。
 
-use crate::team_hub::{inject, CallContext, TeamHub, TeamMessage, TeamTask};
+use crate::team_hub::{inject, CallContext, DynamicRole, TeamHub, TeamMessage, TeamTask};
 use chrono::Utc;
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -12,6 +12,13 @@ use uuid::Uuid;
 
 const RECRUIT_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_MEMBERS_PER_TEAM: usize = 12;
+/// 動的ロール instructions の最大長。Leader が暴走して巨大プロンプトを投げてくるのを抑える。
+const MAX_DYNAMIC_INSTRUCTIONS_LEN: usize = 16 * 1024; // 16 KiB
+/// 動的ロール label / description の最大長
+const MAX_DYNAMIC_LABEL_LEN: usize = 200;
+const MAX_DYNAMIC_DESCRIPTION_LEN: usize = 1000;
+/// チーム 1 つあたりの動的ロール数上限 (DoS 抑止)
+const MAX_DYNAMIC_ROLES_PER_TEAM: usize = 64;
 /// Issue #107: team_send 1 message の最大長。これ以上は呼び出し側を拒否する
 /// (単に切ると context が崩れて user 体験が悪いので reject に倒す)。
 const MAX_MESSAGE_LEN: usize = 64 * 1024; // 64 KiB
@@ -156,16 +163,36 @@ fn tool_defs() -> Value {
         },
         {
             "name": "team_recruit",
-            "description": "Spawn a new team member with the given role profile. Returns when the new agent has joined (up to 30s).",
+            "description":
+                "Define a worker role AND hire a member to fill it, in a single step. \
+                 Pass role_id + label + description + instructions to create a new dynamic role on the fly; \
+                 system-level rules (wait for orders, report via team_send, no polling) are added automatically. \
+                 Reuse an existing role_id (e.g. \"leader\", \"hr\", or any role you already created) by omitting label/description/instructions. \
+                 See the `vibe-team` Skill for the full team-design playbook.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "role_profile_id": { "type": "string" },
-                    "engine": { "type": "string", "enum": ["claude", "codex"] },
-                    "agent_label_hint": { "type": "string" },
-                    "custom_instructions": { "type": "string" }
+                    "role_id": {
+                        "type": "string",
+                        "description": "Short snake_case identifier (e.g. \"marketing_chief\", \"employee_1\"). Reuses an existing role if it already exists."
+                    },
+                    "engine": {
+                        "type": "string",
+                        "enum": ["claude", "codex"],
+                        "description": "Engine to run this member on. Pick based on the role's strengths (claude is strongest at coding/long reasoning)."
+                    },
+                    "label": { "type": "string", "description": "Display name (e.g. \"Marketing Chief\"). Required when role_id is new." },
+                    "description": { "type": "string", "description": "One-sentence summary of the role. Required when role_id is new." },
+                    "instructions": {
+                        "type": "string",
+                        "description":
+                            "Behavioral instructions specific to this role (mindset, priorities, do/don't). Required when role_id is new. \
+                             System rules are added automatically; do NOT repeat them here."
+                    },
+                    "instructions_ja": { "type": "string", "description": "Optional Japanese version of instructions." },
+                    "agent_label_hint": { "type": "string", "description": "Optional override for the canvas card title." }
                 },
-                "required": ["role_profile_id"]
+                "required": ["role_id"]
             }
         },
         {
@@ -179,7 +206,9 @@ fn tool_defs() -> Value {
         },
         {
             "name": "team_list_role_profiles",
-            "description": "List all available role profiles (id, label, permissions). Useful before calling team_recruit.",
+            "description":
+                "List all available role profiles (id, label, permissions). Includes both built-in (leader / hr) \
+                 and any dynamic roles previously created with team_recruit.",
             "inputSchema": { "type": "object", "properties": {} }
         }
     ])
@@ -201,7 +230,7 @@ async fn dispatch_tool(
         "team_update_task" => team_update_task(hub, ctx, args).await,
         "team_recruit" => team_recruit(hub, ctx, args).await,
         "team_dismiss" => team_dismiss(hub, ctx, args).await,
-        "team_list_role_profiles" => team_list_role_profiles(hub).await,
+        "team_list_role_profiles" => team_list_role_profiles(hub, ctx).await,
         other => Err(format!("Unknown tool: {other}")),
     }
 }
@@ -219,22 +248,151 @@ async fn caller_has_permission(
             "canRecruit" => p.can_recruit,
             "canDismiss" => p.can_dismiss,
             "canAssignTasks" => p.can_assign_tasks,
+            "canCreateRoleProfile" => p.can_create_role_profile,
             _ => false,
         }
     } else {
-        // role_profile が summary に無い (古い builtin 等) → 安全側で false。
-        // ただし後方互換のため、leader だけは canRecruit/canDismiss を許可する。
+        // role_profile が summary に無い (renderer 起動中の race condition / 古い builtin 等)
+        // → 既知 builtin (leader / hr) はハードコードされた既定権限で fallback。
+        //   leader: 全権、hr: 採用 + タスク割振 + ロール登録 (HR は Leader 代理採用のため
+        //   canCreateRoleProfile も必要)。
         match (caller_role, perm) {
             ("leader", "canRecruit") => true,
             ("leader", "canDismiss") => true,
             ("leader", "canAssignTasks") => true,
+            ("leader", "canCreateRoleProfile") => true,
+            ("hr", "canRecruit") => true,
+            ("hr", "canAssignTasks") => true,
+            ("hr", "canCreateRoleProfile") => true,
             _ => false,
         }
     }
 }
 
+/// 動的ロール定義 1 件を検証 + 登録。team_recruit の role_definition / team_create_role の両方から使う。
+/// 既存 builtin (summary 上) と被る role_id は拒否、上限超過も拒否、長さ上限も拒否する。
+async fn validate_and_register_dynamic_role(
+    hub: &TeamHub,
+    ctx: &CallContext,
+    role_id: &str,
+    label: &str,
+    description: &str,
+    instructions: &str,
+    instructions_ja: Option<&str>,
+) -> Result<DynamicRole, String> {
+    // 権限チェック (Leader だけが動的ロールを作れる)
+    if !caller_has_permission(hub, &ctx.role, "canCreateRoleProfile").await {
+        return Err(format!(
+            "permission denied: role '{}' cannot create role profiles",
+            ctx.role
+        ));
+    }
+    // バリデーション: id
+    let role_id = role_id.trim();
+    if role_id.is_empty() {
+        return Err("role_id is required".into());
+    }
+    if role_id.len() > 80 {
+        return Err("role_id is too long (max 80)".into());
+    }
+    // ASCII alnum + _ - のみ許可 (`vc-` などのプレフィックスとの混同を避ける)
+    if !role_id
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return Err("role_id must contain only ASCII letters, digits, '_' or '-'".into());
+    }
+    // builtin との衝突 (summary に id が居れば builtin or override)
+    let summary = hub.get_role_profile_summary().await;
+    if summary.iter().any(|p| p.id == role_id) {
+        return Err(format!(
+            "role_id '{role_id}' is reserved by a built-in / existing role profile"
+        ));
+    }
+    // 長さ上限
+    if label.len() > MAX_DYNAMIC_LABEL_LEN {
+        return Err(format!(
+            "label too long: {} bytes (limit {})",
+            label.len(),
+            MAX_DYNAMIC_LABEL_LEN
+        ));
+    }
+    if description.len() > MAX_DYNAMIC_DESCRIPTION_LEN {
+        return Err(format!(
+            "description too long: {} bytes (limit {})",
+            description.len(),
+            MAX_DYNAMIC_DESCRIPTION_LEN
+        ));
+    }
+    if instructions.len() > MAX_DYNAMIC_INSTRUCTIONS_LEN {
+        return Err(format!(
+            "instructions too long: {} bytes (limit {})",
+            instructions.len(),
+            MAX_DYNAMIC_INSTRUCTIONS_LEN
+        ));
+    }
+    if let Some(ja) = instructions_ja {
+        if ja.len() > MAX_DYNAMIC_INSTRUCTIONS_LEN {
+            return Err(format!(
+                "instructions_ja too long: {} bytes (limit {})",
+                ja.len(),
+                MAX_DYNAMIC_INSTRUCTIONS_LEN
+            ));
+        }
+    }
+    // チームあたりの上限
+    let existing = hub.get_dynamic_roles(&ctx.team_id).await;
+    if existing.len() >= MAX_DYNAMIC_ROLES_PER_TEAM
+        && !existing.iter().any(|r| r.id == role_id)
+    {
+        return Err(format!(
+            "too many dynamic roles in this team ({}/{} max)",
+            existing.len(),
+            MAX_DYNAMIC_ROLES_PER_TEAM
+        ));
+    }
+    let role = DynamicRole {
+        id: role_id.to_string(),
+        label: label.to_string(),
+        description: description.to_string(),
+        instructions: instructions.to_string(),
+        instructions_ja: instructions_ja.map(|s| s.to_string()),
+        team_id: ctx.team_id.clone(),
+        created_by_role: ctx.role.clone(),
+    };
+    hub.register_dynamic_role(role.clone()).await;
+    // renderer に通知 (UI 更新 + role-profiles-context 内のメモリキャッシュへ反映)
+    let app = hub.app_handle.lock().await.clone();
+    if let Some(app) = &app {
+        let payload = json!({
+            "teamId": role.team_id,
+            "role": {
+                "id": role.id,
+                "label": role.label,
+                "description": role.description,
+                "instructions": role.instructions,
+                "instructionsJa": role.instructions_ja,
+                "teamId": role.team_id,
+                "createdByRole": role.created_by_role,
+            }
+        });
+        if let Err(e) = app.emit("team:role-created", payload) {
+            tracing::warn!("emit team:role-created failed: {e}");
+        }
+    }
+    Ok(role)
+}
+
 /// team_recruit: 新メンバーをチームに追加する。Renderer に event::emit でカード生成を依頼し、
 /// その新 agentId が handshake してくるまで oneshot で待機 (timeout 30s)。
+///
+/// フラット引数の API:
+///   - role_id (必須): snake_case 識別子。既存 (leader/hr/動的ロール) を再利用する場合はこれだけで OK。
+///   - engine: claude / codex。省略時は role の default、それも無ければ claude。
+///   - label / description / instructions: 揃っていれば「動的ロール定義 + 採用」を 1 コールで実行。
+///     既存 role_id と被る場合は「既に存在する」エラーになる。
+///   - instructions_ja: 任意の日本語版 instructions。
+///   - agent_label_hint: 任意。canvas カードのタイトル上書き。
 async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
     if !caller_has_permission(hub, &ctx.role, "canRecruit").await {
         return Err(format!(
@@ -242,13 +400,15 @@ async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<
             ctx.role
         ));
     }
+    // role_id を主引数とする。後方互換のため `role_profile_id` も受け付ける。
     let role_profile_id = args
-        .get("role_profile_id")
+        .get("role_id")
         .and_then(|v| v.as_str())
+        .or_else(|| args.get("role_profile_id").and_then(|v| v.as_str()))
         .unwrap_or("")
         .to_string();
     if role_profile_id.is_empty() {
-        return Err("role_profile_id is required".into());
+        return Err("role_id is required".into());
     }
     let engine = args
         .get("engine")
@@ -260,49 +420,136 @@ async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let custom_instructions = args
-        .get("custom_instructions")
+
+    // フラット引数で動的ロール定義が同梱されているか判定。
+    // label / description / instructions が「いずれか」あれば「全て揃っている必要がある」とみなしてバリデート。
+    let label = args
+        .get("label")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    let description = args
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let instructions = args
+        .get("instructions")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let instructions_ja = args
+        .get("instructions_ja")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
-    // role profile の検証 (summary から)
-    let summary = hub.get_role_profile_summary().await;
-    let target = summary
-        .iter()
-        .find(|p| p.id == role_profile_id)
-        .ok_or_else(|| format!("unknown role_profile_id: {role_profile_id}"))?;
-
-    // singleton 検証 (同 role が既に居たら拒否)
-    if target.singleton {
-        let members = hub.registry.list_team_members(&ctx.team_id);
-        if members.iter().any(|(_, role)| role == &role_profile_id) {
-            return Err(format!(
-                "singleton role '{role_profile_id}' is already filled in this team"
-            ));
-        }
+    let any_def_field =
+        !label.is_empty() || !description.is_empty() || !instructions.is_empty();
+    let all_def_fields =
+        !label.is_empty() && !description.is_empty() && !instructions.is_empty();
+    if any_def_field && !all_def_fields {
+        return Err(
+            "to define a new role, all of label / description / instructions must be provided".into(),
+        );
     }
 
-    // チーム上限
-    let current_count = hub.registry.list_team_members(&ctx.team_id).len();
-    if current_count >= MAX_MEMBERS_PER_TEAM {
+    // 動的ロール定義が揃っていれば「設計 + 採用」を 1 ステップで実行。
+    // - Leader が「役職を考える」と「採用する」を別ターンで分けると LLM の往復が増えてエラーが増える。
+    //   1 コール完結にすることで、Leader の発話オーバーヘッドとエラーリスクを最小化する。
+    let dynamic_role: Option<DynamicRole> = if all_def_fields {
+        Some(
+            validate_and_register_dynamic_role(
+                hub,
+                ctx,
+                &role_profile_id,
+                &label,
+                &description,
+                &instructions,
+                instructions_ja.as_deref(),
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+
+    // role profile の検証: builtin (summary) もしくは team スコープの動的ロールに在籍していること。
+    let summary = hub.get_role_profile_summary().await;
+    let summary_match = summary.iter().find(|p| p.id == role_profile_id).cloned();
+    let dynamic_match = if summary_match.is_none() {
+        // role_definition で今 register したばかりなら dynamic_role にも入っているし、
+        // 過去の team_create_role による既存ロールもここに含まれる
+        hub.get_dynamic_role(&ctx.team_id, &role_profile_id).await
+    } else {
+        None
+    };
+    if summary_match.is_none() && dynamic_match.is_none() {
         return Err(format!(
-            "team is full ({current_count}/{MAX_MEMBERS_PER_TEAM} members)"
+            "unknown role_profile_id: {role_profile_id} (call team_create_role first, or pass role_definition to team_recruit)"
         ));
     }
 
-    // engine: 引数省略時は role profile の default
+    // singleton / default_engine は builtin にしか無いので summary 側だけで判定する
+    let target = summary_match.as_ref();
+    let is_singleton = target.map(|t| t.singleton).unwrap_or(false);
+
+    // engine: 引数省略時は role profile の default。動的ロールは builtin と違い default を持たないので claude を既定にする。
     let resolved_engine = if engine.is_empty() {
-        target.default_engine.clone()
+        target
+            .map(|t| t.default_engine.clone())
+            .unwrap_or_else(|| "claude".to_string())
     } else {
         engine
+    };
+
+    // 動的ロールの場合は agent_label_hint をロール label で補完する (renderer 側カード表示が綺麗になる)
+    let agent_label_hint = if agent_label_hint.is_empty() {
+        if let Some(d) = &dynamic_role {
+            d.label.clone()
+        } else if let Some(d) = &dynamic_match {
+            d.label.clone()
+        } else {
+            String::new()
+        }
+    } else {
+        agent_label_hint
     };
 
     // 新 agentId を採番 (vc- prefix で他システムと区別)
     let new_agent_id = format!("vc-{}", Uuid::new_v4());
 
-    // pending に登録
-    let rx = hub.register_pending_recruit(new_agent_id.clone()).await;
+    // Issue #122: 「singleton / 人数上限チェック」と「pending 登録」を同じクリティカルセクションで実行。
+    // pending recruit も人数 / role 重複の判定対象に含めることで、並行 team_recruit が
+    // 両方 pass して上限超過 / singleton 重複が発生する競合を防ぐ。
+    let current_members = hub.registry.list_team_members(&ctx.team_id);
+    let rx = match hub
+        .try_register_pending_recruit(
+            new_agent_id.clone(),
+            ctx.team_id.clone(),
+            role_profile_id.clone(),
+            is_singleton,
+            &current_members,
+            MAX_MEMBERS_PER_TEAM,
+        )
+        .await
+    {
+        Ok(rx) => rx,
+        Err(e) => return Err(e),
+    };
+
+    // 動的ロールであれば、その定義もペイロードに同梱する。renderer 側はこの payload を見て
+     // RoleProfilesContext のメモリキャッシュへ追加し、worker template に instructions を流し込む。
+    // (team:role-created を別 emit でも届けているが、recruit-request と同梱しておくと到達順に依存しない)
+    let dynamic_role_payload = match (&dynamic_role, &dynamic_match) {
+        (Some(d), _) | (_, Some(d)) => Some(json!({
+            "id": d.id,
+            "label": d.label,
+            "description": d.description,
+            "instructions": d.instructions,
+            "instructionsJa": d.instructions_ja,
+        })),
+        _ => None,
+    };
 
     // Renderer にカード生成を依頼
     let app = hub.app_handle.lock().await.clone();
@@ -315,7 +562,7 @@ async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<
             "roleProfileId": role_profile_id,
             "engine": resolved_engine,
             "agentLabelHint": agent_label_hint,
-            "customInstructions": custom_instructions,
+            "dynamicRole": dynamic_role_payload,
         });
         if let Err(e) = app.emit("team:recruit-request", payload) {
             hub.cancel_pending_recruit(&new_agent_id).await;
@@ -389,22 +636,45 @@ async fn team_dismiss(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<
     Ok(json!({ "success": true, "agentId": agent_id }))
 }
 
-async fn team_list_role_profiles(hub: &TeamHub) -> Result<Value, String> {
+async fn team_list_role_profiles(hub: &TeamHub, ctx: &CallContext) -> Result<Value, String> {
     let summary = hub.get_role_profile_summary().await;
-    Ok(json!({
-        "profiles": summary.iter().map(|p| json!({
-            "id": p.id,
-            "label": p.label_en,
-            "labelJa": p.label_ja,
-            "description": p.description_en,
-            "descriptionJa": p.description_ja,
-            "canRecruit": p.can_recruit,
-            "canDismiss": p.can_dismiss,
-            "canAssignTasks": p.can_assign_tasks,
-            "defaultEngine": p.default_engine,
-            "singleton": p.singleton,
-        })).collect::<Vec<_>>()
-    }))
+    let dynamic = hub.get_dynamic_roles(&ctx.team_id).await;
+    let mut profiles: Vec<Value> = summary
+        .iter()
+        .map(|p| {
+            json!({
+                "id": p.id,
+                "label": p.label_en,
+                "labelJa": p.label_ja,
+                "description": p.description_en,
+                "descriptionJa": p.description_ja,
+                "canRecruit": p.can_recruit,
+                "canDismiss": p.can_dismiss,
+                "canAssignTasks": p.can_assign_tasks,
+                "canCreateRoleProfile": p.can_create_role_profile,
+                "defaultEngine": p.default_engine,
+                "singleton": p.singleton,
+                "source": "builtin",
+            })
+        })
+        .collect();
+    // 同じ team で動的に作られたロールも返す。Leader の team_create_role 後に
+    // HR が team_list_role_profiles を呼ぶフローで重要。
+    for d in &dynamic {
+        profiles.push(json!({
+            "id": d.id,
+            "label": d.label,
+            "description": d.description,
+            "canRecruit": false,
+            "canDismiss": false,
+            "canAssignTasks": false,
+            "canCreateRoleProfile": false,
+            "defaultEngine": "claude",
+            "singleton": false,
+            "source": "dynamic",
+        }));
+    }
+    Ok(json!({ "profiles": profiles }))
 }
 
 async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
@@ -432,7 +702,10 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
             id: ctx.team_id.clone(),
             ..Default::default()
         });
-    let msg_id = (team.messages.len() + 1) as u32;
+    // Issue #115: messages.len()+1 だと履歴上限到達後に id が固定して衝突する。
+    // 単調増加カウンタにすることで上限を超えても一意性を保つ。
+    team.next_message_id = team.next_message_id.saturating_add(1);
+    let msg_id = team.next_message_id;
     team.messages.push(TeamMessage {
         id: msg_id,
         from: ctx.role.clone(),
@@ -573,6 +846,14 @@ async fn team_assign_task(
     ctx: &CallContext,
     args: &Value,
 ) -> Result<Value, String> {
+    // Issue #114: 旧実装は assignee / description の空チェックだけで権限を見ておらず、
+    // canAssignTasks=false のロールでも task を作成できてしまっていた。先頭で必ず権限検証する。
+    if !caller_has_permission(hub, &ctx.role, "canAssignTasks").await {
+        return Err(format!(
+            "permission denied: role '{}' cannot assign tasks",
+            ctx.role
+        ));
+    }
     let assignee = args.get("assignee").and_then(|v| v.as_str()).unwrap_or("");
     let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
     if assignee.is_empty() || description.is_empty() {
@@ -589,7 +870,10 @@ async fn team_assign_task(
                 id: ctx.team_id.clone(),
                 ..Default::default()
             });
-        task_id = (team.tasks.len() + 1) as u32;
+        // Issue #116: tasks.len()+1 だと履歴上限到達後に id が固定して衝突する。
+        // 単調増加カウンタで一意性を保つ。
+        team.next_task_id = team.next_task_id.saturating_add(1);
+        task_id = team.next_task_id;
         team.tasks.push(TeamTask {
             id: task_id,
             assigned_to: assignee.to_string(),

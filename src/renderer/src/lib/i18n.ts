@@ -248,6 +248,8 @@ const ja: Dict = {
 
   // ---------- Agent Card ----------
   'agentCard.close': 'カードを閉じる',
+  'agentCard.confirmCloseTeam':
+    'このカードを閉じると、同じチーム「{name}」のメンバー {count} 名すべて (Leader 含む) が一緒に閉じられます。続行しますか？',
   'agentStatus.idle': '待機中',
   'agentStatus.thinking': '思考中',
   'agentStatus.typing': '応答中',
@@ -699,6 +701,8 @@ const en: Dict = {
 
   // ---------- Agent Card ----------
   'agentCard.close': 'Close card',
+  'agentCard.confirmCloseTeam':
+    'Closing this card will also close all {count} members of team "{name}" (including the Leader). Continue?',
   'agentStatus.idle': 'Idle',
   'agentStatus.thinking': 'Thinking',
   'agentStatus.typing': 'Typing',

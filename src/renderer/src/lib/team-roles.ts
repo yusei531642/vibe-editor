@@ -47,8 +47,12 @@ export function roleMetaFor(role: TeamRole, language: Language): RoleMeta {
   return profileToMeta(p, language);
 }
 
-/** UI 表示順 (Leader 先頭、ほか旧 4 種) — 旧仕様互換用 */
-export const ROLE_ORDER: TeamRole[] = ['leader', 'planner', 'programmer', 'researcher', 'reviewer'];
+/**
+ * UI 表示順。固定ワーカーロール撤廃に伴い、ビルトインは leader / hr のみ。
+ * 動的ロール (Leader が team_recruit で生成) は UI 側でメンバーカード単位に並ぶため、
+ * ここには含めない。
+ */
+export const ROLE_ORDER: TeamRole[] = ['leader', 'hr'];
 
 export interface TeamMemberSeed {
   agentId: string;

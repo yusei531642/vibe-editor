@@ -6,11 +6,11 @@
  * 一時的に追加して 1.5 秒で自動 fade。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
+// Controls (zoom/+/-、fit、lock 4 ボタン) はデフォルトで白くアプリのテーマと合わないため import しない。
 import {
   ReactFlow,
   ReactFlowProvider,
   Background,
-  Controls,
   MiniMap,
   applyNodeChanges,
   applyEdgeChanges,
@@ -39,6 +39,7 @@ import { KEYS, useKeybinding } from '../../lib/keybindings';
 import { useUiStore } from '../../stores/ui';
 import { ContextMenu, type ContextMenuItem } from '../ContextMenu';
 import { useT } from '../../lib/i18n';
+import { useConfirmRemoveCard } from '../../lib/use-confirm-remove-card';
 
 const nodeTypes = {
   terminal: TerminalCard,
@@ -72,7 +73,8 @@ function FlowApp(): JSX.Element {
   const setEdges = useCanvasStore((s) => s.setEdges);
   const setViewport = useCanvasStore((s) => s.setViewport);
   const addCard = useCanvasStore((s) => s.addCard);
-  const removeCard = useCanvasStore((s) => s.removeCard);
+  // ユーザー操作 (× / 右クリック / Delete) からの削除はチーム全員カスケード前に確認を挟む。
+  const confirmRemoveCard = useConfirmRemoveCard();
   const pulseEdge = useCanvasStore((s) => s.pulseEdge);
   const setTeamLock = useCanvasStore((s) => s.setTeamLock);
   // 個別の getter は store から都度引く (selector は使わない: teamLocks 全体購読すると
@@ -87,7 +89,7 @@ function FlowApp(): JSX.Element {
       // (Delete キー / React Flow 内部削除でもチーム全員が一括で閉じるように)
       const removes = changes.filter((c) => c.type === 'remove');
       for (const r of removes) {
-        removeCard(r.id);
+        confirmRemoveCard(r.id);
       }
       const remaining = removes.length > 0
         ? changes.filter((c) => c.type !== 'remove')
@@ -132,7 +134,7 @@ function FlowApp(): JSX.Element {
       const allChanges = extra.length > 0 ? [...remaining, ...extra] : remaining;
       setNodes(applyNodeChanges(allChanges, nodes));
     },
-    [nodes, setNodes, removeCard, isTeamLocked]
+    [nodes, setNodes, confirmRemoveCard, isTeamLocked]
   );
   const onEdgesChange = useCallback(
     (changes: EdgeChange<Edge>[]) => setEdges(applyEdgeChanges(changes, edges)),
@@ -176,11 +178,11 @@ function FlowApp(): JSX.Element {
       }
       items.push({
         label: t('canvasMenu.deleteCard'),
-        action: () => removeCard(node.id)
+        action: () => confirmRemoveCard(node.id)
       });
       setContextMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [isTeamLocked, removeCard, setTeamLock, t]
+    [isTeamLocked, confirmRemoveCard, setTeamLock, t]
   );
 
   // 空のキャンバス (Pane) で右クリックされたとき: 「ここに Claude を追加」を出す。
@@ -300,7 +302,8 @@ function FlowApp(): JSX.Element {
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={32} color="var(--canvas-grid, #1c1c20)" />
-        <Controls position="bottom-left" />
+        {/* React Flow デフォルトの白い縦 4 ボタン (zoom/+/-、fit、lock) は UI と不整合なので非表示。
+            ズームはマウスホイール / トラックパッド、fit はキー (KEYS.fitView)、lock は不要なため。 */}
         <MiniMap
           pannable
           zoomable

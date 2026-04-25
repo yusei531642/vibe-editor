@@ -85,6 +85,8 @@ pub fn run() {
             commands::terminal::terminal_resize,
             commands::terminal::terminal_kill,
             commands::terminal::terminal_save_pasted_image,
+            // ---- vibe-team Skill ----
+            commands::vibe_team_skill::app_install_vibe_team_skill,
         ])
         .setup(|app| {
             info!(

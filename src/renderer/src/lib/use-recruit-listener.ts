@@ -12,6 +12,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useCanvasStore } from '../stores/canvas';
 import type { Node } from '@xyflow/react';
 import type { CardData } from '../stores/canvas';
+import { useRoleProfiles } from './role-profiles-context';
 
 interface RecruitRequestPayload {
   teamId: string;
@@ -22,6 +23,14 @@ interface RecruitRequestPayload {
   engine: 'claude' | 'codex';
   agentLabelHint?: string;
   customInstructions?: string;
+  /** Leader が team_recruit(role_definition=...) で 1 ステップ採用した場合に同梱される */
+  dynamicRole?: {
+    id: string;
+    label: string;
+    description: string;
+    instructions: string;
+    instructionsJa?: string;
+  } | null;
 }
 
 interface DismissRequestPayload {
@@ -83,6 +92,9 @@ function findRecruitPosition(
 }
 
 export function useRecruitListener(): void {
+  // 動的ロールを RoleProfilesContext に投入するためのフック関数
+  const { registerDynamicRole } = useRoleProfiles();
+
   useEffect(() => {
     const unlistens: UnlistenFn[] = [];
     let cancelled = false;
@@ -98,6 +110,19 @@ export function useRecruitListener(): void {
       if (!requester) {
         console.warn('[recruit] requester card not found', p.requesterAgentId);
         return;
+      }
+      // 動的ロール定義が同梱されていれば、AgentNodeCard が system prompt を組み立てる前に
+      // RoleProfilesContext に登録する。team:role-created event でも同じことが起きるが、
+      // 到達順に依存しないようここでも投入する。
+      if (p.dynamicRole) {
+        registerDynamicRole({
+          id: p.dynamicRole.id,
+          label: p.dynamicRole.label,
+          description: p.dynamicRole.description,
+          instructions: p.dynamicRole.instructions,
+          instructionsJa: p.dynamicRole.instructionsJa,
+          teamId: p.teamId
+        });
       }
       const teamNodes = store.nodes.filter((n) => {
         const data = n.data?.payload as { teamId?: string } | undefined;
@@ -116,8 +141,9 @@ export function useRecruitListener(): void {
           role: p.roleProfileId,
           teamId: p.teamId,
           agentId: p.newAgentId,
-          // customInstructions は将来 codex の model_instructions_file 用にも流用可能
-          codexInstructions: p.customInstructions || undefined
+          // Issue #117: AgentNodeCard が拾って Claude(--append-system-prompt) /
+          // Codex(model_instructions_file) 両方の経路に注入する正本フィールド。
+          customInstructions: p.customInstructions || undefined
         }
       });
     }).then((u) => {
@@ -171,5 +197,7 @@ export function useRecruitListener(): void {
       cancelled = true;
       for (const u of unlistens) u();
     };
+    // registerDynamicRole は useCallback 経由で stable なので再 listen は発生しない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 }

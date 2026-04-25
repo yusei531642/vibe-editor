@@ -66,6 +66,8 @@ export interface RoleProfileSummary {
   canRecruit: boolean;
   canDismiss: boolean;
   canAssignTasks: boolean;
+  /** Leader が team_create_role / team_recruit(role_definition=...) で動的ロールを作れるか */
+  canCreateRoleProfile: boolean;
   defaultEngine: string;
   singleton: boolean;
 }
@@ -137,6 +139,22 @@ export const api = {
     /** recruit を手動キャンセル (timeout 待ち中にユーザーがカードを × で閉じた等) */
     cancelRecruit: (agentId: string): Promise<void> =>
       invoke('app_cancel_recruit', { agentId }),
+    /**
+     * `<projectRoot>/.claude/skills/vibe-team/SKILL.md` を書き出す。
+     * setupTeamMcp でも best-effort で実行されるが、Onboarding / 設定 UI から手動で
+     * 強制再配置 (forceOverwrite=true) したい場合のために露出する。
+     */
+    installVibeTeamSkill: (
+      projectRoot: string,
+      forceOverwrite?: boolean
+    ): Promise<{
+      ok: boolean;
+      path?: string;
+      skipped?: boolean;
+      overwritten?: boolean;
+      error?: string;
+    }> =>
+      invoke('app_install_vibe_team_skill', { projectRoot, forceOverwrite: !!forceOverwrite }),
     getUserInfo: (): Promise<AppUserInfo> => invoke('app_get_user_info'),
     openExternal: (url: string): Promise<OpenExternalResult> => invoke('app_open_external', { url })
   },
@@ -157,10 +175,12 @@ export const api = {
     read: (projectRoot: string, relPath: string): Promise<FileReadResult> =>
       invoke('files_read', { projectRoot, relPath }),
     /**
-     * Issue #65 / #104 / #102: external-change 検出と元 encoding の保持。
+     * Issue #65 / #104 / #102 / #119: external-change 検出と元 encoding の保持。
      *   - expectedMtimeMs: 開いた時点の mtime
      *   - expectedSizeBytes: 開いた時点の size (mtime 解像度の補完)
      *   - encoding: 開いたときに検出した encoding。指定するとその encoding で再エンコードされる
+     *   - expectedContentHash: 開いた時点の SHA-256 (hex)。同サイズかつ 1 秒以内の編集が
+     *     mtime/size 両方で見逃されるケースを内容ハッシュで補完検出する。
      */
     write: (
       projectRoot: string,
@@ -168,7 +188,8 @@ export const api = {
       content: string,
       expectedMtimeMs?: number,
       expectedSizeBytes?: number,
-      encoding?: string
+      encoding?: string,
+      expectedContentHash?: string
     ): Promise<FileWriteResult> =>
       invoke('files_write', {
         projectRoot,
@@ -176,7 +197,8 @@ export const api = {
         content,
         expectedMtimeMs,
         expectedSizeBytes,
-        encoding
+        encoding,
+        expectedContentHash
       })
   },
 

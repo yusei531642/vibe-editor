@@ -150,7 +150,7 @@ pub fn app_set_zoom_level(window: tauri::WebviewWindow, level: f64) -> Result<()
 #[tauri::command]
 pub async fn app_setup_team_mcp(
     state: State<'_, AppState>,
-    _project_root: String,
+    project_root: String,
     team_id: String,
     team_name: String,
     _members: Vec<TeamMcpMember>,
@@ -165,9 +165,32 @@ pub async fn app_setup_team_mcp(
         });
     }
     hub.register_team(&team_id, &team_name).await;
+
+    // vibe-team Skill ファイルを best-effort で配置/同期する。
+    // setupTeamMcp は「_init」ウォームアップ呼び出しでも、実チーム起動でも、復元呼び出しでも走る。
+    // どのケースでも install_skill_best_effort はバージョンヘッダで idempotent (内容一致なら no-op、
+    // 同バージョンヘッダで内容差分があれば自動上書き、ヘッダ無しのユーザー編集ファイルには触らない)
+    // なので team_id を問わず常に呼んでよい。アプリ起動毎に最新の SKILL.md が確実に同期される。
+    let trimmed = project_root.trim();
+    if !trimmed.is_empty() {
+        crate::commands::vibe_team_skill::install_skill_best_effort(trimmed).await;
+    }
     let (port, token, bridge_path) = hub.info().await;
     let socket = format!("127.0.0.1:{port}");
     let desired = crate::mcp_config::bridge_desired(&socket, &token, &bridge_path);
+
+    // Issue #118: claude / codex のどちらか片方だけが書き換わった「半端状態」を残さない。
+    // 事前にスナップショットを取り、claude→codex の順に書く。codex で失敗したら claude を rollback。
+    let claude_snap = match crate::mcp_config::claude::snapshot().await {
+        Ok(s) => s,
+        Err(e) => {
+            return Ok(SetupTeamMcpResult {
+                ok: false,
+                error: Some(format!("claude mcp snapshot: {e:#}")),
+                ..Default::default()
+            });
+        }
+    };
 
     let mut changed = false;
     match crate::mcp_config::claude::setup(&desired).await {
@@ -181,9 +204,20 @@ pub async fn app_setup_team_mcp(
         }
     }
     if let Err(e) = crate::mcp_config::codex::setup(&bridge_path).await {
+        // claude 側を元に戻す。rollback 自体が失敗した場合はログに残し、ユーザーには両方
+        // 失敗したことを返す (ユーザーが手動で `~/.claude.json` を確認できるようメッセージで促す)。
+        let mut error_msg = format!("codex mcp setup: {e:#}");
+        if let Err(re) = crate::mcp_config::claude::restore(claude_snap).await {
+            tracing::error!("[mcp] claude rollback failed after codex setup error: {re:#}");
+            error_msg = format!(
+                "{error_msg} (rollback claude also failed: {re:#}; please review ~/.claude.json manually)"
+            );
+        } else {
+            tracing::warn!("[mcp] codex setup failed, claude rolled back to previous state");
+        }
         return Ok(SetupTeamMcpResult {
             ok: false,
-            error: Some(format!("codex mcp setup: {e:#}")),
+            error: Some(error_msg),
             ..Default::default()
         });
     }
@@ -204,6 +238,19 @@ pub async fn app_cleanup_team_mcp(
     let last = state.team_hub.clear_team(&team_id).await;
     let mut removed = false;
     if last {
+        // Issue #118: 片側だけ vibe-team 行が消えた半端状態を残さない。
+        // 事前にスナップショットを取り、codex 側で失敗したら claude を元に戻す。
+        let claude_snap = match crate::mcp_config::claude::snapshot().await {
+            Ok(s) => s,
+            Err(e) => {
+                return Ok(CleanupTeamMcpResult {
+                    ok: false,
+                    error: Some(format!("claude mcp snapshot: {e:#}")),
+                    removed: None,
+                });
+            }
+        };
+
         // 残りアクティブチームが 0 になったら MCP 設定を削除
         match crate::mcp_config::claude::cleanup().await {
             Ok(r) => removed |= r,
@@ -216,13 +263,23 @@ pub async fn app_cleanup_team_mcp(
             }
         }
         if let Err(e) = crate::mcp_config::codex::cleanup().await {
+            let mut error_msg = format!("codex mcp cleanup: {e:#}");
+            if let Err(re) = crate::mcp_config::claude::restore(claude_snap).await {
+                tracing::error!("[mcp] claude rollback failed after codex cleanup error: {re:#}");
+                error_msg = format!(
+                    "{error_msg} (rollback claude also failed: {re:#}; please review ~/.claude.json manually)"
+                );
+            } else {
+                tracing::warn!(
+                    "[mcp] codex cleanup failed, claude restored to previous state"
+                );
+            }
             return Ok(CleanupTeamMcpResult {
                 ok: false,
-                error: Some(format!("codex mcp cleanup: {e:#}")),
+                error: Some(error_msg),
                 removed: None,
             });
         }
-        removed = true;
     }
     Ok(CleanupTeamMcpResult {
         ok: true,

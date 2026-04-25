@@ -71,10 +71,36 @@ struct HubState {
     bridge_path: PathBuf,
     /// agent_id → 現在進行中の inject タスク数 (cancel 用には含めない、レート制限用)
     pending_injects: HashMap<String, usize>,
-    /// agent_id → 待機中の recruit oneshot (handshake 完了で resolve)
-    pending_recruits: HashMap<String, oneshot::Sender<RecruitOutcome>>,
+    /// agent_id → 待機中の recruit (handshake 完了で resolve)。
+    /// Issue #122: team_id と role を保持して、同時 team_recruit の人数 / singleton 判定に
+    /// pending を含められるようにする (旧実装は registry の handshake 済みだけを見ていたため
+    /// 並行 recruit で上限超過や singleton 重複が起きえた)。
+    pending_recruits: HashMap<String, PendingRecruit>,
     /// renderer から同期された role profile 一覧 (team_list_role_profiles で返す)
     role_profile_summary: Vec<RoleProfileSummary>,
+    /// Leader が team_create_role / team_recruit(role_definition=...) で動的に生成した
+    /// ワーカーロール。team_id ごとに分離 (チーム間の名前衝突を許容しつつ独立性を担保)。
+    /// renderer 側で worker テンプレに instructions を流し込み、最終的な system prompt を組み立てる。
+    /// プロセス再起動で消えるが、canvas restore 時に renderer が再投入する想定。
+    dynamic_roles: HashMap<String, HashMap<String, DynamicRole>>,
+}
+
+/// Leader が team_create_role で定義した動的ワーカーロールの本体。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DynamicRole {
+    pub id: String,
+    pub label: String,
+    pub description: String,
+    /// 役職特有の振る舞い (worker テンプレの {dynamicInstructions} に流し込まれる)
+    pub instructions: String,
+    /// 任意。日本語 instructions 版。未指定なら instructions が両言語に使われる。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions_ja: Option<String>,
+    /// どの team で作成されたか (ログ・スコープ確認用)
+    pub team_id: String,
+    /// 作成者 (ログ用)
+    pub created_by_role: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -88,6 +114,10 @@ pub struct RoleProfileSummary {
     pub can_recruit: bool,
     pub can_dismiss: bool,
     pub can_assign_tasks: bool,
+    /// 動的ロールを team_create_role / team_recruit(role_definition=...) で作成できるか。
+    /// Leader だけ true で、HR や動的ワーカーは false。
+    #[serde(default)]
+    pub can_create_role_profile: bool,
     pub default_engine: String, // "claude" | "codex"
     pub singleton: bool,
 }
@@ -98,12 +128,27 @@ pub struct RecruitOutcome {
     pub role_profile_id: String,
 }
 
+/// pending_recruits の値。team_id と role を保持して、並行 recruit でも整合性のある
+/// 人数 / singleton 判定ができるようにする (Issue #122)。
+pub struct PendingRecruit {
+    pub team_id: String,
+    pub role_profile_id: String,
+    pub tx: oneshot::Sender<RecruitOutcome>,
+}
+
 #[derive(Default, Clone)]
 pub struct TeamInfo {
     pub id: String,
     pub name: String,
     pub messages: Vec<TeamMessage>,
     pub tasks: Vec<TeamTask>,
+    /// 次に採番する message_id (Issue #115)。
+    /// 旧実装は `messages.len() + 1` を使っていたため、履歴上限到達後はずっと同値になり ID 衝突した。
+    /// 単調増加カウンタにすることで上限到達後も一意性を保つ。saturating_add で u32::MAX を超えたら
+    /// 飽和するが、4 billion msgs/team は実用上発生しない。
+    pub next_message_id: u32,
+    /// 次に採番する task_id (Issue #116)。message_id と同じ理由で単調増加カウンタ化。
+    pub next_task_id: u32,
 }
 
 #[derive(Clone)]
@@ -147,8 +192,55 @@ impl TeamHub {
                 pending_injects: HashMap::new(),
                 pending_recruits: HashMap::new(),
                 role_profile_summary: Vec::new(),
+                dynamic_roles: HashMap::new(),
             })),
             app_handle: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// 動的ロールを team_id スコープで登録。既存があれば上書き。
+    /// 既存 builtin (`role_profile_summary` に居る id) との衝突は呼び出し側でチェック済み前提。
+    pub async fn register_dynamic_role(&self, role: DynamicRole) {
+        let mut s = self.state.lock().await;
+        s.dynamic_roles
+            .entry(role.team_id.clone())
+            .or_default()
+            .insert(role.id.clone(), role);
+    }
+
+    /// team_id スコープの動的ロール一覧を返す
+    pub async fn get_dynamic_roles(&self, team_id: &str) -> Vec<DynamicRole> {
+        let s = self.state.lock().await;
+        s.dynamic_roles
+            .get(team_id)
+            .map(|m| m.values().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// 任意 team_id スコープから動的ロール 1 件を引く
+    pub async fn get_dynamic_role(&self, team_id: &str, role_id: &str) -> Option<DynamicRole> {
+        let s = self.state.lock().await;
+        s.dynamic_roles
+            .get(team_id)
+            .and_then(|m| m.get(role_id).cloned())
+    }
+
+    /// renderer 側に dynamic_roles のスナップショットを渡せるようにする想定の hook。
+    /// 現状は未使用 (未来のチーム履歴永続化で使う)
+    #[allow(dead_code)]
+    pub async fn export_dynamic_roles(&self, team_id: &str) -> Vec<DynamicRole> {
+        self.get_dynamic_roles(team_id).await
+    }
+
+    /// canvas 復元時に renderer 側 dynamic_roles をまとめて Hub に流し込むための入口。
+    /// 既存をクリアしてから一括 insert する (team_id スコープ単位)。
+    #[allow(dead_code)]
+    pub async fn replace_dynamic_roles(&self, team_id: &str, roles: Vec<DynamicRole>) {
+        let mut s = self.state.lock().await;
+        let entry = s.dynamic_roles.entry(team_id.to_string()).or_default();
+        entry.clear();
+        for r in roles {
+            entry.insert(r.id.clone(), r);
         }
     }
 
@@ -162,22 +254,64 @@ impl TeamHub {
         self.state.lock().await.role_profile_summary.clone()
     }
 
-    /// recruit が要求された agent_id を pending に登録。handshake 完了で resolve する。
-    pub async fn register_pending_recruit(
+    /// recruit を pending に登録する。Issue #122: 「人数 / singleton 判定」と「pending 登録」を
+    /// 同じクリティカルセクションで行うことで並行 recruit による上限超過や singleton 重複を防ぐ。
+    ///
+    /// `current_members` は呼び出し側で先に取得した「handshake 済みメンバー (agent_id, role) の一覧」。
+    /// クリティカルセクション内で pending と合わせて人数 / 役職重複をチェックし、
+    /// パスしたらこの場で pending に挿入して Receiver を返す。
+    pub async fn try_register_pending_recruit(
         &self,
         agent_id: String,
-    ) -> oneshot::Receiver<RecruitOutcome> {
+        team_id: String,
+        role_profile_id: String,
+        is_singleton: bool,
+        current_members: &[(String, String)],
+        max_members: usize,
+    ) -> Result<oneshot::Receiver<RecruitOutcome>, String> {
         let (tx, rx) = oneshot::channel();
         let mut s = self.state.lock().await;
-        s.pending_recruits.insert(agent_id, tx);
-        rx
+        // 同 team_id に属する pending を列挙
+        let pending_for_team: Vec<&PendingRecruit> = s
+            .pending_recruits
+            .values()
+            .filter(|p| p.team_id == team_id)
+            .collect();
+        // 人数上限チェック (handshake 済み + pending)
+        let total = current_members.len() + pending_for_team.len();
+        if total >= max_members {
+            return Err(format!(
+                "team is full ({total}/{max_members} members; including pending recruits)"
+            ));
+        }
+        // singleton チェック (handshake 済み + pending を両方見る)
+        if is_singleton {
+            let already = current_members.iter().any(|(_, r)| r == &role_profile_id)
+                || pending_for_team
+                    .iter()
+                    .any(|p| p.role_profile_id == role_profile_id);
+            if already {
+                return Err(format!(
+                    "singleton role '{role_profile_id}' is already filled or pending in this team"
+                ));
+            }
+        }
+        s.pending_recruits.insert(
+            agent_id,
+            PendingRecruit {
+                team_id,
+                role_profile_id,
+                tx,
+            },
+        );
+        Ok(rx)
     }
 
     /// handshake 内で agent_id がマッチしたら呼ぶ。recruit が待機中ならここで resolve。
     pub async fn resolve_pending_recruit(&self, agent_id: &str, role_profile_id: &str) {
         let mut s = self.state.lock().await;
-        if let Some(tx) = s.pending_recruits.remove(agent_id) {
-            let _ = tx.send(RecruitOutcome {
+        if let Some(p) = s.pending_recruits.remove(agent_id) {
+            let _ = p.tx.send(RecruitOutcome {
                 agent_id: agent_id.to_string(),
                 role_profile_id: role_profile_id.to_string(),
             });
@@ -292,6 +426,8 @@ impl TeamHub {
         let mut s = self.state.lock().await;
         s.teams.remove(team_id);
         s.active_teams.remove(team_id);
+        // 動的ロールもチーム単位でクリア (チーム破棄でロール定義を残す意味は無い)
+        s.dynamic_roles.remove(team_id);
         s.active_teams.is_empty()
     }
 }

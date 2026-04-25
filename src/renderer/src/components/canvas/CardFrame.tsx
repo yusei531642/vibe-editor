@@ -6,7 +6,7 @@
  */
 import type { ReactNode } from 'react';
 import { NodeResizer } from '@xyflow/react';
-import { useCanvasStore } from '../../stores/canvas';
+import { useConfirmRemoveCard } from '../../lib/use-confirm-remove-card';
 
 interface CardFrameProps {
   id: string;
@@ -16,7 +16,7 @@ interface CardFrameProps {
 }
 
 export function CardFrame({ id, title, accent, children }: CardFrameProps): JSX.Element {
-  const removeCard = useCanvasStore((s) => s.removeCard);
+  const confirmRemoveCard = useConfirmRemoveCard();
   return (
     <div
       style={{
@@ -70,7 +70,7 @@ export function CardFrame({ id, title, accent, children }: CardFrameProps): JSX.
         <button
           type="button"
           className="nodrag"
-          onClick={() => removeCard(id)}
+          onClick={() => confirmRemoveCard(id)}
           style={{
             // 旧 padding 2/6 + font 14 は押しにくかったので 28x28 のヒット領域に拡大
             width: 28,

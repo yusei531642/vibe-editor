@@ -16,12 +16,36 @@ import {
   useState,
   type ReactNode
 } from 'react';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
   Language,
   RoleProfile,
   RoleProfilesFile
 } from '../../../types/shared';
-import { BUILTIN_ROLE_PROFILES, BUILTIN_BY_ID, toolsPlaceholder } from './role-profiles-builtin';
+import {
+  BUILTIN_ROLE_PROFILES,
+  BUILTIN_BY_ID,
+  composeWorkerProfile,
+  toolsPlaceholder
+} from './role-profiles-builtin';
+
+/**
+ * Leader が team_create_role / team_recruit(role_definition=...) で動的に作成したワーカーロール。
+ * RoleProfilesContext の memory 内 cache に保持され、`compose()` 時に builtin/custom と合成される。
+ * 永続化はしない (プロセス再起動で消える) ので、canvas 復元時には Tauri 側 TeamHub にも
+ * 再投入する必要がある (現状は recruit-request payload に同梱される dynamicRole 経由で受け取る)。
+ */
+export interface DynamicRoleEntry {
+  /** 通常 snake_case (例: "marketing_chief") */
+  id: string;
+  /** 表示名 */
+  label: string;
+  description: string;
+  instructions: string;
+  instructionsJa?: string;
+  /** どのチームスコープか (チーム間で id 衝突を許容するため必要) */
+  teamId: string;
+}
 
 interface RoleProfilesContextValue {
   /** 合成後の effective profiles (id → profile) */
@@ -41,6 +65,8 @@ interface RoleProfilesContextValue {
   addCustom: (profile: RoleProfile) => Promise<void>;
   /** custom を 1 件削除 (builtin は削除不可) */
   removeCustom: (id: string) => Promise<void>;
+  /** Leader が動的に作ったワーカーロールを byId に登録 (memory only) */
+  registerDynamicRole: (entry: DynamicRoleEntry) => void;
   /** 読み込みエラー (UI 通知用) */
   error: string | null;
 }
@@ -49,7 +75,10 @@ const Ctx = createContext<RoleProfilesContextValue | null>(null);
 
 const EMPTY_FILE: RoleProfilesFile = { schemaVersion: 1, overrides: {}, custom: [] };
 
-function compose(file: RoleProfilesFile): {
+function compose(
+  file: RoleProfilesFile,
+  dynamic: Record<string, DynamicRoleEntry>
+): {
   byId: Record<string, RoleProfile>;
   ordered: RoleProfile[];
 } {
@@ -84,7 +113,19 @@ function compose(file: RoleProfilesFile): {
     }
     byId[c.id] = { ...c, source: 'user', schemaVersion: 1 };
   }
-  // 順序: leader 先頭 → builtin の元順 → user 追加分
+  // 4. 動的ロール (Leader が team_create_role で作成、または team_recruit(role_definition=...) で同時作成)
+  //    builtin / custom と id が衝突したら衝突側を優先 (Tauri 側で reject されるが二重防衛)
+  for (const [id, entry] of Object.entries(dynamic)) {
+    if (byId[id]) continue;
+    byId[id] = composeWorkerProfile({
+      id: entry.id,
+      label: entry.label,
+      description: entry.description,
+      instructions: entry.instructions,
+      instructionsJa: entry.instructionsJa
+    });
+  }
+  // 順序: leader 先頭 → builtin の元順 → user 追加分 → 動的ロール
   const ordered: RoleProfile[] = [];
   const leader = byId['leader'];
   if (leader) ordered.push(leader);
@@ -94,12 +135,25 @@ function compose(file: RoleProfilesFile): {
   for (const c of file.custom ?? []) {
     if (!BUILTIN_BY_ID[c.id]) ordered.push(byId[c.id]);
   }
+  for (const id of Object.keys(dynamic)) {
+    if (!BUILTIN_BY_ID[id] && !(file.custom ?? []).some((c) => c.id === id)) {
+      const p = byId[id];
+      if (p) ordered.push(p);
+    }
+  }
   return { byId, ordered };
 }
 
 export function RoleProfilesProvider({ children }: { children: ReactNode }): JSX.Element {
   const [file, setFile] = useState<RoleProfilesFile>(EMPTY_FILE);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Leader 動的ロールの memory 内 cache (id → DynamicRoleEntry)。
+   * - team:role-created event (team_create_role 経由) で追加される
+   * - team:recruit-request event の dynamicRole フィールドでも追加される (1 ステップ採用時)
+   * canvas restore 時には useRecruitListener が再投入する想定。
+   */
+  const [dynamic, setDynamic] = useState<Record<string, DynamicRoleEntry>>({});
 
   // 起動時に 1 回ロード
   useEffect(() => {
@@ -127,26 +181,71 @@ export function RoleProfilesProvider({ children }: { children: ReactNode }): JSX
     };
   }, []);
 
-  const { byId, ordered } = useMemo(() => compose(file), [file]);
-
-  // Tauri TeamHub に role profile summary を同期 (team_list_role_profiles / permissions 検証用)
+  // Tauri 側 TeamHub からの team:role-created を購読してメモリキャッシュへ反映
   useEffect(() => {
-    const summary = ordered.map((p) => ({
-      id: p.id,
-      labelEn: p.i18n.en.label,
-      labelJa: p.i18n.ja?.label,
-      descriptionEn: p.i18n.en.description,
-      descriptionJa: p.i18n.ja?.description,
-      canRecruit: p.permissions.canRecruit,
-      canDismiss: p.permissions.canDismiss,
-      canAssignTasks: p.permissions.canAssignTasks,
-      defaultEngine: p.defaultEngine,
-      singleton: !!p.singleton
-    }));
+    let unlisten: UnlistenFn | null = null;
+    let disposed = false;
+    void listen<{
+      teamId: string;
+      role: {
+        id: string;
+        label: string;
+        description: string;
+        instructions: string;
+        instructionsJa?: string;
+      };
+    }>('team:role-created', (e) => {
+      if (disposed) return;
+      const { role, teamId } = e.payload;
+      setDynamic((prev) => ({
+        ...prev,
+        [role.id]: {
+          id: role.id,
+          label: role.label,
+          description: role.description,
+          instructions: role.instructions,
+          instructionsJa: role.instructionsJa,
+          teamId
+        }
+      }));
+    }).then((u) => {
+      if (disposed) {
+        u();
+      } else {
+        unlisten = u;
+      }
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, []);
+
+  const { byId, ordered } = useMemo(() => compose(file, dynamic), [file, dynamic]);
+
+  // Tauri TeamHub に role profile summary を同期 (team_list_role_profiles / permissions 検証用)。
+  // 動的ロールは Hub 側で別管理 (team_id スコープ) なので、ここでは builtin / custom だけを送る。
+  useEffect(() => {
+    const dynamicIds = new Set(Object.keys(dynamic));
+    const summary = ordered
+      .filter((p) => !dynamicIds.has(p.id))
+      .map((p) => ({
+        id: p.id,
+        labelEn: p.i18n.en.label,
+        labelJa: p.i18n.ja?.label,
+        descriptionEn: p.i18n.en.description,
+        descriptionJa: p.i18n.ja?.description,
+        canRecruit: p.permissions.canRecruit,
+        canDismiss: p.permissions.canDismiss,
+        canAssignTasks: p.permissions.canAssignTasks,
+        canCreateRoleProfile: p.permissions.canCreateRoleProfile,
+        defaultEngine: p.defaultEngine,
+        singleton: !!p.singleton
+      }));
     void window.api.app.setRoleProfileSummary(summary).catch((err) => {
       console.warn('[role-profiles] sync to hub failed:', err);
     });
-  }, [ordered]);
+  }, [ordered, dynamic]);
 
   const saveFile = useCallback(async (next: RoleProfilesFile): Promise<void> => {
     setFile(next);
@@ -200,6 +299,10 @@ export function RoleProfilesProvider({ children }: { children: ReactNode }): JSX
     [file, saveFile]
   );
 
+  const registerDynamicRole = useCallback((entry: DynamicRoleEntry): void => {
+    setDynamic((prev) => ({ ...prev, [entry.id]: entry }));
+  }, []);
+
   const value: RoleProfilesContextValue = {
     byId,
     ordered,
@@ -208,6 +311,7 @@ export function RoleProfilesProvider({ children }: { children: ReactNode }): JSX
     upsertOverride,
     addCustom,
     removeCustom,
+    registerDynamicRole,
     error
   };
 
@@ -289,6 +393,8 @@ export function renderSystemPrompt(
   const preamble = (language === 'ja' ? globalPreamble?.ja : globalPreamble?.en) ?? '';
   const tools = toolsPlaceholder(language);
 
+  // dynamicInstructions は composeWorkerProfile() の段階で既に template/templateJa に
+  // 埋め込み済み。ここでは標準プレースホルダのみを展開する。
   return tpl.replace(
     /\{(teamName|selfLabel|selfDescription|roster|tools|globalPreamble)\}/g,
     (_, key: string) => {
