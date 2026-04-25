@@ -126,8 +126,11 @@ async fn read_jsonl_summary(path: &std::path::Path) -> (String, u32, Option<Stri
                 }
             }
         }
-        // title/cwd が揃い、かつ上限行数まで数えたら break する
-        if count >= HEAD_LIMIT_LINES && !title.is_empty() && cwd.is_some() {
+        // Issue #106: title/cwd が取れなくても上限行数で必ず break する。
+        // 旧実装は break 条件に `!title.is_empty() && cwd.is_some()` を含めていたため、
+        // それらが欠けた jsonl (壊れている / 古い形式) では数百 MB を最後まで読み続け、
+        // セッション履歴表示が数秒〜十数秒ブロックしていた。
+        if count >= HEAD_LIMIT_LINES {
             break;
         }
     }

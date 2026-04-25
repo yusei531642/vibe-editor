@@ -2,16 +2,12 @@
 //
 // portable-pty 経由で PTY を spawn、SessionRegistry に登録、
 // terminal:data:{id} / terminal:exit:{id} イベントを emit する。
-//
-// **既知の Phase 1 後半 TODO**:
-// - Claude Code セッション ID watcher (~/.claude/projects/<encoded>/*.jsonl 監視)
-// - Codex 用 model_instructions_file 一時書き出し
-// - PATH 解決 (resolve-command 移植)
 
 use crate::pty::{spawn_session, SpawnOptions};
 use crate::state::AppState;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::PathBuf;
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
@@ -65,15 +61,103 @@ fn resolve_command(command: Option<String>, args: Option<Vec<String>>) -> (Strin
     (cmd, args.unwrap_or_default())
 }
 
+/// Issue #99: Codex の system prompt を一時ファイルに書き、`--config model_instructions_file=...`
+/// を args 末尾に追加する。書き出し先は `~/.vibe-editor/codex-instructions/`。
+/// ディレクトリは起動時に best-effort で TTL=7日 のクリーンアップを掛ける。
+async fn prepare_codex_instructions_file(instructions: &str) -> Option<PathBuf> {
+    if instructions.trim().is_empty() {
+        return None;
+    }
+    let dir = dirs::home_dir()
+        .unwrap_or_default()
+        .join(".vibe-editor")
+        .join("codex-instructions");
+    if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+        tracing::warn!("[terminal] codex-instructions dir create failed: {e}");
+        return None;
+    }
+    cleanup_old_codex_instructions(&dir).await;
+    let path = dir.join(format!("instr-{}.md", Uuid::new_v4()));
+    if let Err(e) = tokio::fs::write(&path, instructions).await {
+        tracing::warn!("[terminal] codex-instructions write failed: {e}");
+        return None;
+    }
+    Some(path)
+}
+
+/// Issue #99: 古い codex 指示ファイルを TTL で掃除 (paste-images と同じ best-effort)。
+async fn cleanup_old_codex_instructions(dir: &std::path::Path) {
+    const TTL_SECS: u64 = 7 * 24 * 60 * 60;
+    let mut rd = match tokio::fs::read_dir(dir).await {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    let now = std::time::SystemTime::now();
+    while let Ok(Some(entry)) = rd.next_entry().await {
+        let Ok(meta) = entry.metadata().await else { continue };
+        let Ok(modified) = meta.modified() else { continue };
+        let age = now.duration_since(modified).unwrap_or_default();
+        if age.as_secs() > TTL_SECS {
+            let _ = tokio::fs::remove_file(entry.path()).await;
+        }
+    }
+}
+
+/// command が codex 系か判定 (パス形式や *.exe も拾う)
+fn is_codex_command(command: &str) -> bool {
+    let lower = command.to_ascii_lowercase();
+    let basename = std::path::Path::new(&lower)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&lower);
+    basename == "codex" || basename.ends_with("-codex") || basename.starts_with("codex-")
+}
+
+#[cfg(test)]
+mod codex_command_tests {
+    use super::is_codex_command;
+
+    #[test]
+    fn detects_basic_codex() {
+        assert!(is_codex_command("codex"));
+        assert!(is_codex_command("CODEX"));
+        assert!(is_codex_command("/usr/local/bin/codex"));
+        assert!(is_codex_command(r"C:\tools\codex.exe"));
+    }
+
+    #[test]
+    fn rejects_non_codex() {
+        assert!(!is_codex_command("claude"));
+        assert!(!is_codex_command("bash"));
+        assert!(!is_codex_command(""));
+    }
+}
+
 #[tauri::command]
 pub async fn terminal_create(
     app: AppHandle,
     state: State<'_, AppState>,
     opts: TerminalCreateOptions,
 ) -> Result<TerminalCreateResult, String> {
-    let (command, args) = resolve_command(opts.command, opts.args);
+    let (command, mut args) = resolve_command(opts.command, opts.args);
     let (cwd, warning) =
         crate::pty::session::resolve_valid_cwd(&opts.cwd, opts.fallback_cwd.as_deref());
+
+    // Issue #99: codex かつ instructions ありなら一時ファイル化して
+    // `--config model_instructions_file=<path>` を args 末尾に追加する。
+    // 既存 args がユーザー設定に含む可能性もあるので、ここでは重複検出はせず単純に append。
+    if is_codex_command(&command) {
+        if let Some(instr) = opts.codex_instructions.as_deref() {
+            if let Some(path) = prepare_codex_instructions_file(instr).await {
+                let path_str = path.to_string_lossy().into_owned();
+                tracing::info!(
+                    "[terminal] codex model_instructions_file={path_str}"
+                );
+                args.push("--config".to_string());
+                args.push(format!("model_instructions_file={path_str}"));
+            }
+        }
+    }
 
     tracing::info!(
         "[IPC] terminal_create command={command} args={args:?} cwd={cwd} cols={} rows={}",
