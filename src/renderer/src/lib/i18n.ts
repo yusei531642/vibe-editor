@@ -224,6 +224,7 @@ const ja: Dict = {
   // ---------- Canvas ----------
   'canvas.add': '追加',
   'canvas.spawnTeam': 'チーム起動',
+  'canvas.spawnTeamMore': 'その他のチーム…',
   'canvas.preset': 'プリセット',
   'canvas.recent': '最近使ったチーム',
   'canvas.panels': 'パネル',
@@ -674,6 +675,7 @@ const en: Dict = {
   // ---------- Canvas ----------
   'canvas.add': 'Add',
   'canvas.spawnTeam': 'Spawn Team',
+  'canvas.spawnTeamMore': 'More team options…',
   'canvas.preset': 'Preset',
   'canvas.recent': 'Recent',
   'canvas.panels': 'Panels',

@@ -180,6 +180,24 @@
   background: var(--bg-hover);
 }
 
+/* ---------- split button (Spawn Team: 即起動 + caret popover) ---------- */
+.canvas-btn-split {
+  display: inline-flex;
+  align-items: stretch;
+}
+.canvas-btn-split__main {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.canvas-btn-split__caret {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid rgba(255, 255, 255, 0.18);
+  margin-left: -1px;
+  padding: 0 6px;
+  min-width: 24px;
+}
+
 /* ---------- popover ---------- */
 .canvas-popover__wrap {
   position: relative;

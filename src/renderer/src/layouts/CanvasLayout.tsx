@@ -12,6 +12,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ChevronDown,
   FilePlus,
   FolderTree,
   GitBranch,
@@ -42,7 +43,7 @@ import { useT } from '../lib/i18n';
 import { useUiStore } from '../stores/ui';
 import { useCanvasStore } from '../stores/canvas';
 import {
-  BUILTIN_PRESETS,
+  DEFAULT_SPAWN_PRESET,
   presetPosition,
   type WorkspacePreset
 } from '../lib/workspace-presets';
@@ -524,15 +525,28 @@ export function CanvasLayout(): JSX.Element {
         </div>
 
         <div className="canvas-popover__wrap" ref={spawnPopoverRef}>
-          <button
-            type="button"
-            className="canvas-btn canvas-btn--primary"
-            onClick={() => setSpawnOpen((v) => !v)}
-            aria-label={t('canvas.spawnTeam')}
-          >
-            <Sparkles size={13} strokeWidth={1.8} />
-            {t('canvas.spawnTeam')}
-          </button>
+          {/* Spawn Team は split button: メインクリックで dynamic-team を即起動、
+              caret 部分でカスタム/最近使ったチームの popover を開く。 */}
+          <div className="canvas-btn-split">
+            <button
+              type="button"
+              className="canvas-btn canvas-btn--primary canvas-btn-split__main"
+              onClick={() => void applyPreset(DEFAULT_SPAWN_PRESET)}
+              aria-label={t('canvas.spawnTeam')}
+            >
+              <Sparkles size={13} strokeWidth={1.8} />
+              {t('canvas.spawnTeam')}
+            </button>
+            <button
+              type="button"
+              className="canvas-btn canvas-btn--primary canvas-btn-split__caret"
+              onClick={() => setSpawnOpen((v) => !v)}
+              aria-label={t('canvas.spawnTeamMore')}
+              aria-expanded={spawnOpen}
+            >
+              <ChevronDown size={12} strokeWidth={2} />
+            </button>
+          </div>
           {spawnOpen && (
             <div className="canvas-popover canvas-popover--wide">
               <div className="canvas-popover__tabs">
@@ -559,14 +573,6 @@ export function CanvasLayout(): JSX.Element {
                     <Plus size={13} />
                     {t('canvas.customTeam')}
                   </button>
-                  {BUILTIN_PRESETS.map((p) => (
-                    <PresetItem
-                      key={p.id}
-                      preset={p}
-                      agentCountLabel={formatAgentCount(p.members.length, settings.language)}
-                      onClick={() => void applyPreset(p)}
-                    />
-                  ))}
                   {(settings.teamPresets ?? []).length > 0 && (
                     <div className="canvas-popover__section">{t('canvas.savedPresets')}</div>
                   )}
@@ -810,32 +816,6 @@ function TabBtn({
       className={`canvas-popover__tab${active ? ' is-active' : ''}`}
     >
       {children}
-    </button>
-  );
-}
-
-function PresetItem({
-  preset,
-  agentCountLabel,
-  onClick
-}: {
-  preset: WorkspacePreset;
-  agentCountLabel: string;
-  onClick: () => void;
-}): JSX.Element {
-  return (
-    <button type="button" onClick={onClick} className="canvas-popover__preset">
-      <span className="canvas-popover__preset-title-row">
-        <Users size={13} />
-        <span className="canvas-popover__preset-title">{preset.name}</span>
-        <span className="canvas-popover__preset-sub">{agentCountLabel}</span>
-      </span>
-      <span className="canvas-popover__preset-desc">{preset.description}</span>
-      <span className="canvas-popover__preset-roles">
-        {preset.members.map((m, i) => (
-          <RoleDot key={i} role={m.role} agent={m.agent} />
-        ))}
-      </span>
     </button>
   );
 }
