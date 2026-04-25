@@ -55,7 +55,12 @@ export function useXtermInstance(
       // ターミナル専用フォントを優先、未設定なら editor フォントに fallback
       fontFamily: initial.terminalFontFamily || initial.editorFontFamily,
       fontSize: initial.terminalFontSize,
-      lineHeight: 1.2,
+      // 選択座標ズレ対策: lineHeight=1.2 × fontSize=13 → cellHeight=15.6 (非整数) だと
+      // xterm v6 の selection 矩形計算で行方向にサブピクセル誤差が積もり、ドラッグ選択
+      // した範囲が表示位置より数行下にずれることがある。lineHeight を 1.0 (default, 整数
+      // cellHeight) に揃え、letterSpacing も明示してメトリックを安定させる。
+      lineHeight: 1.0,
+      letterSpacing: 0,
       cursorBlink: true,
       allowProposedApi: true,
       // glass テーマで xterm キャンバスを透過させるために必要 (Issue #89)。
