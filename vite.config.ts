@@ -40,7 +40,25 @@ export default defineConfig(async () => ({
     minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
     rollupOptions: {
-      input: resolve(__dirname, 'src/renderer/index.html')
+      input: resolve(__dirname, 'src/renderer/index.html'),
+      output: {
+        // Issue #110: main chunk が 4.7MB あり起動時間と WebView メモリに響くため、
+        // 重い vendor を別 chunk に分離する。Monaco / xyflow / xterm が大物。
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (id.includes('monaco-editor') || id.includes('@monaco-editor/react')) {
+            return 'vendor-monaco';
+          }
+          if (id.includes('@xyflow/react')) return 'vendor-xyflow';
+          if (id.includes('@xterm/')) return 'vendor-xterm';
+          if (id.includes('react-dom') || id.includes('scheduler')) {
+            return 'vendor-react';
+          }
+          if (id.includes('@fontsource-variable')) return 'vendor-fonts';
+          // それ以外は default chunk へ (lucide-react / zustand / dompurify / marked 等は小さい)
+          return undefined;
+        }
+      }
     }
   }
 }));

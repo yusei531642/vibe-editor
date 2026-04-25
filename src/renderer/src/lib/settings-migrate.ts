@@ -50,12 +50,15 @@ export function migrateSettings(raw: unknown): AppSettings {
     if (!validLanguages.includes(data.language as Language)) {
       data.language = DEFAULT_SETTINGS.language;
     }
+    // Issue #109: 'glass' を validThemes に追加 (UI/ThemeName には既に存在するが、
+    // ここに無いと migration で claude-dark に戻されてしまう)。
     const validThemes: ThemeName[] = [
       'claude-dark',
       'claude-light',
       'dark',
       'light',
-      'midnight'
+      'midnight',
+      'glass'
     ];
     if (!validThemes.includes(data.theme as ThemeName)) {
       data.theme = DEFAULT_SETTINGS.theme;

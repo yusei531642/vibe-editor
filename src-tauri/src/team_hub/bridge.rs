@@ -35,6 +35,12 @@ let socket = null;
 let connected = false;
 let reconnectTimer = null;
 const pendingOut = [];
+// Issue #100: 未接続中に積める pending request の上限。
+// 想定: handshake 中の数百ms に initialize / tools/list 程度。
+// 万一 hub が長時間繋がらない場合のメモリ青天井を防ぐため上限を設ける。
+const MAX_PENDING = 256;
+// Issue #100: pending エントリは投入時刻も持ち、TTL 超過分は drop する。
+const PENDING_TTL_MS = 30 * 1000;
 // Issue #61: 500ms 固定 retry を exponential backoff + 上限付きに変更。
 // hub が止まっているときの busy loop と CPU 負荷を避ける。
 let retryCount = 0;
@@ -56,8 +62,19 @@ function connect() {
     socket.write(hello + '\n');
     connected = true;
     retryCount = 0; // 成功したので backoff リセット
-    for (const line of pendingOut) socket.write(line);
+    // Issue #100: connect 完了で pending request を flush。
+    // TTL 切れの pending は捨て、生きているものだけ送る。
+    const now = Date.now();
+    let flushed = 0, dropped = 0;
+    for (const entry of pendingOut) {
+      if (now - entry.t > PENDING_TTL_MS) { dropped += 1; continue; }
+      socket.write(entry.line);
+      flushed += 1;
+    }
     pendingOut.length = 0;
+    if (flushed || dropped) {
+      process.stderr.write(`[team-bridge] flushed ${flushed} pending request(s), dropped ${dropped} stale\n`);
+    }
   });
 
   let buf = '';
@@ -106,15 +123,27 @@ process.stdin.on('data', (chunk) => {
     stdinBuf = stdinBuf.slice(nl + 1);
     if (!line) continue;
 
-    if (!connected || !SOCKET || !TOKEN) {
+    // Issue #100: 未接続時の挙動を 3 状態に整理する。
+    //   1) MISSING_HUB_ENV: env 不在 = 永続的に hub 無し → localFallback で error 応答
+    //   2) givenUp:        再接続を諦めた状態 → localFallback で error 応答
+    //   3) それ以外の未接続: connect 中 → pendingOut に積み、connect 後に flush
+    // 旧実装は (3) でも localFallback を呼んでいたため、initialize が null 応答 →
+    // クライアントが応答待ちで詰まる、または成功扱いされてしまう問題があった。
+    if (MISSING_HUB_ENV || givenUp) {
       try {
         const req = JSON.parse(line);
         const resp = localFallback(req);
         if (resp) process.stdout.write(JSON.stringify(resp) + '\n');
       } catch {}
-      if (connected) {
-        pendingOut.push(line + '\n');
+      continue;
+    }
+    if (!connected) {
+      // pending queue: 上限超過なら最古を捨てる
+      if (pendingOut.length >= MAX_PENDING) {
+        pendingOut.shift();
+        process.stderr.write('[team-bridge] pending queue overflow, dropping oldest request\n');
       }
+      pendingOut.push({ line: line + '\n', t: Date.now() });
       continue;
     }
     socket.write(line + '\n');
@@ -123,36 +152,21 @@ process.stdin.on('data', (chunk) => {
 process.stdin.on('end', () => process.exit(0));
 
 function localFallback(req) {
-  // Issue #62: SOCKET/TOKEN 欠如時は initialize をエラーで返し、Claude/Codex に
-  // 「vibe-team MCP は失敗した」ことを明示する。成功応答にしておくと "空の tools/list で
-  // Claude だけ動いている" ように見え、ユーザーが故障に気付けない。
-  // hub への接続は試みたが未接続 (= まだ connecting 中) は従来どおり pending 扱い。
+  // Issue #62 / #100: localFallback は env 不在 (MISSING_HUB_ENV) または再接続を
+  // 諦めた状態 (givenUp) でのみ呼ばれる。connect 試行中は pendingOut に積むので
+  // ここには到達しない。
+  // 「失敗していること」を明示するため、id 付き request には error を返す。
   const { method, id } = req;
-  if (MISSING_HUB_ENV) {
-    if (id !== undefined && id !== null) {
-      return {
-        jsonrpc: '2.0', id,
-        error: {
-          code: -32001,
-          message: 'vibe-team bridge is not configured (VIBE_TEAM_SOCKET / VIBE_TEAM_TOKEN missing)'
-        }
-      };
-    }
-    return null;
+  const reason = MISSING_HUB_ENV
+    ? 'vibe-team bridge is not configured (VIBE_TEAM_SOCKET / VIBE_TEAM_TOKEN missing)'
+    : 'vibe-team hub is unreachable (gave up reconnecting)';
+  if (id !== undefined && id !== null) {
+    return {
+      jsonrpc: '2.0', id,
+      error: { code: -32001, message: reason }
+    };
   }
-  switch (method) {
-    case 'initialize':
-      // 通常は TeamHub が応答する。ここに落ちるのは hub 未接続時のみ → pending 保留
-      return null;
-    case 'tools/list':
-      return { jsonrpc: '2.0', id, result: { tools: [] } };
-    case 'ping':
-      return { jsonrpc: '2.0', id, result: {} };
-    default:
-      if (id !== undefined && id !== null) {
-        return { jsonrpc: '2.0', id, error: { code: -32601, message: 'hub offline' } };
-      }
-      return null;
-  }
+  // notification (id 無し) は応答不要
+  return null;
 }
 "#;

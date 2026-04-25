@@ -173,6 +173,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     });
 
     // --- ResizeObserver + 可視化時 re-fit (不変式 #5) ---
+    // Issue #113: refitTriggers に terminalFontFamily が抜けていてフォント変更時に
+    // ターミナルがリサイズされず文字幅が崩れていたので追加する。
     useFitToContainer({
       containerRef,
       termRef,
@@ -181,6 +183,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       visible,
       refitTriggers: [
         settings.theme,
+        settings.terminalFontFamily,
         settings.editorFontFamily,
         settings.terminalFontSize
       ]

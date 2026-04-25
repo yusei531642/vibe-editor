@@ -111,6 +111,16 @@ export function useXtermInstance(
     term.options.fontFamily = settings.terminalFontFamily || settings.editorFontFamily;
     term.options.fontSize = settings.terminalFontSize;
     term.options.theme = buildXtermTheme(settings.theme);
+    // Issue #113: フォント変更後に fit を呼ばないと xterm 内部の cols/rows と
+    // コンテナの実 px サイズの整合が取れず、グリフキャッシュが古いセル幅のまま残って
+    // 文字が滲んだり位置が崩れる。requestAnimationFrame で次の paint 後に再計測する。
+    requestAnimationFrame(() => {
+      try {
+        fitRef.current?.fit();
+      } catch {
+        // fit は container 不在 / Terminal dispose 直後で例外を投げ得る (無視で安全)
+      }
+    });
   }, [settings.theme, settings.terminalFontFamily, settings.editorFontFamily, settings.terminalFontSize]);
 
   return { containerRef, termRef, fitRef };
