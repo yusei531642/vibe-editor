@@ -59,3 +59,19 @@ jobs:
 
       - name: Cargo test
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+      # Issue #97: 依存関係の脆弱性を CI で検知する。
+      #   - npm audit: production deps の moderate 以上で fail。dev-only の脆弱性 (vite/esbuild の
+      #     dev server 系 advisory 等) は --omit=dev で除外する。direct dependency に当たるものは
+      #     overrides で fix 版に固定済み。
+      #   - cargo audit: RustSec の advisory を参照。CI が落ちないようにまずは continue-on-error で
+      #     可視化のみ。落とす運用に切り替えるときはここから外す。
+      - name: npm audit (production)
+        run: npm audit --omit=dev --audit-level=moderate
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Cargo audit
+        run: cargo audit --file src-tauri/Cargo.lock
+        continue-on-error: true
