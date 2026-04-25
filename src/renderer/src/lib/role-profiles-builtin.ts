@@ -120,6 +120,11 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         'IMPORTANT: Wait for instructions from the Leader. Do not start work on your own. ' +
         'Leader instructions arrive as [Team <- leader] in your input. After receiving them, ' +
         'produce a concrete plan and report back via team_send(\'leader\', ...). ' +
+        // Issue #112: 報告後にワーカーが「マージ許可」「承認待ち」状態に居座るのを防ぐ。
+        // 自分から Leader を polling せず、追加指示は自動的に届くまで静かに待機する。
+        'After reporting, return to a quiet idle state. Do NOT poll the leader, do NOT print ' +
+        '"waiting for merge approval", and do NOT block on extra confirmation. The next instruction ' +
+        'will arrive automatically as [Team <- leader]. ' +
         '{tools}',
       templateJa:
         'あなたはチーム「{teamName}」の{selfLabel}。役割: {selfDescription} {globalPreamble}\n' +
@@ -127,6 +132,9 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         '重要: Leader からの指示を受け取るまで何もせず待機してください。' +
         'Leader からの指示は [Team ← leader] 形式で入力に届くので、' +
         '具体的な計画を作成して team_send(\'leader\', ...) で報告してください。' +
+        // Issue #112
+        '報告した後は静かなアイドル状態に戻り、Leader への追加確認や「マージ許可待ち」の表示はしないでください。' +
+        '次の指示は [Team ← leader] で自動的に届きます。' +
         '{tools}'
     },
     permissions: { canRecruit: false, canDismiss: false, canAssignTasks: false, canCreateRoleProfile: false },
@@ -148,6 +156,10 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         'IMPORTANT: Wait for instructions from the Leader. Do not investigate or modify code on your own. ' +
         'Leader instructions arrive as [Team <- leader] in your input. Start working only after ' +
         'receiving them, and report back via team_send(\'leader\', ...). ' +
+        // Issue #112: 報告後に "merge approval 待ち" のような擬似ブロック状態に陥らない。
+        'After reporting, return to a quiet idle state. Do NOT poll the leader, do NOT print ' +
+        '"waiting for merge approval", and do NOT block on extra confirmation. The next instruction ' +
+        'will arrive automatically as [Team <- leader]. ' +
         '{tools}',
       templateJa:
         'あなたはチーム「{teamName}」の{selfLabel}。役割: {selfDescription} {globalPreamble}\n' +
@@ -156,6 +168,9 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         '自分からプロジェクト調査やコード変更を始めてはいけません。' +
         'Leader からの指示は [Team ← leader] 形式で入力に届くので、それを受け取ってから作業を開始し、' +
         '完了後は team_send(\'leader\', ...) で報告してください。' +
+        // Issue #112
+        '報告した後は静かなアイドル状態に戻り、Leader への追加確認や「マージ許可待ち」の表示はしないでください。' +
+        '次の指示は [Team ← leader] で自動的に届きます。' +
         '{tools}'
     },
     permissions: { canRecruit: false, canDismiss: false, canAssignTasks: false, canCreateRoleProfile: false },
@@ -177,6 +192,10 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         'IMPORTANT: Wait for instructions from the Leader before researching anything. ' +
         'Leader instructions arrive as [Team <- leader]. Investigate thoroughly and report back via ' +
         'team_send(\'leader\', ...) with citations and references. ' +
+        // Issue #112
+        'After reporting, return to a quiet idle state. Do NOT poll the leader, do NOT print ' +
+        '"waiting for merge approval", and do NOT block on extra confirmation. The next instruction ' +
+        'will arrive automatically as [Team <- leader]. ' +
         '{tools}',
       templateJa:
         'あなたはチーム「{teamName}」の{selfLabel}。役割: {selfDescription} {globalPreamble}\n' +
@@ -184,6 +203,9 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         '重要: Leader からの指示を受け取るまで調査を開始しないでください。' +
         'Leader からの指示は [Team ← leader] で届きます。徹底的に調査し、' +
         '出典を添えて team_send(\'leader\', ...) で報告してください。' +
+        // Issue #112
+        '報告した後は静かなアイドル状態に戻り、Leader への追加確認や「マージ許可待ち」の表示はしないでください。' +
+        '次の指示は [Team ← leader] で自動的に届きます。' +
         '{tools}'
     },
     permissions: { canRecruit: false, canDismiss: false, canAssignTasks: false, canCreateRoleProfile: false },
@@ -205,6 +227,10 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         'IMPORTANT: Wait for instructions from the Leader before reviewing. ' +
         'Leader instructions arrive as [Team <- leader]. Provide concrete feedback (issues, suggestions, severity) ' +
         'and report back via team_send(\'leader\', ...). ' +
+        // Issue #112
+        'After reporting, return to a quiet idle state. Do NOT poll the leader, do NOT print ' +
+        '"waiting for merge approval", and do NOT block on extra confirmation. The next instruction ' +
+        'will arrive automatically as [Team <- leader]. ' +
         '{tools}',
       templateJa:
         'あなたはチーム「{teamName}」の{selfLabel}。役割: {selfDescription} {globalPreamble}\n' +
@@ -212,6 +238,9 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         '重要: Leader からの指示を受け取るまでレビューを開始しないでください。' +
         'Leader からの指示は [Team ← leader] で届きます。具体的なフィードバック (問題点・提案・重大度) を作成し、' +
         'team_send(\'leader\', ...) で報告してください。' +
+        // Issue #112
+        '報告した後は静かなアイドル状態に戻り、Leader への追加確認や「マージ許可待ち」の表示はしないでください。' +
+        '次の指示は [Team ← leader] で自動的に届きます。' +
         '{tools}'
     },
     permissions: { canRecruit: false, canDismiss: false, canAssignTasks: false, canCreateRoleProfile: false },
