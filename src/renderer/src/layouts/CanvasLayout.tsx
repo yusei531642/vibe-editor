@@ -178,6 +178,52 @@ export function CanvasLayout(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectRoot]);
 
+  // 起動時のチーム復元 — canvas store は zustand persist で localStorage から
+  // nodes/viewport が復元されるが、Rust 側 TeamHub は再起動でリセットされるため
+  // active_teams が空のまま。各 nodes が持つ teamId をユニーク化して setupTeamMcp を
+  // 1 度だけ呼び直し、TeamHub に再登録する。これがないと team_send 等の MCP ツールが
+  // 「unregistered team_id」で弾かれ「resume されず新しい状態に見える」原因になる。
+  const restoredTeamsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (nodes.length === 0) {
+      // Clear 後は次のチームでまた setup したいので ref をリセット
+      restoredTeamsRef.current.clear();
+    }
+  }, [nodes.length]);
+  useEffect(() => {
+    if (!projectRoot) return;
+    if (settings.mcpAutoSetup === false) return;
+    interface TeamRestoreInfo {
+      name: string;
+      members: { agentId: string; role: string; agent: string }[];
+    }
+    const byTeam = new Map<string, TeamRestoreInfo>();
+    for (const n of nodes) {
+      const p = (n.data?.payload ?? {}) as {
+        teamId?: string;
+        agentId?: string;
+        role?: string;
+        agent?: string;
+      };
+      if (!p.teamId || !p.agentId || !p.role || !p.agent) continue;
+      const title = String(n.data?.title ?? 'Team');
+      const tm = byTeam.get(p.teamId) ?? { name: title, members: [] };
+      tm.members.push({ agentId: p.agentId, role: p.role, agent: p.agent });
+      byTeam.set(p.teamId, tm);
+    }
+    for (const [teamId, info] of byTeam) {
+      if (restoredTeamsRef.current.has(teamId)) continue;
+      restoredTeamsRef.current.add(teamId);
+      void window.api.app
+        .setupTeamMcp(projectRoot, teamId, info.name, info.members)
+        .catch((err) => {
+          // 失敗時は ref から外して次のレンダーで再試行可能にする
+          restoredTeamsRef.current.delete(teamId);
+          console.warn('[restore] setupTeamMcp failed:', err);
+        });
+    }
+  }, [projectRoot, nodes, settings.mcpAutoSetup]);
+
   // Phase 5: Canvas state が変わったら、active な team について team-history へ自動保存。
   //
   // パフォーマンス注意:
