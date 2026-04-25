@@ -24,8 +24,16 @@ const SCROLLBACK_LINES = 2000;
  *
  * pty のライフサイクルとは独立で、cwd/command の変化では作り直さない。
  * コンテナ DOM は `containerRef` を div にアタッチして利用する。
+ *
+ * @param disableWebgl true なら WebglAddon を読み込まず、xterm v6 デフォルトの DOM renderer
+ *   を使う。Canvas モードでは React Flow が親に `transform: scale(zoom)` を当てるため
+ *   WebGL canvas の bitmap がアップサンプリングされて滲む。DOM renderer なら text は実 DOM
+ *   なので Chromium が親 transform に応じて再ラスタライズし、常にシャープに描画される。
  */
-export function useXtermInstance(settings: AppSettings): {
+export function useXtermInstance(
+  settings: AppSettings,
+  disableWebgl = false
+): {
   containerRef: RefObject<HTMLDivElement>;
   termRef: MutableRefObject<Terminal | null>;
   fitRef: MutableRefObject<FitAddon | null>;
@@ -44,7 +52,8 @@ export function useXtermInstance(settings: AppSettings): {
 
     const initial = initialSettingsRef.current;
     const term = new Terminal({
-      fontFamily: initial.editorFontFamily,
+      // ターミナル専用フォントを優先、未設定なら editor フォントに fallback
+      fontFamily: initial.terminalFontFamily || initial.editorFontFamily,
       fontSize: initial.terminalFontSize,
       lineHeight: 1.2,
       cursorBlink: true,
@@ -63,18 +72,23 @@ export function useXtermInstance(settings: AppSettings): {
     // WebGL レンダラ (主ケース): DOM renderer を GPU 描画に置き換え。
     // 環境 (headless / GPU 無効 / context lost) で失敗したら try/catch + webgl "contextlost"
     // イベントで dispose し、xterm が自動的に DOM renderer へフォールバックする。
+    //
+    // disableWebgl=true (Canvas モード) の場合は WebGL を読み込まず DOM renderer のままにする。
+    // 親の `transform: scale(zoom)` で WebGL canvas が GPU 補間されると滲むため。
     let webgl: WebglAddon | null = null;
-    try {
-      webgl = new WebglAddon();
-      webgl.onContextLoss(() => {
-        webgl?.dispose();
+    if (!disableWebgl) {
+      try {
+        webgl = new WebglAddon();
+        webgl.onContextLoss(() => {
+          webgl?.dispose();
+          webgl = null;
+        });
+        term.loadAddon(webgl);
+      } catch (err) {
+        // 例: WebGL 作成不可 → DOM renderer で続行 (問題なく動作する)
+        console.warn('[xterm] WebGL addon 初期化失敗 → DOM renderer にフォールバック:', err);
         webgl = null;
-      });
-      term.loadAddon(webgl);
-    } catch (err) {
-      // 例: WebGL 作成不可 → DOM renderer で続行 (問題なく動作する)
-      console.warn('[xterm] WebGL addon 初期化失敗 → DOM renderer にフォールバック:', err);
-      webgl = null;
+      }
     }
 
     termRef.current = term;
@@ -94,10 +108,10 @@ export function useXtermInstance(settings: AppSettings): {
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
-    term.options.fontFamily = settings.editorFontFamily;
+    term.options.fontFamily = settings.terminalFontFamily || settings.editorFontFamily;
     term.options.fontSize = settings.terminalFontSize;
     term.options.theme = buildXtermTheme(settings.theme);
-  }, [settings.theme, settings.editorFontFamily, settings.terminalFontSize]);
+  }, [settings.theme, settings.terminalFontFamily, settings.editorFontFamily, settings.terminalFontSize]);
 
   return { containerRef, termRef, fitRef };
 }

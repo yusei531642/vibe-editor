@@ -186,7 +186,7 @@ export function App(): JSX.Element {
     update: updateSettings,
     reset: resetSettings
   } = useSettings();
-  const { showToast } = useToast();
+  const { showToast, dismissToast } = useToast();
   const t = useT();
   // Canvas モードでは App が裏で常時マウントされるが、下の初回タブ生成
   // useEffect を抑制して "迷子ターミナル" が裏で起動しないようにする。
@@ -492,11 +492,18 @@ export function App(): JSX.Element {
 
   // 起動時に GitHub Release の latest.json を確認 (prod のみ)。
   // Issue #59: UI 言語をダイアログ文言に反映するため settings.language を渡す。
+  // 進捗 / エラーは Toast に出すよう updater-check.ts 側で対応済み。
   useEffect(() => {
     void import('./lib/updater-check').then((m) =>
-      m.checkForUpdatesOnce(settings.language)
+      m.checkForUpdates({
+        language: settings.language,
+        showToast,
+        dismissToast,
+        manual: false,
+        runningTaskCount: 0
+      })
     );
-    // 言語変更時に再チェックはしない (didCheck で 1 回のみ)
+    // 起動 1 回のみなので deps 空。settings.language / showToast の最新参照は要らない。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -693,13 +700,15 @@ export function App(): JSX.Element {
     [projectRoot, confirmDiscardEditorTabs, settings.recentProjects, updateSettings]
   );
 
-  // 初回ロード — lastOpenedRoot (前回開いたルート) があれば復元、なければ process.cwd()。
-  // settings の非同期 hydration を待ってから走らせないと、DEFAULT_SETTINGS の
-  // 空文字を読み取って process.cwd() に fallback し、結果として永続値を失ってしまう。
+  // 初回ロード — lastOpenedRoot (前回開いたルート) があれば復元、なければフォルダ選択ダイアログ。
+  // 以前は process.cwd() に fallback していたが、インストール版だと vibe-editor 自身の
+  // インストールディレクトリが選ばれてしまう。明示的にユーザーに選んでもらう。
+  // Onboarding 未完了時は Onboarding 側でルートを選ばせるため、ここでは何もしない。
   const didInitRef = useRef(false);
   useEffect(() => {
     if (settingsLoading) return;
     if (didInitRef.current) return;
+    if (!settings.hasCompletedOnboarding) return;
     didInitRef.current = true;
     let cancelled = false;
     (async () => {
@@ -707,10 +716,22 @@ export function App(): JSX.Element {
         // 既存ユーザーの移行: lastOpenedRoot が空で claudeCwd が設定されている場合は
         // かつての挙動 (claudeCwd = 最後に開いたルート) を尊重して再利用する。
         const remembered = settings.lastOpenedRoot || settings.claudeCwd;
-        const root = remembered || (await window.api.app.getProjectRoot());
+        let root = remembered;
+        if (!root) {
+          const picked = await window.api.dialog.openFolder(t('appMenu.openFolderDialogTitle'));
+          if (cancelled) return;
+          if (!picked) {
+            // ユーザーがキャンセルした場合は projectRoot 未設定のまま空状態を維持。
+            // 上部の AppMenu / コマンドパレットから後で開けるようにしておく。
+            setStatus(t('status.noProject'));
+            setGitLoading(false);
+            return;
+          }
+          root = picked;
+        }
         if (cancelled) return;
         setProjectRoot(root);
-        if (!settings.lastOpenedRoot) {
+        if (root !== settings.lastOpenedRoot) {
           void updateSettings({ lastOpenedRoot: root });
         }
         const [gs, sess] = await Promise.all([
@@ -739,7 +760,7 @@ export function App(): JSX.Element {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsLoading]);
+  }, [settingsLoading, settings.hasCompletedOnboarding]);
 
   // タイトルバー
   useEffect(() => {
@@ -1045,24 +1066,28 @@ export function App(): JSX.Element {
   const handleFileContextMenu = useCallback(
     (e: React.MouseEvent, file: GitFileChange) => {
       e.preventDefault();
-      const items: ContextMenuItem[] = [
-        {
-          label: t('ctxMenu.openDiff'),
-          action: () => void openDiffTab(file)
-        },
-        {
-          label: t('ctxMenu.reviewDiff'),
-          action: () => reviewDiff(file),
-          divider: true
-        },
-        {
-          label: t('ctxMenu.copyPath'),
-          action: () => {
-            void navigator.clipboard.writeText(file.path);
-            showToast(t('toast.pathCopied'), { tone: 'info' });
+      const isUntracked = file.indexStatus === '?' && file.worktreeStatus === '?';
+      const items: ContextMenuItem[] = [];
+      if (!isUntracked) {
+        items.push(
+          {
+            label: t('ctxMenu.openDiff'),
+            action: () => void openDiffTab(file)
+          },
+          {
+            label: t('ctxMenu.reviewDiff'),
+            action: () => reviewDiff(file),
+            divider: true
           }
+        );
+      }
+      items.push({
+        label: t('ctxMenu.copyPath'),
+        action: () => {
+          void navigator.clipboard.writeText(file.path);
+          showToast(t('toast.pathCopied'), { tone: 'info' });
         }
-      ];
+      });
       setContextMenu({ x: e.clientX, y: e.clientY, items });
     },
     [openDiffTab, reviewDiff, showToast, t]
@@ -1435,6 +1460,23 @@ export function App(): JSX.Element {
         title: t('cmd.app.restart'),
         category: t('cmd.cat.app'),
         run: () => void handleRestart()
+      },
+      {
+        id: 'app.checkForUpdates',
+        title: t('updater.checkNow'),
+        category: t('cmd.cat.app'),
+        run: () => {
+          void import('./lib/updater-check').then((m) => {
+            // manual=true: didCheck を無視して再試行可能 + 「最新です」も明示通知
+            void m.checkForUpdates({
+              language: settings.language,
+              showToast,
+              dismissToast,
+              manual: true,
+              runningTaskCount: terminalTabs.length
+            });
+          });
+        }
       }
     ];
     return list;
@@ -1456,6 +1498,7 @@ export function App(): JSX.Element {
     settings.theme,
     settings.density,
     settings.recentProjects,
+    settings.language,
     updateSettings,
     handleRestart,
     restartTerminal,
@@ -1463,7 +1506,9 @@ export function App(): JSX.Element {
     closeTerminalTab,
     activeTerminalTabId,
     terminalTabs.length,
-    diffTabs.length
+    diffTabs.length,
+    showToast,
+    dismissToast
   ]);
 
   // ---------- Shift+ホイールで webview zoom ----------
@@ -2040,6 +2085,15 @@ export function App(): JSX.Element {
 
   const totalHistoryCount = sessions.length + teamHistoryEntries.length;
   const gitChangeCount = gitStatus?.ok ? gitStatus.files.length : 0;
+  // gitStatus が読み込み済みかつ ok=false のときだけ Rail から Changes タブを外す。
+  // 読み込み中 (null) は表示したまま (一瞬消えてチラつくのを避ける)。
+  const hasGitRepo = gitStatus === null ? true : gitStatus.ok;
+  // git リポジトリでないと判明した瞬間に sidebar が 'changes' なら 'files' へ自動退避
+  useEffect(() => {
+    if (!hasGitRepo && sidebarView === 'changes') {
+      setSidebarView('files');
+    }
+  }, [hasGitRepo, sidebarView]);
   const [userInitial, setUserInitial] = useState<string>('');
   useEffect(() => {
     let cancelled = false;
@@ -2077,6 +2131,7 @@ export function App(): JSX.Element {
         changeCount={gitChangeCount}
         historyCount={totalHistoryCount}
         onOpenSettings={() => setSettingsOpen(true)}
+        hasGitRepo={hasGitRepo}
       />
       <Sidebar
         view={sidebarView}

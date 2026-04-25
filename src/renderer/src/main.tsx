@@ -1,11 +1,22 @@
 // Tauri 環境では window.api をシム実装にバインド (Electron preload の代替)
 import './lib/tauri-api';
 
-import '@fontsource/inter/400.css';
-import '@fontsource/inter/500.css';
-import '@fontsource/inter/600.css';
-import '@fontsource/source-serif-4/400.css';
-import '@fontsource/source-serif-4/600.css';
+// ---------- Bundled Fonts (variable, full weight range) ----------
+//
+// アプリ全体で「こだわった」タイポグラフィを実現するため、以下を webfont として同梱:
+//   - Inter Variable             → UI / 本文 (sans)。opsz 軸で大見出しは display 形に自動切替
+//   - Geist Variable             → ブランド見出し (heading)。Vercel 由来の幾何学的 sans
+//   - Source Serif 4 Variable    → Claude エージェント応答 (serif)。Tiempos に近い書体感
+//   - JetBrains Mono Variable    → ターミナル / Monaco エディタ (mono)。ligatures あり
+//   - Geist Mono Variable        → mono の代替 (UI 内コード片に使い分け可)
+//
+// 全て variable font なので 1 ファイルで全 weight (100〜900) が来る。OS にフォントが
+// 入っていなくても即座に意図したルックで表示される。
+import '@fontsource-variable/inter';
+import '@fontsource-variable/geist';
+import '@fontsource-variable/source-serif-4';
+import '@fontsource-variable/jetbrains-mono';
+import '@fontsource-variable/geist-mono';
 import React, { useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
@@ -89,11 +100,15 @@ function Root(): JSX.Element {
   // そこで <App/> は常時マウントし、Canvas モードではその上に CanvasLayout を
   // position:fixed でオーバーレイするだけに留める。これにより切替で
   // terminalTabs / editorTabs / teams がすべて保持される。
+  //
+  // 同様の理由で <CanvasLayout/> も常時マウントし、IDE モードでは display:none で
+  // 隠す (CanvasLayout 自身が viewMode を読んでルート div を toggle する)。
+  // これで Canvas 上の AgentNodeCard も unmount されず、PTY が kill されない。
   const floatingLabel = t('canvas.modeToggleShortcut');
   return (
     <>
       <App />
-      {viewMode === 'canvas' && <CanvasLayout />}
+      <CanvasLayout />
       {viewMode === 'ide' && (
         <FloatingCanvasToggle
           label={floatingLabel}

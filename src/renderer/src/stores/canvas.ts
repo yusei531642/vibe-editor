@@ -38,12 +38,22 @@ interface CanvasState {
   removeCard: (id: string) => void;
   /** カードのタイトルを更新 (auto-summary や rename 用) */
   setCardTitle: (id: string, title: string) => void;
+  /** カードの payload を浅くマージ更新する。
+   *  Claude Code のセッション id 検出時に `resumeSessionId` を後追いで埋める用途。
+   *  これにより次回 mount (アプリ再起動 / カード再表示) で `--resume <id>` を付与できる。 */
+  setCardPayload: (id: string, patch: Record<string, unknown>) => void;
   /** 一時的な hand-off edge を追加し N ms 後に自動削除 */
   pulseEdge: (edge: Edge, ttlMs?: number) => void;
   clear: () => void;
   /** Canvas の見え方切替: stage=ラジアル / list=リスト / focus=フォーカス */
   stageView: StageView;
   setStageView: (v: StageView) => void;
+  /** teamId ごとの「カードを一緒に動かすか」状態。
+   *  未設定は「ロック (= 一緒に動く)」がデフォルト。
+   *  チーム編成時は一緒に動かしたいケースが多いので、明示的に解除されるまでロック扱い。 */
+  teamLocks: Record<string, boolean>;
+  setTeamLock: (teamId: string, locked: boolean) => void;
+  isTeamLocked: (teamId: string) => boolean;
 }
 
 export type StageView = 'stage' | 'list' | 'focus';
@@ -110,9 +120,34 @@ export const useCanvasStore = create<CanvasState>()(
         return ids;
       },
       removeCard: (id) =>
-        set({
-          nodes: get().nodes.filter((n) => n.id !== id),
-          edges: get().edges.filter((e) => e.source !== id && e.target !== id)
+        set((state) => {
+          // チームカードを 1 枚閉じたら、同 teamId の全メンバーを連動して閉じる。
+          // 「team を閉じる = チーム単位で閉じる」のが自然な期待値なので、
+          // どのエントリポイント (×ボタン / 右クリック / Delete キー) からでも
+          // このアクションに集約する。
+          const target = state.nodes.find((n) => n.id === id);
+          const teamId = (target?.data?.payload as { teamId?: string } | undefined)?.teamId;
+          const ids = new Set<string>([id]);
+          let teamLocksNext = state.teamLocks;
+          if (teamId) {
+            for (const n of state.nodes) {
+              const tid = (n.data?.payload as { teamId?: string } | undefined)?.teamId;
+              if (tid === teamId) ids.add(n.id);
+            }
+            // ロック状態も一緒に掃除 (再度同じ teamId を立てる将来のために残骸を残さない)
+            if (teamId in state.teamLocks) {
+              const next = { ...state.teamLocks };
+              delete next[teamId];
+              teamLocksNext = next;
+            }
+          }
+          return {
+            nodes: state.nodes.filter((n) => !ids.has(n.id)),
+            edges: state.edges.filter(
+              (e) => !ids.has(e.source) && !ids.has(e.target)
+            ),
+            teamLocks: teamLocksNext
+          };
         }),
       setCardTitle: (id, title) =>
         set({
@@ -120,20 +155,44 @@ export const useCanvasStore = create<CanvasState>()(
             n.id === id ? { ...n, data: { ...n.data, title } } : n
           )
         }),
+      setCardPayload: (id, patch) =>
+        set({
+          nodes: get().nodes.map((n) => {
+            if (n.id !== id) return n;
+            const prev = (n.data?.payload as Record<string, unknown> | undefined) ?? {};
+            return {
+              ...n,
+              data: { ...n.data, payload: { ...prev, ...patch } }
+            };
+          })
+        }),
       pulseEdge: (edge, ttlMs = 1500) => {
         set({ edges: [...get().edges.filter((e) => e.id !== edge.id), edge] });
         setTimeout(() => {
           set({ edges: get().edges.filter((e) => e.id !== edge.id) });
         }, ttlMs);
       },
-      clear: () => set({ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } }),
+      clear: () => set({ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 }, teamLocks: {} }),
       stageView: 'stage',
-      setStageView: (v) => set({ stageView: v })
+      setStageView: (v) => set({ stageView: v }),
+      teamLocks: {},
+      setTeamLock: (teamId, locked) =>
+        set({ teamLocks: { ...get().teamLocks, [teamId]: locked } }),
+      isTeamLocked: (teamId) => {
+        const v = get().teamLocks[teamId];
+        return v === undefined ? true : v;
+      }
     }),
     {
       name: 'vibe-editor:canvas',
-      // 永続化: nodes / viewport / stageView のみ。edges は一時的な hand-off アニメに使うので含めない
-      partialize: (s) => ({ nodes: s.nodes, viewport: s.viewport, stageView: s.stageView })
+      // 永続化: nodes / viewport / stageView / teamLocks。
+      // edges は一時的な hand-off アニメに使うので含めない。
+      partialize: (s) => ({
+        nodes: s.nodes,
+        viewport: s.viewport,
+        stageView: s.stageView,
+        teamLocks: s.teamLocks
+      })
     }
   )
 );

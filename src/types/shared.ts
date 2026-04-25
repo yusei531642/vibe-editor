@@ -42,6 +42,11 @@ export interface AppSettings {
   uiFontSize: number;
   editorFontFamily: string;
   editorFontSize: number;
+  /**
+   * ターミナル (xterm) のフォントファミリ。
+   * 未設定なら editorFontFamily にフォールバック。バンドル済み JetBrains Mono が既定。
+   */
+  terminalFontFamily?: string;
   terminalFontSize: number;
   density: Density;
   // ---------- Claude Code 起動オプション ----------
@@ -123,10 +128,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
   language: 'ja',
   theme: 'claude-dark',
   uiFontFamily:
-    "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', sans-serif",
+    "'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', sans-serif",
   uiFontSize: 14,
-  editorFontFamily: "'Cascadia Code', 'Consolas', monospace",
+  // バンドル済み JetBrains Mono Variable を最優先。OS 未インストールでも綺麗に出る。
+  editorFontFamily:
+    "'JetBrains Mono Variable', 'Geist Mono Variable', 'Cascadia Code', 'Consolas', monospace",
   editorFontSize: 13,
+  terminalFontFamily:
+    "'JetBrains Mono Variable', 'Geist Mono Variable', 'Cascadia Code', 'Consolas', monospace",
   terminalFontSize: 13,
   density: 'normal',
   claudeCommand: 'claude',

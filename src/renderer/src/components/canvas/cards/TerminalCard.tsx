@@ -5,11 +5,12 @@
  * payload で渡される {agent, role, teamId, command, args, cwd, agentId, resumeSessionId} を
  * TerminalView に伝える。Phase 3 で AgentNodeCard (ロール色) に派生させる。
  */
-import { memo, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { CardFrame } from '../CardFrame';
 import { TerminalView, type TerminalViewHandle } from '../../TerminalView';
 import { useSettings } from '../../../lib/settings-context';
+import { useCanvasStore } from '../../../stores/canvas';
 
 interface TerminalPayload {
   agent?: 'claude' | 'codex';
@@ -33,6 +34,18 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
   const payload = (data?.payload ?? {}) as TerminalPayload;
   const title = (data?.title as string) ?? 'Terminal';
   const [, setStatus] = useState<string>('');
+  const setCardPayload = useCanvasStore((s) => s.setCardPayload);
+
+  // Claude Code が新規セッションを作ったら、その session id を payload に書き戻す。
+  // localStorage 永続化された payload に乗るので、アプリ再起動 / カード再マウント時に
+  // 自動的に `--resume <id>` で前回会話を復元できる。
+  const handleSessionId = useCallback(
+    (sessionId: string) => {
+      if (!sessionId) return;
+      setCardPayload(id, { resumeSessionId: sessionId });
+    },
+    [id, setCardPayload]
+  );
 
   // Issue #23: 現在開いているプロジェクト (lastOpenedRoot) を最優先。
   // claudeCwd / payload.cwd は fallback として残す。
@@ -67,6 +80,9 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
           // Issue #63: payload.codexInstructions を TerminalView に伝播
           codexInstructions={payload.codexInstructions}
           onStatus={setStatus}
+          onSessionId={handleSessionId}
+          // Canvas zoom で滲まないよう WebGL を切る (DOM renderer 固定)
+          disableWebgl
         />
       </CardFrame>
       <Handle type="source" position={Position.Right} style={{ background: '#7a7afd' }} />

@@ -346,7 +346,7 @@
 }
 
 .modal--settings .modal__section + .modal__section {
-  padding-top: 24px;
+  padding-top: 28px;
   border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
 }
 
@@ -361,7 +361,8 @@
 
 .modal--settings .modal__row {
   grid-template-columns: minmax(0, 1fr) 140px;
-  gap: 12px;
+  gap: 16px;
+  margin-bottom: 4px;
 }
 
 .modal--settings .modal__label {

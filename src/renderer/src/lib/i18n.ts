@@ -154,6 +154,10 @@ const ja: Dict = {
   'ctxMenu.openDiff': '差分を開く',
   'ctxMenu.reviewDiff': '差分レビューを Claude Code に依頼',
   'ctxMenu.copyPath': 'パスをコピー',
+  'canvasMenu.lockTeam': 'チームで一緒に動かす',
+  'canvasMenu.unlockTeam': 'チーム固定を解除',
+  'canvasMenu.deleteCard': 'カードを削除',
+  'canvasMenu.addClaudeHere': 'ここに Claude を追加',
 
   // ---------- Claude Code panel ----------
   'claudePanel.title': 'Claude Code',
@@ -384,6 +388,16 @@ const ja: Dict = {
 
   // ---------- Updater (Issue #59) ----------
   'updater.confirm': 'vibe-editor v{version} が利用可能です。今すぐ更新しますか?',
+  'updater.upToDate': '最新版を使用しています',
+  'updater.checkFailed': '更新の確認に失敗しました: {error}',
+  'updater.dialogFailed': '更新ダイアログの表示に失敗しました: {error}',
+  'updater.downloading': '更新をダウンロード中…',
+  'updater.downloadProgress': 'ダウンロード中… {pct}%',
+  'updater.installing': 'インストール中… 完了後に再起動します',
+  'updater.downloadFailed': 'ダウンロードに失敗しました: {error}',
+  'updater.relaunchFailed': '再起動に失敗しました ({error})。手動で再起動してください',
+  'updater.runningTasksWarning': '実行中のエージェントが {count} 個あります。更新で中断されます',
+  'updater.checkNow': '更新を確認',
 
   // ---------- Toast tone ラベル (Issue #80) ----------
   'toast.tone.info': '情報',
@@ -397,6 +411,7 @@ const ja: Dict = {
   'status.templateInserted': 'テンプレートを挿入しました（まだ保存されていません）',
   'status.initError': '初期化エラー: {err}',
   'status.loadError': '読み込みエラー: {err}',
+  'status.noProject': 'プロジェクトが選択されていません',
 
   // ---------- Onboarding ----------
   'onboarding.step': '{current} / {total}',
@@ -578,6 +593,10 @@ const en: Dict = {
   'ctxMenu.openDiff': 'Open diff',
   'ctxMenu.reviewDiff': 'Ask Claude Code to review this diff',
   'ctxMenu.copyPath': 'Copy path',
+  'canvasMenu.lockTeam': 'Move team together',
+  'canvasMenu.unlockTeam': 'Unlock team movement',
+  'canvasMenu.deleteCard': 'Delete card',
+  'canvasMenu.addClaudeHere': 'Add Claude here',
 
   // ---------- Claude Code panel ----------
   'claudePanel.title': 'Claude Code',
@@ -813,6 +832,16 @@ const en: Dict = {
 
   // ---------- Updater (Issue #59) ----------
   'updater.confirm': 'vibe-editor v{version} is available. Install it now?',
+  'updater.upToDate': 'You are on the latest version',
+  'updater.checkFailed': 'Failed to check for updates: {error}',
+  'updater.dialogFailed': 'Failed to show update dialog: {error}',
+  'updater.downloading': 'Downloading update…',
+  'updater.downloadProgress': 'Downloading… {pct}%',
+  'updater.installing': 'Installing… The app will restart when finished',
+  'updater.downloadFailed': 'Download failed: {error}',
+  'updater.relaunchFailed': 'Relaunch failed ({error}). Please restart manually',
+  'updater.runningTasksWarning': '{count} agent(s) are still running and will be interrupted',
+  'updater.checkNow': 'Check for updates',
 
   // ---------- Toast tone labels (Issue #80) ----------
   'toast.tone.info': 'Info',
@@ -825,6 +854,7 @@ const en: Dict = {
   'status.templateInserted': 'Template inserted (not saved yet)',
   'status.initError': 'Init error: {err}',
   'status.loadError': 'Load error: {err}',
+  'status.noProject': 'No project selected',
 
   // ---------- Onboarding ----------
   'onboarding.step': '{current} / {total}',

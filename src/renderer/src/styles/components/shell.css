@@ -12,8 +12,8 @@
   height: var(--shell-header);
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 0 14px 0 12px;
+  gap: 12px;
+  padding: 0 18px 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-toolbar);
   backdrop-filter: blur(14px) saturate(160%);
@@ -58,7 +58,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 10px 5px 8px;
+  padding: 6px 12px 6px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   color: var(--text-dim);
@@ -126,11 +126,11 @@
   -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   min-width: 240px;
   max-width: 360px;
   flex: 0 1 auto;
-  padding: 5px 10px;
+  padding: 6px 12px;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -239,8 +239,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 10px 0;
-  gap: 4px;
+  padding: 14px 0;
+  gap: 6px;
   flex-shrink: 0;
   z-index: 1;
 }
@@ -260,8 +260,10 @@
   cursor: pointer;
 }
 .rail__btn > svg {
-  stroke-width: 2.1;
-  opacity: 0.78;
+  /* バッジに負けないよう、ベースのストロークを少し太めにする。
+     opacity も 0.85 まで上げてバッジ (full-opacity) との視覚差を縮める。 */
+  stroke-width: 2.4;
+  opacity: 0.88;
   transition: opacity 160ms var(--ease-out), stroke-width 160ms var(--ease-out);
 }
 .rail__btn:hover {
@@ -271,12 +273,13 @@
   opacity: 1;
 }
 .rail__btn.is-active {
+  /* 「黒い枠線」を撤去。背景変化と左端 accent バーだけで active を示し、
+     バッジが乗っても窮屈に見えないよう抜け感を残す。 */
   background: var(--bg-panel);
-  box-shadow: inset 0 0 0 1px var(--border-strong);
 }
 .rail__btn.is-active > svg {
   opacity: 1;
-  stroke-width: 2.3;
+  stroke-width: 2.6;
 }
 /* 設定 (歯車) はレールの最下段単独なので、常時うっすら枠を与えて "押せる" 情報を出す */
 .rail__btn:last-child {
@@ -302,23 +305,29 @@
   width: 22px;
   height: 1px;
   background: var(--border);
-  margin: 6px 0;
+  margin: 8px 0;
 }
 .rail__badge {
+  /* ボタンの右上角からわずかにはみ出させて、下のアイコンに被らないようにする。
+     min-width / padding を絞り、文字サイズも 10px ジャストで詰めて
+     「ひとまわり小さい」見た目に。ring も 1.5px に細くして空間に抜け感を残す。 */
   position: absolute;
-  top: 3px;
-  right: 3px;
-  min-width: 14px;
-  height: 14px;
-  padding: 0 4px;
+  top: -4px;
+  right: -4px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
   border-radius: 999px;
   background: var(--accent);
   color: #fff;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
+  line-height: 1;
+  letter-spacing: -0.02em;
   display: grid;
   place-items: center;
-  box-shadow: 0 0 0 2px var(--bg-sidebar, var(--bg-deep));
+  box-shadow: 0 0 0 1.5px var(--bg-sidebar, var(--bg-deep));
+  pointer-events: none;
 }
 .rail__spacer {
   flex: 1;
@@ -329,8 +338,8 @@
   height: var(--shell-status);
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 0 14px;
+  gap: 16px;
+  padding: 0 18px;
   background: var(--bg-sidebar, var(--bg-deep));
   border-top: 1px solid var(--border);
   font-family: var(--mono-font);
@@ -426,7 +435,7 @@
   }
 }
 .activity__header {
-  padding: 12px 14px 8px;
+  padding: 14px 16px 10px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -485,8 +494,8 @@
 }
 .activity__filters {
   display: flex;
-  gap: 4px;
-  padding: 8px 14px 6px;
+  gap: 6px;
+  padding: 10px 16px 8px;
   flex-wrap: wrap;
 }
 .activity__filter {
@@ -510,7 +519,7 @@
 .activity__body {
   flex: 1;
   overflow: auto;
-  padding: 4px 14px 18px;
+  padding: 6px 16px 22px;
 }
 .activity__empty {
   padding: 32px 14px;

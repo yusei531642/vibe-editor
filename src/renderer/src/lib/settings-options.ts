@@ -17,19 +17,54 @@ export const THEME_OPTIONS: { value: ThemeName; label: string; desc: string }[] 
   { value: 'light', label: 'Light', desc: '明るい背景、暗い文字' }
 ];
 
+/* ★ = アプリに同梱 (variable webfont)。OS 未インストールでも常に同じルックで描画される。 */
 export const UI_FONT_PRESETS: { label: string; value: string }[] = [
+  {
+    label: 'Inter ★',
+    value:
+      "'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', sans-serif"
+  },
+  {
+    label: 'Geist ★',
+    value:
+      "'Geist Variable', 'Inter Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', sans-serif"
+  },
   {
     label: 'System',
     value:
       "'Segoe UI', -apple-system, BlinkMacSystemFont, 'Hiragino Sans', 'Yu Gothic UI', sans-serif"
   },
-  { label: 'Inter', value: "'Inter', 'Segoe UI', sans-serif" },
   { label: 'Noto Sans JP', value: "'Noto Sans JP', 'Yu Gothic UI', sans-serif" }
 ];
 
 export const EDITOR_FONT_PRESETS: { label: string; value: string }[] = [
+  {
+    label: 'JetBrains Mono ★',
+    value: "'JetBrains Mono Variable', 'Cascadia Code', 'Consolas', monospace"
+  },
+  {
+    label: 'Geist Mono ★',
+    value: "'Geist Mono Variable', 'JetBrains Mono Variable', 'Consolas', monospace"
+  },
   { label: 'Cascadia Code', value: "'Cascadia Code', 'Consolas', monospace" },
-  { label: 'JetBrains Mono', value: "'JetBrains Mono', 'Consolas', monospace" },
+  { label: 'Fira Code', value: "'Fira Code', 'Consolas', monospace" },
+  { label: 'Consolas', value: "Consolas, 'Courier New', monospace" }
+];
+
+/**
+ * ターミナル (xterm) 用フォントプリセット。Editor とは別に持つことで、
+ * Monaco は Cascadia / xterm は JetBrains Mono のような使い分けが可能。
+ */
+export const TERMINAL_FONT_PRESETS: { label: string; value: string }[] = [
+  {
+    label: 'JetBrains Mono ★',
+    value: "'JetBrains Mono Variable', 'Cascadia Code', 'Consolas', monospace"
+  },
+  {
+    label: 'Geist Mono ★',
+    value: "'Geist Mono Variable', 'JetBrains Mono Variable', 'Consolas', monospace"
+  },
+  { label: 'Cascadia Code', value: "'Cascadia Code', 'Consolas', monospace" },
   { label: 'Fira Code', value: "'Fira Code', 'Consolas', monospace" },
   { label: 'Consolas', value: "Consolas, 'Courier New', monospace" }
 ];

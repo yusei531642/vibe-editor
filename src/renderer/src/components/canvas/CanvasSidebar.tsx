@@ -23,13 +23,16 @@ interface CanvasSidebarProps {
   onChangeCount?: (n: number) => void;
   /** 親で session + teamHistory の合計件数を表示する用のコールバック */
   onHistoryCount?: (n: number) => void;
+  /** プロジェクトが git リポジトリかどうかを親に通知 (Rail から Changes タブを外す用) */
+  onGitOk?: (ok: boolean) => void;
 }
 
 export function CanvasSidebar({
   view: viewProp,
   onViewChange,
   onChangeCount,
-  onHistoryCount
+  onHistoryCount,
+  onGitOk
 }: CanvasSidebarProps = {}): JSX.Element {
   const { settings, update } = useSettings();
   const t = useT();
@@ -95,7 +98,9 @@ export function CanvasSidebar({
   // 親 (CanvasLayout) の Rail バッジに件数を通知
   useEffect(() => {
     onChangeCount?.(gitStatus?.ok ? gitStatus.files.length : 0);
-  }, [gitStatus, onChangeCount]);
+    // git リポジトリかどうかも上に通知。null (取得前) は表示維持のため true 扱い。
+    onGitOk?.(gitStatus === null ? true : gitStatus.ok);
+  }, [gitStatus, onChangeCount, onGitOk]);
   useEffect(() => {
     onHistoryCount?.(sessions.length + teamHistory.length);
   }, [sessions.length, teamHistory.length, onHistoryCount]);

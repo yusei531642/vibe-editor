@@ -9,6 +9,25 @@
 use serde::Serialize;
 use tokio::process::Command;
 
+/// Windows で GUI アプリ (Tauri) からコンソールプロセス (git.exe) を起動すると、
+/// 既定では一瞬コンソールウィンドウが表示されてしまう。
+/// `CREATE_NO_WINDOW = 0x08000000` を付けると窓を作らずに起動できる。
+/// 起動時に Canvas の各カードから git status / diff が呼ばれるたびに点滅していたのを抑止する。
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+fn new_git_command() -> Command {
+    let cmd = Command::new("git");
+    #[cfg(windows)]
+    let mut cmd = cmd;
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct GitFileChange {
@@ -45,7 +64,7 @@ pub struct GitDiffResult {
 }
 
 async fn run_git(args: &[&str], cwd: &str) -> Result<String, String> {
-    let out = Command::new("git")
+    let out = new_git_command()
         .args(args)
         .current_dir(cwd)
         .output()
@@ -60,7 +79,7 @@ async fn run_git(args: &[&str], cwd: &str) -> Result<String, String> {
 /// `git status --porcelain=v1 -z` の raw bytes を返す。
 /// -z は NUL 区切りなので UTF-8 変換せず bytes 単位で返す必要がある。
 async fn run_git_bytes(args: &[&str], cwd: &str) -> Result<Vec<u8>, String> {
-    let out = Command::new("git")
+    let out = new_git_command()
         .args(args)
         .current_dir(cwd)
         .output()

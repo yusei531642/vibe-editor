@@ -7,22 +7,38 @@
  */
 
 :root {
-  /* ---------- Typography ---------- */
-  --ui-font: 'Inter', 'Inter Display', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+  /* ---------- Typography ----------
+   *
+   * フォントは main.tsx で全て webfont として bundle 済み (variable fonts)。
+   * OS インストール状況に左右されず、常に意図したルックで描画される。
+   *
+   *   - Inter Variable          → ui / 本文 sans。opsz 軸で大見出しは自動 display 形
+   *   - Geist Variable          → ブランド見出し sans (Vercel 由来の幾何学的)
+   *   - Source Serif 4 Variable → エージェント応答 serif (Tiempos 風)
+   *   - JetBrains Mono Variable → ターミナル / コード mono (ligatures)
+   *   - Geist Mono Variable     → mono の代替 (UI 内コード片に使い分け可)
+   *
+   * 日本語フォールバックは OS 標準 (Hiragino / Yu Gothic / Noto) を採用。
+   */
+  --ui-font:
+    'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
     'Hiragino Sans', 'Yu Gothic UI', 'Noto Sans JP', sans-serif;
-  --heading-font: 'Inter Display', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    'Hiragino Sans', 'Yu Gothic UI', sans-serif;
-  --mono-font: 'Geist Mono', 'Cascadia Code', 'JetBrains Mono', 'SFMono-Regular', 'Consolas',
-    'Liberation Mono', 'Menlo', monospace;
+  --heading-font:
+    'Geist Variable', 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont,
+    'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', sans-serif;
+  --mono-font:
+    'JetBrains Mono Variable', 'Geist Mono Variable', 'Cascadia Code', 'SFMono-Regular',
+    'Consolas', 'Liberation Mono', 'Menlo', monospace;
+  --mono-font-alt:
+    'Geist Mono Variable', 'JetBrains Mono Variable', 'Cascadia Code', 'SFMono-Regular',
+    'Consolas', monospace;
   /*
    * Claude 公式風: エージェント応答は serif、ユーザー入力・UI は sans。
-   * Web フォント未導入なので Source Serif 4 をまず期待し、OS 収録の高品位 serif にフォールバック。
-   * 本文で使う場合のみ `font-family: var(--font-claude-response)` を明示指定する。
-   * claude テーマ以外では applyTheme 側で sans 系に差し替え。
+   * Source Serif 4 を bundle 済みなので OS 状況に依存しない。
    */
   --font-claude-response:
-    'Source Serif 4', 'Source Serif Pro', 'Iowan Old Style', Georgia,
-    'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
+    'Source Serif 4 Variable', 'Source Serif 4', 'Source Serif Pro', 'Iowan Old Style',
+    Georgia, 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif;
   --ui-font-size: 14px;
 
   --text-xs: 11px;
@@ -68,7 +84,9 @@
   --shell-header: 44px;
   --shell-dock: 320px;
   --shell-activity: 300px;
-  --shell-status: 26px;
+  /* status bar: 26 だと細すぎて窮屈に見えるので 30 に揃える。grid-template-rows と
+   * activity panel の bottom: var(--shell-status) 配置がトークン参照なので副作用は無い。 */
+  --shell-status: 30px;
 
   /* ---------- Role Colors (team canvas) ----------
    * ROLE_META (team-roles.ts) の hex とは別に、UI surface 側で参照する
@@ -211,8 +229,45 @@
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
-  font-feature-settings: "lnum", "kern";
+  /*
+   * Inter の stylistic sets を細かく opt-in:
+   *   - kern  カーニング
+   *   - lnum  ライニング数字 (UI ベースライン揃え)
+   *   - cv02  open-type "g" (二階建てを一階建てに切り替えてクリーン化)
+   *   - cv11  single-storey "a"
+   *   - ss03  curve "y"
+   * 効きすぎないよう装飾的なセットだけ最小限に絞っている。
+   */
+  font-feature-settings: "kern", "lnum", "cv02", "cv11", "ss03";
+  font-variant-ligatures: common-ligatures contextual;
   line-height: var(--leading-normal);
+}
+
+/* mono コンテキストでは ligatures + slashed-zero + tabular-nums を有効化。
+ * "slashed zero" は xterm の 0/O 区別を強調する細部チューニング。 */
+code,
+pre,
+kbd,
+samp,
+.terminal-view,
+.xterm,
+.monaco-editor {
+  font-feature-settings: "kern", "liga", "calt", "tnum", "zero";
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+/*
+ * Glass テーマ専用オーバーライド。
+ * - saturate(180%) は backdrop の明色画素を増幅して "milky" 化させるため 120% に下げる。
+ * - glass-border / glass-highlight も白の主張を抑える (テーマ palette 側の border と
+ *   合わせて全体の白浮きを断ち切る)。
+ * - blur は OS Acrylic 主導なのでアプリ側は控えめ (12px) で十分。重ね過ぎると milky になる。
+ */
+:root[data-theme='glass'] {
+  --glass-blur: 12px;
+  --glass-saturate: 120%;
+  --glass-border: rgba(255, 255, 255, 0.04);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
 :root[data-theme='light'],
@@ -266,4 +321,80 @@
   --z-noise-overlay: 9000;
   --z-canvas-toggle: 9100;
   --z-canvas-root: 9200;
+}
+
+/* ==========================================================================
+ * Density-aware sizing
+ *
+ * `applyDensity` (lib/themes.ts) が `--row-h` / `--gap` / `--pad` / `--toolbar-h`
+ * を <html> に流し込む。元々はトークンを定義するだけで実 CSS から参照されておらず、
+ * density 切替が toolbar 高以外プラセボだった。
+ *
+ * ここでは "list/row 系の高さ" と "section 間の gap" にだけトークンを wire する。
+ * 全箇所に widely 当てるとデザインが density に振り回されすぎるので、影響範囲は
+ * 一覧性の効く要素 (filetree / sidebar nav / tab / modal section) に限定。
+ *
+ * 各値が以下のように density と連動する:
+ *
+ *   density        --pad   --gap   --row-h   --toolbar-h
+ *   compact         6       6      26        40
+ *   normal         10      10      32        44   (default)
+ *   comfortable    14      14      40        52
+ * ========================================================================== */
+
+/* selector の specificity (`:root[data-density]` で attribute selector を 1 つ
+ * 加える) を上げているのは、後続の component CSS で定義された同名クラスのルールに
+ * 負けないようにするため。CSS cascade 上は後勝ちなので、特殊度を 1 段引き上げる
+ * 必要がある。`applyDensity` で `data-density` 属性は常に <html> に付くので
+ * 値マッチは不要 (ある = 真)。 */
+
+/* ---- file tree (Sidebar の主要なリスト) ---- */
+:root[data-density] .filetree__row {
+  /* file tree は menu/タブより情報密度が高い列なので、density base の row-h から
+     6px 詰める。
+     compact 26→20 / normal 32→26 / comfortable 40→34
+     最低でも 20px は確保してターゲット領域を保つ。 */
+  min-height: max(20px, calc(var(--row-h) - 6px));
+  gap: var(--gap);
+  /* 縦 padding は min-height で制御するので 0、横 padding は --pad ベースで density 連動 */
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: var(--pad);
+  padding-right: calc(var(--pad) + 2px);
+}
+
+/* ---- sidebar switcher (files/changes/sessions/notes 切替) ---- */
+:root[data-density] .sidebar-switcher__btn {
+  min-height: var(--row-h);
+  gap: var(--gap);
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: calc(var(--pad) + 8px);
+  padding-right: calc(var(--pad) + 4px);
+}
+
+:root[data-density] .sidebar-switcher {
+  gap: calc(var(--gap) - 4px);
+}
+
+/* ---- tab bar (エディタ/ターミナルタブ) ---- */
+:root[data-density] .tabbar__tab {
+  min-height: var(--row-h);
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: calc(var(--pad) + 2px);
+  padding-right: calc(var(--pad) + 4px);
+}
+
+/* ---- 設定モーダルのセクション間 / row 内 ---- */
+:root[data-density] .modal--settings .modal__row {
+  gap: calc(var(--gap) + 6px);
+}
+:root[data-density] .modal--settings .modal__section + .modal__section {
+  padding-top: calc(var(--gap) + 18px);
+}
+
+/* ---- ステータスバー / ツールバー内アイテム ---- */
+:root[data-density] .status {
+  gap: calc(var(--gap) + 6px);
 }

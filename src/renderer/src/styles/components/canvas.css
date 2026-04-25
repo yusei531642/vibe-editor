@@ -42,20 +42,47 @@
  * zoom > 1 のとき、このビットマップが自身の natural pixel より大きく表示されるため
  * テキストが滲む。
  *
- * 方針: viewport / node のどこにも GPU 昇格ヒントを付けず、毎フレーム paint させる。
- *       pan のジャダーは若干増えるが、zoom 中のテキストがネイティブ解像度で描画される。
- *       font-smoothing / text-rendering は明示的に高品質指示。
+ * 方針:
+ *   1. viewport / node のどこにも GPU 昇格ヒントを付けず、毎フレーム paint させる。
+ *   2. カード側で `overflow:hidden + border-radius + box-shadow` の三点セットを作らない
+ *      (.canvas-agent-card / CardFrame で box-shadow を撤去済み)。
+ *   3. xterm の内部 DOM (.xterm-screen / .xterm-rows / .xterm-viewport) にも
+ *      明示的に will-change: auto / backface-visibility: visible を当てて
+ *      v6 DOM renderer がカーソル等で挿入する transform からのレイヤ昇格を抑える。
+ *
+ *   pan のジャダーは若干増えるが、zoom 中のテキストがネイティブ解像度で描画される。
+ *   font-smoothing / text-rendering は明示的に高品質指示。
  */
 .react-flow__viewport,
 .react-flow__renderer,
 .react-flow__pane,
-.react-flow__node {
+.react-flow__node,
+.react-flow__node .xterm,
+.react-flow__node .xterm-screen,
+.react-flow__node .xterm-rows,
+.react-flow__node .xterm-viewport,
+.react-flow__node .xterm-helper-textarea,
+.react-flow__node .terminal-view {
   will-change: auto;
   backface-visibility: visible;
   -webkit-backface-visibility: visible;
+  /* contain: paint はクリップを強制してレイヤを生むので絶対に使わない。
+     contain: layout だけならレイヤ昇格しないが、ここでは contain も付けない */
 }
 
 .react-flow__node {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: geometricPrecision;
+}
+
+/* Canvas 内の xterm DOM テキストを Chromium 任せに毎フレーム再ラスタさせる。
+   font-smoothing / text-rendering を明示しないと親 .react-flow__node の値が
+   行末の cursor 行など個別に上書きされていることがあるので、ここで揃える。
+   span 単位で当てると全文字にマッチして CSS コストが嵩むうえ、xterm が将来
+   cursor 等で transform を使ったときに壊れるので、構造要素にのみ適用する。 */
+.react-flow__node .xterm,
+.react-flow__node .xterm-rows {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: geometricPrecision;
@@ -358,7 +385,11 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-md, 14px);
   overflow: hidden;
-  box-shadow: var(--shadow-sm);
+  /* box-shadow は付けない。
+     React Flow viewport の `transform: scale()` 配下で
+     `overflow: hidden + border-radius + box-shadow` が揃うと
+     Chromium が合成レイヤを作って xterm DOM テキストごとビットマップ化し、
+     ズーム時にバイリニア補間で滲む。border + 左端 accent バーで十分定義は出る。 */
   position: relative;
   transition: border-color var(--dur-fast, 180ms) var(--ease-standard, cubic-bezier(0.4, 0, 0.2, 1));
 }
@@ -458,17 +489,19 @@
   text-overflow: ellipsis;
 }
 .canvas-agent-card__close {
-  width: 20px;
-  height: 20px;
+  /* 旧 20x20/14px は Fitts 的に小さすぎ (右クリックメニュー追加前は ×が唯一の閉じ手段)。
+     28x28 + 18px グリフへ拡大。ヘッダ高 (34px) を超えない範囲で最大化。 */
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: transparent;
   color: var(--fg-subtle);
   border: 0;
-  border-radius: 4px;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 18px;
   line-height: 1;
   transition: background-color 100ms ease, color 100ms ease;
 }

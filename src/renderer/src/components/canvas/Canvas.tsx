@@ -37,6 +37,8 @@ import { useCanvasStore, type CardData } from '../../stores/canvas';
 import { colorOf } from '../../lib/team-roles';
 import { KEYS, useKeybinding } from '../../lib/keybindings';
 import { useUiStore } from '../../stores/ui';
+import { ContextMenu, type ContextMenuItem } from '../ContextMenu';
+import { useT } from '../../lib/i18n';
 
 const nodeTypes = {
   terminal: TerminalCard,
@@ -63,17 +65,74 @@ interface HandoffPayload {
 }
 
 function FlowApp(): JSX.Element {
+  const t = useT();
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
   const setNodes = useCanvasStore((s) => s.setNodes);
   const setEdges = useCanvasStore((s) => s.setEdges);
   const setViewport = useCanvasStore((s) => s.setViewport);
   const addCard = useCanvasStore((s) => s.addCard);
+  const removeCard = useCanvasStore((s) => s.removeCard);
   const pulseEdge = useCanvasStore((s) => s.pulseEdge);
+  const setTeamLock = useCanvasStore((s) => s.setTeamLock);
+  // 個別の getter は store から都度引く (selector は使わない: teamLocks 全体購読すると
+  // ロック切替で全カード再レンダーになるため、必要時に getState で参照する)。
+  const isTeamLocked = useCallback((teamId: string): boolean => {
+    return useCanvasStore.getState().isTeamLocked(teamId);
+  }, []);
 
   const onNodesChange = useCallback(
-    (changes: NodeChange<Node<CardData>>[]) => setNodes(applyNodeChanges(changes, nodes)),
-    [nodes, setNodes]
+    (changes: NodeChange<Node<CardData>>[]) => {
+      // remove はチームカスケードのため store.removeCard 経由で処理する。
+      // (Delete キー / React Flow 内部削除でもチーム全員が一括で閉じるように)
+      const removes = changes.filter((c) => c.type === 'remove');
+      for (const r of removes) {
+        removeCard(r.id);
+      }
+      const remaining = removes.length > 0
+        ? changes.filter((c) => c.type !== 'remove')
+        : changes;
+      if (remaining.length === 0) return;
+
+      // ----- チーム同期ドラッグ -----
+      // teamId を持つカードがロック状態でドラッグされたら、同 teamId の他カードへ
+      // 同じ delta を broadcast する。これでチーム全員が一塊で動く。
+      const extra: NodeChange<Node<CardData>>[] = [];
+      for (const c of remaining) {
+        if (c.type !== 'position' || !c.position) continue;
+        const node = nodes.find((n) => n.id === c.id);
+        if (!node) continue;
+        const teamId = (node.data?.payload as { teamId?: string } | undefined)?.teamId;
+        if (!teamId) continue;
+        if (!isTeamLocked(teamId)) continue;
+        const dx = c.position.x - node.position.x;
+        const dy = c.position.y - node.position.y;
+        if (dx === 0 && dy === 0) continue;
+        for (const other of nodes) {
+          if (other.id === node.id) continue;
+          const otherTeam = (other.data?.payload as { teamId?: string } | undefined)?.teamId;
+          if (otherTeam !== teamId) continue;
+          // 既にこのフレームで同じ id の position 変更が来ていたらスキップ (二重適用回避)
+          if (
+            remaining.some(
+              (x) => x.type === 'position' && 'id' in x && x.id === other.id
+            )
+          ) {
+            continue;
+          }
+          extra.push({
+            id: other.id,
+            type: 'position',
+            position: { x: other.position.x + dx, y: other.position.y + dy },
+            dragging: c.dragging
+          });
+        }
+      }
+
+      const allChanges = extra.length > 0 ? [...remaining, ...extra] : remaining;
+      setNodes(applyNodeChanges(allChanges, nodes));
+    },
+    [nodes, setNodes, removeCard, isTeamLocked]
   );
   const onEdgesChange = useCallback(
     (changes: EdgeChange<Edge>[]) => setEdges(applyEdgeChanges(changes, edges)),
@@ -82,6 +141,63 @@ function FlowApp(): JSX.Element {
   const onConnect = useCallback(
     (c: Connection) => setEdges(addEdge(c, edges)),
     [edges, setEdges]
+  );
+
+  // ----- 右クリックメニュー (カード単位) -----
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    items: ContextMenuItem[];
+  } | null>(null);
+
+  // Ctrl+Space / Pane 右クリック共通: 新規 AI Agent (Claude Code) を追加
+  const handleAddClaudeAgent = useCallback((): void => {
+    const n = nodes.filter((x) => x.type === 'agent').length + 1;
+    addCard({
+      type: 'agent',
+      title: `Claude #${n}`,
+      payload: { agent: 'claude', role: 'leader' }
+    });
+  }, [addCard, nodes]);
+
+  const handleNodeContextMenu = useCallback(
+    (e: React.MouseEvent, node: Node<CardData>) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const teamId = (node.data?.payload as { teamId?: string } | undefined)?.teamId;
+      const items: ContextMenuItem[] = [];
+      if (teamId) {
+        const locked = isTeamLocked(teamId);
+        items.push({
+          label: locked ? t('canvasMenu.unlockTeam') : t('canvasMenu.lockTeam'),
+          action: () => setTeamLock(teamId, !locked),
+          divider: true
+        });
+      }
+      items.push({
+        label: t('canvasMenu.deleteCard'),
+        action: () => removeCard(node.id)
+      });
+      setContextMenu({ x: e.clientX, y: e.clientY, items });
+    },
+    [isTeamLocked, removeCard, setTeamLock, t]
+  );
+
+  // 空のキャンバス (Pane) で右クリックされたとき: 「ここに Claude を追加」を出す。
+  // ユーザーが「右クリックしてもメニューが出ない」と感じる主因は、ノード上ではなく
+  // Pane 上を狙ってしまっているケース。Pane 用にも明示的にハンドラを生やしておく。
+  const handlePaneContextMenu = useCallback(
+    (e: React.MouseEvent | MouseEvent) => {
+      e.preventDefault();
+      const items: ContextMenuItem[] = [
+        {
+          label: t('canvasMenu.addClaudeHere'),
+          action: () => handleAddClaudeAgent()
+        }
+      ];
+      setContextMenu({ x: e.clientX, y: e.clientY, items });
+    },
+    [t, handleAddClaudeAgent]
   );
 
   // hand-off event を listen → 該当 agent ノード間に一時 edge を追加
@@ -128,16 +244,6 @@ function FlowApp(): JSX.Element {
     return '#7a7afd';
   }, []);
 
-  // Ctrl+Space: 新規 AI Agent (Claude Code) を追加
-  const handleAddClaudeAgent = useCallback((): void => {
-    const n = nodes.filter((x) => x.type === 'agent').length + 1;
-    addCard({
-      type: 'agent',
-      title: `Claude #${n}`,
-      payload: { agent: 'claude', role: 'leader' }
-    });
-  }, [addCard, nodes]);
-
   const initialViewport = useMemo(() => useCanvasStore.getState().viewport, []);
 
   // ---- Phase 4: keybindings ----
@@ -165,6 +271,10 @@ function FlowApp(): JSX.Element {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onMoveEnd={(_, vp) => setViewport(vp)}
+        onNodeContextMenu={handleNodeContextMenu}
+        onPaneContextMenu={handlePaneContextMenu}
+        // Delete キーで選択中カードを削除 (Backspace は xterm 入力と衝突するので除外)
+        deleteKeyCode={['Delete']}
         defaultViewport={initialViewport}
         // --- zoom / pan の挙動 ---
         // Figma/Miro 風のカメラ zoom を React Flow 本来の挙動として復活。
@@ -181,7 +291,12 @@ function FlowApp(): JSX.Element {
         zoomOnPinch
         zoomOnDoubleClick={false}
         panOnDrag={[0, 1, 2]}
-        onlyRenderVisibleElements
+        // onlyRenderVisibleElements は付けない。
+        // 付けると React Flow がビューポート外のカードを DOM からアンマウントし、
+        // TerminalCard 配下の usePtySession クリーンアップが走って PTY (= Claude/Codex)
+        // ごと kill されてしまう。
+        // パンで視点を動かしただけで Claude が死ぬのは UX として許容できないので、
+        // 多少の DOM 増加は呑んで全カードを常時マウントしておく。
         proOptions={{ hideAttribution: true }}
       >
         <Background gap={32} color="var(--canvas-grid, #1c1c20)" />
@@ -198,6 +313,14 @@ function FlowApp(): JSX.Element {
       {stageView === 'list' ? <StageListOverlay /> : null}
       <StageHud />
       <QuickNav open={quickNavOpen} onClose={() => setQuickNavOpen(false)} />
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }

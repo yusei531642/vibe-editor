@@ -32,6 +32,9 @@ interface AgentPayload {
   command?: string;
   args?: string[];
   cwd?: string;
+  /** Claude Code のセッション id。検出時に payload に書き戻し、次回 spawn で
+   *  `--resume <id>` を付与して前回会話を復元する。 */
+  resumeSessionId?: string | null;
 }
 
 type AgentStatus = 'idle' | 'thinking' | 'typing';
@@ -76,6 +79,7 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const t = useT();
   const removeCard = useCanvasStore((s) => s.removeCard);
   const setCardTitle = useCanvasStore((s) => s.setCardTitle);
+  const setCardPayload = useCanvasStore((s) => s.setCardPayload);
   const payload = (data?.payload ?? {}) as AgentPayload;
   const meta = metaOf(payload.role);
   const accent = colorOf(payload.role);
@@ -140,25 +144,35 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
 
   // ----- チームのシステムプロンプトを構築 -----
   // 同 teamId の AgentNode カード群から roster を作成。
-  // 注意: useCanvasStore のセレクタで .filter().map() を返すと毎回新しい配列参照に
-  // なり Object.is 比較で再レンダー無限ループになる。なので生 nodes を購読し、
-  // useMemo 内で派生する。
-  const allNodes = useCanvasStore((s) => s.nodes);
+  //
+  // パフォーマンス: 旧実装は `useCanvasStore((s) => s.nodes)` で全 nodes を購読していたため、
+  // ノードを 1 ピクセル動かすだけで全 AgentNodeCard が再レンダーし Canvas が重かった。
+  // 対策として primitive な signature 文字列 (agentId|role|agent を ; で連結) を購読し、
+  // 文字列 equality で React がデフォルトで bailout できるようにする。drag/resize では
+  // signature が変わらないので再レンダーが発生しない。
+  const teamMembersSig = useCanvasStore((s) => {
+    if (!payload.teamId) return '';
+    const sigs: string[] = [];
+    for (const n of s.nodes) {
+      if (n.type !== 'agent') continue;
+      const p = n.data?.payload as AgentPayload | undefined;
+      if (!p || p.teamId !== payload.teamId || !p.agentId || !p.role) continue;
+      sigs.push(`${p.agentId}:${p.role}:${p.agent ?? 'claude'}`);
+    }
+    return sigs.join(';');
+  });
   const teamMembers = useMemo<TeamMemberSeed[] | null>(() => {
     if (!payload.teamId) return null;
-    return allNodes
-      .filter((n) => n.type === 'agent')
-      .map((n) => n.data?.payload as AgentPayload | undefined)
-      .filter(
-        (p): p is AgentPayload =>
-          !!p && p.teamId === payload.teamId && !!p.agentId && !!p.role
-      )
-      .map<TeamMemberSeed>((p) => ({
-        agentId: p.agentId!,
-        role: p.role as TeamRole,
-        agent: (p.agent ?? 'claude') as 'claude' | 'codex'
-      }));
-  }, [allNodes, payload.teamId]);
+    if (teamMembersSig === '') return [];
+    return teamMembersSig.split(';').map((s) => {
+      const [agentId, role, agent] = s.split(':');
+      return {
+        agentId,
+        role: role as TeamRole,
+        agent: agent as 'claude' | 'codex'
+      };
+    });
+  }, [teamMembersSig, payload.teamId]);
 
   const sysPrompt = useMemo(() => {
     if (!teamMembers || !payload.teamId || !payload.agentId || !payload.role) return undefined;
@@ -195,6 +209,12 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
         base.push('-c', 'disable_paste_burst=true');
       }
     }
+    // Claude のみ `--resume <id>` で前回会話を復元 (Codex は --resume 非対応)。
+    // payload.resumeSessionId は onSessionId で書き戻されるため、
+    // アプリ再起動時もそのまま `--resume` 付き spawn になる。
+    if (isClaude && payload.resumeSessionId) {
+      base.push('--resume', payload.resumeSessionId);
+    }
     return base.length > 0 ? base : undefined;
   }, [
     isClaude,
@@ -202,6 +222,7 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     resolved.args,
     sysPrompt,
     payload.teamId,
+    payload.resumeSessionId,
     settings.claudeArgs,
     settings.codexArgs
   ]);
@@ -270,6 +291,12 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
             onStatus={setStatus}
             onActivity={handleActivity}
             onUserInput={handleUserInput}
+            onSessionId={(sid) => {
+              if (sid) setCardPayload(id, { resumeSessionId: sid });
+            }}
+            // Canvas zoom で xterm canvas が滲むのを避けるため WebGL を切る (DOM renderer 固定)。
+            // text は実 DOM になるので Chromium が親 transform に応じて再ラスタライズしシャープに描く。
+            disableWebgl
           />
         </div>
       </div>

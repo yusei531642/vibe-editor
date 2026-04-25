@@ -88,6 +88,12 @@ function mergeCanvasMembers(
 
 export function CanvasLayout(): JSX.Element {
   const setViewMode = useUiStore((s) => s.setViewMode);
+  // bug: 旧実装では main.tsx 側で viewMode === 'canvas' のときだけ CanvasLayout を
+  // マウントしていたため、IDE→Canvas→IDE と切替えると Canvas 内の AgentNodeCard が
+  // unmount → usePtySession の cleanup が走り PTY が kill されて Claude セッションが
+  // 全部消えていた。CanvasLayout を常時マウントし、display:none で隠すことで解決。
+  const viewMode = useUiStore((s) => s.viewMode);
+  const isCanvasActive = viewMode === 'canvas';
   const cardCount = useCanvasStore((s) => s.nodes.length);
   const nodes = useCanvasStore((s) => s.nodes);
   const viewport = useCanvasStore((s) => s.viewport);
@@ -108,6 +114,13 @@ export function CanvasLayout(): JSX.Element {
   const [sidebarView, setSidebarView] = useState<SidebarView>('files');
   const [railChangeCount, setRailChangeCount] = useState(0);
   const [railHistoryCount, setRailHistoryCount] = useState(0);
+  const [railHasGitRepo, setRailHasGitRepo] = useState(true);
+  // git リポジトリが無いと判明 + 現在 'changes' を見ている → 'files' に退避
+  useEffect(() => {
+    if (!railHasGitRepo && sidebarView === 'changes') {
+      setSidebarView('files');
+    }
+  }, [railHasGitRepo, sidebarView]);
   const addPopoverRef = useRef<HTMLDivElement>(null);
   const spawnPopoverRef = useRef<HTMLDivElement>(null);
   const locale = localeOf(settings.language);
@@ -453,7 +466,12 @@ export function CanvasLayout(): JSX.Element {
   };
 
   return (
-    <div className="canvas-layout">
+    <div
+      className="canvas-layout"
+      // 非アクティブ時は表示・hit-test を完全に切る (内部 PTY は維持される)
+      style={isCanvasActive ? undefined : { display: 'none' }}
+      aria-hidden={!isCanvasActive}
+    >
       <header className="canvas-header">
         <span className="canvas-header__brand">
           <MonitorSmartphone size={14} strokeWidth={1.75} />
@@ -632,12 +650,14 @@ export function CanvasLayout(): JSX.Element {
           changeCount={railChangeCount}
           historyCount={railHistoryCount}
           onOpenSettings={() => setSettingsOpen(true)}
+          hasGitRepo={railHasGitRepo}
         />
         <CanvasSidebar
           view={sidebarView}
           onViewChange={setSidebarView}
           onChangeCount={setRailChangeCount}
           onHistoryCount={setRailHistoryCount}
+          onGitOk={setRailHasGitRepo}
         />
         <div className="canvas-layout__stage">
           <Canvas />

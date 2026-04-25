@@ -9,6 +9,9 @@ interface RailProps {
   changeCount: number;
   historyCount: number;
   onOpenSettings: () => void;
+  /** プロジェクトが git リポジトリかどうか。false のとき Changes タブを Rail から外す。
+   *  undefined / true は表示 (status 取得前に一瞬で消えるのを避けるためデフォルト表示)。 */
+  hasGitRepo?: boolean;
 }
 
 /**
@@ -22,7 +25,8 @@ export function Rail({
   onSidebarViewChange,
   changeCount,
   historyCount,
-  onOpenSettings
+  onOpenSettings,
+  hasGitRepo = true
 }: RailProps): JSX.Element {
   const t = useT();
   const viewMode = useUiStore((s) => s.viewMode);
@@ -34,20 +38,25 @@ export function Rail({
     icon: JSX.Element;
     count?: number;
   }> = [
-    { view: 'files', label: t('sidebar.files'), icon: <Files size={16} strokeWidth={1.9} /> },
-    {
-      view: 'changes',
-      label: t('sidebar.changes'),
-      icon: <GitBranch size={16} strokeWidth={1.9} />,
-      count: changeCount
-    },
+    { view: 'files', label: t('sidebar.files'), icon: <Files size={17} strokeWidth={2.2} /> },
+    // git リポジトリでない場合は Changes タブごと表示しない
+    ...(hasGitRepo
+      ? [
+          {
+            view: 'changes' as SidebarView,
+            label: t('sidebar.changes'),
+            icon: <GitBranch size={17} strokeWidth={2.2} />,
+            count: changeCount
+          }
+        ]
+      : []),
     {
       view: 'sessions',
       label: t('sidebar.history'),
-      icon: <History size={16} strokeWidth={1.9} />,
+      icon: <History size={17} strokeWidth={2.2} />,
       count: historyCount
     },
-    { view: 'notes', label: t('sidebar.notes'), icon: <StickyNote size={16} strokeWidth={1.9} /> }
+    { view: 'notes', label: t('sidebar.notes'), icon: <StickyNote size={17} strokeWidth={2.2} /> }
   ];
 
   return (
@@ -82,7 +91,7 @@ export function Rail({
         aria-label={t('topbar.mode.canvas')}
         aria-current={viewMode === 'canvas' ? 'page' : undefined}
       >
-        <LayoutGrid size={16} strokeWidth={1.9} />
+        <LayoutGrid size={17} strokeWidth={2.2} />
       </button>
 
       <span className="rail__spacer" />
@@ -94,7 +103,7 @@ export function Rail({
         title={t('toolbar.settings.title')}
         aria-label={t('toolbar.settings.title')}
       >
-        <SettingsIcon size={16} strokeWidth={1.9} />
+        <SettingsIcon size={17} strokeWidth={2.2} />
       </button>
     </nav>
   );

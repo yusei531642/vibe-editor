@@ -51,6 +51,12 @@ interface TerminalViewProps {
   onSessionId?: (sessionId: string) => void;
   /** ユーザーが xterm 上で入力したキーストロークの sniff (タイトル auto-summary 等の用途) */
   onUserInput?: (data: string) => void;
+  /**
+   * Canvas モードのカード内で使うとき true にする。
+   * WebglAddon を読み込まず DOM renderer に固定することで、React Flow の親 transform
+   * で xterm が滲む問題を回避する。
+   */
+  disableWebgl?: boolean;
 }
 
 /**
@@ -81,14 +87,15 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       onActivity,
       onExit,
       onSessionId,
-      onUserInput
+      onUserInput,
+      disableWebgl
     },
     ref
   ): JSX.Element {
     const { settings } = useSettings();
 
     // --- Terminal インスタンス ---
-    const { containerRef, termRef, fitRef } = useXtermInstance(settings);
+    const { containerRef, termRef, fitRef } = useXtermInstance(settings, disableWebgl);
 
     // --- ref で state を hook 間共有 ---
     const ptyIdRef = useRef<string | null>(null);

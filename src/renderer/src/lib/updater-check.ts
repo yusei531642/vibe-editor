@@ -1,38 +1,165 @@
 /**
- * Tauri updater 起動時チェック。
+ * Tauri updater 起動時 / 手動チェック。
  *
- * - prod ビルドのみ動作 (dev では skip)
- * - 新版があれば confirm ダイアログ → ダウンロード → 再起動
- * - 失敗は console.debug に流すだけ (鍵未設定/オフライン等で落ちないように)
- *
- * Issue #59: UI 言語に合わせてダイアログ文言を切り替える。
- * (Tauri native dialog への差し替えは #68 の扱いなのでここでは window.confirm のまま。)
+ * 旧実装の問題点と修正:
+ *   - エラー全 console.debug → toast に出す (manual モードでは必ず表示)
+ *   - window.confirm → @tauri-apps/plugin-dialog の ask (テーマ追従, 多言語フォント OK)
+ *   - 進捗無し → onEvent コールバックで Toast 進捗 (10% 刻み)
+ *   - didCheck を try 前で立てる → 成功時のみフラグ
+ *   - release notes 無制限 → 600 文字で truncate
+ *   - 実行中タスクが警告無く死ぬ → ダイアログに警告追加
+ *   - Windows での relaunch 二重 → NSIS 任せ (非 Windows のみ relaunch)
  */
 import type { Language } from '../../../types/shared';
 import { translate } from './i18n';
 
-let didCheck = false;
+export interface UpdaterDeps {
+  language: Language;
+  showToast: (
+    message: string,
+    options?: { duration?: number; tone?: 'info' | 'success' | 'warning' | 'error' }
+  ) => number;
+  dismissToast?: (id: number) => void;
+  /** 起動時の自動チェックなら省略 / false。設定 or コマンドからの手動なら true。
+   *  manual=true のときは didAutoCheck を無視し、また「最新です」「失敗」も明示通知する。 */
+  manual?: boolean;
+  /** 実行中の Claude/Codex タブ数 (確認ダイアログで警告) */
+  runningTaskCount?: number;
+}
 
-export async function checkForUpdatesOnce(language: Language = 'en'): Promise<void> {
-  if (didCheck) return;
-  didCheck = true;
-  if (!import.meta.env.PROD) return;
+const MAX_BODY_CHARS = 600;
+let didAutoCheck = false;
 
+function isWindowsPlatform(): boolean {
+  // Tauri 2 の navigator.userAgentData が WebView2 で undefined になりうるので両対応
+  if (typeof navigator !== 'undefined') {
+    const ua = (navigator.userAgent || '').toLowerCase();
+    if (ua.includes('windows')) return true;
+  }
+  return false;
+}
+
+export async function checkForUpdates(deps: UpdaterDeps): Promise<void> {
+  const { language, showToast, dismissToast, manual = false, runningTaskCount = 0 } = deps;
+  // 自動チェックは prod のみ。manual の場合は dev でも走らせて挙動確認できるようにする。
+  if (!manual && didAutoCheck) return;
+  if (!manual && !import.meta.env.PROD) return;
+
+  // ---------- 1. check() ----------
+  let update: Awaited<ReturnType<typeof import('@tauri-apps/plugin-updater').check>>;
   try {
     const { check } = await import('@tauri-apps/plugin-updater');
-    const update = await check();
-    if (!update) return;
+    update = await check();
+  } catch (err) {
+    if (manual) {
+      showToast(translate(language, 'updater.checkFailed', { error: String(err) }), {
+        tone: 'error'
+      });
+    } else {
+      console.debug('[updater] check skipped:', err);
+    }
+    return;
+  }
 
-    const body = update.body ? `\n\n${update.body}` : '';
-    const ok = window.confirm(
-      translate(language, 'updater.confirm', { version: update.version }) + body
-    );
-    if (!ok) return;
+  if (!update) {
+    if (manual) {
+      showToast(translate(language, 'updater.upToDate'), { tone: 'success' });
+    }
+    didAutoCheck = true;
+    return;
+  }
+  didAutoCheck = true;
 
-    await update.downloadAndInstall();
+  // ---------- 2. confirm dialog (Tauri native) ----------
+  const rawBody = update.body ?? '';
+  const body =
+    rawBody.length > MAX_BODY_CHARS ? `${rawBody.slice(0, MAX_BODY_CHARS).trimEnd()}…` : rawBody;
+  const warning =
+    runningTaskCount > 0
+      ? `\n\n${translate(language, 'updater.runningTasksWarning', {
+          count: runningTaskCount
+        })}`
+      : '';
+  const message =
+    translate(language, 'updater.confirm', { version: update.version }) +
+    warning +
+    (body ? `\n\n${body}` : '');
+
+  let proceed = false;
+  try {
+    const { ask } = await import('@tauri-apps/plugin-dialog');
+    proceed = await ask(message, { title: 'vibe-editor', kind: 'info' });
+  } catch (err) {
+    showToast(translate(language, 'updater.dialogFailed', { error: String(err) }), {
+      tone: 'error'
+    });
+    return;
+  }
+  if (!proceed) return;
+
+  // ---------- 3. download & install with progress ----------
+  let total = 0;
+  let downloaded = 0;
+  let lastBucket = -1;
+  const progressId = showToast(translate(language, 'updater.downloading'), {
+    tone: 'info',
+    // 進捗 toast は完了 / エラー時に dismiss するので長めに
+    duration: 600_000
+  });
+
+  try {
+    await update.downloadAndInstall((event) => {
+      if (event.event === 'Started') {
+        total = event.data.contentLength ?? 0;
+      } else if (event.event === 'Progress') {
+        downloaded += event.data.chunkLength;
+        if (total > 0) {
+          const pct = Math.floor((downloaded / total) * 100);
+          // 10% 刻みで toast を更新 (高頻度に dismiss/show すると瞬く)
+          const bucket = Math.floor(pct / 10);
+          if (bucket > lastBucket) {
+            lastBucket = bucket;
+            dismissToast?.(progressId);
+            showToast(translate(language, 'updater.downloadProgress', { pct }), {
+              tone: 'info',
+              duration: 600_000
+            });
+          }
+        }
+      } else if (event.event === 'Finished') {
+        dismissToast?.(progressId);
+        showToast(translate(language, 'updater.installing'), {
+          tone: 'info',
+          duration: 30_000
+        });
+      }
+    });
+  } catch (err) {
+    dismissToast?.(progressId);
+    showToast(translate(language, 'updater.downloadFailed', { error: String(err) }), {
+      tone: 'error',
+      duration: 8_000
+    });
+    return;
+  }
+
+  // ---------- 4. relaunch ----------
+  // Windows: NSIS インストーラが自動でアプリを終了 → 再起動するので relaunch は呼ばない。
+  // 呼んでも害は少ないが、競合タイミングで relaunch エラーが出てユーザーを混乱させうる。
+  if (isWindowsPlatform()) return;
+
+  try {
     const { relaunch } = await import('@tauri-apps/plugin-process');
     await relaunch();
   } catch (err) {
-    console.debug('[updater] check skipped:', err);
+    showToast(translate(language, 'updater.relaunchFailed', { error: String(err) }), {
+      tone: 'warning',
+      duration: 8_000
+    });
   }
+}
+
+/** 自動チェック用の after-build フラグをリセット (テスト / 手動再試行用) */
+export function resetAutoCheckFlag(): void {
+  didAutoCheck = false;
 }

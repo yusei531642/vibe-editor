@@ -130,18 +130,25 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
   glass: {
     /*
      * Issue #16: アクリル風テーマ。OS 側 (Windows acrylic / macOS vibrancy) が
-     * 背後のぼかしを担い、アプリ側は半透明の黒系サーフェスを重ねるだけ。
+     * 背後のぼかしを担い、アプリ側は半透明の黒系サーフェスを重ねる。
      * 青くせず、claude-dark と同じテラコッタ accent に揃える。
+     *
+     * 「深みのあるダークガラス」を出すための原則:
+     *   1. パネル/サイドバー/ツールバーの黒オパシティを 60〜78% まで上げる。
+     *      旧値 (34〜58%) だと OS 背景の明るい画素が透けて milky に見える。
+     *   2. 枠線は純白 5% 以下に抑える。10〜18% だと黒の上で白くギラつき "milky" を助長する。
+     *   3. hover も白フラッシュを抑える (4% 以下)。
+     *   4. saturate(180%) は別途 tokens.css の `[data-theme='glass']` で 120% に下げる。
      */
     bg: 'rgba(0, 0, 0, 0)',
-    bgPanel: 'rgba(20, 20, 20, 0.42)',
-    bgSidebar: 'rgba(14, 14, 14, 0.38)',
-    bgToolbar: 'rgba(10, 10, 10, 0.34)',
-    bgElev: 'rgba(30, 30, 30, 0.58)',
-    border: 'rgba(255, 255, 255, 0.10)',
-    borderStrong: 'rgba(255, 255, 255, 0.18)',
-    bgHover: 'rgba(255, 255, 255, 0.07)',
-    bgActive: 'rgba(217, 119, 87, 0.16)',
+    bgPanel: 'rgba(15, 15, 15, 0.72)',
+    bgSidebar: 'rgba(10, 10, 10, 0.70)',
+    bgToolbar: 'rgba(8, 8, 8, 0.66)',
+    bgElev: 'rgba(26, 26, 26, 0.78)',
+    border: 'rgba(255, 255, 255, 0.05)',
+    borderStrong: 'rgba(255, 255, 255, 0.10)',
+    bgHover: 'rgba(255, 255, 255, 0.04)',
+    bgActive: 'rgba(217, 119, 87, 0.18)',
     accent: '#d97757',
     accentHover: '#e88a6a',
     accentSoft: '#d97757',
@@ -151,7 +158,7 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
     text: '#f6f6f5',
     textDim: '#c3c2b7',
     textMute: '#97958c',
-    surfaceGlass: 'rgba(10, 10, 10, 0.30)',
+    surfaceGlass: 'rgba(8, 8, 8, 0.62)',
     focusRing: '0 0 0 3px rgba(217, 119, 87, 0.30)',
     monacoTheme: 'vs-dark'
   },
@@ -181,9 +188,9 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
 };
 
 const HEADING_FONT_SERIF =
-  "'Source Serif 4', 'Source Serif Pro', 'Iowan Old Style', Georgia, 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif";
+  "'Source Serif 4 Variable', 'Source Serif 4', 'Source Serif Pro', 'Iowan Old Style', Georgia, 'Hiragino Mincho ProN', 'Yu Mincho', 'Noto Serif JP', serif";
 const HEADING_FONT_SANS =
-  "'Geist', 'Inter', 'Inter Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', sans-serif";
+  "'Geist Variable', 'Inter Variable', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Yu Gothic UI', sans-serif";
 /*
  * Claude 公式風: エージェント応答本文に使う書体。
  * claude テーマでは serif (Claude.ai の返答表示と揃える)、それ以外のテーマでは sans に戻して
@@ -270,10 +277,12 @@ export function applyTheme(name: ThemeName, uiFontFamily: string, uiFontSize: nu
 
 export function applyDensity(density: Density): void {
   const root = document.documentElement;
+  // Linear / Notion 系の感覚に合わせて全体的に値を引き上げ。
+  // normal をデフォルトにしているので、out-of-box で詰まり感が出ないラインを normal に。
   const map: Record<Density, { pad: string; gap: string; rowH: string; toolbarH: string }> = {
-    compact: { pad: '4px', gap: '4px', rowH: '22px', toolbarH: '36px' },
-    normal: { pad: '8px', gap: '8px', rowH: '28px', toolbarH: '44px' },
-    comfortable: { pad: '12px', gap: '12px', rowH: '36px', toolbarH: '52px' }
+    compact: { pad: '6px', gap: '6px', rowH: '26px', toolbarH: '40px' },
+    normal: { pad: '10px', gap: '10px', rowH: '32px', toolbarH: '44px' },
+    comfortable: { pad: '14px', gap: '14px', rowH: '40px', toolbarH: '52px' }
   };
   const vals = map[density] ?? map.normal;
   root.style.setProperty('--pad', vals.pad);

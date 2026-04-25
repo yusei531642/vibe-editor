@@ -4,6 +4,24 @@
   box-sizing: border-box;
 }
 
+/* ---------- ボタンの全体リセット ----------
+ * 既定の <button> は ButtonFace 系の OS 色 (Windows の WebView2 では薄い灰〜白) を
+ * 引きずり、ダークテーマでも白い箱に見えてしまう。各コンポーネント側で背景を明示
+ * していないボタンが Topbar/Rail/メニュー等に多数あるため、ここで一括して
+ * 透明背景＆親色継承にして「背景を当てないボタンは完全に透ける」状態を保証する。
+ * appearance: none で Windows のデフォルト押下ハイライトも消す。 */
+button {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
 /* ---------- アクセシビリティ: フォーカスリング ---------- */
 
 /* マウス操作中は既定のフォーカスリングを抑制するが、
@@ -232,12 +250,12 @@ body.is-resizing * {
 
 /* サイドバーブランドヘッダー */
 .sidebar__header {
-  padding: 0 10px 0 8px;
+  padding: 0 14px 0 12px;
   min-height: var(--toolbar-h);
   height: var(--toolbar-h);
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   -webkit-app-region: drag;
   border-bottom: 1px solid var(--glass-border);
   /* NOTE: ここに overflow: hidden を付けると AppMenu のドロップダウンが
@@ -299,8 +317,8 @@ body.is-resizing * {
 .sidebar-switcher {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 10px 0;
+  gap: 6px;
+  padding: 12px 12px 0;
   background: transparent;
   position: relative;
 }
@@ -312,7 +330,7 @@ body.is-resizing * {
   color: var(--text-dim);
   border: none;
   border-radius: 12px;
-  padding: 10px 12px 10px 16px;
+  padding: 12px 14px 12px 18px;
   font-size: 12.5px;
   font-weight: 550;
   font-family: inherit;
@@ -3543,13 +3561,13 @@ body.is-resizing * {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
   background-color: transparent;
   color: var(--text);
   border: none;
   text-align: left;
-  padding: 5px 10px 5px 8px;
+  padding: 7px 12px 7px 10px;
   font-size: 13px;
   cursor: pointer;
   border-radius: var(--radius-sm);
@@ -3568,6 +3586,10 @@ body.is-resizing * {
 [data-theme='dark'],
 [data-theme='midnight'] {
   --filetree-guide: rgba(255, 255, 255, 0.1);
+}
+/* glass はガイドも白浮きしないよう一段控えめに */
+[data-theme='glass'] {
+  --filetree-guide: rgba(255, 255, 255, 0.06);
 }
 [data-theme='claude-light'],
 [data-theme='light'] {

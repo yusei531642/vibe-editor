@@ -27,8 +27,12 @@ export function CardFrame({ id, title, accent, children }: CardFrameProps): JSX.
         background: 'var(--bg-elevated, #16161c)',
         border: `1px solid ${accent ?? 'var(--border, #2a2a35)'}`,
         borderRadius: 8,
-        overflow: 'hidden',
-        boxShadow: '0 8px 24px rgba(0,0,0,0.35)'
+        overflow: 'hidden'
+        // boxShadow は付けない。
+        // React Flow viewport の `transform: scale()` 配下で
+        // `overflow:hidden + border-radius + box-shadow` が揃うと Chromium が
+        // 合成レイヤを作って xterm DOM テキストごとビットマップ化し、
+        // ズーム時にバイリニア補間で滲む。border だけで十分。
       }}
     >
       <NodeResizer
@@ -68,12 +72,18 @@ export function CardFrame({ id, title, accent, children }: CardFrameProps): JSX.
           className="nodrag"
           onClick={() => removeCard(id)}
           style={{
+            // 旧 padding 2/6 + font 14 は押しにくかったので 28x28 のヒット領域に拡大
+            width: 28,
+            height: 28,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             background: 'transparent',
             border: 0,
+            borderRadius: 6,
             color: 'var(--fg-muted, #a8a8b8)',
             cursor: 'pointer',
-            padding: '2px 6px',
-            fontSize: 14,
+            fontSize: 18,
             lineHeight: 1
           }}
           title="Close"
