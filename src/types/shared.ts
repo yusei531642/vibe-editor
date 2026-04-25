@@ -335,10 +335,12 @@ export interface FileReadResult {
   path: string;
   content: string;
   isBinary: boolean;
-  /** UTF-8以外で読み取った場合の警告用 */
+  /** 検出された encoding。"utf-8" | "utf-8-bom" | "utf-16le" | "utf-16be" | "utf-32le" | "utf-32be" | "lossy" | "binary" */
   encoding: string;
   /** Issue #65: 読み取った時点の mtime (ms since epoch)。save 時の external-change 検出に使う */
   mtimeMs?: number;
+  /** Issue #104: 読み取った時点の size。mtime 解像度の補完として save 時に併用される */
+  sizeBytes?: number;
 }
 
 export interface FileWriteResult {
@@ -346,6 +348,8 @@ export interface FileWriteResult {
   error?: string;
   /** Issue #65: 書き込み後の mtime。次回 save 時の比較基準に使う */
   mtimeMs?: number;
+  /** Issue #104: 書き込み後の size。次回 save 時の比較基準に使う */
+  sizeBytes?: number;
   /** Issue #65: expected mtime と現状が食い違った場合 true。ok=false かつ conflict=true でユーザーに確認 */
   conflict?: boolean;
 }

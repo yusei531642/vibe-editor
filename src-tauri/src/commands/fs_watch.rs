@@ -4,7 +4,9 @@
 // 設計:
 //   - app_set_project_root で project_root が変わるたびに watcher を再起動
 //   - notify crate の RecommendedWatcher で project_root/ を recursive 監視
-//   - イベントは 300ms debounce して「連続変更のうち最後の 1 回だけ」emit
+//   - イベントは 300ms trailing debounce: 最後のイベント着信から 300ms 経ってから emit
+//     (Issue #105: 旧実装は leading debounce で最初のイベントしか拾えず、保存処理の
+//      最後の状態 (rename 後など) を取り逃すバグがあった)
 //   - .git/**, node_modules/**, target/**, dist/** は除外 (高頻度変更で UI が詰まる)
 
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -74,8 +76,13 @@ pub fn start_for_root(app: AppHandle, root: String) {
         }
         tracing::info!("[fs_watch] started for {my_root}");
 
-        let mut last_emit = Instant::now() - Duration::from_secs(1);
         const DEBOUNCE: Duration = Duration::from_millis(300);
+        // Issue #105: trailing debounce 用の pending state。
+        //   - イベントが届くたびに last_event_at を更新
+        //   - 次のループで last_event_at から DEBOUNCE 経過していたら emit
+        //   - DEBOUNCE 内に新しいイベントが来たら待機継続 → 最後の状態だけ emit される
+        let mut pending: bool = false;
+        let mut last_event_at: Instant = Instant::now();
 
         loop {
             // アクティブ root が自分でなくなったら終了
@@ -85,33 +92,49 @@ pub fn start_for_root(app: AppHandle, root: String) {
                 tracing::debug!("[fs_watch] stopping watcher for {my_root}");
                 break;
             }
-            let Ok(res) = rx.recv_timeout(Duration::from_millis(500)) else {
-                continue;
+
+            // pending 中は短い timeout で再ループして trailing emit を判定する。
+            // pending 無しなら長めに block し続けて CPU を食わない。
+            let recv_timeout = if pending {
+                Duration::from_millis(50)
+            } else {
+                Duration::from_millis(500)
             };
-            let Ok(event) = res else { continue };
-            // Create / Modify / Remove 以外は無視
-            if !matches!(
-                event.kind,
-                EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
-            ) {
-                continue;
+
+            match rx.recv_timeout(recv_timeout) {
+                Ok(Ok(event)) => {
+                    // Create / Modify / Remove 以外は無視
+                    if !matches!(
+                        event.kind,
+                        EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+                    ) {
+                        // pending を維持して次ループへ
+                    } else {
+                        // 除外ディレクトリのみのイベントはスキップ
+                        let all_ignored = event
+                            .paths
+                            .iter()
+                            .all(|p| path_is_ignored(p, &root_path));
+                        if !all_ignored {
+                            pending = true;
+                            last_event_at = Instant::now();
+                        }
+                    }
+                }
+                Ok(Err(_)) => {
+                    // notify からのエラーは無視 (pending は維持)
+                }
+                Err(_) => {
+                    // timeout: 何もしない (下の trailing 判定に進む)
+                }
             }
-            // 除外ディレクトリのみのイベントはスキップ
-            let all_ignored = event
-                .paths
-                .iter()
-                .all(|p| path_is_ignored(p, &root_path));
-            if all_ignored {
-                continue;
-            }
-            // debounce: 300ms 以内の連続イベントは吸収
-            let now = Instant::now();
-            if now.duration_since(last_emit) < DEBOUNCE {
-                continue;
-            }
-            last_emit = now;
-            if let Err(e) = app.emit("project:files-changed", &my_root) {
-                tracing::warn!("[fs_watch] emit failed: {e}");
+
+            // trailing debounce: 最後のイベントから DEBOUNCE 経過していたら emit
+            if pending && last_event_at.elapsed() >= DEBOUNCE {
+                pending = false;
+                if let Err(e) = app.emit("project:files-changed", &my_root) {
+                    tracing::warn!("[fs_watch] emit failed: {e}");
+                }
             }
         }
     });

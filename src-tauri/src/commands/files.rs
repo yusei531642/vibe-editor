@@ -34,6 +34,10 @@ pub struct FileReadResult {
     /// Issue #65: open 時の mtime (ms since epoch)。save で外部変更検出に使う。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mtime_ms: Option<u64>,
+    /// Issue #104: open 時のファイルサイズ (bytes)。save で size mismatch も併用検出する。
+    /// FS の mtime 解像度 (1 秒単位など) では 1 秒以内の変更を取り逃すため、size を併用する。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
 }
 
 #[derive(Serialize, Default)]
@@ -44,6 +48,9 @@ pub struct FileWriteResult {
     /// Issue #65: 書き込み後の mtime。次回 save 時の比較基準になる。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mtime_ms: Option<u64>,
+    /// Issue #104: 書き込み後のファイルサイズ。次回 save の比較基準になる。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
     /// Issue #65: 期待する mtime と現状が食い違った場合に true を返す。
     /// ok=false + conflict=true でフロントはユーザーに確認ダイアログを出す。
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -55,6 +62,58 @@ fn mtime_ms_of(meta: &std::fs::Metadata) -> Option<u64> {
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map(|d| d.as_millis() as u64)
+}
+
+/// Issue #102: read 時に検出した encoding で content を再エンコードする。
+/// "lossy" / "binary" は保存禁止。空 / "utf-8" は無印 UTF-8。
+fn encode_for_save(content: &str, encoding: &str) -> Result<Vec<u8>, String> {
+    match encoding {
+        "" | "utf-8" => Ok(content.as_bytes().to_vec()),
+        "utf-8-bom" => {
+            let mut out = Vec::with_capacity(content.len() + 3);
+            out.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+            out.extend_from_slice(content.as_bytes());
+            Ok(out)
+        }
+        "utf-16le" => {
+            let mut out = Vec::with_capacity(content.len() * 2 + 2);
+            out.extend_from_slice(&[0xFF, 0xFE]);
+            for u in content.encode_utf16() {
+                out.extend_from_slice(&u.to_le_bytes());
+            }
+            Ok(out)
+        }
+        "utf-16be" => {
+            let mut out = Vec::with_capacity(content.len() * 2 + 2);
+            out.extend_from_slice(&[0xFE, 0xFF]);
+            for u in content.encode_utf16() {
+                out.extend_from_slice(&u.to_be_bytes());
+            }
+            Ok(out)
+        }
+        "utf-32le" => {
+            let mut out = Vec::with_capacity(content.len() * 4 + 4);
+            out.extend_from_slice(&[0xFF, 0xFE, 0x00, 0x00]);
+            for c in content.chars() {
+                out.extend_from_slice(&(c as u32).to_le_bytes());
+            }
+            Ok(out)
+        }
+        "utf-32be" => {
+            let mut out = Vec::with_capacity(content.len() * 4 + 4);
+            out.extend_from_slice(&[0x00, 0x00, 0xFE, 0xFF]);
+            for c in content.chars() {
+                out.extend_from_slice(&(c as u32).to_be_bytes());
+            }
+            Ok(out)
+        }
+        "lossy" => Err(
+            "cannot save: file was decoded with replacement characters (original encoding lost)"
+                .into(),
+        ),
+        "binary" => Err("cannot save binary file".into()),
+        other => Err(format!("unsupported encoding: {other}")),
+    }
 }
 
 /// Issue #45: UTF-16 / UTF-32 / CP932 等も「テキスト」として扱えるよう拡張した判定。
@@ -86,7 +145,8 @@ fn detect_text_or_binary(bytes: &[u8]) -> (bool, String, String) {
         // UTF-8 BOM
         let body = &bytes[3..];
         return match std::str::from_utf8(body) {
-            Ok(s) => (false, s.to_string(), "utf-8".to_string()),
+            // Issue #102: BOM 付きを保存時にも保持できるよう、明示的に "utf-8-bom" を返す。
+            Ok(s) => (false, s.to_string(), "utf-8-bom".to_string()),
             Err(_) => (
                 false,
                 String::from_utf8_lossy(body).into_owned(),
@@ -185,6 +245,57 @@ mod detect_tests {
         let (bin, _, enc) = detect_text_or_binary(&bytes);
         assert!(bin);
         assert_eq!(enc, "binary");
+    }
+
+    #[test]
+    fn utf8_bom_is_distinguished() {
+        // Issue #102: BOM 付き UTF-8 は "utf-8-bom" を返し、保存時に BOM を保てる
+        let bytes = [0xEF, 0xBB, 0xBF, b'h', b'i'];
+        let (bin, content, enc) = detect_text_or_binary(&bytes);
+        assert!(!bin);
+        assert_eq!(content, "hi");
+        assert_eq!(enc, "utf-8-bom");
+    }
+}
+
+#[cfg(test)]
+mod encode_tests {
+    use super::encode_for_save;
+
+    #[test]
+    fn utf8_no_encoding_is_raw_bytes() {
+        let out = encode_for_save("hello", "").unwrap();
+        assert_eq!(out, b"hello");
+    }
+
+    #[test]
+    fn utf8_bom_round_trips() {
+        let out = encode_for_save("hi", "utf-8-bom").unwrap();
+        assert_eq!(&out[..3], &[0xEF, 0xBB, 0xBF]);
+        assert_eq!(&out[3..], b"hi");
+    }
+
+    #[test]
+    fn utf16_le_round_trips() {
+        let out = encode_for_save("hi", "utf-16le").unwrap();
+        assert_eq!(out, [0xFF, 0xFE, b'h', 0x00, b'i', 0x00]);
+    }
+
+    #[test]
+    fn utf16_be_round_trips() {
+        let out = encode_for_save("hi", "utf-16be").unwrap();
+        assert_eq!(out, [0xFE, 0xFF, 0x00, b'h', 0x00, b'i']);
+    }
+
+    #[test]
+    fn lossy_is_rejected() {
+        // Issue #102: lossy decode したファイルを保存すると元 encoding を失うため拒否
+        assert!(encode_for_save("x", "lossy").is_err());
+    }
+
+    #[test]
+    fn binary_is_rejected() {
+        assert!(encode_for_save("x", "binary").is_err());
     }
 }
 
@@ -378,8 +489,10 @@ pub async fn files_read(project_root: String, rel_path: String) -> FileReadResul
     //   - それ以外は「非テキスト char の割合」で判定: NUL の他に 0x01..0x08/0x0B/0x0E..0x1F を含む
     //     バイト比率が高いときだけバイナリ扱い。偽陽性を減らす。
     let (is_binary, content, encoding) = detect_text_or_binary(&bytes);
-    // Issue #65: 開いた時点の mtime を返して、save 時の external-change 検出に使う
-    let mtime_ms = tokio::fs::metadata(&abs).await.ok().and_then(|m| mtime_ms_of(&m));
+    // Issue #65 / #104: 開いた時点の mtime と size を返して、save 時の external-change 検出に使う
+    let meta = tokio::fs::metadata(&abs).await.ok();
+    let mtime_ms = meta.as_ref().and_then(mtime_ms_of);
+    let size_bytes = meta.as_ref().map(|m| m.len());
     FileReadResult {
         ok: true,
         error: None,
@@ -388,6 +501,7 @@ pub async fn files_read(project_root: String, rel_path: String) -> FileReadResul
         is_binary,
         encoding,
         mtime_ms,
+        size_bytes,
     }
 }
 
@@ -399,6 +513,12 @@ pub async fn files_write(
     // Issue #65: 前回 read 時の mtime_ms。指定時は save 直前に現在 mtime と比較して
     // 食い違いを検出する。未指定 (None) なら後方互換で検出をスキップ。
     expected_mtime_ms: Option<u64>,
+    // Issue #104: 前回 read 時の size。mtime 解像度の粗い FS や 1 秒以内の連続変更の
+    // 取りこぼし対策として併用する。
+    expected_size_bytes: Option<u64>,
+    // Issue #102: read 時の encoding。指定時はその encoding で再エンコードして書き戻す。
+    // 未指定なら従来通り UTF-8。
+    encoding: Option<String>,
 ) -> FileWriteResult {
     let abs = match safe_join(&project_root, &rel_path) {
         Some(p) => p,
@@ -411,22 +531,48 @@ pub async fn files_write(
         }
     };
 
-    // Issue #65: expected_mtime_ms が指定されていて、ファイルが既にあるなら現在 mtime と比較
-    if let Some(expected) = expected_mtime_ms {
-        if let Ok(meta) = tokio::fs::metadata(&abs).await {
+    // Issue #102: 指定 encoding で再エンコード。lossy / binary は拒否。
+    let encoding_str = encoding.as_deref().unwrap_or("");
+    let bytes = match encode_for_save(&content, encoding_str) {
+        Ok(b) => b,
+        Err(e) => {
+            return FileWriteResult {
+                ok: false,
+                error: Some(e),
+                ..Default::default()
+            }
+        }
+    };
+
+    // Issue #65 / #104: 既存ファイルがある場合のみ external-change 検出
+    if let Ok(meta) = tokio::fs::metadata(&abs).await {
+        // Issue #104: mtime 比較は abs_diff で前後どちらのズレも検出する。
+        // saturating_sub だと expected > current (時刻巻き戻り / 別 mtime のファイルへ
+        // 差し替え) の場合に diff=0 で素通しされていた。
+        if let Some(expected) = expected_mtime_ms {
             if let Some(current) = mtime_ms_of(&meta) {
-                // 1 秒未満の誤差は無視 (FS によって ms 精度が無いため)
-                let diff = current.saturating_sub(expected);
-                if diff > 1000 {
+                // 1 秒未満の誤差は無視 (一部 FS は秒精度しか持たないため)
+                if current.abs_diff(expected) > 1000 {
                     return FileWriteResult {
                         ok: false,
-                        error: Some(
-                            "file changed on disk since it was opened".into(),
-                        ),
+                        error: Some("file changed on disk since it was opened".into()),
                         mtime_ms: Some(current),
+                        size_bytes: Some(meta.len()),
                         conflict: true,
                     };
                 }
+            }
+        }
+        // Issue #104: size mismatch も conflict 扱い (mtime 解像度の補完)
+        if let Some(expected_size) = expected_size_bytes {
+            if meta.len() != expected_size {
+                return FileWriteResult {
+                    ok: false,
+                    error: Some("file size changed on disk since it was opened".into()),
+                    mtime_ms: mtime_ms_of(&meta),
+                    size_bytes: Some(meta.len()),
+                    conflict: true,
+                };
             }
         }
     }
@@ -440,20 +586,35 @@ pub async fn files_write(
             };
         }
     }
-    match tokio::fs::write(&abs, content).await {
-        Ok(_) => {
-            let mtime_ms = tokio::fs::metadata(&abs).await.ok().and_then(|m| mtime_ms_of(&m));
-            FileWriteResult {
-                ok: true,
-                error: None,
-                mtime_ms,
-                conflict: false,
-            }
+
+    // Issue #103: 直接 fs::write だとクラッシュ時に半端書きが残る。atomic_write で
+    // 同一ディレクトリ temp → fsync → rename 経由に置き換える。
+    // symlink の場合は rename が symlink 自体を置き換えてしまうため、target を解決して
+    // 実体パスに書き込む。
+    let target_path = match tokio::fs::symlink_metadata(&abs).await {
+        Ok(m) if m.file_type().is_symlink() => {
+            // symlink を辿って実体を解決する。失敗時は元の path にフォールバック。
+            tokio::fs::canonicalize(&abs).await.unwrap_or_else(|_| abs.clone())
         }
-        Err(e) => FileWriteResult {
+        _ => abs.clone(),
+    };
+
+    if let Err(e) = crate::commands::atomic_write::atomic_write(&target_path, &bytes).await {
+        return FileWriteResult {
             ok: false,
             error: Some(e.to_string()),
             ..Default::default()
-        },
+        };
+    }
+
+    let new_meta = tokio::fs::metadata(&target_path).await.ok();
+    let mtime_ms = new_meta.as_ref().and_then(mtime_ms_of);
+    let size_bytes = new_meta.as_ref().map(|m| m.len());
+    FileWriteResult {
+        ok: true,
+        error: None,
+        mtime_ms,
+        size_bytes,
+        conflict: false,
     }
 }
