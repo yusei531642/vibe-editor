@@ -128,28 +128,37 @@ async fn inject_codex_prompt_to_pty(
         Some(s) => s,
         None => return,
     };
+    // Issue #153: 注入中はユーザーの xterm 入力 (terminal_write) を抑止する。
     // build_chunks は banner 込みで分割するが、Codex 注入では banner 不要なので空文字を渡す。
+    session.set_injecting(true);
+    // 関数を抜けるあらゆる経路で必ず injecting を下ろすため、内部処理を closure で wrap せず
+    // 早期 return ごとに明示 false に戻す。
     let chunks = build_chunks("", &instructions);
     if chunks.is_empty() {
+        session.set_injecting(false);
         return;
     }
     let mut iter = chunks.into_iter();
     if let Some(first) = iter.next() {
         if session.write(&first).is_err() {
+            session.set_injecting(false);
             return;
         }
     }
     for chunk in iter {
         sleep(Duration::from_millis(15)).await;
         if registry.get(&term_id).is_none() {
+            session.set_injecting(false);
             return;
         }
         if session.write(&chunk).is_err() {
+            session.set_injecting(false);
             return;
         }
     }
     sleep(Duration::from_millis(15)).await;
     let _ = session.write(b"\r");
+    session.set_injecting(false);
     tracing::info!(
         "[terminal] codex prompt injected into pty {term_id} ({} bytes)",
         instructions.len()
@@ -341,7 +350,9 @@ pub async fn terminal_write(
     data: String,
 ) -> Result<(), String> {
     if let Some(s) = state.pty_registry.get(&id) {
-        s.write(data.as_bytes()).map_err(|e| e.to_string())?;
+        // Issue #153: prompt injection 中はユーザー入力を drop して、
+        // codex への初手指示と xterm のキー入力が混ざるのを防ぐ。
+        let _ = s.user_write(data.as_bytes()).map_err(|e| e.to_string())?;
     }
     Ok(())
 }

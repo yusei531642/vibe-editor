@@ -44,9 +44,14 @@ pub struct SessionHandle {
     pub agent_id: Option<String>,
     pub team_id: Option<String>,
     pub role: Option<String>,
+    /// Issue #153: prompt injection 中はユーザー入力を抑止する。
+    /// `inject_codex_prompt_to_pty` 等が begin/end で立て下げる。
+    /// renderer 側からの terminal_write は user_write 経由でこのフラグを見る。
+    injecting: std::sync::atomic::AtomicBool,
 }
 
 impl SessionHandle {
+    /// 内部 / inject 経路用: フラグの状態にかかわらず常に書き込む。
     pub fn write(&self, data: &[u8]) -> Result<()> {
         let mut w = self
             .writer
@@ -55,6 +60,21 @@ impl SessionHandle {
         w.write_all(data)?;
         w.flush()?;
         Ok(())
+    }
+
+    /// Issue #153: ユーザー入力 (renderer の terminal_write) 経路は inject 中なら drop。
+    /// 戻り値: 実際に書き込んだら true、injecting で抑止したら false。
+    pub fn user_write(&self, data: &[u8]) -> Result<bool> {
+        if self.injecting.load(std::sync::atomic::Ordering::Acquire) {
+            return Ok(false);
+        }
+        self.write(data)?;
+        Ok(true)
+    }
+
+    pub fn set_injecting(&self, on: bool) {
+        self.injecting
+            .store(on, std::sync::atomic::Ordering::Release);
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> Result<()> {
@@ -399,5 +419,6 @@ pub fn spawn_session(
         agent_id: opts.agent_id,
         team_id: opts.team_id,
         role: opts.role,
+        injecting: std::sync::atomic::AtomicBool::new(false),
     })
 }
