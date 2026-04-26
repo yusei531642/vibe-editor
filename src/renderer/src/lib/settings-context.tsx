@@ -84,17 +84,43 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
     });
   }, [settings.lastOpenedRoot, settings.claudeCwd]);
 
+  // Issue #131: save を 200ms debounce してバッチ化する。
+  // patch 1 つごとに settings.json 全文 atomic_write していたため、
+  // claudeCodePanelWidth リサイズ確定や workspace 追加で UI が IPC await で
+  // ブロックしていた。ref を持っているので最新値が即座に in-memory で見える。
+  const saveTimerRef = useRef<number | null>(null);
+
   const update = useCallback(async (patch: Partial<AppSettings>) => {
     // 常に最新値 (ref) を起点に merge。ref を先行コミットすることで、
     // await 中に走る次の update() 呼び出しが今の patch を含んだ state を見る。
     const next = { ...settingsRef.current, ...patch };
     settingsRef.current = next;
     setSettings(next);
-    try {
-      await window.api.settings.save(next);
-    } catch (err) {
-      console.error('[settings] 保存失敗:', err);
+    if (saveTimerRef.current !== null) {
+      window.clearTimeout(saveTimerRef.current);
     }
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
+      void window.api.settings.save(settingsRef.current).catch((err) => {
+        console.error('[settings] 保存失敗:', err);
+      });
+    }, 200);
+  }, []);
+
+  // ページ離脱直前に未 flush の save を確定させる。debounce 中の値が永続化漏れにならないように。
+  useEffect(() => {
+    const handler = (): void => {
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        // window 終了直前なので fire-and-forget で sync 風に投げる
+        void window.api.settings.save(settingsRef.current).catch(() => {
+          /* shutdown 時のエラーは無視 */
+        });
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
   }, []);
 
   const reset = useCallback(async () => {
