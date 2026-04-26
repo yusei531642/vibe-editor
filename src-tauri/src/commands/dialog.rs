@@ -38,6 +38,46 @@ pub async fn dialog_open_file(
     rx.await.ok().flatten()
 }
 
+/// Issue #137 (Security): 任意 path をクエリして OS / FS の fingerprint に使われるのを防ぐため、
+/// 「ユーザーホーム配下」または「現在のプロジェクトルート / その祖先」だけを許可する。
+/// /etc, /sys, /proc, C:\Windows などのシステム領域は早期 reject。
+fn is_path_safe_to_query(path: &std::path::Path) -> bool {
+    let canon = match path.canonicalize() {
+        Ok(p) => p,
+        Err(_) => return false, // 存在しないパスも reject (fingerprint 防止)
+    };
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return false,
+    };
+    let home_canon = home.canonicalize().unwrap_or(home);
+    if canon.starts_with(&home_canon) {
+        return true;
+    }
+    // システム領域の denylist (ホーム外でも見やすい場所)
+    #[cfg(windows)]
+    {
+        let lower = canon.to_string_lossy().to_lowercase();
+        if lower.starts_with("c:\\windows")
+            || lower.starts_with("c:\\program files")
+            || lower.starts_with("c:\\programdata")
+        {
+            return false;
+        }
+    }
+    #[cfg(unix)]
+    {
+        let lower = canon.to_string_lossy().to_string();
+        for prefix in ["/etc", "/sys", "/proc", "/dev", "/var", "/usr", "/bin", "/sbin", "/boot"] {
+            if lower.starts_with(prefix) {
+                return false;
+            }
+        }
+    }
+    // それ以外 (ホーム外で denylist にも該当しない) は許可しない (fail-closed)
+    false
+}
+
 /// Issue #60: 旧実装は読み取り失敗時に `true` (= 空) を返していたため、権限エラー /
 /// path 不存在を「空」と取り違え、呼び出し側の警告ロジックが誤判定していた。
 ///
@@ -45,10 +85,15 @@ pub async fn dialog_open_file(
 /// - 読み取り成功 + next_entry が None → 空 (true)
 /// - 読み取り失敗 or エントリ検出 → false ("OK as empty" と判定させない)
 ///
-/// ユーザーが「権限無しで空扱い」されるケースを潰す。本当に「読めない」を区別したい
-/// 呼び出し側は dialog_read_dir 等を別途用意すること (現時点では不要)。
+/// Issue #137: 加えて、ホーム外/システム領域のパスは fingerprint 防止のため拒否する。
 #[tauri::command]
 pub async fn dialog_is_folder_empty(folder_path: String) -> bool {
+    if !is_path_safe_to_query(std::path::Path::new(&folder_path)) {
+        tracing::warn!(
+            "[dialog_is_folder_empty] rejecting query outside allowed area: {folder_path:?}"
+        );
+        return false;
+    }
     let mut rd = match tokio::fs::read_dir(&folder_path).await {
         Ok(r) => r,
         Err(e) => {

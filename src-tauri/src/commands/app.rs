@@ -114,15 +114,31 @@ pub fn app_set_window_title(window: tauri::Window, title: String) -> Result<(), 
     window.set_title(&title).map_err(|e| e.to_string())
 }
 
+/// Issue #137 (Security): app_check_claude は which::which で任意 path を叩けるため、
+/// renderer から `app_check_claude("/Users/victim/.ssh/id_rsa")` のように呼ぶと
+/// 任意ファイル/ディレクトリの存在確認 (fingerprint) になってしまう。
+///
+/// 防御策:
+///   - 絶対パス / `/` / `\` を含む値は reject (PATH 経由の lookup だけ許可)
+///   - 文字列を制限 ([A-Za-z0-9_.-] のみ)。シェル特殊文字を排除
 #[tauri::command]
 pub async fn app_check_claude(command: String) -> ClaudeCheckResult {
-    // 実装: PATH から command を which し、ok/path/error を返す
-    let cmd = if command.trim().is_empty() {
-        "claude".to_string()
-    } else {
-        command
-    };
-    match which::which(&cmd) {
+    let raw = command.trim();
+    let cmd = if raw.is_empty() { "claude" } else { raw };
+    if cmd.contains('/')
+        || cmd.contains('\\')
+        || std::path::Path::new(cmd).is_absolute()
+        || !cmd
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-')
+    {
+        return ClaudeCheckResult {
+            ok: false,
+            path: None,
+            error: Some("invalid command name (only PATH lookup of bare names is allowed)".into()),
+        };
+    }
+    match which::which(cmd) {
         Ok(path) => ClaudeCheckResult {
             ok: true,
             path: Some(path.to_string_lossy().into_owned()),
