@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { memo, useEffect, useMemo, useState, useCallback } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -62,9 +62,16 @@ export function FileTreePanel({
   /** 折り畳み状態のルート集合。primary は初期展開、extra はユーザー操作に委ねる */
   const [collapsedRoots, setCollapsedRoots] = useState<Set<string>>(new Set());
 
-  /** 現在サイドバーに表示するルート一覧(primary + extras から重複除去) */
-  const roots = [primaryRoot, ...extraRoots].filter(
-    (p, i, arr) => p && arr.indexOf(p) === i
+  /** 現在サイドバーに表示するルート一覧(primary + extras から重複除去)。
+   *  Issue #129: 配列リテラルを毎レンダー作ると useEffect deps や子供 props が
+   *  毎回新参照になるので useMemo で identity を安定化する。 */
+  const roots = useMemo(
+    () =>
+      [primaryRoot, ...extraRoots].filter(
+        (p, i, arr) => p && arr.indexOf(p) === i
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [primaryRoot, extraRoots.join('')]
   );
 
   const loadDir = useCallback(
@@ -221,20 +228,26 @@ export function FileTreePanel({
     }
     return (
       <>
-        {state.entries.map((node) => (
-          <FileTreeNode
-            key={dirKey(rootPath, node.path)}
-            rootPath={rootPath}
-            node={node}
-            depth={depth}
-            expanded={expanded}
-            dirs={dirs}
-            activeFilePath={activeFilePath}
-            onToggle={toggleDir}
-            onOpenFile={onOpenFile}
-            renderChildren={renderChildren}
-          />
-        ))}
+        {state.entries.map((node) => {
+          const childKey = dirKey(rootPath, node.path);
+          const isOpen = node.isDir && expanded.has(childKey);
+          const childState = node.isDir ? dirs.get(childKey) ?? null : null;
+          const isActive = !node.isDir && activeFilePath === node.path;
+          return (
+            <FileTreeNode
+              key={childKey}
+              rootPath={rootPath}
+              node={node}
+              depth={depth}
+              isOpen={isOpen}
+              isActive={isActive}
+              childState={childState}
+              onToggle={toggleDir}
+              onOpenFile={onOpenFile}
+              renderChildren={renderChildren}
+            />
+          );
+        })}
       </>
     );
   };
@@ -316,9 +329,10 @@ interface FileTreeNodeProps {
   rootPath: string;
   node: FileNode;
   depth: number;
-  expanded: Set<string>;
-  dirs: Map<string, DirState>;
-  activeFilePath: string | null;
+  isOpen: boolean;
+  isActive: boolean;
+  /** 子ディレクトリの DirState (再レンダー判定用)。null は未読込 or ファイル */
+  childState: DirState | null;
   onToggle: (rootPath: string, node: FileNode) => void;
   onOpenFile: (rootPath: string, relPath: string) => void;
   renderChildren: (
@@ -328,18 +342,16 @@ interface FileTreeNodeProps {
   ) => JSX.Element | null;
 }
 
-function FileTreeNode({
+function FileTreeNodeImpl({
   rootPath,
   node,
   depth,
-  expanded,
-  activeFilePath,
+  isOpen,
+  isActive,
   onToggle,
   onOpenFile,
   renderChildren
 }: FileTreeNodeProps): JSX.Element {
-  const isOpen = expanded.has(dirKey(rootPath, node.path));
-  const isActive = !node.isDir && activeFilePath === node.path;
   const fileIconDef = node.isDir ? undefined : fileIcon(node.name);
   const FileTypeIcon = fileIconDef?.Icon ?? DefaultFileIcon;
   const fileTypeColor = fileIconDef?.color;
@@ -414,3 +426,28 @@ function FileTreeNode({
     </>
   );
 }
+
+/**
+ * Issue #129: React.memo で「親が再レンダーしても自分の入力 (node, isOpen, isActive,
+ * childState など) が変わらない限り再レンダーしない」ようにする。
+ * 親が expanded Set を新規生成しても、各ノードの isOpen は親側で計算してから
+ * primitive boolean として渡しているので memo が安全に効く。
+ * renderChildren は親が毎レンダー再生成するため、ここでは再レンダー判定から外す
+ * (renderChildren 経由で開いた子供は依然として再帰的に再構築されるが、
+ *  閉じているノード/葉は本 memo + props 比較で再レンダーをスキップできる)。
+ */
+const FileTreeNode = memo(FileTreeNodeImpl, (prev, next) => {
+  return (
+    prev.rootPath === next.rootPath &&
+    prev.node === next.node &&
+    prev.depth === next.depth &&
+    prev.isOpen === next.isOpen &&
+    prev.isActive === next.isActive &&
+    prev.childState === next.childState &&
+    prev.onToggle === next.onToggle &&
+    prev.onOpenFile === next.onOpenFile
+    // renderChildren は意図的に比較しない (毎レンダー新参照になるが、
+    // 開いているディレクトリは isOpen + childState の変化で再レンダーが
+    // 既に走るので問題なし。閉じているノード/葉は早期 return できる)。
+  );
+});
