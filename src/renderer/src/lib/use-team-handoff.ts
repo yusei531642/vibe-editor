@@ -21,12 +21,17 @@ export interface HandoffPayload {
 
 type Listener = (p: HandoffPayload) => void;
 const listeners = new Set<Listener>();
-let unlisten: UnlistenFn | null = null;
-let initPromise: Promise<void> | null = null;
+/**
+ * Issue #192: 旧実装は `unlisten` を別変数に保持し、`listen()` の resolve を待たずに
+ * cleanup が走ると「resolve 後に届く unlisten が誰からも呼ばれない孤児」になり、
+ * 次のマウントで `initPromise === null` を見て 2 本目の listen が張られて二重発火していた。
+ * 修正: Promise 自体に UnlistenFn を持たせ、cleanup は必ず resolve を待ってから unlisten を呼ぶ。
+ */
+let initPromise: Promise<UnlistenFn> | null = null;
 
-function ensureRegistered(): Promise<void> {
+function ensureRegistered(): Promise<UnlistenFn> {
   if (initPromise) return initPromise;
-  initPromise = listen<HandoffPayload>('team:handoff', (e) => {
+  const p = listen<HandoffPayload>('team:handoff', (e) => {
     for (const cb of listeners) {
       try {
         cb(e.payload);
@@ -34,10 +39,17 @@ function ensureRegistered(): Promise<void> {
         console.warn('[handoff] listener threw:', err);
       }
     }
-  }).then((u) => {
-    unlisten = u;
   });
-  return initPromise;
+  initPromise = p;
+  // 防御的フェールセーフ: listen() が reject した場合 initPromise が rejected のまま固着し、
+  // 後続マウントの `if (initPromise) return initPromise` が永遠に rejected を返し続ける。
+  // ここで attach する .catch は元の Promise (p) と同じチェーン上だが、cleanup 側 .then().catch()
+  // が rejection を別途 console.warn で観測しているため二重 warn にならない (こちらは無言で reset)。
+  // p === initPromise の同一性チェックで、別マウントが先に新しい listen を張った後の stale clear を防ぐ。
+  p.catch(() => {
+    if (initPromise === p) initPromise = null;
+  });
+  return p;
 }
 
 /**
@@ -51,16 +63,39 @@ export function useTeamHandoff(callback: (p: HandoffPayload) => void): void {
   useEffect(() => {
     const wrapper: Listener = (p) => cbRef.current(p);
     listeners.add(wrapper);
-    void ensureRegistered();
+    const myInit = ensureRegistered();
     return () => {
       listeners.delete(wrapper);
-      // すべての subscriber が抜けたら Tauri listener も止める。
-      if (listeners.size === 0) {
-        const u = unlisten;
-        unlisten = null;
-        initPromise = null;
-        if (u) u();
-      }
+      if (listeners.size !== 0) return;
+      // Issue #192: cleanup 時点で listeners=0 でも、unlisten 完了前に再マウントが間に合うと
+      // 「古い initPromise を即 null → 新マウントが NEW listen を生成 → 古い listen は
+      //  まだ生きていて二重発火」となる race があるため、resolve まで initPromise を null に
+      // しない。resolve 時に listeners.size を再確認し、
+      //   - 0 のまま: 本当に誰も居ない → u() で unlisten + initPromise クリア
+      //   - >0     : 再マウントが間に合った → 既存 listen を再利用 (initPromise=myInit のまま)
+      // どちらの分岐でも listen は 1 本だけ、二重発火しない。
+      //
+      // 詳細な race シナリオ (レビュー検証用):
+      //   t0: マウント A cleanup → listeners.delete(wrapperA) → listeners.size = 0
+      //   t1: ensureRegistered() を呼んでいたマウント B が listeners.add(wrapperB) → size = 1
+      //       B の myInit は ensureRegistered の if (initPromise) return initPromise で
+      //       同じ Promise (= A の myInit) を取得済み
+      //   t2: A の cleanup .then が resolve → listeners.size > 0 → return (unlisten せず)
+      //   t3: B の cleanup → listeners.size = 0
+      //   t4: B の cleanup .then が resolve → listeners.size = 0 → u() で unlisten
+      //       initPromise === myInit (B) なので null クリア
+      // listen は 1 本だけ、unlisten も 1 回だけ。リークなし。
+      void myInit
+        .then((u) => {
+          if (listeners.size > 0) return;
+          u();
+          if (initPromise === myInit) initPromise = null;
+        })
+        .catch((err) => {
+          // 旧コードは catch を空に握り潰していたが、Tauri IPC が壊れた等で listen() が
+          // 失敗したケースが完全に sile になってしまうため最低限 console.warn で残す。
+          console.warn('[handoff] listen() failed in cleanup path:', err);
+        });
     };
   }, []);
 }

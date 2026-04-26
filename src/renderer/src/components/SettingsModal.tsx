@@ -129,6 +129,8 @@ export function SettingsModal({
   const saveTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   // サイドバー検索 (空文字なら全表示)
   const [navQuery, setNavQuery] = useState('');
+  // Issue #195: focus trap + Escape + autofocus 用のルート ref
+  const dialogRef = useRef<HTMLDivElement | null>(null);
 
   // Issue #178: open 中に外部から settings が更新されると useEffect が再発火して
   // ユーザー入力中の draft が消える事故があった。
@@ -166,6 +168,23 @@ export function SettingsModal({
       }
     };
   }, []);
+
+  // Issue #195: マウント直後にダイアログ内の最初の focusable に focus を移す。
+  // 何もせず開くと focus は背景 (Canvas/FileTree) に残り、Tab で背後に抜ける起点になる。
+  // setTimeout のマジックナンバーを避けるため requestAnimationFrame を使い、
+  // 描画完了直後の最初のフレームで focus を移す。
+  useEffect(() => {
+    if (!open) return;
+    const raf = window.requestAnimationFrame(() => {
+      const root = dialogRef.current;
+      if (!root) return;
+      const target = root.querySelector<HTMLElement>(
+        '[autofocus], button, [href], input, select, textarea, [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])'
+      );
+      target?.focus();
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [open]);
 
   const { mounted, dataState, motion } = useSpringMount(open, 180);
   if (!mounted) return null;
@@ -468,10 +487,84 @@ export function SettingsModal({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         className="modal modal--settings"
         data-state={dataState}
         data-motion={motion}
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={isJa ? '設定' : 'Settings'}
+        // Issue #195: dialog root を programmatic focus ターゲットにするため tabindex=-1。
+        // Escape を入力フィールドから受けたとき、まず root に focus を退避してから次の
+        // Escape で閉じる UX (vscode / macOS native と同じ) を実現する。
+        tabIndex={-1}
+        onKeyDown={(e) => {
+          // Issue #195: Escape で閉じる + Tab で focus trap。
+          if (e.key === 'Escape') {
+            // IME 変換中の Escape は確定キャンセルとして使われるので絶対に握らない。
+            // React 17+ では e.nativeEvent は KeyboardEvent 型に推論されるためキャスト不要。
+            if (e.nativeEvent.isComposing) return;
+            const target = e.target as HTMLElement | null;
+            const tag = target?.tagName;
+            // contenteditable は inherit で親から継承されるケースがあるため、
+            // 文字列比較の getAttribute ではなく DOM プロパティ isContentEditable を使う
+            // (継承込みの正しい判定が出る)。レビュー指摘。
+            const isTextField =
+              tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable === true;
+            e.preventDefault();
+            // 入力中の Escape で即閉じると入力中のテキストが lost するため、
+            // 1 回目は input から blur して dialog root に focus を退避するだけにする。
+            // (2 回目の Escape は target=dialog なのでこの分岐に入らず onClose に進む)
+            if (isTextField && target) {
+              target.blur();
+              dialogRef.current?.focus();
+              return;
+            }
+            onClose();
+            return;
+          }
+          if (e.key !== 'Tab') return;
+          const root = dialogRef.current;
+          if (!root) return;
+          const focusables = Array.from(
+            root.querySelectorAll<HTMLElement>(
+              // セレクタ側は典型的な -1 だけを除外し、それ以外の負値や空文字 ([tabindex=""] 等) は
+              // 後段 filter の el.tabIndex < 0 に委ねる (CSS attribute selector の前方一致は
+              // ブラウザ間で挙動差があり、正規実装に統一するほうが堅牢)。
+              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])'
+            )
+          ).filter((el) => {
+            // 1. tabIndex の負値 (-2 等) と dialog root (tabIndex=-1) を除外
+            if (el.tabIndex < 0) return false;
+            // 2. レイアウト上見えていない要素を除外。
+            //    旧 getBoundingClientRect だけだと visibility:hidden の要素が rect=占有領域を
+            //    持つため通過してしまう (レビュー指摘)。
+            //    Chromium が提供する Element.checkVisibility() は display:none / visibility:hidden /
+            //    content-visibility:hidden を 1 回呼ぶだけで判定できる。Tauri は WebView2 (Chromium)
+            //    なので利用可能。型未定義環境用に typeof チェックで guard し、未対応時は
+            //    旧来の rect ベース判定にフォールバック。
+            const checkVisibility = (el as unknown as {
+              checkVisibility?: (opts?: { checkVisibilityCSS?: boolean }) => boolean;
+            }).checkVisibility;
+            if (typeof checkVisibility === 'function') {
+              return checkVisibility.call(el, { checkVisibilityCSS: true });
+            }
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 || rect.height > 0;
+          });
+          if (focusables.length === 0) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          const active = document.activeElement as HTMLElement | null;
+          if (e.shiftKey && active === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && active === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }}
       >
         <header className="modal__header">
           <div className="modal__title-group">

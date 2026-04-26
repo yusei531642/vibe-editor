@@ -183,9 +183,57 @@ pub async fn app_setup_team_mcp(
     // どのケースでも install_skill_best_effort はバージョンヘッダで idempotent (内容一致なら no-op、
     // 同バージョンヘッダで内容差分があれば自動上書き、ヘッダ無しのユーザー編集ファイルには触らない)
     // なので team_id を問わず常に呼んでよい。アプリ起動毎に最新の SKILL.md が確実に同期される。
+    //
+    // Issue #191 (Security): 旧実装は renderer 由来の project_root をそのまま install に流して
+    // いたため、改ざん済み bundled JS から任意ディレクトリ配下に SKILL.md を plant 可能だった
+    // (#135 で app_install_vibe_team_skill だけに付けたガードが、setup 経路では空転していた)。
+    // → app_install_vibe_team_skill と同じく req_canon == active_canon を検証してから install する。
     let trimmed = project_root.trim();
     if !trimmed.is_empty() {
-        crate::commands::vibe_team_skill::install_skill_best_effort(trimmed).await;
+        let active = crate::state::lock_project_root_recover(&state.project_root)
+            .clone()
+            .unwrap_or_default();
+        if active.trim().is_empty() {
+            tracing::warn!(
+                "[setup_team_mcp] skipping skill install: no active project_root configured"
+            );
+        } else {
+            // canonicalize は async fn 内では tokio::fs を使う (network mount 等で blocking I/O が
+            // Tokio worker を塞ぐのを避けるため)。req と active は独立なので join で並列実行。
+            let (req_res, active_res) = tokio::join!(
+                tokio::fs::canonicalize(trimmed),
+                tokio::fs::canonicalize(active.trim())
+            );
+            match (req_res, active_res) {
+                (Ok(req_canon), Ok(active_canon)) if req_canon == active_canon => {
+                    crate::commands::vibe_team_skill::install_skill_best_effort(
+                        &req_canon.to_string_lossy(),
+                    )
+                    .await;
+                }
+                (Ok(req_canon), Ok(active_canon)) => {
+                    tracing::warn!(
+                        "[setup_team_mcp] skill install denied: requested {} != active {}",
+                        req_canon.display(),
+                        active_canon.display()
+                    );
+                }
+                (req_res, active_res) => {
+                    // どちらか / 両方失敗。両方分けて出すことで「片方だけ失敗 → ディスク破損疑い」
+                    // 「両方失敗 → 設定経路の不整合」のデバッグ材料を残す。
+                    if let Err(e) = req_res {
+                        tracing::warn!(
+                            "[setup_team_mcp] canonicalize requested project_root failed: {e}"
+                        );
+                    }
+                    if let Err(e) = active_res {
+                        tracing::warn!(
+                            "[setup_team_mcp] canonicalize active project_root failed: {e}"
+                        );
+                    }
+                }
+            }
+        }
     }
     let (port, token, bridge_path) = hub.info().await;
     let socket = format!("127.0.0.1:{port}");
