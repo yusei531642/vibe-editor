@@ -15,33 +15,48 @@
 
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use once_cell::sync::Lazy;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::channel;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
-/// Issue #30: 同じ project で watcher が複数同時に走ると、全 watcher が
-/// `snapshot.difference(current)` の先頭を自分の sessionId と誤認する。
-/// プロセス全体で「既に配布済み sessionId」を共有し、他の watcher がそれを採らないようにする。
-///
-/// 実運用ではセッション数 << UUID 衝突率 なので単純な HashSet で十分。
-/// アプリ終了時に消えるためリークも無視できる範囲。
-static CLAIMED_SESSIONS: Lazy<Mutex<HashSet<String>>> = Lazy::new(|| Mutex::new(HashSet::new()));
+/// Issue #30 + #148: claim 済み sessionId の集合。
+/// 旧実装は HashSet で永続成長し、長時間稼働でメモリリーク + デッドサーション ID で
+/// 占有されると新 watcher が拾えない問題があった。
+/// → (sessionId → claimed_at) の HashMap にして TTL_SECS を超えた entry は claim 取得時
+///   にまとめて掃除する。デッドサーションは TTL 後に再 claim 可能になる。
+static CLAIMED_SESSIONS: Lazy<Mutex<HashMap<String, Instant>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+const CLAIM_TTL_SECS: u64 = 60 * 60; // 1 時間
+
+fn evict_expired(map: &mut HashMap<String, Instant>) {
+    let cutoff = Duration::from_secs(CLAIM_TTL_SECS);
+    map.retain(|_, t| t.elapsed() < cutoff);
+}
 
 fn try_claim(session_id: &str) -> bool {
-    match CLAIMED_SESSIONS.lock() {
-        Ok(mut set) => set.insert(session_id.to_string()),
-        Err(poisoned) => poisoned.into_inner().insert(session_id.to_string()),
+    let mut guard = match CLAIMED_SESSIONS.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    evict_expired(&mut guard);
+    if guard.contains_key(session_id) {
+        return false;
     }
+    guard.insert(session_id.to_string(), Instant::now());
+    true
 }
 
 fn is_claimed(session_id: &str) -> bool {
-    match CLAIMED_SESSIONS.lock() {
-        Ok(set) => set.contains(session_id),
-        Err(poisoned) => poisoned.into_inner().contains(session_id),
-    }
+    let mut guard = match CLAIMED_SESSIONS.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    evict_expired(&mut guard);
+    guard.contains_key(session_id)
 }
 
 /// Issue #31: 同 encoded directory に別 project が集まる場合に備え、jsonl の最初の `cwd`
@@ -125,8 +140,8 @@ pub fn spawn_watcher(
         // こうしておくと「spawn 時点で新規扱いだが他 watcher が先に claim した id」を
         // この watcher が後から誤拾いする可能性も閉じられる。
         let mut snapshot = list_session_ids(&dir);
-        if let Ok(set) = CLAIMED_SESSIONS.lock() {
-            for s in set.iter() {
+        if let Ok(map) = CLAIMED_SESSIONS.lock() {
+            for s in map.keys() {
                 snapshot.insert(s.clone());
             }
         }
