@@ -208,14 +208,25 @@ pub async fn git_diff(
 ) -> GitDiffResult {
     // 旧実装と同じく `git diff -- <path>` ではなく、HEAD と worktree を別々に取って
     // Monaco DiffEditor が比較しやすい形式 (original / modified) に整形する。
+
+    // Issue #134 (Security): head_path は `git show HEAD:<head_path>` で git に渡る。
+    //   - 旧実装は safe_join 検証より先に git に渡していたため、
+    //     originalRelPath="../../.env" のようなペイロードで repo root 直下の任意の
+    //     HEAD blob を読み取れてしまっていた。
+    //   - safe_join() を git 呼び出しの「前」に移動し、境界外のパスは早期 reject する。
+    //   - 加えて head_path が "-" で始まる場合 (CLI option 偽装) も拒否する。
+    //     `HEAD:-foo` は git 的には rev spec の一部だが、防御的に弾いておく。
     let head_path = original_rel_path.as_deref().unwrap_or(&rel_path);
-    let head = run_git(
-        &["show", &format!("HEAD:{head_path}")],
-        &project_root,
-    )
-    .await;
-    let is_new = matches!(&head, Err(e) if e.contains("does not exist") || e.contains("exists on disk, but not in"));
-    let original = head.clone().unwrap_or_default();
+    if head_path.starts_with('-') || head_path.contains("..")
+        || crate::commands::files::safe_join(&project_root, head_path).is_none()
+    {
+        return GitDiffResult {
+            ok: false,
+            error: Some("invalid head path".into()),
+            path: rel_path,
+            ..Default::default()
+        };
+    }
 
     // Issue #36: rel_path が ".." を含むと project_root の外を読めてしまうため safe_join を通す。
     // safe_join が None (= 境界外 / absolute / 不正) の場合は empty にしてエラー扱い。
@@ -230,17 +241,14 @@ pub async fn git_diff(
             };
         }
     };
-    // original_rel_path (rename 旧パス) も同様に境界チェックする。
-    if let Some(ref orig) = original_rel_path {
-        if crate::commands::files::safe_join(&project_root, orig).is_none() {
-            return GitDiffResult {
-                ok: false,
-                error: Some("invalid original relative path".into()),
-                path: rel_path,
-                ..Default::default()
-            };
-        }
-    }
+
+    let head = run_git(
+        &["show", &format!("HEAD:{head_path}")],
+        &project_root,
+    )
+    .await;
+    let is_new = matches!(&head, Err(e) if e.contains("does not exist") || e.contains("exists on disk, but not in"));
+    let original = head.clone().unwrap_or_default();
     // Issue #35: read_to_string() は非 UTF-8 で失敗し、worktree 側が空文字になって
     // diff が「全削除」に見えてしまう。raw bytes → from_utf8_lossy で落としどころを作る。
     let (modified, worktree_is_lossy) = match tokio::fs::read(&abs).await {
