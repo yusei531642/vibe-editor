@@ -12,7 +12,8 @@ import {
   Sparkles,
   Type,
   Users,
-  X
+  X,
+  type LucideIcon
 } from 'lucide-react';
 import type { AgentConfig, AppSettings } from '../../../types/shared';
 import { DEFAULT_SETTINGS } from '../../../types/shared';
@@ -61,7 +62,10 @@ type SectionId = string;
  *     共通定数として再利用、JSX は呼び出しごとに都度生成する形に統一する。
  *     パフォーマンスへの影響はこの規模では実測差が出ないため、安全側に倒す。 */
 const ICON_PROPS = { size: 14, strokeWidth: 1.85 } as const;
-const SECTION_ICON_TYPES: Record<string, React.ComponentType<typeof ICON_PROPS>> = {
+// SECTION_ICON_TYPES の値は lucide-react のアイコン (LucideIcon) なので、
+// 旧 React.ComponentType<typeof ICON_PROPS> (リテラル {size:14}) ではなく
+// LucideIcon 型を使うほうが正確で意図が伝わる (レビュー指摘)。
+const SECTION_ICON_TYPES: Record<string, LucideIcon> = {
   general: SettingsIcon,
   appearance: Palette,
   fonts: Type,
@@ -99,6 +103,12 @@ const FIXED_LABELS_EN: Record<string, FixedLabelEntry> = {
   roles: { label: 'Role profiles', title: 'Role profiles', desc: 'Team member role templates' },
   mcp: { label: 'MCP', title: 'MCP', desc: 'How to install vibe-team MCP' }
 };
+
+/** 名前未設定のカスタムエージェントに使う fallback 文字列。
+ *  fixedLabels と同じく言語切替で同期するモジュール定数として持つことで、
+ *  groups useMemo の closure から isJa を直接参照しないで済むようにする。 */
+const UNTITLED_FALLBACK_JA = '（無名）';
+const UNTITLED_FALLBACK_EN = '(untitled)';
 
 export function SettingsModal({
   open,
@@ -173,12 +183,14 @@ export function SettingsModal({
     try {
       onApply(draft);
     } catch (err) {
+      // err.message はスタックトレース / ファイルパス等の機微情報を含みうるため、
+      // ユーザー向け toast には汎用文言だけ出し、詳細は console.error にだけ残す (レビュー指摘)。
       console.error('[settings] apply failed:', err);
-      // toast でユーザーにも保存失敗を明示 (旧実装は console のみで UI 上は無音だった)。
-      const detail = err instanceof Error ? err.message : String(err);
       const isJaNow = draft.language === 'ja';
       showToast(
-        isJaNow ? `設定の保存に失敗しました: ${detail}` : `Failed to save settings: ${detail}`,
+        isJaNow
+          ? '設定の保存に失敗しました。詳細は開発者ツールのコンソールを確認してください。'
+          : 'Failed to save settings. See the developer console for details.',
         { tone: 'error', duration: 6000 }
       );
       return; // saved=true / setTimeout を始動しないことで、モーダルを閉じない
@@ -288,11 +300,16 @@ export function SettingsModal({
     const fixedLabelMap = fixedLabels;
     const agents = draft.customAgents ?? [];
     const customLabelMap = new Map(agents.map((a) => [a.id, a.name] as const));
+    // fixedLabels と untitled fallback は draft.language で同期して切り替わるため、
+    // どちらかを deps に入れれば言語切替を検知できる。closure から isJa を直接参照しないことで
+    // eslint exhaustive-deps 違反を解消する (レビュー指摘)。
+    const untitled =
+      fixedLabelMap === FIXED_LABELS_JA ? UNTITLED_FALLBACK_JA : UNTITLED_FALLBACK_EN;
     const labelForFilter = (id: SectionId): string => {
       if (fixedLabelMap[id]) return fixedLabelMap[id].label;
       if (id.startsWith('custom:')) {
         const aid = id.slice('custom:'.length);
-        return customLabelMap.get(aid) || (isJa ? '（無名）' : '(untitled)');
+        return customLabelMap.get(aid) || untitled;
       }
       return id;
     };
@@ -306,27 +323,30 @@ export function SettingsModal({
         })
       }))
       .filter((g) => g.items.length > 0);
-    // 旧コードは fixedLabels と isJa の両方を deps に入れていたが、fixedLabels は
-    // FIXED_LABELS_JA / _EN のモジュール定数を isJa で選んだだけなので isJa は冗長 (レビュー指摘)。
-    // fixedLabels が変われば必然的に isJa も切り替わっており、`fixedLabels` だけで十分。
-    // groupsRaw deps は draft.customAgents と draft.language をモジュールスコープ参照で
-    // 拾うので isJa を抜くのと同様の理由で `draft.customAgents` を直接入れる。
-  }, [navQuery, groupsRaw, fixedLabels, draft.customAgents]);
+    // deps 構成: navQuery (検索ワード) と groupsRaw (構造) と fixedLabels (言語切替) のみ。
+    // closure 内の untitled fallback は fixedLabels === FIXED_LABELS_JA で判別するため
+    // fixedLabels の参照変化で必然的に再評価される (= 言語切替を fixedLabels だけで検知できる)。
+    // customAgents は groupsRaw 経由で参照変化が伝播する。
+  }, [navQuery, groupsRaw, fixedLabels]);
 
   // 検索フィルタ後の groups に activeSection が含まれない場合、右ペインとサイドバーの
   // 選択状態が乖離する (例: "font" 検索で nav は fonts だけ表示するのに右ペインは general のまま)。
-  // → フィルタ結果の最初の項目に自動で切り替えて整合させる。検索クリア時は最後に選んだ
-  //    項目を維持する (ユーザーが意図的にクリアした想定)。
-  // deps から activeSection を外し、setActiveSection(prev => ...) の関数型更新で自分自身を読む。
-  // (deps に入れると setActiveSection → 再レンダー → useEffect 再実行のループが理論上発生しうる)
+  // → クエリが変わった瞬間にだけフィルタ結果の最初の項目に切り替えて整合させる。
+  //
+  // 旧コードは deps に groups を入れていたが、検索中に customAgents が増減すると groups が
+  // 変わって意図せず activeSection が先頭にリセットされる edge case があった (レビュー指摘)。
+  // → 同期は navQuery 変化時のみに限定し、groups は ref 経由で最新値を読む。
+  // 関数型更新で activeSection 自身を比較することで再レンダーループも防ぐ。
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
   useEffect(() => {
     if (!navQuery.trim()) return;
-    const flat: SectionId[] = groups
+    const flat: SectionId[] = groupsRef.current
       .flatMap((g) => g.items)
       .filter((id) => id !== '__addCustom');
     if (flat.length === 0) return;
     setActiveSection((prev) => (flat.includes(prev) ? prev : flat[0]));
-  }, [navQuery, groups]);
+  }, [navQuery]);
 
   const renderSection = (id: SectionId): JSX.Element | null => {
     switch (id) {

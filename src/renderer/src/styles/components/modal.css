@@ -598,6 +598,10 @@
   }
 }
 
+/* :active は @media (hover: hover) の外に置く (意図的)。
+   タッチデバイスでも :active は短時間走るが、translateY(0) / box-shadow:none は
+   どちらも「初期状態に戻す」値なので視覚的な悪影響なし。むしろ hover が出ない端末で
+   tap 後の sticky transform を確実にリセットする保険として役立つ。 */
 .modal--settings .theme-card:active,
 .modal--settings .lang-card:active,
 .modal--settings .density-card:active {
