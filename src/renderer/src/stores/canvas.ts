@@ -70,6 +70,15 @@ function newId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${counter}`;
 }
 
+/**
+ * Issue #156: pulseEdge の TTL 用 setTimeout ハンドルを edge.id ごとに保持する。
+ * 同じ edge.id への連続 pulse は古い timer を clear して上書き、clear() / unmount で
+ * 全件まとめて clear する。これにより:
+ *  - 1.5s 以内に clear() が走った後の不要再描画を防ぐ
+ *  - 大量 handoff 時の保留 timer 蓄積を抑える
+ */
+const pulseTimers = new Map<string, number>();
+
 export const useCanvasStore = create<CanvasState>()(
   persist(
     (set, get) => ({
@@ -170,11 +179,25 @@ export const useCanvasStore = create<CanvasState>()(
         }),
       pulseEdge: (edge, ttlMs = 1500) => {
         set({ edges: [...get().edges.filter((e) => e.id !== edge.id), edge] });
-        setTimeout(() => {
+        // Issue #156: 同 id の前回 pulse タイマーを clear してから新規張り直し
+        const prev = pulseTimers.get(edge.id);
+        if (prev !== undefined) {
+          window.clearTimeout(prev);
+        }
+        const handle = window.setTimeout(() => {
+          pulseTimers.delete(edge.id);
           set({ edges: get().edges.filter((e) => e.id !== edge.id) });
         }, ttlMs);
+        pulseTimers.set(edge.id, handle);
       },
-      clear: () => set({ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 }, teamLocks: {} }),
+      clear: () => {
+        // Issue #156: pulse 用の保留タイマーを全件 clear して、clear 後の不要再描画を防ぐ
+        for (const h of pulseTimers.values()) {
+          window.clearTimeout(h);
+        }
+        pulseTimers.clear();
+        set({ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 }, teamLocks: {} });
+      },
       stageView: 'stage',
       setStageView: (v) => set({ stageView: v }),
       teamLocks: {},
