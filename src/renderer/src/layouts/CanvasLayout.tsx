@@ -49,7 +49,7 @@ import {
   presetPosition,
   type WorkspacePreset
 } from '../lib/workspace-presets';
-import { ROLE_META } from '../lib/team-roles';
+import { ROLE_META, roleMetaFor } from '../lib/team-roles';
 import { useSettings } from '../lib/settings-context';
 import { useToast } from '../lib/toast-context';
 
@@ -852,7 +852,10 @@ function RoleDot({
   role: TeamRole;
   agent: TerminalAgent;
 }): JSX.Element {
-  const meta = ROLE_META[role];
+  // 動的ロール (Leader が team_create_role で作成した worker) は ROLE_META にエントリが
+  // 無く undefined になり .label/.color/.glyph 参照で TypeError を起こす (#220 系で報告)。
+  // roleMetaFor は不明 role に対して fallbackProfile を返してくれるので、これに切り替える。
+  const meta = ROLE_META[role] ?? roleMetaFor(role, 'en');
   return (
     <span
       className="canvas-role-dot"
