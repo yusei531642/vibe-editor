@@ -52,21 +52,28 @@ interface SettingsModalProps {
 type SectionId = string;
 
 /** セクション ID → サイドバー Lucide アイコン。
- *  関数内で定義するとレンダーごとに新規 JSX が生成されるため、コンポーネント外に置く。 */
-const SECTION_ICONS: Record<string, JSX.Element> = {
-  general: <SettingsIcon size={14} strokeWidth={1.85} />,
-  appearance: <Palette size={14} strokeWidth={1.85} />,
-  fonts: <Type size={14} strokeWidth={1.85} />,
-  claude: <Bot size={14} strokeWidth={1.85} />,
-  codex: <Code2 size={14} strokeWidth={1.85} />,
-  roles: <Users size={14} strokeWidth={1.85} />,
-  mcp: <Plug size={14} strokeWidth={1.85} />
+ *
+ *  旧実装は JSX リテラルをモジュールスコープに保持していたが、これは
+ *  React.StrictMode の二重レンダリングや React Server Components 移行時に
+ *  「複数のレンダーが同一インスタンスを共有する」前提が崩れる懸念がある。
+ *  → アイコンコンポーネント自体だけを参照し、props (size/strokeWidth) は
+ *     共通定数として再利用、JSX は呼び出しごとに都度生成する形に統一する。
+ *     パフォーマンスへの影響はこの規模では実測差が出ないため、安全側に倒す。 */
+const ICON_PROPS = { size: 14, strokeWidth: 1.85 } as const;
+const SECTION_ICON_TYPES: Record<string, React.ComponentType<typeof ICON_PROPS>> = {
+  general: SettingsIcon,
+  appearance: Palette,
+  fonts: Type,
+  claude: Bot,
+  codex: Code2,
+  roles: Users,
+  mcp: Plug
 };
-const CUSTOM_ICON: JSX.Element = <Sparkles size={14} strokeWidth={1.85} />;
 function iconFor(id: SectionId): JSX.Element {
-  if (SECTION_ICONS[id]) return SECTION_ICONS[id];
-  if (id.startsWith('custom:')) return CUSTOM_ICON;
-  return SECTION_ICONS.general;
+  const Icon =
+    SECTION_ICON_TYPES[id] ??
+    (id.startsWith('custom:') ? Sparkles : SECTION_ICON_TYPES.general);
+  return <Icon {...ICON_PROPS} />;
 }
 
 /** 固定セクションのラベル / タイトル / 説明 (i18n)。
@@ -159,7 +166,14 @@ export function SettingsModal({
     // saved=true の状態で再度押されるのはボタンの disabled で防いでいるが、
     // 380ms 中に外部から閉じる操作が走ったあとに別経路でこの関数が呼ばれた場合の二重実行ガード。
     if (saved) return;
-    onApply(draft);
+    // onApply が throw した場合に「保存された ✓」のフィードバックを見せて閉じてしまうと
+    // ユーザーは保存に成功したと誤解する。例外を捕まえて、success path だけで saved=true に倒す。
+    try {
+      onApply(draft);
+    } catch (err) {
+      console.error('[settings] apply failed:', err);
+      return; // saved=true / setTimeout を始動しないことで、エラーは UI から飲み込まれない
+    }
     // 保存ボタンを 380ms だけ ✓ 表示にしてから閉じる。
     // 「押した → 保存された → モーダルが消える」の因果が体感できるようにする (Linear / Vercel 風)。
     setSaved(true);
@@ -222,29 +236,33 @@ export function SettingsModal({
     setActiveSection(`custom:${id}`);
   };
 
-  // groupsRaw は customAgents と isJa から導出される。useMemo で安定化させ、
-  // 後段 useMemo (groups) の依存配列で正しく検出させる。
-  // (旧実装は毎レンダーで新しい配列を作っており groups の useMemo がメモ化されていなかった)
+  // groupsRaw は customAgents と isJa から導出される。useMemo で安定化させる。
+  // deps には `customAgents` ローカル (`draft.customAgents ?? []`) ではなく `draft.customAgents` を
+  // 直接入れる。`?? []` は undefined のとき毎レンダー新しい [] を返してしまい、参照比較で常に
+  // 不一致 → メモ化が無効化される。`draft.customAgents` 自体は同一更新内では安定。
   const groupsRaw = useMemo<
     Array<{ label: string | null; items: SectionId[] }>
   >(
-    () => [
-      { label: null, items: ['general', 'appearance', 'fonts'] },
-      {
-        label: isJa ? 'エージェント' : 'Agents',
-        items: [
-          'claude',
-          'codex',
-          ...customAgents.map((a) => `custom:${a.id}`),
-          '__addCustom'
-        ]
-      },
-      // vibe-team MCP のセットアップ手順は「チーム」機能の一部なので同グループに収める。
-      // 旧構成では MCP を独立グループにしていたが、グループラベル "MCP" と唯一の項目 "MCP" が
-      // 同名で並び、サイドバー上で MCP が 2 行重複しているように見える UI バグを生んでいた。
-      { label: isJa ? 'チーム' : 'Team', items: ['roles', 'mcp'] }
-    ],
-    [customAgents, isJa]
+    () => {
+      const agents = draft.customAgents ?? [];
+      return [
+        { label: null, items: ['general', 'appearance', 'fonts'] },
+        {
+          label: isJa ? 'エージェント' : 'Agents',
+          items: [
+            'claude',
+            'codex',
+            ...agents.map((a) => `custom:${a.id}`),
+            '__addCustom'
+          ]
+        },
+        // vibe-team MCP のセットアップ手順は「チーム」機能の一部なので同グループに収める。
+        // 旧構成では MCP を独立グループにしていたが、グループラベル "MCP" と唯一の項目 "MCP" が
+        // 同名で並び、サイドバー上で MCP が 2 行重複しているように見える UI バグを生んでいた。
+        { label: isJa ? 'チーム' : 'Team', items: ['roles', 'mcp'] }
+      ];
+    },
+    [draft.customAgents, isJa]
   );
 
   // 検索ワードで items を絞り込む。`__addCustom` は検索中だけ非表示 (新規追加は通常時のみ)。
@@ -256,7 +274,8 @@ export function SettingsModal({
     const q = navQuery.trim().toLowerCase();
     if (!q) return groupsRaw;
     const fixedLabelMap = fixedLabels;
-    const customLabelMap = new Map(customAgents.map((a) => [a.id, a.name] as const));
+    const agents = draft.customAgents ?? [];
+    const customLabelMap = new Map(agents.map((a) => [a.id, a.name] as const));
     const labelForFilter = (id: SectionId): string => {
       if (fixedLabelMap[id]) return fixedLabelMap[id].label;
       if (id.startsWith('custom:')) {
@@ -275,7 +294,22 @@ export function SettingsModal({
         })
       }))
       .filter((g) => g.items.length > 0);
-  }, [navQuery, groupsRaw, fixedLabels, customAgents, isJa]);
+  }, [navQuery, groupsRaw, fixedLabels, draft.customAgents, isJa]);
+
+  // 検索フィルタ後の groups に activeSection が含まれない場合、右ペインとサイドバーの
+  // 選択状態が乖離する (例: "font" 検索で nav は fonts だけ表示するのに右ペインは general のまま)。
+  // → フィルタ結果の最初の項目に自動で切り替えて整合させる。検索クリア時は最後に選んだ
+  //    項目を維持する (ユーザーが意図的にクリアした想定)。
+  useEffect(() => {
+    if (!navQuery.trim()) return;
+    const flat: SectionId[] = groups
+      .flatMap((g) => g.items)
+      .filter((id) => id !== '__addCustom');
+    if (flat.length === 0) return;
+    if (!flat.includes(activeSection)) {
+      setActiveSection(flat[0]);
+    }
+  }, [navQuery, groups, activeSection]);
 
   const renderSection = (id: SectionId): JSX.Element | null => {
     switch (id) {

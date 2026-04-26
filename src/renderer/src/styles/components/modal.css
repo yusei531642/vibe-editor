@@ -581,16 +581,21 @@
     transform 200ms cubic-bezier(0.25, 1, 0.5, 1);
 }
 
-.modal--settings .theme-card:hover,
-.modal--settings .lang-card:hover,
-.modal--settings .density-card:hover {
-  background: var(--bg-elev);
-  border-color: var(--border-strong);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 14px -8px rgba(0, 0, 0, 0.45);
-  /* will-change: transform は撤去。hover で初めて付与してもブラウザが GPU 準備する時間が無く
-     最適化効果が薄い (レビュー指摘)。常時付与は GPU メモリを無駄に食うので、
-     Chromium の auto-promote ヒューリスティックに任せる方が賢明。 */
+/* hover による translateY と shadow はマウス系デバイスのみで有効化する。
+   タッチデバイスでは hover 状態がスティッキーになり、タップ後にカードが浮いたままになる。
+   @media (hover: hover) で hover が走り去れる環境だけに絞る (レビュー指摘)。 */
+@media (hover: hover) {
+  .modal--settings .theme-card:hover,
+  .modal--settings .lang-card:hover,
+  .modal--settings .density-card:hover {
+    background: var(--bg-elev);
+    border-color: var(--border-strong);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px -8px rgba(0, 0, 0, 0.45);
+    /* will-change: transform は撤去。hover で初めて付与してもブラウザが GPU 準備する時間が無く
+       最適化効果が薄い。常時付与は GPU メモリを無駄に食うので、Chromium の auto-promote に
+       任せる方が賢明。 */
+  }
 }
 
 .modal--settings .theme-card:active,
