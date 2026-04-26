@@ -69,6 +69,29 @@ function iconFor(id: SectionId): JSX.Element {
   return SECTION_ICONS.general;
 }
 
+/** 固定セクションのラベル / タイトル / 説明 (i18n)。
+ *  毎レンダー新規オブジェクトを生成すると useMemo の deps チェーンが無効化されるため、
+ *  ja / en それぞれをモジュールスコープで 1 度だけ作る。 */
+type FixedLabelEntry = { label: string; title: string; desc: string };
+const FIXED_LABELS_JA: Record<string, FixedLabelEntry> = {
+  general: { label: '一般', title: '一般', desc: '言語と密度設定' },
+  appearance: { label: '表示', title: '表示', desc: 'テーマと配色' },
+  fonts: { label: 'フォント', title: 'フォント', desc: 'UI / エディタ / ターミナルのフォント' },
+  claude: { label: 'Claude Code', title: 'Claude Code', desc: '起動コマンドと引数' },
+  codex: { label: 'Codex', title: 'Codex', desc: '起動コマンドと引数' },
+  roles: { label: 'ロール定義', title: 'ロール定義', desc: 'チームメンバーの役割テンプレ' },
+  mcp: { label: 'MCP', title: 'MCP', desc: 'vibe-team MCP の導入方法' }
+};
+const FIXED_LABELS_EN: Record<string, FixedLabelEntry> = {
+  general: { label: 'General', title: 'General', desc: 'Language and density' },
+  appearance: { label: 'Appearance', title: 'Appearance', desc: 'Theme and surfaces' },
+  fonts: { label: 'Fonts', title: 'Typography', desc: 'UI / editor / terminal fonts' },
+  claude: { label: 'Claude Code', title: 'Claude Code', desc: 'Launch command and args' },
+  codex: { label: 'Codex', title: 'Codex', desc: 'Launch command and args' },
+  roles: { label: 'Role profiles', title: 'Role profiles', desc: 'Team member role templates' },
+  mcp: { label: 'MCP', title: 'MCP', desc: 'How to install vibe-team MCP' }
+};
+
 export function SettingsModal({
   open,
   initial,
@@ -133,6 +156,9 @@ export function SettingsModal({
   };
 
   const handleApply = (): void => {
+    // saved=true の状態で再度押されるのはボタンの disabled で防いでいるが、
+    // 380ms 中に外部から閉じる操作が走ったあとに別経路でこの関数が呼ばれた場合の二重実行ガード。
+    if (saved) return;
     onApply(draft);
     // 保存ボタンを 380ms だけ ✓ 表示にしてから閉じる。
     // 「押した → 保存された → モーダルが消える」の因果が体感できるようにする (Linear / Vercel 風)。
@@ -141,7 +167,7 @@ export function SettingsModal({
     saveTimerRef.current = window.setTimeout(() => {
       saveTimerRef.current = null;
       // setSaved(false) は呼ばない: onClose で親がアンマウントするので不要な再レンダーを生むだけ。
-      // (再 open 時は wasOpenRef effect が draft を initial に戻し、saved も初期値 false に戻る)
+      // 再 open 時の saved リセットは wasOpenRef effect (上) に集約してあるのでここでは不要。
       onClose();
     }, 380);
   };
@@ -155,26 +181,9 @@ export function SettingsModal({
   const isJa = draft.language === 'ja';
   const customAgents = draft.customAgents ?? [];
 
-  // 固定ラベル
-  const fixedLabels: Record<string, { label: string; title: string; desc: string }> = isJa
-    ? {
-        general: { label: '一般', title: '一般', desc: '言語と密度設定' },
-        appearance: { label: '表示', title: '表示', desc: 'テーマと配色' },
-        fonts: { label: 'フォント', title: 'フォント', desc: 'UI / エディタ / ターミナルのフォント' },
-        claude: { label: 'Claude Code', title: 'Claude Code', desc: '起動コマンドと引数' },
-        codex: { label: 'Codex', title: 'Codex', desc: '起動コマンドと引数' },
-        roles: { label: 'ロール定義', title: 'ロール定義', desc: 'チームメンバーの役割テンプレ' },
-        mcp: { label: 'MCP', title: 'MCP', desc: 'vibe-team MCP の導入方法' }
-      }
-    : {
-        general: { label: 'General', title: 'General', desc: 'Language and density' },
-        appearance: { label: 'Appearance', title: 'Appearance', desc: 'Theme and surfaces' },
-        fonts: { label: 'Fonts', title: 'Typography', desc: 'UI / editor / terminal fonts' },
-        claude: { label: 'Claude Code', title: 'Claude Code', desc: 'Launch command and args' },
-        codex: { label: 'Codex', title: 'Codex', desc: 'Launch command and args' },
-        roles: { label: 'Role profiles', title: 'Role profiles', desc: 'Team member role templates' },
-        mcp: { label: 'MCP', title: 'MCP', desc: 'How to install vibe-team MCP' }
-      };
+  // 固定ラベルはモジュールスコープのため毎レンダーで参照が変わらない。
+  // useMemo deps に直接入れても安定性を保てる。
+  const fixedLabels = isJa ? FIXED_LABELS_JA : FIXED_LABELS_EN;
 
   /** 指定 id のラベル情報を返す (固定 + カスタム動的) */
   const labelOf = (id: SectionId): { label: string; title: string; desc: string } => {
