@@ -59,20 +59,14 @@ export function useTeamHandoff(callback: (p: HandoffPayload) => void): void {
       listeners.delete(wrapper);
       if (listeners.size !== 0) return;
       // 全 subscriber が抜けた → Tauri listener を止めて initPromise をリセット。
-      // listen() がまだ resolve していなくても、Promise.then で resolve 後に呼ぶことで
-      // 「unlisten が孤児になり次マウントで二重 listen」 (Issue #192) を防ぐ。
-      // ただし then 内で listeners.size を再確認し、別フックが先に再 mount していれば
-      // unlisten せずにそのまま使い回す (false-positive cleanup を避ける)。
-      const stale = initPromise;
+      // listen() がまだ resolve していなくても、Promise.then で resolve 後に必ず unlisten を
+      // 呼ぶことで「unlisten が孤児になり次マウントで二重 listen」 (Issue #192) を防ぐ。
+      // 再マウントは ensureRegistered() で新しい listen を作るので、古い myInit は確実に閉じる。
+      // (旧コミットでは「再マウントが間に合えば stale を再活用」する最適化を入れていたが、
+      //  cleanup 高頻度時の世代管理が複雑になりレビューで race を指摘された。listen 1 回分の
+      //  コストは無視できるので常に閉じる単純形に戻す。)
       initPromise = null;
-      void myInit.then((u) => {
-        if (listeners.size > 0 && initPromise === null) {
-          // 再マウントが間に合った: この listen をそのまま再活用する
-          initPromise = stale;
-        } else {
-          u();
-        }
-      });
+      void myInit.then((u) => u()).catch(() => {});
     };
   }, []);
 }

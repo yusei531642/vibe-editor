@@ -72,34 +72,22 @@ export function SettingsModal({
     if (!exists) setActiveSection('general');
   }, [activeSection, draft.customAgents]);
 
-  // Issue #195 (a11y): document レベルで Escape をキャッチして閉じる。
-  // (modal 内 input にフォーカスが当たっていても効くように window 経由で listen する)
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, [open, onClose]);
-
   // Issue #195: マウント直後にダイアログ内の最初の focusable に focus を移す。
   // 何もせず開くと focus は背景 (Canvas/FileTree) に残り、Tab で背後に抜ける起点になる。
+  // setTimeout のマジックナンバーを避けるため requestAnimationFrame を使い、
+  // 描画完了直後の最初のフレームで focus を移す。
   useEffect(() => {
     if (!open) return;
-    // 描画完了を待ってから focus (transition 中の hidden 要素を選ばないため遅延)
-    const id = window.setTimeout(() => {
+    let raf = 0;
+    raf = window.requestAnimationFrame(() => {
       const root = dialogRef.current;
       if (!root) return;
       const target = root.querySelector<HTMLElement>(
-        '[autofocus], button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+        '[autofocus], button, [href], input, select, textarea, [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])'
       );
       target?.focus();
-    }, 30);
-    return () => window.clearTimeout(id);
+    });
+    return () => window.cancelAnimationFrame(raf);
   }, [open]);
 
   const { mounted, dataState, motion } = useSpringMount(open, 180);
@@ -310,13 +298,28 @@ export function SettingsModal({
         aria-modal="true"
         aria-label={isJa ? '設定' : 'Settings'}
         onKeyDown={(e) => {
-          // Issue #195: 簡易 focus trap。Tab/Shift+Tab で末尾⇄先頭をループさせる。
+          // Issue #195: Escape で閉じる + Tab で focus trap。
+          // Escape は input/textarea/IME 確定中はスキップ (IME 確定キャンセル等の標準挙動を妨げない)。
+          if (e.key === 'Escape') {
+            const target = e.target as HTMLElement | null;
+            const tag = target?.tagName;
+            const isTextField =
+              tag === 'INPUT' ||
+              tag === 'TEXTAREA' ||
+              target?.getAttribute('contenteditable') === 'true';
+            // nativeEvent.isComposing は IME 変換中 true。確定前の Escape を漏らさない。
+            const composing = (e.nativeEvent as KeyboardEvent).isComposing;
+            if (isTextField && composing) return;
+            e.preventDefault();
+            onClose();
+            return;
+          }
           if (e.key !== 'Tab') return;
           const root = dialogRef.current;
           if (!root) return;
           const focusables = Array.from(
             root.querySelectorAll<HTMLElement>(
-              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])'
             )
           ).filter((el) => el.offsetParent !== null);
           if (focusables.length === 0) return;
