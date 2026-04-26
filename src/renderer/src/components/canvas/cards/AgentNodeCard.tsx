@@ -101,19 +101,28 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const [status, setStatus] = useState<string>('');
   // Phase 4: ステータスバッジ。出力を最近受け取ったら typing、暫く来なければ idle。
   const [activity, setActivity] = useState<AgentStatus>('idle');
-  const lastActivityRef = useRef(0);
+  // Issue #125: 旧実装は 200ms 周期の setInterval を全 AgentNodeCard が常時動かしており
+  // 30 カード並ぶと idle 中も毎秒 150 回 timer が起きていた (省電力モード/裏画面でも)。
+  // → 出力イベント (handleActivity) の都度 setTimeout を立て直し、idle 復帰でクリアする。
+  //   typing 状態の間しかタイマーが動かないので idle 時はゼロコスト。
+  const idleTimerRef = useRef<number | null>(null);
   const handleActivity = (): void => {
-    lastActivityRef.current = performance.now();
     setActivity('typing');
+    if (idleTimerRef.current !== null) {
+      window.clearTimeout(idleTimerRef.current);
+    }
+    idleTimerRef.current = window.setTimeout(() => {
+      idleTimerRef.current = null;
+      setActivity((prev) => (prev !== 'idle' ? 'idle' : prev));
+    }, 600);
   };
-  // 600ms 何も無ければ idle に戻す
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (performance.now() - lastActivityRef.current > 600) {
-        setActivity((prev) => (prev !== 'idle' ? 'idle' : prev));
+    return () => {
+      if (idleTimerRef.current !== null) {
+        window.clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = null;
       }
-    }, 200);
-    return () => window.clearInterval(timer);
+    };
   }, []);
 
   // ----- ユーザー入力から auto-summary タイトル -----
