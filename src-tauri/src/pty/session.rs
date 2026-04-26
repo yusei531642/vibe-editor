@@ -288,6 +288,7 @@ pub fn spawn_session(
     app: AppHandle,
     id: String,
     opts: SpawnOptions,
+    registry: std::sync::Arc<crate::pty::SessionRegistry>,
 ) -> Result<SessionHandle> {
     let pty_system = native_pty_system();
     let pair = pty_system.openpty(PtySize {
@@ -368,8 +369,12 @@ pub fn spawn_session(
     spawn_batcher(app.clone(), data_event, rx);
 
     // exit watcher (blocking child.wait → emit exit event)
+    // Issue #152: child.wait() の後に registry からも remove して、孤立 entry が
+    // residual に残らないようにする (renderer が落ちて terminal_kill が呼ばれない経路で必要)。
     let app_for_exit = app.clone();
     let exit_event_clone = exit_event.clone();
+    let registry_for_exit = registry.clone();
+    let id_for_exit = id.clone();
     std::thread::spawn(move || {
         let exit_status = child.wait().ok();
         let info = TerminalExitInfo {
@@ -382,6 +387,9 @@ pub fn spawn_session(
         if let Err(e) = app_for_exit.emit(&exit_event_clone, info) {
             tracing::warn!("emit {exit_event_clone} failed: {e}");
         }
+        // child.wait() が返った時点で kill 不要だが、registry::remove は handle.kill() を呼ぶ。
+        // SessionHandle::kill() は何度呼んでも安全 (ChildKiller 内部で no-op)。
+        let _ = registry_for_exit.remove(&id_for_exit);
     });
 
     Ok(SessionHandle {

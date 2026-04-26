@@ -273,7 +273,7 @@ pub async fn terminal_create(
         role: opts.role,
     };
 
-    match spawn_session(app.clone(), id.clone(), spawn_opts) {
+    match spawn_session(app.clone(), id.clone(), spawn_opts, state.pty_registry.clone()) {
         Ok(handle) => {
             state.pty_registry.insert(id.clone(), handle);
 
