@@ -517,33 +517,47 @@ async fn handle_client(
     // 待機中の team_recruit があればここで resolve (caller への MCP response が解放される)
     hub.resolve_pending_recruit(&ctx.agent_id, &ctx.role).await;
 
-    // Issue #107: BufReader::lines() は行サイズに上限が無く、`\n` 無しの巨大 line で
-    // メモリ DoS になる。1 byte ずつ BufReader 経由で読み (内部 4KB buffer でまとめ取り
-    // されるので syscall コストは無視できる)、RPC_LINE_LIMIT を超えたら行を破棄しつつ
-    // \n まで読み捨てて接続維持する。
-    use tokio::io::AsyncReadExt;
+    // Issue #107 + #133: BufReader::lines() は行サイズに上限が無く DoS になる。
+    // 旧実装は 1 byte ずつ read_exact を呼んでいたため、長文 message 1 行 (10 KB) で
+    // 10000 回の future poll が走り tokio worker を飽和させていた。
+    // → AsyncBufReadExt::read_until(b'\n', ...) でまとめ取りし、戻り値が
+    //   RPC_LINE_LIMIT を超えていたらその場で破棄する方針に変更。
+    //   read_until は内部 BufReader バッファごと一気にコピーするので poll 回数が激減する。
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt};
     let mut buf: Vec<u8> = Vec::with_capacity(4096);
     loop {
         buf.clear();
+        // RPC_LINE_LIMIT + 1 までは積極的に取り、超えたら overflowed として破棄する。
+        // 1 行が極端に長くてもメモリ使用量は LIMIT で頭打ちになる。
         let mut overflowed = false;
-        loop {
-            let mut byte = [0u8; 1];
-            match reader.read_exact(&mut byte).await {
-                Ok(_) => {}
-                Err(_) => return Ok(()), // EOF / 切断
-            }
-            if byte[0] == b'\n' {
-                break;
-            }
-            if !overflowed {
-                if buf.len() >= RPC_LINE_LIMIT {
-                    overflowed = true;
-                    buf.clear();
-                } else {
-                    buf.push(byte[0]);
+        // tokio の BufReader::read_until は max 制限が無いので、自前で take してから読む。
+        // ただし client が \n を送ってこないと無限読みになるため、LIMIT+1 で take。
+        let mut limited = (&mut reader).take((RPC_LINE_LIMIT as u64) + 1);
+        match limited.read_until(b'\n', &mut buf).await {
+            Ok(0) => return Ok(()), // EOF / 切断
+            Ok(_) => {}
+            Err(_) => return Ok(()),
+        }
+        if buf.last() != Some(&b'\n') {
+            // limit に達して \n 未到達 → overflowed。残りを \n まで捨てる。
+            overflowed = true;
+            buf.clear();
+            // \n を見つけるまで読み捨てる (LIMIT バイトずつ繰り返し)
+            loop {
+                let mut drop_buf: Vec<u8> = Vec::with_capacity(4096);
+                let mut drop_limited = (&mut reader).take((RPC_LINE_LIMIT as u64) + 1);
+                match drop_limited.read_until(b'\n', &mut drop_buf).await {
+                    Ok(0) => return Ok(()),
+                    Ok(_) => {}
+                    Err(_) => return Ok(()),
+                }
+                if drop_buf.last() == Some(&b'\n') {
+                    break;
                 }
             }
-            // overflowed の場合は buf に push しない (= \n まで読み捨て)
+        } else {
+            // 末尾の \n を取り除く (後続の処理が trim 前提のため)
+            buf.pop();
         }
 
         if overflowed {
