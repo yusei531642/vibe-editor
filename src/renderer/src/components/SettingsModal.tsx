@@ -47,6 +47,8 @@ export function SettingsModal({
   const t = useT();
   const [draft, setDraft] = useState<AppSettings>(initial);
   const [activeSection, setActiveSection] = useState<SectionId>('general');
+  // Issue #195: focus trap + Escape + autofocus 用のルート ref
+  const dialogRef = useRef<HTMLDivElement | null>(null);
 
   // Issue #178: open 中に外部から settings が更新されると useEffect が再発火して
   // ユーザー入力中の draft が消える事故があった。
@@ -69,6 +71,36 @@ export function SettingsModal({
     );
     if (!exists) setActiveSection('general');
   }, [activeSection, draft.customAgents]);
+
+  // Issue #195 (a11y): document レベルで Escape をキャッチして閉じる。
+  // (modal 内 input にフォーカスが当たっていても効くように window 経由で listen する)
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open, onClose]);
+
+  // Issue #195: マウント直後にダイアログ内の最初の focusable に focus を移す。
+  // 何もせず開くと focus は背景 (Canvas/FileTree) に残り、Tab で背後に抜ける起点になる。
+  useEffect(() => {
+    if (!open) return;
+    // 描画完了を待ってから focus (transition 中の hidden 要素を選ばないため遅延)
+    const id = window.setTimeout(() => {
+      const root = dialogRef.current;
+      if (!root) return;
+      const target = root.querySelector<HTMLElement>(
+        '[autofocus], button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+      );
+      target?.focus();
+    }, 30);
+    return () => window.clearTimeout(id);
+  }, [open]);
 
   const { mounted, dataState, motion } = useSpringMount(open, 180);
   if (!mounted) return null;
@@ -269,10 +301,36 @@ export function SettingsModal({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         className="modal modal--settings"
         data-state={dataState}
         data-motion={motion}
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={isJa ? '設定' : 'Settings'}
+        onKeyDown={(e) => {
+          // Issue #195: 簡易 focus trap。Tab/Shift+Tab で末尾⇄先頭をループさせる。
+          if (e.key !== 'Tab') return;
+          const root = dialogRef.current;
+          if (!root) return;
+          const focusables = Array.from(
+            root.querySelectorAll<HTMLElement>(
+              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+            )
+          ).filter((el) => el.offsetParent !== null);
+          if (focusables.length === 0) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          const active = document.activeElement as HTMLElement | null;
+          if (e.shiftKey && active === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && active === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }}
       >
         <header className="modal__header">
           <div className="modal__title-group" style={{ display: 'flex', alignItems: 'center' }}>
