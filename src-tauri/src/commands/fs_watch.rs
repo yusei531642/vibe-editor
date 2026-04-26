@@ -43,21 +43,21 @@ fn current_active() -> (u64, Option<String>) {
 
 /// `root` 配下を監視開始する。既に別 root で動いていたら停止する。
 pub fn start_for_root(app: AppHandle, root: String) {
-    // 同じ root + 既存 generation が動いているなら no-op
-    {
-        if let Ok(g) = ACTIVE_WATCHER_GEN.lock() {
-            if g.1.as_deref() == Some(root.as_str()) {
-                return;
-            }
+    // Issue #171: 「同 root なら no-op」判定と generation 更新の lock を分けると
+    // TOCTOU で同 root に並行 start_for_root が両方 spawn する race があった。
+    // 1 つの critical section にまとめ、no-op 判定 → generation 更新 → spawn 引数生成までを
+    // ロック保持中に行う。
+    let my_generation = {
+        let mut g = match ACTIVE_WATCHER_GEN.lock() {
+            Ok(g) => g,
+            Err(_) => return,
+        };
+        if g.1.as_deref() == Some(root.as_str()) {
+            return; // 同 root 同 generation が既に動いているので no-op
         }
-    }
-    // 世代をインクリメントし、新しい root を active にする
-    let my_generation = if let Ok(mut g) = ACTIVE_WATCHER_GEN.lock() {
         g.0 = g.0.wrapping_add(1);
         g.1 = Some(root.clone());
         g.0
-    } else {
-        return;
     };
 
     let my_root = root.clone();
