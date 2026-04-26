@@ -30,24 +30,35 @@ fn path_is_ignored(path: &Path, root: &Path) -> bool {
     })
 }
 
-/// 現在動いている watcher のスレッドを停止させるためのフラグ
-static ACTIVE_WATCHER_ROOT: Lazy<Mutex<Option<String>>> = Lazy::new(|| Mutex::new(None));
+/// 現在動いている watcher を識別する世代カウンタ。
+/// Issue #146: 旧実装は ROOT 文字列の一致だけで「自分が現役か」を判定していたため、
+/// 同じ root を 2 回 start すると watcher が並走してしまう余地があり、また
+/// 切替直後に旧 watcher が emit するタイミングを潰せなかった。
+/// 世代を毎回 +1 して、ループ内では `current_generation() == my_generation` で照合する。
+static ACTIVE_WATCHER_GEN: Lazy<Mutex<(u64, Option<String>)>> = Lazy::new(|| Mutex::new((0, None)));
+
+fn current_active() -> (u64, Option<String>) {
+    ACTIVE_WATCHER_GEN.lock().ok().map(|g| g.clone()).unwrap_or((0, None))
+}
 
 /// `root` 配下を監視開始する。既に別 root で動いていたら停止する。
 pub fn start_for_root(app: AppHandle, root: String) {
-    // 同じ root なら no-op
+    // 同じ root + 既存 generation が動いているなら no-op
     {
-        let guard = ACTIVE_WATCHER_ROOT.lock().ok();
-        if let Some(guard) = guard {
-            if guard.as_deref() == Some(root.as_str()) {
+        if let Ok(g) = ACTIVE_WATCHER_GEN.lock() {
+            if g.1.as_deref() == Some(root.as_str()) {
                 return;
             }
         }
     }
-    // ACTIVE_WATCHER_ROOT を更新 (旧 watcher は `*_ROOT != my_root` 判定で自分で stop する)
-    if let Ok(mut g) = ACTIVE_WATCHER_ROOT.lock() {
-        *g = Some(root.clone());
-    }
+    // 世代をインクリメントし、新しい root を active にする
+    let my_generation = if let Ok(mut g) = ACTIVE_WATCHER_GEN.lock() {
+        g.0 = g.0.wrapping_add(1);
+        g.1 = Some(root.clone());
+        g.0
+    } else {
+        return;
+    };
 
     let my_root = root.clone();
     std::thread::spawn(move || {
@@ -85,20 +96,19 @@ pub fn start_for_root(app: AppHandle, root: String) {
         let mut last_event_at: Instant = Instant::now();
 
         loop {
-            // アクティブ root が自分でなくなったら終了
-            if ACTIVE_WATCHER_ROOT.lock().ok().and_then(|g| g.clone()).as_deref()
-                != Some(my_root.as_str())
-            {
-                tracing::debug!("[fs_watch] stopping watcher for {my_root}");
+            // アクティブ世代が自分でなくなったら即終了 (Watcher を drop してカーネル枠を解放)
+            let (active_gen, _) = current_active();
+            if active_gen != my_generation {
+                tracing::debug!("[fs_watch] stopping watcher for {my_root} (gen={my_generation})");
                 break;
             }
 
             // pending 中は短い timeout で再ループして trailing emit を判定する。
-            // pending 無しなら長めに block し続けて CPU を食わない。
+            // pending 無しは中程度の timeout (500ms → 200ms) で active 世代切替への応答性を上げる。
             let recv_timeout = if pending {
                 Duration::from_millis(50)
             } else {
-                Duration::from_millis(500)
+                Duration::from_millis(200)
             };
 
             match rx.recv_timeout(recv_timeout) {
@@ -132,10 +142,20 @@ pub fn start_for_root(app: AppHandle, root: String) {
             // trailing debounce: 最後のイベントから DEBOUNCE 経過していたら emit
             if pending && last_event_at.elapsed() >= DEBOUNCE {
                 pending = false;
+                // Issue #146: emit 直前に再度 active 世代を確認。debounce 待ちの 300ms 中に
+                // root が切替えられた場合は旧 root のイベントを誤発火させない。
+                let (active_gen, _) = current_active();
+                if active_gen != my_generation {
+                    tracing::debug!(
+                        "[fs_watch] suppressing stale emit for {my_root} (gen={my_generation})"
+                    );
+                    break;
+                }
                 if let Err(e) = app.emit("project:files-changed", &my_root) {
                     tracing::warn!("[fs_watch] emit failed: {e}");
                 }
             }
         }
+        // Watcher は drop で notify の OS 側 watch を unregister する。
     });
 }
