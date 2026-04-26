@@ -44,7 +44,7 @@ uuid = { version = "1", features = ["v4", "serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6"
 which = "6"
-whoami = "1"
+whoami = "2"
 base64 = "0.22"
 rand = "0.8"
 # Issue #120: CP932 / Shift_JIS のテキスト decode/encode 用 (Windows 日本語環境互換)
