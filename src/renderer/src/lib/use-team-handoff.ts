@@ -31,7 +31,7 @@ let initPromise: Promise<UnlistenFn> | null = null;
 
 function ensureRegistered(): Promise<UnlistenFn> {
   if (initPromise) return initPromise;
-  initPromise = listen<HandoffPayload>('team:handoff', (e) => {
+  const p = listen<HandoffPayload>('team:handoff', (e) => {
     for (const cb of listeners) {
       try {
         cb(e.payload);
@@ -40,7 +40,16 @@ function ensureRegistered(): Promise<UnlistenFn> {
       }
     }
   });
-  return initPromise;
+  initPromise = p;
+  // 防御的フェールセーフ: listen() が reject した場合 initPromise が rejected のまま固着し、
+  // 後続マウントの `if (initPromise) return initPromise` が永遠に rejected を返し続ける。
+  // ここで attach する .catch は元の Promise (p) と同じチェーン上だが、cleanup 側 .then().catch()
+  // が rejection を別途 console.warn で観測しているため二重 warn にならない (こちらは無言で reset)。
+  // p === initPromise の同一性チェックで、別マウントが先に新しい listen を張った後の stale clear を防ぐ。
+  p.catch(() => {
+    if (initPromise === p) initPromise = null;
+  });
+  return p;
 }
 
 /**
