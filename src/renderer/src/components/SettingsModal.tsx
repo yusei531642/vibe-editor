@@ -1,5 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Plus } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ArrowLeft,
+  Bot,
+  Check,
+  Code2,
+  Palette,
+  Plug,
+  Plus,
+  Search,
+  Settings as SettingsIcon,
+  Sparkles,
+  Type,
+  Users,
+  X
+} from 'lucide-react';
 import type { AgentConfig, AppSettings } from '../../../types/shared';
 import { DEFAULT_SETTINGS } from '../../../types/shared';
 import { useT } from '../lib/i18n';
@@ -47,6 +61,10 @@ export function SettingsModal({
   const t = useT();
   const [draft, setDraft] = useState<AppSettings>(initial);
   const [activeSection, setActiveSection] = useState<SectionId>('general');
+  // 「適用して保存」押下時に短時間だけ ✓ アイコンに切り替えて操作完了を伝える
+  const [saved, setSaved] = useState(false);
+  // サイドバー検索 (空文字なら全表示)
+  const [navQuery, setNavQuery] = useState('');
 
   // Issue #178: open 中に外部から settings が更新されると useEffect が再発火して
   // ユーザー入力中の draft が消える事故があった。
@@ -79,7 +97,13 @@ export function SettingsModal({
 
   const handleApply = (): void => {
     onApply(draft);
-    onClose();
+    // 保存ボタンを 380ms だけ ✓ 表示にしてから閉じる。
+    // 「押した → 保存された → モーダルが消える」の因果が体感できるようにする (Linear / Vercel 風)。
+    setSaved(true);
+    window.setTimeout(() => {
+      setSaved(false);
+      onClose();
+    }, 380);
   };
 
   // Issue #28: Reset は draft だけを DEFAULT_SETTINGS に戻す。
@@ -111,6 +135,31 @@ export function SettingsModal({
         roles: { label: 'Role profiles', title: 'Role profiles', desc: 'Team member role templates' },
         mcp: { label: 'MCP', title: 'MCP', desc: 'How to install vibe-team MCP' }
       };
+
+  /** セクション ID → サイドバー Lucide アイコン (視認性向上 + 視覚スキャン高速化)。
+   *  カスタムエージェントは Sparkles で代用。 */
+  const iconFor = (id: SectionId): JSX.Element => {
+    const props = { size: 14, strokeWidth: 1.85 } as const;
+    switch (id) {
+      case 'general':
+        return <SettingsIcon {...props} />;
+      case 'appearance':
+        return <Palette {...props} />;
+      case 'fonts':
+        return <Type {...props} />;
+      case 'claude':
+        return <Bot {...props} />;
+      case 'codex':
+        return <Code2 {...props} />;
+      case 'roles':
+        return <Users {...props} />;
+      case 'mcp':
+        return <Plug {...props} />;
+      default:
+        if (id.startsWith('custom:')) return <Sparkles {...props} />;
+        return <SettingsIcon {...props} />;
+    }
+  };
 
   /** 指定 id のラベル情報を返す (固定 + カスタム動的) */
   const labelOf = (id: SectionId): { label: string; title: string; desc: string } => {
@@ -149,7 +198,7 @@ export function SettingsModal({
     setActiveSection(`custom:${id}`);
   };
 
-  const groups: Array<{ label: string | null; items: SectionId[] }> = [
+  const groupsRaw: Array<{ label: string | null; items: SectionId[] }> = [
     { label: null, items: ['general', 'appearance', 'fonts'] },
     {
       label: isJa ? 'エージェント' : 'Agents',
@@ -160,9 +209,30 @@ export function SettingsModal({
         '__addCustom'
       ]
     },
-    { label: isJa ? 'チーム' : 'Team', items: ['roles'] },
-    { label: 'MCP', items: ['mcp'] }
+    // vibe-team MCP のセットアップ手順は「チーム」機能の一部なので同グループに収める。
+    // 旧構成では MCP を独立グループにしていたが、グループラベル "MCP" と唯一の項目 "MCP" が
+    // 同名で並び、サイドバー上で MCP が 2 行重複しているように見える UI バグを生んでいた。
+    { label: isJa ? 'チーム' : 'Team', items: ['roles', 'mcp'] }
   ];
+
+  // 検索ワードで items を絞り込む。`__addCustom` は検索中だけ非表示 (新規追加は通常時のみ)。
+  // 検索結果が空のグループはラベルごと除外する。
+  const groups = useMemo(() => {
+    const q = navQuery.trim().toLowerCase();
+    if (!q) return groupsRaw;
+    return groupsRaw
+      .map((g) => ({
+        label: g.label,
+        items: g.items.filter((id) => {
+          if (id === '__addCustom') return false;
+          const { label } = labelOf(id);
+          return label.toLowerCase().includes(q) || id.toLowerCase().includes(q);
+        })
+      }))
+      .filter((g) => g.items.length > 0);
+    // labelOf は customAgents と isJa から導出されるラベルを返すので両方を deps に
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navQuery, customAgents, isJa]);
 
   const renderSection = (id: SectionId): JSX.Element | null => {
     switch (id) {
@@ -175,7 +245,7 @@ export function SettingsModal({
               <div className="settings-shell__replay">
                 <button
                   type="button"
-                  className="toolbar__btn"
+                  className="toolbar__btn settings-shell__replay-btn"
                   onClick={() => {
                     onClose();
                     onReplayOnboarding();
@@ -275,7 +345,7 @@ export function SettingsModal({
         onClick={(e) => e.stopPropagation()}
       >
         <header className="modal__header">
-          <div className="modal__title-group" style={{ display: 'flex', alignItems: 'center' }}>
+          <div className="modal__title-group">
             <button
               type="button"
               className="settings-back-btn"
@@ -291,44 +361,75 @@ export function SettingsModal({
 
         <div className="modal__body modal__body--settings">
           <nav className="settings-shell__nav" aria-label="Settings sections">
-            {groups.map((g, gi) => (
-              <div key={gi} style={{ display: 'contents' }}>
-                {g.label && (
-                  <div className="settings-shell__nav-group-label">{g.label}</div>
-                )}
-                {g.items.map((id) => {
-                  // 擬似項目: カスタムエージェント追加ボタン
-                  if (id === '__addCustom') {
-                    return (
-                      <button
-                        key={id}
-                        type="button"
-                        className="settings-shell__nav-item settings-shell__nav-item--add"
-                        onClick={addCustomAgent}
-                      >
-                        <Plus size={13} strokeWidth={2} />
-                        <span className="settings-shell__nav-label">
-                          {t('settings.customAgents.add')}
-                        </span>
-                      </button>
-                    );
-                  }
-                  const { label } = labelOf(id);
-                  return (
-                    <button
-                      key={id}
-                      type="button"
-                      className={`settings-shell__nav-item${
-                        id === activeSection ? ' is-active' : ''
-                      }`}
-                      onClick={() => setActiveSection(id)}
-                    >
-                      <span className="settings-shell__nav-label">{label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            ))}
+            <div className="settings-shell__search">
+              <Search size={13} strokeWidth={2} className="settings-shell__search-icon" />
+              <input
+                type="text"
+                className="settings-shell__search-input"
+                placeholder={isJa ? '設定を検索…' : 'Search settings…'}
+                value={navQuery}
+                onChange={(e) => setNavQuery(e.target.value)}
+                aria-label={isJa ? '設定を検索' : 'Search settings'}
+              />
+              {navQuery && (
+                <button
+                  type="button"
+                  className="settings-shell__search-clear"
+                  onClick={() => setNavQuery('')}
+                  aria-label={isJa ? 'クリア' : 'Clear'}
+                >
+                  <X size={12} strokeWidth={2.2} />
+                </button>
+              )}
+            </div>
+            <div className="settings-shell__nav-list">
+              {groups.length === 0 ? (
+                <div className="settings-shell__nav-empty">
+                  {isJa ? '一致する項目がありません' : 'No matches'}
+                </div>
+              ) : (
+                groups.map((g, gi) => (
+                  <div key={gi} style={{ display: 'contents' }}>
+                    {g.label && (
+                      <div className="settings-shell__nav-group-label">{g.label}</div>
+                    )}
+                    {g.items.map((id) => {
+                      // 擬似項目: カスタムエージェント追加ボタン
+                      if (id === '__addCustom') {
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            className="settings-shell__nav-item settings-shell__nav-item--add"
+                            onClick={addCustomAgent}
+                          >
+                            <Plus size={13} strokeWidth={2} />
+                            <span className="settings-shell__nav-label">
+                              {t('settings.customAgents.add')}
+                            </span>
+                          </button>
+                        );
+                      }
+                      const { label } = labelOf(id);
+                      const active = id === activeSection;
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          className={`settings-shell__nav-item${active ? ' is-active' : ''}`}
+                          onClick={() => setActiveSection(id)}
+                        >
+                          <span className="settings-shell__nav-icon" aria-hidden="true">
+                            {iconFor(id)}
+                          </span>
+                          <span className="settings-shell__nav-label">{label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))
+              )}
+            </div>
           </nav>
 
           <div className="settings-shell__content">
@@ -343,7 +444,11 @@ export function SettingsModal({
         </div>
 
         <footer className="modal__footer">
-          <button type="button" className="toolbar__btn" onClick={handleReset}>
+          <button
+            type="button"
+            className="toolbar__btn settings-shell__reset"
+            onClick={handleReset}
+          >
             {t('settings.reset')}
           </button>
           <div className="modal__footer-right">
@@ -352,10 +457,18 @@ export function SettingsModal({
             </button>
             <button
               type="button"
-              className="toolbar__btn toolbar__btn--primary"
+              className={`toolbar__btn toolbar__btn--primary settings-shell__apply${
+                saved ? ' is-saved' : ''
+              }`}
               onClick={handleApply}
+              disabled={saved}
+              aria-label={t('settings.apply')}
             >
-              {t('settings.apply')}
+              {saved ? (
+                <Check size={14} strokeWidth={2.5} />
+              ) : (
+                t('settings.apply')
+              )}
             </button>
           </div>
         </footer>
