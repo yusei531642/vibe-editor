@@ -24,13 +24,14 @@ export function QuickNav({ open, onClose }: QuickNavProps): JSX.Element | null {
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   // open 切替で reset + focus
+  // Issue #181: open を高速トグル/Escape 連打したときに setTimeout が複数積まれて
+  // unmount 後にも focus を奪う余地があったため、cleanup で clearTimeout を返す。
   useEffect(() => {
-    if (open) {
-      setQuery('');
-      setActiveIdx(0);
-      // focus 1tick 遅らせる
-      setTimeout(() => inputRef.current?.focus(), 0);
-    }
+    if (!open) return;
+    setQuery('');
+    setActiveIdx(0);
+    const handle = window.setTimeout(() => inputRef.current?.focus(), 0);
+    return () => window.clearTimeout(handle);
   }, [open]);
 
   const items = useMemo(() => {
