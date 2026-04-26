@@ -745,47 +745,72 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
     }
     drop(state);
 
-    // 宛先 PTY に inject
+    // Issue #150: 宛先メンバーへの inject を並列実行する。
+    // 旧実装はメンバーごとに inject().await を直列で回し、to=all + 6 メンバー +
+    // 4KB メッセージで 6 秒間 RPC を握りっぱなしになっていた (sleep 15ms × 64chunk × 6人)。
+    // → 各宛先を tokio::spawn で並列発火して JoinSet で集約する。
     let registry = hub.registry.clone();
     let team_members = registry.list_team_members(&ctx.team_id);
-    let mut delivered = vec![];
     let preview: String = message.chars().take(80).collect();
     let app = hub.app_handle.lock().await.clone();
+
+    let mut targets: Vec<(String, String)> = Vec::new();
     for (target_aid, target_role) in team_members {
         if target_aid == ctx.agent_id {
             continue;
         }
         if to == "all" || to == target_role {
-            if inject::inject(registry.clone(), &target_aid, &ctx.role, message).await {
-                delivered.push(if target_role.is_empty() {
-                    target_aid.clone()
-                } else {
-                    target_role.clone()
-                });
-                // read_by に追加
-                {
-                    let mut state = hub.state.lock().await;
-                    if let Some(t) = state.teams.get_mut(&ctx.team_id) {
-                        if let Some(m) = t.messages.iter_mut().find(|m| m.id == msg_id) {
-                            m.read_by.push(target_aid.clone());
-                        }
+            targets.push((target_aid, target_role));
+        }
+    }
+
+    let mut join_set = tokio::task::JoinSet::new();
+    for (target_aid, target_role) in &targets {
+        let reg = registry.clone();
+        let aid = target_aid.clone();
+        let from_role = ctx.role.clone();
+        let msg = message.to_string();
+        let role_clone = target_role.clone();
+        join_set.spawn(async move {
+            let ok = inject::inject(reg, &aid, &from_role, &msg).await;
+            (aid, role_clone, ok)
+        });
+    }
+
+    let mut delivered: Vec<String> = Vec::new();
+    while let Some(joined) = join_set.join_next().await {
+        if let Ok((target_aid, target_role, ok)) = joined {
+            if !ok {
+                continue;
+            }
+            delivered.push(if target_role.is_empty() {
+                target_aid.clone()
+            } else {
+                target_role.clone()
+            });
+            // read_by に追加
+            {
+                let mut state = hub.state.lock().await;
+                if let Some(t) = state.teams.get_mut(&ctx.team_id) {
+                    if let Some(m) = t.messages.iter_mut().find(|m| m.id == msg_id) {
+                        m.read_by.push(target_aid.clone());
                     }
                 }
-                // Phase 3: hand-off イベントを Canvas にブロードキャスト
-                if let Some(app) = &app {
-                    let payload = json!({
-                        "teamId": ctx.team_id,
-                        "fromAgentId": ctx.agent_id,
-                        "fromRole": ctx.role,
-                        "toAgentId": target_aid,
-                        "toRole": target_role,
-                        "preview": preview,
-                        "messageId": msg_id,
-                        "timestamp": timestamp,
-                    });
-                    if let Err(e) = app.emit("team:handoff", payload) {
-                        tracing::warn!("emit team:handoff failed: {e}");
-                    }
+            }
+            // Phase 3: hand-off イベントを Canvas にブロードキャスト
+            if let Some(app) = &app {
+                let payload = json!({
+                    "teamId": ctx.team_id,
+                    "fromAgentId": ctx.agent_id,
+                    "fromRole": ctx.role,
+                    "toAgentId": target_aid,
+                    "toRole": target_role,
+                    "preview": preview,
+                    "messageId": msg_id,
+                    "timestamp": timestamp,
+                });
+                if let Err(e) = app.emit("team:handoff", payload) {
+                    tracing::warn!("emit team:handoff failed: {e}");
                 }
             }
         }
