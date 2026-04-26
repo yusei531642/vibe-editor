@@ -187,7 +187,10 @@ export function SettingsModal({
   }, [open]);
 
   const { mounted, dataState, motion } = useSpringMount(open, 180);
-  if (!mounted) return null;
+  // 注意: 早期 return は「最後の hook の後ろ」に移動してある (このファイル末尾近くの
+  // `if (!mounted) return null;`)。useSpringMount より下にもまだ useMemo / useRef / useEffect が
+  // 並んでおり、ここで return すると mounted の値で hook 数が変わって "Rendered more hooks
+  // than during the previous render" エラーになる (#220 系で再発)。
 
   const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]): void => {
     setDraft((d) => ({ ...d, [key]: value }));
@@ -381,6 +384,10 @@ export function SettingsModal({
     if (flat.length === 0) return;
     setActiveSection((prev) => (flat.includes(prev) ? prev : flat[0]));
   }, [navQuery]);
+
+  // すべての hook 呼び出しが終わった後でだけ早期 return する (Rules of Hooks)。
+  // これより上の useSpringMount から `mounted` を受け取り、未マウントなら DOM を返さない。
+  if (!mounted) return null;
 
   const renderSection = (id: SectionId): JSX.Element | null => {
     switch (id) {
