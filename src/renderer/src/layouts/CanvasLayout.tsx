@@ -519,6 +519,21 @@ export function CanvasLayout(): JSX.Element {
 
   const cardCounter = (t: CardType): number => nodes.filter((n) => n.type === t).length + 1;
 
+  // Issue #166: Date.now() % 600 だと連続クリックで数 ms 差しか出ず、全カードが
+  // ほぼ同じ x に積み重なって UI 上「追加されていない」ように見えていた。
+  // 既存ノード数 (現在 viewport 内に限らずグローバル) を 6 列グリッドに展開して
+  // staggered レイアウトを返す。
+  const stagger = (kind: CardType): { x: number; y: number } => {
+    const idx = nodes.length; // 全 type 共通の連番でも視覚的に十分散る
+    const cols = 6;
+    const wrapTitle = ['agent', 'terminal'].includes(kind) ? 480 + 32 : 360 + 32;
+    const wrapH = ['agent', 'terminal'].includes(kind) ? 320 + 32 : 240 + 32;
+    return {
+      x: (idx % cols) * wrapTitle,
+      y: Math.floor(idx / cols) * wrapH
+    };
+  };
+
   const addAgent = (agent: 'claude' | 'codex'): void => {
     const cwd = projectRoot;
     const n = cardCounter('agent');
@@ -526,7 +541,7 @@ export function CanvasLayout(): JSX.Element {
       {
         type: 'agent',
         title: agent === 'codex' ? `Codex #${n}` : `Claude #${n}`,
-        position: { x: Date.now() % 600, y: 0 },
+        position: stagger('agent'),
         payload: { agent, role: 'leader', cwd }
       }
     ]);
@@ -545,7 +560,7 @@ export function CanvasLayout(): JSX.Element {
       type === 'fileTree' || type === 'changes'
         ? { projectRoot: cwd }
         : { projectRoot: cwd, relPath: '' };
-    addCards([{ type, title: titles[type], position: { x: Date.now() % 600, y: 0 }, payload }]);
+    addCards([{ type, title: titles[type], position: stagger(type), payload }]);
     setAddCardOpen(false);
   };
 
