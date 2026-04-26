@@ -69,10 +69,21 @@ pub fn build_chunks(banner: &str, body: &str) -> Vec<Vec<u8>> {
     let banner_clean = sanitize_for_paste(banner);
     let body_clean = sanitize_for_paste(body);
 
+    // Issue #193: 旧実装は判定が body_clean.len() (バイト) なのに切詰が chars().take(MAX_PAYLOAD)
+    // (文字数) で、UTF-8 マルチバイトでは MAX_PAYLOAD バイト超過判定後に最大 4 倍長を残してしまい、
+    // 32 KiB 上限が事実上機能していなかった。
+    // 修正: バイト単位で UTF-8 境界を保ったまま切る。char_indices で 1 文字ずつ加算長を計算し、
+    // MAX_PAYLOAD バイトに収まる最後の境界を end として slice する。
     let truncated: String = if body_clean.len() > MAX_PAYLOAD {
-        let mut s: String = body_clean.chars().take(MAX_PAYLOAD).collect();
-        s.push_str(" …(truncated)");
-        s
+        let mut end = 0usize;
+        for (i, ch) in body_clean.char_indices() {
+            let next = i + ch.len_utf8();
+            if next > MAX_PAYLOAD {
+                break;
+            }
+            end = next;
+        }
+        format!("{} …(truncated)", &body_clean[..end])
     } else {
         body_clean
     };
@@ -187,4 +198,72 @@ pub async fn inject(
     let _ = tokio::task::spawn_blocking(move || s.write(b"\r")).await;
     tracing::debug!("[inject] -> agent {agent_id} delivered");
     true
+}
+
+#[cfg(test)]
+mod build_chunks_tests {
+    use super::{build_chunks, BP_END, BP_START, MAX_PAYLOAD};
+
+    fn join(chunks: &[Vec<u8>]) -> Vec<u8> {
+        let mut v = Vec::new();
+        for c in chunks {
+            v.extend_from_slice(c);
+        }
+        v
+    }
+
+    #[test]
+    fn short_message_is_wrapped_in_bracketed_paste() {
+        let chunks = build_chunks("[Team] ", "hello");
+        let bytes = join(&chunks);
+        assert!(bytes.starts_with(BP_START));
+        assert!(bytes.ends_with(BP_END));
+        assert!(bytes.windows(5).any(|w| w == b"hello"));
+    }
+
+    #[test]
+    fn ascii_oversize_is_truncated_to_byte_limit() {
+        let body = "a".repeat(MAX_PAYLOAD + 100);
+        let chunks = build_chunks("", &body);
+        let bytes = join(&chunks);
+        let inner = &bytes[BP_START.len()..bytes.len() - BP_END.len()];
+        let inner_str = std::str::from_utf8(inner).unwrap();
+        let marker = " …(truncated)";
+        assert!(inner_str.ends_with(marker));
+        // 本文部分 (marker を除いた前半) が MAX_PAYLOAD バイトを超えないこと。
+        // marker 文字列は 'a' を 1 つ含む (trunc[a]ted) ので char count では合算されてしまう。
+        // バイト長で本文のサイズを直接検証する。
+        let body_only_bytes = inner.len() - marker.len();
+        assert!(
+            body_only_bytes <= MAX_PAYLOAD,
+            "body_only_bytes {body_only_bytes} exceeded MAX_PAYLOAD {MAX_PAYLOAD}"
+        );
+        assert!(
+            body_only_bytes >= MAX_PAYLOAD - 1,
+            "kept too few bytes: {body_only_bytes}"
+        );
+    }
+
+    /// Issue #193 回帰テスト: マルチバイト UTF-8 でも MAX_PAYLOAD バイトに収まること。
+    /// 旧実装は chars().take(MAX_PAYLOAD) で「文字数」で切っていたため、3 byte 文字なら
+    /// 最大 ~3 倍長を残していた。
+    #[test]
+    fn multibyte_oversize_stays_within_byte_limit() {
+        // 「あ」は UTF-8 で 3 bytes。MAX_PAYLOAD バイト換算で約 32768/3 = 10922 文字までしか入らない。
+        // 旧実装はここで chars().take(MAX_PAYLOAD)=32768 文字 ~= 98 KiB を残してしまう。
+        let body = "あ".repeat(MAX_PAYLOAD); // 約 98 KiB
+        let chunks = build_chunks("", &body);
+        let bytes = join(&chunks);
+        let inner = &bytes[BP_START.len()..bytes.len() - BP_END.len()];
+        // truncated 末尾分は許容する (固定 14 byte 程度) が、本文部分は MAX_PAYLOAD 以下
+        let truncated_marker = " …(truncated)";
+        assert!(inner.windows(truncated_marker.len()).any(|w| w == truncated_marker.as_bytes()));
+        let body_only_len = inner.len() - truncated_marker.len();
+        assert!(
+            body_only_len <= MAX_PAYLOAD,
+            "body bytes {body_only_len} exceeded MAX_PAYLOAD {MAX_PAYLOAD}"
+        );
+        // UTF-8 として valid であること (境界で切れていないこと)
+        assert!(std::str::from_utf8(&inner[..body_only_len]).is_ok());
+    }
 }
