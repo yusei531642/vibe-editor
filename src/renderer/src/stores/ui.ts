@@ -7,6 +7,7 @@
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { AvailableUpdateInfo } from '../lib/updater-check';
 
 export type ViewMode = 'ide' | 'canvas';
 
@@ -30,6 +31,11 @@ interface UiState {
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (collapsed: boolean) => void;
   toggleSidebar: () => void;
+  /** 起動時 silentCheckForUpdate() で検出された更新情報。
+   *  Topbar / CanvasLayout 右上の「更新」ボタンの表示制御に使う。
+   *  null = 更新なし or 未チェック。永続化しない (再起動時に再検出する)。 */
+  availableUpdate: AvailableUpdateInfo | null;
+  setAvailableUpdate: (info: AvailableUpdateInfo | null) => void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -48,7 +54,9 @@ export const useUiStore = create<UiState>()(
       toggleTweaks: () => set({ tweaksOpen: !get().tweaksOpen }),
       sidebarCollapsed: false,
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
-      toggleSidebar: () => set({ sidebarCollapsed: !get().sidebarCollapsed })
+      toggleSidebar: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
+      availableUpdate: null,
+      setAvailableUpdate: (info) => set({ availableUpdate: info })
     }),
     {
       name: 'vibe-editor:ui',

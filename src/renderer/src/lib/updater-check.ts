@@ -1,14 +1,19 @@
 /**
- * Tauri updater 起動時 / 手動チェック。
+ * Tauri updater モジュール。
  *
- * 旧実装の問題点と修正:
- *   - エラー全 console.debug → toast に出す (manual モードでは必ず表示)
- *   - window.confirm → @tauri-apps/plugin-dialog の ask (テーマ追従, 多言語フォント OK)
- *   - 進捗無し → onEvent コールバックで Toast 進捗 (10% 刻み)
- *   - didCheck を try 前で立てる → 成功時のみフラグ
- *   - release notes 無制限 → 600 文字で truncate
- *   - 実行中タスクが警告無く死ぬ → ダイアログに警告追加
- *   - Windows での relaunch 二重 → NSIS 任せ (非 Windows のみ relaunch)
+ * 旧仕様: 起動時に自動で「アップデートあり → ask → 即 install → relaunch」を行っていた。
+ *         体感的には「起動して数秒したら無言でアプリが落ち、再起動 = 更新」となり、
+ *         作業中タブを書き戻す前にプロセスが死ぬ事故報告が複数あったため撤廃する。
+ * 新仕様:
+ *   - 起動時は `silentCheckForUpdate()` で「更新があるか」だけを検出 (UI 副作用なし)。
+ *     呼び出し側 (App / CanvasLayout) は結果を `useUiStore.setAvailableUpdate()` に
+ *     書き、Topbar / CanvasLayout 右上の「Update vX.Y.Z」ボタンを表示する。
+ *   - ユーザーが明示的にボタンを押したときだけ `runUpdateInstall()` が走る。
+ *     旧 `checkForUpdates` は manual=true パスとして残す (コマンドパレット / ヘルプメニュー
+ *     からの「更新を確認」用、最新時 toast や失敗 toast を出す挙動を維持)。
+ *
+ * 進捗 toast / Issue #121 (toast 重ね焼け回避) / Issue #142 (downgrade 防止) /
+ * Issue #59 (i18n) / Windows NSIS 二重 relaunch 回避 はすべて維持する。
  */
 import type { Language } from '../../../types/shared';
 import { translate } from './i18n';
@@ -20,23 +25,27 @@ export interface UpdaterDeps {
     options?: { duration?: number; tone?: 'info' | 'success' | 'warning' | 'error' }
   ) => number;
   dismissToast?: (id: number) => void;
-  /** 起動時の自動チェックなら省略 / false。設定 or コマンドからの手動なら true。
-   *  manual=true のときは didAutoCheck を無視し、また「最新です」「失敗」も明示通知する。 */
+  /** コマンドパレット / ヘルプメニューからの手動チェック。最新時の通知や失敗 toast を出す。 */
   manual?: boolean;
   /** 実行中の Claude/Codex タブ数 (確認ダイアログで警告) */
   runningTaskCount?: number;
 }
 
+/** silentCheck で外部に渡す軽量な更新メタ情報。raw な Update オブジェクトは保持しない
+ *  (再 install 時にもう一度 check() を呼び直すので問題ない)。 */
+export interface AvailableUpdateInfo {
+  version: string;
+  currentVersion: string;
+  /** リリースノート本文 (truncate 済み) */
+  body: string;
+}
+
 const MAX_BODY_CHARS = 600;
-let didAutoCheck = false;
 
 /**
  * Issue #142: downgrade 防止。Tauri plugin-updater は通常 update.version > current で
  * しか update を返さないが、CI で生成する `latest.json` の version 文字列が手動で
  * いじられた等のエッジケースに備えて、renderer 側でも明示的に semver 比較を行う。
- *
- * セマンティックバージョンの簡易比較。プレリリース部分は trailing tail として string 比較
- * (主目的は「より小さいバージョン」が来たときに updater を抑止すること)。
  */
 function isStrictlyNewer(candidate: string, current: string): boolean {
   const parse = (v: string): { nums: number[]; tail: string } => {
@@ -53,14 +62,10 @@ function isStrictlyNewer(candidate: string, current: string): boolean {
     if (a.nums[i] > b.nums[i]) return true;
     if (a.nums[i] < b.nums[i]) return false;
   }
-  // メジャー / マイナー / パッチが一致したら tail 比較
-  // 例: 1.3.1-beta.2 > 1.3.1-beta.1 は安全側で false (= 同等扱い) とし、
-  // 純粋な「より古いバージョン」が偽装してきたケースだけ防げれば十分。
   return a.tail > b.tail && b.tail !== '';
 }
 
 function isWindowsPlatform(): boolean {
-  // Tauri 2 の navigator.userAgentData が WebView2 で undefined になりうるので両対応
   if (typeof navigator !== 'undefined') {
     const ua = (navigator.userAgent || '').toLowerCase();
     if (ua.includes('windows')) return true;
@@ -68,11 +73,54 @@ function isWindowsPlatform(): boolean {
   return false;
 }
 
-export async function checkForUpdates(deps: UpdaterDeps): Promise<void> {
+function truncateBody(raw: string): string {
+  return raw.length > MAX_BODY_CHARS ? `${raw.slice(0, MAX_BODY_CHARS).trimEnd()}…` : raw;
+}
+
+/**
+ * UI 副作用なしで「より新しい更新があるか」だけを返す。
+ * - prod でしか走らせない (dev は plugin-updater の signature 検証で常に失敗する)
+ * - 失敗時は console.debug に落として null を返す (起動を止めない)
+ * - 無更新 / 同等以下バージョンの場合も null
+ */
+export async function silentCheckForUpdate(): Promise<AvailableUpdateInfo | null> {
+  if (!import.meta.env.PROD) return null;
+
+  try {
+    const { check } = await import('@tauri-apps/plugin-updater');
+    const update = await check();
+    if (!update) return null;
+
+    const currentVersion = (update as unknown as { currentVersion?: string }).currentVersion ?? '';
+    if (currentVersion && !isStrictlyNewer(update.version, currentVersion)) {
+      console.warn(
+        '[updater] suppressing non-newer update offer:',
+        'candidate=',
+        update.version,
+        'current=',
+        currentVersion
+      );
+      return null;
+    }
+    return {
+      version: update.version,
+      currentVersion,
+      body: truncateBody(update.body ?? '')
+    };
+  } catch (err) {
+    console.debug('[updater] silent check skipped:', err);
+    return null;
+  }
+}
+
+/**
+ * 実際の install フロー。ボタンクリックで呼ばれる。
+ * もう一度 check() を走らせて raw Update を取り直し、確認ダイアログ → DL → install → relaunch。
+ * silent check で取れた版以外が降ってくる可能性 (CI が直前に latest.json を再アップロード)
+ * もあるが、その場合はダイアログにそのまま新しい version を出すのが正しい挙動。
+ */
+export async function runUpdateInstall(deps: UpdaterDeps): Promise<void> {
   const { language, showToast, dismissToast, manual = false, runningTaskCount = 0 } = deps;
-  // 自動チェックは prod のみ。manual の場合は dev でも走らせて挙動確認できるようにする。
-  if (!manual && didAutoCheck) return;
-  if (!manual && !import.meta.env.PROD) return;
 
   // ---------- 1. check() ----------
   let update: Awaited<ReturnType<typeof import('@tauri-apps/plugin-updater').check>>;
@@ -80,28 +128,17 @@ export async function checkForUpdates(deps: UpdaterDeps): Promise<void> {
     const { check } = await import('@tauri-apps/plugin-updater');
     update = await check();
   } catch (err) {
-    if (manual) {
-      showToast(translate(language, 'updater.checkFailed', { error: String(err) }), {
-        tone: 'error'
-      });
-    } else {
-      console.debug('[updater] check skipped:', err);
-    }
+    showToast(translate(language, 'updater.checkFailed', { error: String(err) }), {
+      tone: 'error'
+    });
     return;
   }
 
   if (!update) {
-    if (manual) {
-      showToast(translate(language, 'updater.upToDate'), { tone: 'success' });
-    }
-    didAutoCheck = true;
+    showToast(translate(language, 'updater.upToDate'), { tone: 'success' });
     return;
   }
-  didAutoCheck = true;
 
-  // Issue #142 (Security): downgrade 防止。
-  // current 版本が取れない場合 (古い Tauri など) はチェックを skip するが、
-  // 通常 update.currentVersion が入っているはず。明示的に semver 比較する。
   const currentVersion = (update as unknown as { currentVersion?: string }).currentVersion ?? '';
   if (currentVersion && !isStrictlyNewer(update.version, currentVersion)) {
     console.warn(
@@ -111,16 +148,12 @@ export async function checkForUpdates(deps: UpdaterDeps): Promise<void> {
       'current=',
       currentVersion
     );
-    if (manual) {
-      showToast(translate(language, 'updater.upToDate'), { tone: 'success' });
-    }
+    showToast(translate(language, 'updater.upToDate'), { tone: 'success' });
     return;
   }
 
   // ---------- 2. confirm dialog (Tauri native) ----------
-  const rawBody = update.body ?? '';
-  const body =
-    rawBody.length > MAX_BODY_CHARS ? `${rawBody.slice(0, MAX_BODY_CHARS).trimEnd()}…` : rawBody;
+  const body = truncateBody(update.body ?? '');
   const warning =
     runningTaskCount > 0
       ? `\n\n${translate(language, 'updater.runningTasksWarning', {
@@ -149,11 +182,8 @@ export async function checkForUpdates(deps: UpdaterDeps): Promise<void> {
   let downloaded = 0;
   let lastBucket = -1;
   // Issue #121: 「最新の」進捗 toast id を保持して、新しい toast を出す前に必ず dismiss する。
-  // 旧実装は初回 toast の id (progressId) しか覚えておらず、10% 刻みで新規 toast を作り続けた結果
-  // ダウンロード中ずっと info toast が積み上がっていた。currentToastId をローカル変数で更新する。
   let currentToastId: number = showToast(translate(language, 'updater.downloading'), {
     tone: 'info',
-    // 進捗 toast は完了 / エラー時に dismiss するので長めに
     duration: 600_000
   });
 
@@ -165,11 +195,9 @@ export async function checkForUpdates(deps: UpdaterDeps): Promise<void> {
         downloaded += event.data.chunkLength;
         if (total > 0) {
           const pct = Math.floor((downloaded / total) * 100);
-          // 10% 刻みで toast を更新 (高頻度に dismiss/show すると瞬く)
           const bucket = Math.floor(pct / 10);
           if (bucket > lastBucket) {
             lastBucket = bucket;
-            // Issue #121: 直前の toast を dismiss してから新しい toast を出し、id を更新する。
             dismissToast?.(currentToastId);
             currentToastId = showToast(
               translate(language, 'updater.downloadProgress', { pct }),
@@ -199,7 +227,6 @@ export async function checkForUpdates(deps: UpdaterDeps): Promise<void> {
 
   // ---------- 4. relaunch ----------
   // Windows: NSIS インストーラが自動でアプリを終了 → 再起動するので relaunch は呼ばない。
-  // 呼んでも害は少ないが、競合タイミングで relaunch エラーが出てユーザーを混乱させうる。
   if (isWindowsPlatform()) return;
 
   try {
@@ -211,9 +238,14 @@ export async function checkForUpdates(deps: UpdaterDeps): Promise<void> {
       duration: 8_000
     });
   }
+  // manual パラメータは現状特に追加挙動を持たないが、将来の差別化用に署名は維持。
+  void manual;
 }
 
-/** 自動チェック用の after-build フラグをリセット (テスト / 手動再試行用) */
-export function resetAutoCheckFlag(): void {
-  didAutoCheck = false;
+/**
+ * 旧 API 互換: 「ヘルプメニュー / コマンドパレットからの『更新を確認』」用。
+ * silent check と install 起動を 1 回で行う。manual=true 相当の挙動 (最新時の toast を出す)。
+ */
+export async function checkForUpdates(deps: UpdaterDeps): Promise<void> {
+  await runUpdateInstall({ ...deps, manual: true });
 }

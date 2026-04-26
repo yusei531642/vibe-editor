@@ -425,6 +425,8 @@ const ja: Dict = {
   'updater.relaunchFailed': '再起動に失敗しました ({error})。手動で再起動してください',
   'updater.runningTasksWarning': '実行中のエージェントが {count} 個あります。更新で中断されます',
   'updater.checkNow': '更新を確認',
+  'updater.button.label': '更新 v{version}',
+  'updater.button.title': '新しいバージョン v{version} が利用可能です。クリックでインストール',
 
   // ---------- Toast tone ラベル (Issue #80) ----------
   'toast.tone.info': '情報',
@@ -896,6 +898,8 @@ const en: Dict = {
   'updater.relaunchFailed': 'Relaunch failed ({error}). Please restart manually',
   'updater.runningTasksWarning': '{count} agent(s) are still running and will be interrupted',
   'updater.checkNow': 'Check for updates',
+  'updater.button.label': 'Update v{version}',
+  'updater.button.title': 'A new version v{version} is available. Click to install',
 
   // ---------- Toast tone labels (Issue #80) ----------
   'toast.tone.info': 'Info',

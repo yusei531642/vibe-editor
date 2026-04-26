@@ -1,6 +1,7 @@
 import { type ReactNode } from 'react';
 import {
   Activity as ActivityIcon,
+  ArrowDownToLine,
   Command as CommandIcon,
   RotateCw,
   Search,
@@ -8,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useT } from '../../lib/i18n';
 import { useUiStore } from '../../stores/ui';
+import type { AvailableUpdateInfo } from '../../lib/updater-check';
 
 interface TopbarProps {
   projectRoot: string;
@@ -17,6 +19,10 @@ interface TopbarProps {
   userInitial?: string;
   /** 左側に置く自作メニューバー (File / View / Help…) */
   menuBar?: ReactNode;
+  /** silentCheckForUpdate で検出された更新情報。null のときボタンは出さない */
+  availableUpdate?: AvailableUpdateInfo | null;
+  /** 「更新」ボタンが押されたとき。runUpdateInstall を呼び出す想定 */
+  onClickUpdate?: () => void;
 }
 
 /**
@@ -31,7 +37,9 @@ export function Topbar({
   onRestart,
   onOpenPalette,
   userInitial = 'U',
-  menuBar
+  menuBar,
+  availableUpdate,
+  onClickUpdate
 }: TopbarProps): JSX.Element {
   const t = useT();
   const segments = projectRoot.split(/[\\/]/).filter(Boolean);
@@ -97,6 +105,20 @@ export function Topbar({
       ) : null}
 
       <div className="topbar__icons">
+        {availableUpdate && onClickUpdate ? (
+          <button
+            type="button"
+            className="topbar__update"
+            onClick={onClickUpdate}
+            title={t('updater.button.title', { version: availableUpdate.version })}
+            aria-label={t('updater.button.title', { version: availableUpdate.version })}
+          >
+            <ArrowDownToLine size={13} strokeWidth={2} />
+            <span className="topbar__update-label">
+              {t('updater.button.label', { version: availableUpdate.version })}
+            </span>
+          </button>
+        ) : null}
         <TopbarActivityToggle />
         <TopbarTweaksToggle />
         <button

@@ -13,6 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Node } from '@xyflow/react';
 import {
+  ArrowDownToLine,
   ChevronDown,
   FilePlus,
   FolderTree,
@@ -50,6 +51,7 @@ import {
 } from '../lib/workspace-presets';
 import { ROLE_META } from '../lib/team-roles';
 import { useSettings } from '../lib/settings-context';
+import { useToast } from '../lib/toast-context';
 
 type Tab = 'preset' | 'recent';
 const MAX_CANVAS_AGENTS = 30;
@@ -123,6 +125,8 @@ export function CanvasLayout(): JSX.Element {
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
+  const availableUpdate = useUiStore((s) => s.availableUpdate);
+  const { showToast, dismissToast } = useToast();
   const [spawnOpen, setSpawnOpen] = useState(false);
   const [addCardOpen, setAddCardOpen] = useState(false);
   const [tab, setTab] = useState<Tab>('preset');
@@ -740,6 +744,27 @@ export function CanvasLayout(): JSX.Element {
             }}
           >
             {t('canvas.clear')}
+          </button>
+        )}
+        {availableUpdate && (
+          <button
+            type="button"
+            className="canvas-btn canvas-btn--update"
+            onClick={() => {
+              void import('../lib/updater-check').then((m) =>
+                m.runUpdateInstall({
+                  language: settings.language,
+                  showToast,
+                  dismissToast,
+                  manual: true
+                })
+              );
+            }}
+            title={t('updater.button.title', { version: availableUpdate.version })}
+            aria-label={t('updater.button.title', { version: availableUpdate.version })}
+          >
+            <ArrowDownToLine size={13} strokeWidth={1.9} />
+            {t('updater.button.label', { version: availableUpdate.version })}
           </button>
         )}
         <button

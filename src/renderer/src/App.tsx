@@ -537,21 +537,24 @@ export function App(): JSX.Element {
     void runClaudeCheck();
   }, [runClaudeCheck]);
 
-  // 起動時に GitHub Release の latest.json を確認 (prod のみ)。
-  // Issue #59: UI 言語をダイアログ文言に反映するため settings.language を渡す。
-  // 進捗 / エラーは Toast に出すよう updater-check.ts 側で対応済み。
+  // 起動時に GitHub Release の latest.json を「確認だけ」する (prod のみ)。
+  // 旧仕様の「ask → 即 install → relaunch」は撤廃。代わりに silentCheckForUpdate で
+  // 更新の有無を検出して useUiStore.availableUpdate に書き、Topbar / CanvasLayout の
+  // 「Update」ボタンを点灯させる。実 install はユーザーがボタンを押したときだけ走る。
+  // 起動直後の負荷を避けるため少し遅延させる (5 秒)。
   useEffect(() => {
-    void import('./lib/updater-check').then((m) =>
-      m.checkForUpdates({
-        language: settings.language,
-        showToast,
-        dismissToast,
-        manual: false,
-        runningTaskCount: 0
-      })
-    );
-    // 起動 1 回のみなので deps 空。settings.language / showToast の最新参照は要らない。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    let cancelled = false;
+    const handle = window.setTimeout(() => {
+      void import('./lib/updater-check').then(async (m) => {
+        const info = await m.silentCheckForUpdate();
+        if (cancelled) return;
+        useUiStore.getState().setAvailableUpdate(info);
+      });
+    }, 5_000);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
   }, []);
 
   // Issue #66: project_root の外部変更 (git pull / Claude 編集 / 他エディタ) を検知して
@@ -2194,6 +2197,21 @@ export function App(): JSX.Element {
   const setActivityOpen = useUiStore((s) => s.setActivityOpen);
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
+  const availableUpdate = useUiStore((s) => s.availableUpdate);
+
+  // 「更新」ボタンクリック: 確認ダイアログ → DL → install → (Win 以外) relaunch。
+  // 実行中タブ数を runningTaskCount に渡し、ダイアログで警告できるようにする。
+  const handleClickUpdate = useCallback(() => {
+    void import('./lib/updater-check').then((m) =>
+      m.runUpdateInstall({
+        language: settings.language,
+        showToast,
+        dismissToast,
+        manual: true,
+        runningTaskCount: terminalTabs.length
+      })
+    );
+  }, [settings.language, showToast, dismissToast, terminalTabs.length]);
 
   // Ctrl+B (Cmd+B on macOS) で sidebar を toggle
   useEffect(() => {
@@ -2222,6 +2240,8 @@ export function App(): JSX.Element {
         onRestart={handleRestart}
         onOpenPalette={() => setPaletteOpen(true)}
         userInitial={userInitial}
+        availableUpdate={availableUpdate}
+        onClickUpdate={handleClickUpdate}
         menuBar={
           <MenuBar
             items={[
