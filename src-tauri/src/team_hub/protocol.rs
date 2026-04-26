@@ -590,7 +590,11 @@ async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<
             "roleProfileId": outcome.role_profile_id,
         })),
         Ok(Err(_)) => {
-            // sender dropped
+            // Issue #173: sender dropped 経路でも pending を必ず掃除する。
+            // 旧実装は cancel_pending_recruit を呼ばずに Err を返していたため、
+            // 孤立 pending が try_register_pending_recruit の人数/singleton 判定に
+            // 永久カウントされ、再起動まで採用不能化していた。
+            hub.cancel_pending_recruit(&new_agent_id).await;
             Err("recruit cancelled".into())
         }
         Err(_) => {
