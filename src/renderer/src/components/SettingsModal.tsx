@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Plus } from 'lucide-react';
 import type { AgentConfig, AppSettings } from '../../../types/shared';
 import { DEFAULT_SETTINGS } from '../../../types/shared';
@@ -48,11 +48,17 @@ export function SettingsModal({
   const [draft, setDraft] = useState<AppSettings>(initial);
   const [activeSection, setActiveSection] = useState<SectionId>('general');
 
+  // Issue #178: open 中に外部から settings が更新されると useEffect が再発火して
+  // ユーザー入力中の draft が消える事故があった。
+  // 解決: open が false→true に変化したフレームでだけ initial を採り込み、
+  // open=true のままでの initial 変化は無視する (draft は閉じるまでユーザー編集を保持)。
+  const wasOpenRef = useRef(false);
   useEffect(() => {
-    if (open) {
+    if (open && !wasOpenRef.current) {
       setDraft(initial);
       setActiveSection('general');
     }
+    wasOpenRef.current = open;
   }, [open, initial]);
 
   // カスタムエージェントが削除された結果、activeSection が迷子になったら 'general' に戻す
