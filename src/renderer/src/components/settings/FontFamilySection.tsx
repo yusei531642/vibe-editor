@@ -64,7 +64,18 @@ export function FontFamilySection({
         <input
           type="text"
           value={family}
-          onChange={(e) => update(familyKey, e.target.value)}
+          onChange={(e) => {
+            // Issue #165: 空文字を永続化すると xterm 等が空 family でレンダーし
+            // ブラウザ既定 monospace にフォールバックして元に戻せなくなるため、
+            // trim 後 falsy のときは preset 1 個目に戻す。
+            const next = e.target.value;
+            if (next.trim() === '') {
+              update(familyKey, presets[0]?.value ?? '');
+            } else {
+              update(familyKey, next);
+            }
+          }}
+          placeholder={presets[0]?.value ?? ''}
           spellCheck={false}
         />
       </label>

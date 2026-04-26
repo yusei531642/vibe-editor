@@ -17,7 +17,12 @@ export function TerminalSection({ draft, update }: Props): JSX.Element {
           <span>フォント</span>
           <select
             value={currentFamily}
-            onChange={(e) => update('terminalFontFamily', e.target.value)}
+            onChange={(e) => {
+              // Issue #165: 空文字選択で xterm が既定 monospace にフォールバックする事故を防ぐ。
+              const v = e.target.value;
+              if (v.trim() === '') return;
+              update('terminalFontFamily', v);
+            }}
             style={{ fontFamily: currentFamily }}
           >
             {TERMINAL_FONT_PRESETS.map((p) => (
