@@ -703,16 +703,14 @@ fn resolve_targets(
     raw_to: &str,
 ) -> Vec<(String, String)> {
     let to = raw_to.trim();
-    let to_lc = to.to_lowercase();
+    // "all" 判定はメンバー数に依らない定数なのでループ外で 1 度だけ計算する
+    let is_all = to.eq_ignore_ascii_case("all");
     let mut out: Vec<(String, String)> = Vec::new();
     for (aid, role) in members {
         if aid == self_agent_id {
             continue;
         }
-        let role_match = role.eq_ignore_ascii_case(to);
-        let aid_match = aid == to;
-        let all_match = to_lc == "all";
-        if all_match || role_match || aid_match {
+        if is_all || role.eq_ignore_ascii_case(to) || aid == to {
             out.push((aid.clone(), role.clone()));
         }
     }
@@ -720,14 +718,14 @@ fn resolve_targets(
 }
 
 async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
+    // trim は resolve_targets 内で行うので、ここでは生文字列を保持して履歴 / 検証に使う。
     let to = args
         .get("to")
         .and_then(|v| v.as_str())
         .unwrap_or("")
-        .trim()
         .to_string();
     let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("");
-    if to.is_empty() || message.is_empty() {
+    if to.trim().is_empty() || message.is_empty() {
         return Err("to and message are required".into());
     }
     // Issue #107: 1 メッセージのハードリミット超過は拒否 (途中で truncate すると意味が壊れる)
@@ -869,11 +867,15 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
 
     let note = if delivered.is_empty() {
         // 受信者ゼロは「サイレント失敗」を起こしがちなので、現在のメンバーを文字列でヒントする。
-        let hint: Vec<String> = other_members
+        // 同 role 複数名がいる場合に "[programmer, programmer]" のような重複表示を避けるため
+        // sort + dedup で一意化する (順序を安定させたいので HashSet ではなく Vec で処理)。
+        let mut hint: Vec<String> = other_members
             .iter()
             .map(|(_, r)| r.clone())
             .filter(|r| !r.is_empty())
             .collect();
+        hint.sort();
+        hint.dedup();
         if hint.is_empty() {
             format!(
                 "宛先 '{to}' に該当するメンバーがチームに居ません (自分以外のメンバーが 0 名)。"
@@ -914,8 +916,9 @@ async fn team_read(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         let is_for_me = to_trim.eq_ignore_ascii_case("all")
             || to_trim.eq_ignore_ascii_case(&ctx.role)
             || to_trim == ctx.agent_id;
-        let not_from_me = m.from_agent_id != ctx.agent_id;
-        if !is_for_me || !not_from_me {
+        let from_someone_else = m.from_agent_id != ctx.agent_id;
+        // 「自分宛て かつ 自分以外が送信したもの」だけ表示する (旧来の挙動を保ったまま肯定形で記述)
+        if !(is_for_me && from_someone_else) {
             continue;
         }
         if unread_only && m.read_by.contains(&ctx.agent_id) {
@@ -985,12 +988,15 @@ async fn team_assign_task(
     let members = hub.registry.list_team_members(&ctx.team_id);
     let resolved = resolve_targets(&members, &ctx.agent_id, assignee);
     if resolved.is_empty() {
-        let other_roles: Vec<String> = members
+        // 同 role 複数名がいる場合の重複ヒント表示を避けるため一意化する
+        let mut other_roles: Vec<String> = members
             .iter()
             .filter(|(aid, _)| aid != &ctx.agent_id)
             .map(|(_, r)| r.clone())
             .filter(|r| !r.is_empty())
             .collect();
+        other_roles.sort();
+        other_roles.dedup();
         return Err(format!(
             "assignee '{assignee}' does not match any current team member. Valid roles: {other_roles:?} (or 'all', or an agentId)"
         ));
