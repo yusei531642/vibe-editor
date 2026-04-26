@@ -95,11 +95,40 @@ pub fn run() {
                 "vibe-editor (Tauri) v{} starting",
                 app.package_info().version
             );
+            // Issue #155: spawn したタスクが panic で silent に死ぬのを防ぐため、
+            // tokio::task::spawn の JoinHandle を観察するラッパーを介して spawn する。
+            // panic は JoinError::is_panic() で検出して error ログに残す。
+            fn spawn_observed<F>(name: &'static str, fut: F)
+            where
+                F: std::future::Future<Output = ()> + Send + 'static,
+            {
+                tauri::async_runtime::spawn(async move {
+                    let join = tokio::task::spawn(fut);
+                    match join.await {
+                        Ok(()) => {}
+                        Err(je) if je.is_panic() => {
+                            let payload = je.into_panic();
+                            let msg = payload
+                                .downcast_ref::<String>()
+                                .cloned()
+                                .or_else(|| {
+                                    payload.downcast_ref::<&'static str>().map(|s| s.to_string())
+                                })
+                                .unwrap_or_else(|| "(unknown)".to_string());
+                            tracing::error!("[setup] {name} task panicked: {msg}");
+                        }
+                        Err(je) => {
+                            tracing::error!("[setup] {name} task join error: {je}");
+                        }
+                    }
+                });
+            }
+
             // TeamHub は app start で常時稼働
             let state = app.state::<state::AppState>();
             let hub = state.team_hub.clone();
             let app_handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
+            spawn_observed("teamhub", async move {
                 hub.set_app_handle(app_handle).await;
                 if let Err(e) = hub.start().await {
                     tracing::warn!("teamhub start failed: {e:#}");
@@ -107,10 +136,8 @@ pub fn run() {
             });
 
             // Issue #29: settings.json の lastOpenedRoot から AppState.project_root を復元する。
-            // renderer がロードされる前に watcher / app_get_project_root が呼ばれても、
-            // 正しい project root を返せるようにするためここで先読みする。
             let app_handle_for_root = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
+            spawn_observed("settings_restore", async move {
                 let settings = commands::settings::settings_load().await;
                 let root = settings
                     .get("lastOpenedRoot")
@@ -157,7 +184,12 @@ pub fn run() {
             Ok(())
         });
 
-    builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    // Issue #155: builder.run().expect だと plugin 初期化失敗 / single_instance bind 失敗 /
+    // setup 内 panic がすべて同じメッセージで死に、ユーザー報告から原因究明できない。
+    // Err を構造化ログしてから exit code 1 で抜ける。
+    if let Err(e) = builder.run(tauri::generate_context!()) {
+        tracing::error!("[startup] tauri builder failed: {e:#}");
+        eprintln!("vibe-editor failed to start: {e:#}");
+        std::process::exit(1);
+    }
 }
