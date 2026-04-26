@@ -85,33 +85,66 @@ function FlowApp(): JSX.Element {
         : changes;
       if (remaining.length === 0) return;
 
+      // Issue #196: 旧実装は変更ごとに `nodes.find` + `for (other of nodes)` + 内側 `remaining.some(...)`
+      // で O(N×M) になっており、6 人チーム × 4 種カード = 24 ノード規模で 1 px ドラッグごとに
+      // 数百ステップ走り 16ms フレーム予算を超えやすかった。
+      //
+      // 修正: 1 フレームに 1 度だけインデックスを構築し、内部ループを O(チームサイズ) + O(1) に落とす。
+      //   - nodesById: id → Node のマップ (旧 nodes.find = O(N))
+      //   - teamMembers: teamId → Node[] のマップ (旧 nodes 全走査をチーム単位に絞る)
+      //   - pendingPosIds / pendingDimIds: remaining 内に既存の position/dimensions 変更がある id の Set
+      //     (旧 remaining.some 二重ループを Set.has の O(1) に置換)
+      //   - lockedTeams: teamId → boolean のキャッシュ (isTeamLocked の重複呼び出しを削減)
+      // payload は CardData 内で複数のサブ型を持つため { teamId?: string } で局所キャストする。
+      // 同じキャストが index 構築 + position/dimensions 分岐で計 3 回走るので helper に集約。
+      const teamIdOf = (n: Node<CardData>): string | undefined =>
+        (n.data?.payload as { teamId?: string } | undefined)?.teamId;
+      const nodesById = new Map<string, Node<CardData>>();
+      const teamMembers = new Map<string, Node<CardData>[]>();
+      for (const n of nodes) {
+        nodesById.set(n.id, n);
+        const tid = teamIdOf(n);
+        if (tid) {
+          let bucket = teamMembers.get(tid);
+          if (!bucket) {
+            bucket = [];
+            teamMembers.set(tid, bucket);
+          }
+          bucket.push(n);
+        }
+      }
+      const pendingPosIds = new Set<string>();
+      const pendingDimIds = new Set<string>();
+      for (const c of remaining) {
+        if (c.type === 'position' && 'id' in c) pendingPosIds.add(c.id);
+        else if (c.type === 'dimensions' && 'id' in c) pendingDimIds.add(c.id);
+      }
+      const lockedTeams = new Map<string, boolean>();
+      const isLocked = (tid: string): boolean => {
+        const cached = lockedTeams.get(tid);
+        if (cached !== undefined) return cached;
+        const v = isTeamLocked(tid);
+        lockedTeams.set(tid, v);
+        return v;
+      };
+
       // ----- チーム同期ドラッグ + 同期リサイズ -----
-      // teamId を持つカードがロック状態でドラッグ / リサイズされたら、同 teamId の他カードへ
-      // 同じ変化を broadcast する。これでチーム全員が一塊で動き、揃ったサイズに変わる。
       const extra: NodeChange<Node<CardData>>[] = [];
       for (const c of remaining) {
         // 位置同期 (ドラッグ): delta を全員に伝える
         if (c.type === 'position' && c.position) {
-          const node = nodes.find((n) => n.id === c.id);
+          const node = nodesById.get(c.id);
           if (!node) continue;
-          const teamId = (node.data?.payload as { teamId?: string } | undefined)?.teamId;
-          if (!teamId) continue;
-          if (!isTeamLocked(teamId)) continue;
+          const teamId = teamIdOf(node);
+          if (!teamId || !isLocked(teamId)) continue;
           const dx = c.position.x - node.position.x;
           const dy = c.position.y - node.position.y;
           if (dx === 0 && dy === 0) continue;
-          for (const other of nodes) {
+          const members = teamMembers.get(teamId);
+          if (!members) continue;
+          for (const other of members) {
             if (other.id === node.id) continue;
-            const otherTeam = (other.data?.payload as { teamId?: string } | undefined)?.teamId;
-            if (otherTeam !== teamId) continue;
-            // 既にこのフレームで同じ id の position 変更が来ていたらスキップ (二重適用回避)
-            if (
-              remaining.some(
-                (x) => x.type === 'position' && 'id' in x && x.id === other.id
-              )
-            ) {
-              continue;
-            }
+            if (pendingPosIds.has(other.id)) continue;
             extra.push({
               id: other.id,
               type: 'position',
@@ -123,25 +156,17 @@ function FlowApp(): JSX.Element {
         }
         // サイズ同期 (NodeResizer): リサイズ後のサイズに全員揃える
         if (c.type === 'dimensions' && c.dimensions && c.resizing) {
-          const node = nodes.find((n) => n.id === c.id);
+          const node = nodesById.get(c.id);
           if (!node) continue;
-          const teamId = (node.data?.payload as { teamId?: string } | undefined)?.teamId;
-          if (!teamId) continue;
-          if (!isTeamLocked(teamId)) continue;
+          const teamId = teamIdOf(node);
+          if (!teamId || !isLocked(teamId)) continue;
           const w = c.dimensions.width;
           const h = c.dimensions.height;
-          for (const other of nodes) {
+          const members = teamMembers.get(teamId);
+          if (!members) continue;
+          for (const other of members) {
             if (other.id === node.id) continue;
-            const otherTeam = (other.data?.payload as { teamId?: string } | undefined)?.teamId;
-            if (otherTeam !== teamId) continue;
-            // 既に同じ id の dimensions 変更が来ていたらスキップ
-            if (
-              remaining.some(
-                (x) => x.type === 'dimensions' && 'id' in x && x.id === other.id
-              )
-            ) {
-              continue;
-            }
+            if (pendingDimIds.has(other.id)) continue;
             extra.push({
               id: other.id,
               type: 'dimensions',

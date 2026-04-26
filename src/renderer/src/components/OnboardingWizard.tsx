@@ -130,12 +130,11 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
     void onComplete(patch);
   }, [draftLanguage, draftTheme, draftFolder, onComplete]);
 
-  // Done 画面は 2 秒放置で自動完了
-  useEffect(() => {
-    if (step !== 'done') return;
-    const id = setTimeout(finish, 2000);
-    return () => clearTimeout(id);
-  }, [step, finish]);
+  // Issue #197: 旧実装は Done 画面を 2 秒で自動完了させていたが、
+  //   - スクリーンリーダーは <dl> サマリ (language/theme/folder) を読み始めた直後に modal が消える
+  //   - 認知負荷の高いユーザー / スクリーンショット作成が画面を確認できない
+  //   - WCAG 2.2.1 (Timing Adjustable) 違反
+  // 「完了」CTA はすでに画面下部にあるので、自動 finish を撤去してユーザー操作のみで閉じる仕様にする。
 
   const progressIndex = useMemo(() => {
     if (step === 'done') return PROGRESS_STEPS.length;
