@@ -34,7 +34,19 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
     // encoded directory に衝突し得る (例: `C:\repo-a` と `C:\repo\a`)。
     // jsonl 内に Claude Code が書き込む cwd を読んで、異なる project のものは除外する。
     let requested_norm = normalize_project_root(&project_root);
-    let mut sessions = vec![];
+
+    // Issue #127: 旧実装は metadata + read_jsonl_summary を 1 ファイルずつ直列に await
+    // しており、100+ セッションあるプロジェクトで I/O 直列化により 1〜3 秒かかっていた。
+    //
+    // 1-pass: read_dir で jsonl 候補と metadata を集める (read_dir 自体は順次)。
+    // 2-pass: read_jsonl_summary を tokio::task::JoinSet で並列化 (CONCURRENCY=8)。
+    //         並列度を絞ってファイルディスクリプタ枯渇を防ぐ。
+    struct Candidate {
+        id: String,
+        path: PathBuf,
+        last_modified_at: String,
+    }
+    let mut candidates: Vec<Candidate> = Vec::new();
     while let Ok(Some(entry)) = rd.next_entry().await {
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
@@ -54,24 +66,59 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
             .ok()
             .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339())
             .unwrap_or_default();
-
-        let (title, count, cwd) = read_jsonl_summary(&path).await;
-        // cwd が jsonl から取れたときだけ厳密チェック (取れないものは fail-open)
-        if let Some(ref c) = cwd {
-            if !c.trim().is_empty() && normalize_project_root(c) != requested_norm {
-                tracing::debug!(
-                    "[sessions] skipping colliding session {id}: cwd={c} != requested={project_root}"
-                );
-                continue;
-            }
-        }
-        sessions.push(SessionInfo {
+        candidates.push(Candidate {
             id,
-            path: path.to_string_lossy().into_owned(),
-            title,
-            message_count: count,
+            path,
             last_modified_at,
         });
+    }
+
+    // 並列に summary を抽出。CONCURRENCY=8 で fd 枯渇を回避しつつ十分な高速化を得る。
+    const CONCURRENCY: usize = 8;
+    let mut sessions: Vec<SessionInfo> = Vec::with_capacity(candidates.len());
+    let mut iter = candidates.into_iter();
+    let mut in_flight: tokio::task::JoinSet<(Candidate, String, u32, Option<String>)> =
+        tokio::task::JoinSet::new();
+
+    let spawn_one = |set: &mut tokio::task::JoinSet<(Candidate, String, u32, Option<String>)>,
+                     cand: Candidate| {
+        set.spawn(async move {
+            let (title, count, cwd) = read_jsonl_summary(&cand.path).await;
+            (cand, title, count, cwd)
+        });
+    };
+
+    for _ in 0..CONCURRENCY {
+        if let Some(cand) = iter.next() {
+            spawn_one(&mut in_flight, cand);
+        }
+    }
+    while let Some(joined) = in_flight.join_next().await {
+        if let Ok((cand, title, count, cwd)) = joined {
+            // 後続を 1 件 spawn して並列度を維持
+            if let Some(next) = iter.next() {
+                spawn_one(&mut in_flight, next);
+            }
+            // cwd が jsonl から取れたときだけ厳密チェック (取れないものは fail-open)
+            if let Some(ref c) = cwd {
+                if !c.trim().is_empty() && normalize_project_root(c) != requested_norm {
+                    tracing::debug!(
+                        "[sessions] skipping colliding session {}: cwd={} != requested={}",
+                        cand.id,
+                        c,
+                        project_root
+                    );
+                    continue;
+                }
+            }
+            sessions.push(SessionInfo {
+                id: cand.id,
+                path: cand.path.to_string_lossy().into_owned(),
+                title,
+                message_count: count,
+                last_modified_at: cand.last_modified_at,
+            });
+        }
     }
     // 新しい順
     sessions.sort_by(|a, b| b.last_modified_at.cmp(&a.last_modified_at));
