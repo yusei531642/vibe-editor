@@ -937,11 +937,22 @@ export function useT(): (key: string, params?: Record<string, string | number>) 
   return (key: string, params?: Record<string, string | number>): string => {
     const text = translations[lang]?.[key] ?? translations.ja[key] ?? key;
     if (!params) return text;
-    return Object.entries(params).reduce(
-      (acc, [k, v]) => acc.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v)),
-      text
-    );
+    return interpolate(text, params);
   };
+}
+
+/**
+ * Issue #176: String.prototype.replace の第 2 引数は `$&` `$1` `$$` 等を
+ * 特殊置換シーケンスとして解釈する。Windows パスや正規表現サンプル等を
+ * params に渡すと結果が壊れていた。`replace(re, fn)` の関数フォームなら
+ * 戻り値は literal として扱われるので安全。
+ */
+function interpolate(text: string, params: Record<string, string | number>): string {
+  return Object.entries(params).reduce(
+    (acc, [k, v]) =>
+      acc.replace(new RegExp(`\\{${k}\\}`, 'g'), () => String(v)),
+    text
+  );
 }
 
 /**
@@ -955,8 +966,10 @@ export function translate(
 ): string {
   const text = translations[lang]?.[key] ?? translations.ja[key] ?? key;
   if (!params) return text;
+  // Issue #176: replace の関数フォームを使って `$` 特殊シーケンスを literal 化
   return Object.entries(params).reduce(
-    (acc, [k, v]) => acc.replace(new RegExp(`\\{${k}\\}`, 'g'), String(v)),
+    (acc, [k, v]) =>
+      acc.replace(new RegExp(`\\{${k}\\}`, 'g'), () => String(v)),
     text
   );
 }
