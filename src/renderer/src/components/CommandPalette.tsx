@@ -79,12 +79,22 @@ export function CommandPalette({
     }
   };
 
+  // Issue #180: 旧実装は backdrop onClick={onClose} で閉じていたため、リスト内/入力欄で
+  // mousedown → backdrop で mouseup と移動するドラッグ選択 (テキスト選択) でも click が
+  // backdrop に届いて閉じていた。
+  // mousedown 時点の target が backdrop 自体のときだけ閉じるように変更。
+  // (panel 内で mousedown した click は target=panel の子孫になるので閉じない)
+  const handleBackdropMouseDown = (e: React.MouseEvent<HTMLDivElement>): void => {
+    if (e.target === e.currentTarget) {
+      onClose();
+    }
+  };
   return (
     <div
       className="cmdp-backdrop"
       data-state={dataState}
       data-motion={motion}
-      onClick={onClose}
+      onMouseDown={handleBackdropMouseDown}
       role="dialog"
       aria-modal="true"
       aria-label={t('palette.ariaLabel')}
@@ -93,7 +103,6 @@ export function CommandPalette({
         className="cmdp"
         data-state={dataState}
         data-motion={motion}
-        onClick={(e) => e.stopPropagation()}
       >
         <div className="cmdp__header">
           <div className="cmdp__search">
