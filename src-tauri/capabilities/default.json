@@ -13,7 +13,6 @@
     "core:window:allow-set-title",
     "core:app:default",
     "dialog:default",
-    "opener:default",
     "process:default",
     "updater:default"
   ]
