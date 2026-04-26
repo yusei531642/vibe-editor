@@ -13,17 +13,23 @@ export async function insertPastedImageToPty(
   mime: string,
   writeToPty: (text: string) => void | Promise<void>
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const buffer = await blob.arrayBuffer();
-  let binary = '';
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode.apply(
-      null,
-      Array.from(bytes.subarray(i, i + chunkSize))
-    );
+  // Issue #160: 旧実装は 32KB チャンクで Array.from(Uint8Array) → String.fromCharCode.apply
+  // を回しており、20MB クラスのスクショで Array.from が 20M 要素配列を作成 → UI ハング。
+  // FileReader.readAsDataURL で base64 をネイティブ実装一発で取得する方が圧倒的に速い。
+  const dataUrl: string = await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onerror = () => reject(fr.error ?? new Error('FileReader failed'));
+    fr.onload = () => resolve(typeof fr.result === 'string' ? fr.result : '');
+    fr.readAsDataURL(blob);
+  }).catch((e: Error) => {
+    return Promise.reject(e);
+  });
+  // dataUrl は "data:<mime>;base64,<payload>" の形式。payload 部分のみ取り出す。
+  const commaIdx = dataUrl.indexOf(',');
+  const base64 = commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : '';
+  if (!base64) {
+    return { ok: false, error: 'pasted image is empty' };
   }
-  const base64 = btoa(binary);
 
   const res = await window.api.terminal.savePastedImage(base64, mime);
   if (!res.ok || !res.path) {
