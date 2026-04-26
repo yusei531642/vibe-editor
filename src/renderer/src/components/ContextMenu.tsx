@@ -26,6 +26,10 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Ele
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ x, y });
   const [state, setState] = useState<'open' | 'closed'>('closed');
+  // Issue #163: WAI-ARIA menu pattern 準拠。matchable な (= 非 disabled) 項目だけを
+  // 矢印キーで巡回させる。
+  const itemRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [focusedIndex, setFocusedIndex] = useState(0);
 
   // マウント直後にサイズを測って画面外はみ出しを補正
   useLayoutEffect(() => {
@@ -49,6 +53,18 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Ele
     return () => cancelAnimationFrame(raf);
   }, []);
 
+  // Issue #163: 最初の matchable な項目に自動フォーカス。
+  useEffect(() => {
+    const firstEnabled = items.findIndex((it) => !it.disabled);
+    if (firstEnabled >= 0) {
+      setFocusedIndex(firstEnabled);
+      // 次フレームで focus (DOM が ready なはず)
+      requestAnimationFrame(() => {
+        itemRefs.current[firstEnabled]?.focus();
+      });
+    }
+  }, [items]);
+
   useEffect(() => {
     const handleClick = (e: MouseEvent): void => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
@@ -56,7 +72,35 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Ele
       }
     };
     const handleKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onClose();
+        return;
+      }
+      // Issue #163: WAI-ARIA menu pattern: ArrowUp / ArrowDown / Home / End / Tab で閉じる。
+      // disabled をスキップしながら巡回する。
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Home' || e.key === 'End') {
+        e.preventDefault();
+        const enabledIdx = items
+          .map((it, i) => (it.disabled ? -1 : i))
+          .filter((i) => i >= 0);
+        if (enabledIdx.length === 0) return;
+        let next = focusedIndex;
+        if (e.key === 'Home') next = enabledIdx[0];
+        else if (e.key === 'End') next = enabledIdx[enabledIdx.length - 1];
+        else {
+          const cur = enabledIdx.indexOf(focusedIndex);
+          const step = e.key === 'ArrowDown' ? 1 : -1;
+          const ni = (cur + step + enabledIdx.length) % enabledIdx.length;
+          next = enabledIdx[ni];
+        }
+        setFocusedIndex(next);
+        itemRefs.current[next]?.focus();
+      }
     };
     document.addEventListener('mousedown', handleClick);
     document.addEventListener('keydown', handleKey);
@@ -64,7 +108,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Ele
       document.removeEventListener('mousedown', handleClick);
       document.removeEventListener('keydown', handleKey);
     };
-  }, [onClose]);
+  }, [onClose, items, focusedIndex]);
 
   return (
     <div
@@ -80,12 +124,17 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Ele
         <div key={i}>
           <button
             type="button"
+            ref={(el) => {
+              itemRefs.current[i] = el;
+            }}
             className="context-menu__item"
             onClick={() => {
               if (item.disabled) return;
               onClose();
               item.action();
             }}
+            onFocus={() => setFocusedIndex(i)}
+            tabIndex={focusedIndex === i ? 0 : -1}
             disabled={item.disabled}
             aria-disabled={item.disabled}
             role="menuitem"
