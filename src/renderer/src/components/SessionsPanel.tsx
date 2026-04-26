@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { RefreshCw, Users, X } from 'lucide-react';
 import type { SessionInfo, TeamHistoryEntry } from '../../../types/shared';
 import { useT } from '../lib/i18n';
@@ -17,15 +17,16 @@ interface SessionsPanelProps {
   onDeleteTeamHistory: (id: string) => void;
 }
 
-/** 相対時刻表示（例: "3分前", "2 hours ago", "yesterday"） */
+/** 相対時刻表示（例: "3分前", "2 hours ago", "yesterday"）。
+ *  Issue #130: 旧 API は毎呼び出し iso → Date.parse → getTime を 2 回実行していた。
+ *  parsed timestamp (ms) を受け取る形に変更し、呼び出し側で 1 回だけ parse する。 */
 function relativeTime(
-  iso: string,
+  thenMs: number,
   rtf: Intl.RelativeTimeFormat,
   dateFormatter: Intl.DateTimeFormat
 ): string {
-  const then = new Date(iso).getTime();
-  if (!Number.isFinite(then)) return '';
-  const diffSec = Math.round((then - Date.now()) / 1000);
+  if (!Number.isFinite(thenMs)) return '';
+  const diffSec = Math.round((thenMs - Date.now()) / 1000);
   const absSec = Math.abs(diffSec);
   if (absSec < 60) return rtf.format(diffSec, 'second');
   const diffMin = Math.round(diffSec / 60);
@@ -34,8 +35,12 @@ function relativeTime(
   if (Math.abs(diffHour) < 24) return rtf.format(diffHour, 'hour');
   const diffDay = Math.round(diffHour / 24);
   if (Math.abs(diffDay) < 7) return rtf.format(diffDay, 'day');
-  return dateFormatter.format(new Date(iso));
+  return dateFormatter.format(new Date(thenMs));
 }
+
+/** 初期表示件数。これを超えるセッションは "Load more" でページング表示する */
+const INITIAL_VISIBLE = 50;
+const PAGE_SIZE = 50;
 
 export function SessionsPanel({
   sessions,
@@ -63,6 +68,24 @@ export function SessionsPanel({
       }),
     [locale]
   );
+  // Issue #130: lastModifiedAt の Date.parse を毎レンダーから 1 回だけに削減。
+  // sessions の identity が変わったときだけ再計算される。
+  const sessionTimes = useMemo(
+    () => sessions.map((s) => Date.parse(s.lastModifiedAt) || 0),
+    [sessions]
+  );
+  const teamTimes = useMemo(
+    () => teamHistory.map((e) => Date.parse(e.lastUsedAt) || 0),
+    [teamHistory]
+  );
+  // Issue #130: 200+ 件あるセッションを全描画するとサイドバー切替に 200ms+ かかる。
+  // ページング表示で初期は 50 件、ボタンで +50 件ずつ増やす。
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE);
+  const visibleSessions = useMemo(
+    () => sessions.slice(0, visibleCount),
+    [sessions, visibleCount]
+  );
+  const hasMore = sessions.length > visibleCount;
   return (
     <div className="sidebar-view">
       <header className="sidebar-view__header">
@@ -91,7 +114,7 @@ export function SessionsPanel({
             <span className="sidebar-section-label__count">{teamHistory.length}</span>
           </div>
           <ul className="team-history-list">
-            {teamHistory.map((entry) => {
+            {teamHistory.map((entry, i) => {
               const memberSummary = entry.members
                 .map((m) => m.role)
                 .slice(0, 5)
@@ -107,7 +130,7 @@ export function SessionsPanel({
                     <div className="team-history-item__top">
                       <span className="team-history-item__name">{entry.name}</span>
                       <span className="team-history-item__time">
-                        {relativeTime(entry.lastUsedAt, rtf, dateFormatter)}
+                        {relativeTime(teamTimes[i] ?? 0, rtf, dateFormatter)}
                       </span>
                     </div>
                     <div className="team-history-item__roles">
@@ -156,7 +179,7 @@ export function SessionsPanel({
       )}
 
       <ul className="sessions">
-        {sessions.map((s) => {
+        {visibleSessions.map((s, i) => {
           const isActive = activeSessionId === s.id;
           return (
             <li key={s.id}>
@@ -168,7 +191,7 @@ export function SessionsPanel({
               >
                 <div className="session__top">
                   <span className="session__time">
-                    {relativeTime(s.lastModifiedAt, rtf, dateFormatter)}
+                    {relativeTime(sessionTimes[i] ?? 0, rtf, dateFormatter)}
                   </span>
                   <span className="session__count">
                     {t('sessions.messages', { count: s.messageCount })}
@@ -181,6 +204,18 @@ export function SessionsPanel({
           );
         })}
       </ul>
+      {hasMore && (
+        <button
+          type="button"
+          className="sidebar__section-btn"
+          style={{ width: '100%', marginTop: 6 }}
+          onClick={() => setVisibleCount((n) => n + PAGE_SIZE)}
+        >
+          {t('sessions.loadMore', {
+            remaining: sessions.length - visibleCount
+          })}
+        </button>
+      )}
     </div>
   );
 }

@@ -257,6 +257,7 @@ const ja: Dict = {
   // ---------- Sessions ----------
   'sessions.resume': 'セッション {id} に戻る',
   'sessions.messages': '{count} 件',
+  'sessions.loadMore': '残り {remaining} 件を表示',
 
   // ---------- Roles ----------
   'role.leader': 'Leader',
@@ -710,6 +711,7 @@ const en: Dict = {
   // ---------- Sessions ----------
   'sessions.resume': 'Resume session {id}',
   'sessions.messages': '{count} msgs',
+  'sessions.loadMore': 'Load {remaining} more',
 
   // ---------- Roles ----------
   'role.leader': 'Leader',
