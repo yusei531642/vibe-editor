@@ -69,11 +69,9 @@ pub struct TeamMcpMember {
 
 #[tauri::command]
 pub fn app_get_project_root(state: State<AppState>) -> String {
-    state
-        .project_root
-        .lock()
-        .ok()
-        .and_then(|guard| guard.clone())
+    // Issue #147: poison しても recovery して値を返す。
+    crate::state::lock_project_root_recover(&state.project_root)
+        .clone()
         .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().into_owned()))
         .unwrap_or_default()
 }
@@ -90,10 +88,8 @@ pub fn app_set_project_root(
     state: State<AppState>,
     project_root: String,
 ) -> Result<(), String> {
-    let mut guard = state
-        .project_root
-        .lock()
-        .map_err(|e| format!("project_root lock poisoned: {e}"))?;
+    // Issue #147: poison していても recovery して書き込む。失敗で常時死亡しない。
+    let mut guard = crate::state::lock_project_root_recover(&state.project_root);
     let trimmed = project_root.trim().to_string();
     *guard = if trimmed.is_empty() { None } else { Some(trimmed.clone()) };
     drop(guard);

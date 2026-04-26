@@ -126,11 +126,10 @@ pub fn run() {
                     });
                 if let Some(root) = root {
                     let state = app_handle_for_root.state::<state::AppState>();
-                    let lock_result = state.project_root.lock();
-                    if let Ok(mut guard) = lock_result {
-                        *guard = Some(root.clone());
-                        tracing::info!("[setup] project_root restored from settings: {root}");
-                    }
+                    // Issue #147: poison でも recovery
+                    let mut guard = state::lock_project_root_recover(&state.project_root);
+                    *guard = Some(root.clone());
+                    tracing::info!("[setup] project_root restored from settings: {root}");
                 }
             });
             #[cfg(debug_assertions)]

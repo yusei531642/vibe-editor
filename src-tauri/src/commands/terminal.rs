@@ -298,11 +298,9 @@ pub async fn terminal_create(
             if command.to_lowercase().contains("claude") {
                 let registry = state.pty_registry.clone();
                 let watcher_id = id.clone();
-                let watcher_root = state
-                    .project_root
-                    .lock()
-                    .ok()
-                    .and_then(|g| g.clone())
+                // Issue #147: poison でも recovery して読む
+                let watcher_root = crate::state::lock_project_root_recover(&state.project_root)
+                    .clone()
                     .unwrap_or_default();
                 let actual_root = if watcher_root.is_empty() {
                     // PTY spawn 時の cwd を流用
