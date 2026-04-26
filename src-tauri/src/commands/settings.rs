@@ -25,9 +25,25 @@ static SAVE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 pub async fn settings_load() -> Value {
     tracing::info!("[IPC] settings_load called");
     let path = settings_path();
-    match fs::read(&path).await {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or(Value::Null),
-        Err(_) => Value::Null,
+    let bytes = match fs::read(&path).await {
+        Ok(b) => b,
+        Err(_) => return Value::Null,
+    };
+    match serde_json::from_slice::<Value>(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            // Issue #170: 旧実装は parse 失敗時に黙って Null を返し、次の save で
+            // ユーザー設定が完全消失する事故が起きていた。.bak に元ファイルを退避してから
+            // Null を返すことで、ユーザーが手動で復元できるようにする。
+            tracing::error!(
+                "[settings] parse failed ({}), backing up to settings.json.bak",
+                e
+            );
+            let bak = path.with_extension("json.bak");
+            // best-effort: バックアップが取れなくても続行
+            let _ = atomic_write(&bak, &bytes).await;
+            Value::Null
+        }
     }
 }
 

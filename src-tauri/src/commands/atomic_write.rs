@@ -19,20 +19,17 @@ pub async fn atomic_write(target: &Path, bytes: &[u8]) -> Result<()> {
         fs::create_dir_all(parent).await?;
     }
     // temp ファイル名は同ディレクトリ内に (rename が atomic になる条件)
+    // Issue #169: 旧 tmp 名 `.{file}.tmp.{pid}.{nanos}` は同プロセス内の同時 atomic_write が
+    // 同一ナノ秒に揃うと衝突しうる (settings リサイズ + role profile save 並行時など)。
+    // uuid v4 を混ぜて衝突確率を実質ゼロにする。
     let tmp = {
         let file_name = target
             .file_name()
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "vibe.tmp".to_string());
         let pid = std::process::id();
-        let rnd: u64 = {
-            use std::time::{SystemTime, UNIX_EPOCH};
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_nanos() as u64)
-                .unwrap_or(0)
-        };
-        let tmp_name = format!(".{file_name}.tmp.{pid}.{rnd}");
+        let unique = uuid::Uuid::new_v4().simple().to_string();
+        let tmp_name = format!(".{file_name}.tmp.{pid}.{unique}");
         target
             .parent()
             .map(|p| p.join(tmp_name.clone()))

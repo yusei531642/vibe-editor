@@ -20,9 +20,23 @@ static SAVE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 #[tauri::command]
 pub async fn role_profiles_load() -> Value {
     let path = role_profiles_path();
-    match fs::read(&path).await {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or(Value::Null),
-        Err(_) => Value::Null,
+    let bytes = match fs::read(&path).await {
+        Ok(b) => b,
+        Err(_) => return Value::Null,
+    };
+    match serde_json::from_slice::<Value>(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            // Issue #170: 旧実装は parse 失敗で黙って Null を返し、次の save で
+            // 役割プロファイルが完全消失していた。.bak 退避してから Null を返す。
+            tracing::error!(
+                "[role-profiles] parse failed ({}), backing up to role-profiles.json.bak",
+                e
+            );
+            let bak = path.with_extension("json.bak");
+            let _ = atomic_write(&bak, &bytes).await;
+            Value::Null
+        }
     }
 }
 
