@@ -28,7 +28,8 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' ipc: http://ipc.localhost; script-src 'self' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:5173 http://localhost:5173 https://github.com https://api.github.com; worker-src 'self' blob:; frame-src 'none'; object-src 'none'"
+      "csp": "default-src 'self' ipc: http://ipc.localhost; script-src 'self' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://github.com https://api.github.com; worker-src 'self' blob:; frame-src 'none'; object-src 'none'",
+      "devCsp": "default-src 'self' ipc: http://ipc.localhost; script-src 'self' 'wasm-unsafe-eval' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:5173 http://localhost:5173 https://github.com https://api.github.com; worker-src 'self' blob:; frame-src 'none'; object-src 'none'"
     },
     "trayIcon": {
       "iconPath": "icons/icon.png",
