@@ -8,9 +8,9 @@
 
 .modal-backdrop[data-state='opening'],
 .modal-backdrop[data-state='open'] {
-  background: rgba(6, 8, 12, 0.45);
-  backdrop-filter: blur(18px) saturate(135%);
-  -webkit-backdrop-filter: blur(18px) saturate(135%);
+  background: rgba(6, 8, 12, 0.52);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .modal-backdrop[data-state='closing'] {
@@ -24,16 +24,10 @@
   height: min(820px, calc(100vh - 64px));
   max-height: calc(100vh - 64px);
   border-radius: 16px;
-  /* リキッドグラス: 半透明 panel + サブグラデでわずかな立体感を出す。
-     backdrop-filter は backdrop が既に blur されているので二重 blur は控えめに */
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--bg-panel) 96%, transparent) 0%,
-      color-mix(in srgb, var(--bg-panel) 92%, transparent) 100%
-    );
+  /* WebView2 で backdrop-filter のネストが画面真っ白を起こすことがあったので、
+     モーダル本体は不透明 bg-panel をベースにし、subtle な立体感だけ重ねる */
+  background: var(--bg-panel);
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
-  /* 強めの soft drop-shadow + 内側の subtle highlight */
   box-shadow:
     0 24px 64px -16px rgba(0, 0, 0, 0.55),
     0 4px 12px -4px rgba(0, 0, 0, 0.35),
@@ -62,19 +56,17 @@
 
 .modal--settings .modal__header {
   padding: 16px 24px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
-  background: color-mix(in srgb, var(--bg-panel) 70%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  /* nested backdrop-filter は WebView2 でレンダリング崩壊を起こすので使わない。
+     代わりに subtle にだけ色を変える */
+  background: color-mix(in srgb, var(--bg-panel) 96%, var(--bg) 4%);
   flex-shrink: 0;
 }
 
 .modal--settings .modal__footer {
   padding: 14px 24px;
-  border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
-  background: color-mix(in srgb, var(--bg-panel) 70%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  background: color-mix(in srgb, var(--bg-panel) 96%, var(--bg) 4%);
   flex-shrink: 0;
 }
 
@@ -138,7 +130,8 @@
   display: flex;
   flex-direction: column;
   padding: 16px 10px 16px 12px;
-  background: color-mix(in srgb, var(--bg) 45%, transparent);
+  /* 半透明だと背景が透けて視認性が落ちるので、モーダル本体より少し暗い不透明色にする */
+  background: color-mix(in srgb, var(--bg) 65%, var(--bg-panel) 35%);
   border-right: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
   overflow-y: auto;
   gap: 12px;
@@ -321,30 +314,12 @@
   gap: 28px;
 }
 
-/* スクロール時にタイトル下に subtle な fade があるように見せる */
-.settings-shell__content::before {
-  content: '';
-  position: sticky;
-  top: 0;
-  height: 0;
-  pointer-events: none;
-}
-
 .settings-shell__pane-title {
   font-size: 24px;
   font-weight: 600;
   letter-spacing: -0.025em;
   color: var(--text);
   margin: 0 0 6px;
-  /* subtle text gradient: 完全な白すぎず、claude-light 系で潰れないよう color-mix を使う */
-  background: linear-gradient(
-    180deg,
-    var(--text) 0%,
-    color-mix(in srgb, var(--text) 88%, transparent) 100%
-  );
-  background-clip: text;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
 }
 
 .settings-shell__pane-desc {
