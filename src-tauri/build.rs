@@ -8,6 +8,15 @@
 // 本物のフロントは `beforeBuildCommand` (= npm run build:vite) / `beforeDevCommand` が上書きする。
 fn main() {
     ensure_frontend_placeholder();
+    // Windows: main thread の stack reserve をデフォルト 1 MB → 8 MB に引き上げる。
+    // v1.4.0 で起動 ~3 秒後に "thread 'main' has overflowed its stack" で死ぬ事象が出た。
+    // 同じソースの debug build では再現しないので、release プロファイル特有の deep inline /
+    // LTO による stack frame 膨張で 1 MB を踏み越えていると判断 (tracing-subscriber 初期化 +
+    // tauri::generate_handler! の dispatch + serde deserialize 連鎖が疑わしい)。
+    // 根本原因の追跡は別 issue で行うが、当座のクラッシュ抑止としてリンカに /STACK を渡す。
+    // 形式: /STACK:reserve[,commit]。reserve だけ指定すれば commit はそのまま (= 4 KiB)。
+    #[cfg(target_os = "windows")]
+    println!("cargo:rustc-link-arg-bins=/STACK:8388608");
     tauri_build::build();
 }
 
