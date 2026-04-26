@@ -690,10 +690,42 @@ async fn team_list_role_profiles(hub: &TeamHub, ctx: &CallContext) -> Result<Val
     Ok(json!({ "profiles": profiles }))
 }
 
+/// `to` / `assignee` をチームメンバー一覧と突き合わせ、宛先の (agent_id, role) リストを返す。
+///
+/// マッチ規則 (どれか 1 つで採用):
+///   1. "all" → 自分を除く全員
+///   2. role 名で case-insensitive 一致 (LLM が "Programmer" 等で送ってもヒットさせる)
+///   3. agent_id で完全一致 (同 role の複数メンバー中の特定 1 名を狙うとき)
+/// 自分自身 (`self_agent_id`) はどの match でも除外する。
+fn resolve_targets(
+    members: &[(String, String)],
+    self_agent_id: &str,
+    raw_to: &str,
+) -> Vec<(String, String)> {
+    let to = raw_to.trim();
+    // "all" 判定はメンバー数に依らない定数なのでループ外で 1 度だけ計算する
+    let is_all = to.eq_ignore_ascii_case("all");
+    let mut out: Vec<(String, String)> = Vec::new();
+    for (aid, role) in members {
+        if aid == self_agent_id {
+            continue;
+        }
+        if is_all || role.eq_ignore_ascii_case(to) || aid == to {
+            out.push((aid.clone(), role.clone()));
+        }
+    }
+    out
+}
+
 async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
-    let to = args.get("to").and_then(|v| v.as_str()).unwrap_or("");
+    // trim は resolve_targets 内で行うので、ここでは生文字列を保持して履歴 / 検証に使う。
+    let to = args
+        .get("to")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("");
-    if to.is_empty() || message.is_empty() {
+    if to.trim().is_empty() || message.is_empty() {
         return Err("to and message are required".into());
     }
     // Issue #107: 1 メッセージのハードリミット超過は拒否 (途中で truncate すると意味が壊れる)
@@ -737,7 +769,7 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         id: msg_id,
         from: ctx.role.clone(),
         from_agent_id: ctx.agent_id.clone(),
-        to: to.to_string(),
+        to: to.clone(),
         message: message.to_string(),
         timestamp: timestamp.clone(),
         read_by: vec![ctx.agent_id.clone()],
@@ -758,14 +790,27 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
     let preview: String = message.chars().take(80).collect();
     let app = hub.app_handle.lock().await.clone();
 
-    let mut targets: Vec<(String, String)> = Vec::new();
-    for (target_aid, target_role) in team_members {
-        if target_aid == ctx.agent_id {
-            continue;
-        }
-        if to == "all" || to == target_role {
-            targets.push((target_aid, target_role));
-        }
+    let targets = resolve_targets(&team_members, &ctx.agent_id, &to);
+    let other_members: Vec<(String, String)> = team_members
+        .iter()
+        .filter(|(aid, _)| aid != &ctx.agent_id)
+        .cloned()
+        .collect();
+    tracing::debug!(
+        "[team_send] from agent={} role={} to={} → targets={}/{} other_members",
+        ctx.agent_id,
+        ctx.role,
+        to,
+        targets.len(),
+        other_members.len()
+    );
+    if targets.is_empty() {
+        tracing::warn!(
+            "[team_send] no targets for to={:?} in team={} (other members: {:?})",
+            to,
+            ctx.team_id,
+            other_members
+        );
     }
 
     let mut join_set = tokio::task::JoinSet::new();
@@ -821,7 +866,25 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
     }
 
     let note = if delivered.is_empty() {
-        "宛先のエージェントが見つからないか、現在オンラインではありません。".to_string()
+        // 受信者ゼロは「サイレント失敗」を起こしがちなので、現在のメンバーを文字列でヒントする。
+        // 同 role 複数名がいる場合に "[programmer, programmer]" のような重複表示を避けるため
+        // sort + dedup で一意化する (順序を安定させたいので HashSet ではなく Vec で処理)。
+        let mut hint: Vec<String> = other_members
+            .iter()
+            .map(|(_, r)| r.clone())
+            .filter(|r| !r.is_empty())
+            .collect();
+        hint.sort();
+        hint.dedup();
+        if hint.is_empty() {
+            format!(
+                "宛先 '{to}' に該当するメンバーがチームに居ません (自分以外のメンバーが 0 名)。"
+            )
+        } else {
+            format!(
+                "宛先 '{to}' に該当するメンバーが居ません。現在のメンバーロール: {hint:?} (role 名 / agentId / 'all' で指定してください)"
+            )
+        }
     } else {
         format!("{} 名に直接配信しました。", delivered.len())
     };
@@ -848,9 +911,14 @@ async fn team_read(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         });
     let mut out = vec![];
     for m in team.messages.iter_mut() {
-        let is_for_me = m.to == "all" || m.to == ctx.role;
-        let not_from_me = m.from_agent_id != ctx.agent_id;
-        if !is_for_me || !not_from_me {
+        // team_send 側の宛先解決と整合: "all" / role 名 case-insensitive / agent_id 完全一致を許容。
+        let to_trim = m.to.trim();
+        let is_for_me = to_trim.eq_ignore_ascii_case("all")
+            || to_trim.eq_ignore_ascii_case(&ctx.role)
+            || to_trim == ctx.agent_id;
+        let from_someone_else = m.from_agent_id != ctx.agent_id;
+        // 「自分宛て かつ 自分以外が送信したもの」だけ表示する (旧来の挙動を保ったまま肯定形で記述)
+        if !(is_for_me && from_someone_else) {
             continue;
         }
         if unread_only && m.read_by.contains(&ctx.agent_id) {
@@ -906,10 +974,32 @@ async fn team_assign_task(
             ctx.role
         ));
     }
-    let assignee = args.get("assignee").and_then(|v| v.as_str()).unwrap_or("");
+    let assignee_raw = args.get("assignee").and_then(|v| v.as_str()).unwrap_or("");
+    let assignee = assignee_raw.trim();
     let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
     if assignee.is_empty() || description.is_empty() {
         return Err("assignee and description are required".into());
+    }
+    // 旧実装は assignee を一切検証せずに task を作成していた。
+    // Claude (LLM) が "Programmer" / "プログラマー" / 存在しない role 名を渡すと、
+    // task は作成されるが team_send 通知はゼロ宛先で no-op になり、
+    // Leader からは「task は登録されたのに何も起こらない」サイレント失敗になる。
+    // → 作成前に resolve_targets で検証し、無効ならエラーで弾いて roles を案内する。
+    let members = hub.registry.list_team_members(&ctx.team_id);
+    let resolved = resolve_targets(&members, &ctx.agent_id, assignee);
+    if resolved.is_empty() {
+        // 同 role 複数名がいる場合の重複ヒント表示を避けるため一意化する
+        let mut other_roles: Vec<String> = members
+            .iter()
+            .filter(|(aid, _)| aid != &ctx.agent_id)
+            .map(|(_, r)| r.clone())
+            .filter(|r| !r.is_empty())
+            .collect();
+        other_roles.sort();
+        other_roles.dedup();
+        return Err(format!(
+            "assignee '{assignee}' does not match any current team member. Valid roles: {other_roles:?} (or 'all', or an agentId)"
+        ));
     }
     // 「長文ペイロード・ルール」: description も SOFT_PAYLOAD_LIMIT で弾いてファイル経由を強制。
     // bulk な指示 (21 連続 issue 起票の YAML 等) はここで必ず途中切れしないために。
@@ -959,8 +1049,31 @@ async fn team_assign_task(
     let notify_args = json!({ "to": assignee, "message": format!("[Task #{task_id}] {description}") });
     let hub_clone = hub.clone();
     let ctx_clone = ctx.clone();
+    let task_id_for_log = task_id;
+    let assignee_for_log = assignee.to_string();
     tokio::spawn(async move {
-        let _ = team_send(&hub_clone, &ctx_clone, &notify_args).await;
+        match team_send(&hub_clone, &ctx_clone, &notify_args).await {
+            Ok(v) => {
+                let delivered = v
+                    .get("delivered")
+                    .and_then(|d| d.as_array())
+                    .map(|a| a.len())
+                    .unwrap_or(0);
+                if delivered == 0 {
+                    // assignee 検証で resolve_targets はパスしたはずなので、ここに来るのは
+                    // 「resolve した直後にメンバーが落ちた」「inject 自体が PTY write 失敗で 0 件」
+                    // のいずれか。診断のため warn で落とす。
+                    tracing::warn!(
+                        "[team_assign_task] task #{task_id_for_log} created for '{assignee_for_log}' but inject delivered to 0 members"
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[team_assign_task] task #{task_id_for_log} notify failed: {e}"
+                );
+            }
+        }
     });
     Ok(json!({ "success": true, "taskId": task_id }))
 }
@@ -1008,4 +1121,95 @@ async fn team_update_task(
         .ok_or_else(|| format!("Task #{task_id} not found"))?;
     task.status = status.to_string();
     Ok(json!({ "success": true }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_targets;
+
+    fn member(aid: &str, role: &str) -> (String, String) {
+        (aid.to_string(), role.to_string())
+    }
+
+    #[test]
+    fn resolve_targets_matches_role_exact() {
+        let members = vec![
+            member("vc-leader", "leader"),
+            member("vc-prog", "programmer"),
+        ];
+        let got = resolve_targets(&members, "vc-leader", "programmer");
+        assert_eq!(got, vec![member("vc-prog", "programmer")]);
+    }
+
+    #[test]
+    fn resolve_targets_matches_role_case_insensitive() {
+        let members = vec![
+            member("vc-leader", "leader"),
+            member("vc-prog", "programmer"),
+        ];
+        // Claude が "Programmer" / "PROGRAMMER" で送ってきても届くこと
+        let got = resolve_targets(&members, "vc-leader", "Programmer");
+        assert_eq!(got, vec![member("vc-prog", "programmer")]);
+        let got = resolve_targets(&members, "vc-leader", "PROGRAMMER");
+        assert_eq!(got, vec![member("vc-prog", "programmer")]);
+    }
+
+    #[test]
+    fn resolve_targets_trims_whitespace() {
+        let members = vec![
+            member("vc-leader", "leader"),
+            member("vc-prog", "programmer"),
+        ];
+        // 呼び出し側で trim 済みである前提だが、resolve_targets 自体も trim する
+        let got = resolve_targets(&members, "vc-leader", "  programmer  ");
+        assert_eq!(got, vec![member("vc-prog", "programmer")]);
+    }
+
+    #[test]
+    fn resolve_targets_matches_agent_id() {
+        let members = vec![
+            member("vc-leader", "leader"),
+            member("vc-prog-1", "programmer"),
+            member("vc-prog-2", "programmer"),
+        ];
+        // 同 role の複数メンバー中から agent_id で 1 名指定
+        let got = resolve_targets(&members, "vc-leader", "vc-prog-2");
+        assert_eq!(got, vec![member("vc-prog-2", "programmer")]);
+    }
+
+    #[test]
+    fn resolve_targets_all_excludes_self() {
+        let members = vec![
+            member("vc-leader", "leader"),
+            member("vc-prog", "programmer"),
+            member("vc-rev", "reviewer"),
+        ];
+        let got = resolve_targets(&members, "vc-leader", "all");
+        assert_eq!(got.len(), 2);
+        assert!(got.iter().all(|(aid, _)| aid != "vc-leader"));
+        // "ALL" でも通る
+        let got = resolve_targets(&members, "vc-leader", "ALL");
+        assert_eq!(got.len(), 2);
+    }
+
+    #[test]
+    fn resolve_targets_no_self_reply() {
+        let members = vec![
+            member("vc-leader", "leader"),
+            member("vc-prog", "programmer"),
+        ];
+        // 自分自身 (leader) を狙っても自分は含めない
+        let got = resolve_targets(&members, "vc-leader", "leader");
+        assert!(got.is_empty());
+    }
+
+    #[test]
+    fn resolve_targets_unknown_role_empty() {
+        let members = vec![
+            member("vc-leader", "leader"),
+            member("vc-prog", "programmer"),
+        ];
+        let got = resolve_targets(&members, "vc-leader", "researcher");
+        assert!(got.is_empty());
+    }
 }

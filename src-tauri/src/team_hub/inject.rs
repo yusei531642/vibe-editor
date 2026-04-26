@@ -108,13 +108,27 @@ pub async fn inject(
 ) -> bool {
     let session = match registry.get_by_agent(agent_id) {
         Some(s) => s,
-        None => return false,
+        None => {
+            tracing::warn!(
+                "[inject] no session for agent {agent_id} — registry has no by_agent entry"
+            );
+            return false;
+        }
     };
     let banner = format!("[Team ← {from_role}] ");
     let chunks = build_chunks(&banner, text);
     if chunks.is_empty() {
+        tracing::warn!(
+            "[inject] empty chunks for agent {agent_id} (text len={})",
+            text.len()
+        );
         return false;
     }
+    tracing::debug!(
+        "[inject] -> agent {agent_id} role={from_role} chunks={} bytes={}",
+        chunks.len(),
+        text.len()
+    );
 
     // 最初のチャンクは即時、以降は 15ms 間隔
     // Issue #145: session.write は std::sync::Mutex + blocking I/O なので tokio worker を
@@ -122,13 +136,16 @@ pub async fn inject(
     let mut iter = chunks.into_iter();
     if let Some(first) = iter.next() {
         let s = session.clone();
-        if tokio::task::spawn_blocking(move || s.write(&first))
-            .await
-            .ok()
-            .and_then(|r| r.ok())
-            .is_none()
-        {
-            return false;
+        match tokio::task::spawn_blocking(move || s.write(&first)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                tracing::warn!("[inject] write(first) failed for agent {agent_id}: {e}");
+                return false;
+            }
+            Err(e) => {
+                tracing::warn!("[inject] spawn_blocking(first) failed for agent {agent_id}: {e}");
+                return false;
+            }
         }
     }
     for chunk in iter {
@@ -145,20 +162,29 @@ pub async fn inject(
                     return false;
                 }
             }
-            None => return false,
+            None => {
+                tracing::warn!(
+                    "[inject] aborting: session for agent {agent_id} disappeared mid-inject"
+                );
+                return false;
+            }
         }
         let s = session.clone();
-        if tokio::task::spawn_blocking(move || s.write(&chunk))
-            .await
-            .ok()
-            .and_then(|r| r.ok())
-            .is_none()
-        {
-            return false;
+        match tokio::task::spawn_blocking(move || s.write(&chunk)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                tracing::warn!("[inject] write(chunk) failed for agent {agent_id}: {e}");
+                return false;
+            }
+            Err(e) => {
+                tracing::warn!("[inject] spawn_blocking(chunk) failed for agent {agent_id}: {e}");
+                return false;
+            }
         }
     }
     sleep(Duration::from_millis(CHUNK_DELAY_MS)).await;
     let s = session.clone();
     let _ = tokio::task::spawn_blocking(move || s.write(b"\r")).await;
+    tracing::debug!("[inject] -> agent {agent_id} delivered");
     true
 }

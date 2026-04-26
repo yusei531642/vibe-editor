@@ -166,8 +166,12 @@ async fn inject_codex_prompt_to_pty(
 }
 
 /// command が codex 系か判定 (パス形式や *.exe も拾う)
+///
+/// Path::new は OS のセパレータしか認識しない (Linux では `\` が単なる文字扱い) ので、
+/// Windows-style な `C:\tools\codex.exe` も Linux CI で正しく判定できるよう、
+/// 先に `/` `\` 双方をスラッシュに正規化してから basename を取り出す。
 fn is_codex_command(command: &str) -> bool {
-    let lower = command.to_ascii_lowercase();
+    let lower = command.to_ascii_lowercase().replace('\\', "/");
     let basename = std::path::Path::new(&lower)
         .file_stem()
         .and_then(|s| s.to_str())
