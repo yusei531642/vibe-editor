@@ -163,7 +163,9 @@ export function useRecruitListener(): void {
         return data?.agentId === p.agentId && data?.teamId === p.teamId;
       });
       if (target) {
-        store.removeCard(target.id);
+        // team_dismiss は 1 名だけ解雇する MCP 経路。チーム単位カスケードを無効化して、
+        // Leader や他メンバーが連鎖的に閉じないようにする。
+        store.removeCard(target.id, { cascadeTeam: false });
       }
     }).then((u) => {
       if (cancelled) {
@@ -183,7 +185,9 @@ export function useRecruitListener(): void {
       });
       if (target) {
         console.warn(`[recruit] cancelled: ${p.reason}`);
-        store.removeCard(target.id);
+        // recruit timeout / cancel で出る暫定カードだけを撤収する。
+        // 既に立っている Leader / 他メンバーを巻き込まないようカスケード無効化。
+        store.removeCard(target.id, { cascadeTeam: false });
       }
     }).then((u) => {
       if (cancelled) {

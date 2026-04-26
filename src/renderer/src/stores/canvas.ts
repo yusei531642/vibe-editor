@@ -35,7 +35,10 @@ interface CanvasState {
   addCards: (
     cards: { type: CardType; title: string; payload?: unknown; position: { x: number; y: number } }[]
   ) => string[];
-  removeCard: (id: string) => void;
+  /** カードを 1 枚削除する。
+   *  デフォルトは teamId が一致する仲間カードを「チーム単位」で全部閉じる挙動 (× ボタン等の UX)。
+   *  `cascadeTeam: false` を渡すと指定 id 1 枚だけを閉じる (`team_dismiss` で 1 名解雇する経路で使う)。 */
+  removeCard: (id: string, options?: { cascadeTeam?: boolean }) => void;
   /** カードのタイトルを更新 (auto-summary や rename 用) */
   setCardTitle: (id: string, title: string) => void;
   /** カードの payload を浅くマージ更新する。
@@ -119,17 +122,16 @@ export const useCanvasStore = create<CanvasState>()(
         set({ nodes: [...get().nodes, ...newNodes] });
         return ids;
       },
-      removeCard: (id) =>
+      removeCard: (id, options) =>
         set((state) => {
-          // チームカードを 1 枚閉じたら、同 teamId の全メンバーを連動して閉じる。
-          // 「team を閉じる = チーム単位で閉じる」のが自然な期待値なので、
-          // どのエントリポイント (×ボタン / 右クリック / Delete キー) からでも
-          // このアクションに集約する。
+          const cascadeTeam = options?.cascadeTeam !== false; // 既定: チーム単位カスケード
+          // cascadeTeam=true (× ボタン等): 同 teamId 全員 + teamLocks も掃除
+          // cascadeTeam=false (team_dismiss 1 名解雇): 指定 id だけを閉じ、Leader や他メンバーは残す
           const target = state.nodes.find((n) => n.id === id);
           const teamId = (target?.data?.payload as { teamId?: string } | undefined)?.teamId;
           const ids = new Set<string>([id]);
           let teamLocksNext = state.teamLocks;
-          if (teamId) {
+          if (cascadeTeam && teamId) {
             for (const n of state.nodes) {
               const tid = (n.data?.payload as { teamId?: string } | undefined)?.teamId;
               if (tid === teamId) ids.add(n.id);
