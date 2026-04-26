@@ -19,12 +19,7 @@
         "minHeight": 640,
         "resizable": true,
         "decorations": true,
-        "fullscreen": false,
-        "transparent": true,
-        "windowEffects": {
-          "effects": ["acrylic", "mica", "hudWindow"],
-          "state": "active"
-        }
+        "fullscreen": false
       }
     ],
     "security": {
