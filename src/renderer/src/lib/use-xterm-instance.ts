@@ -41,6 +41,9 @@ export function useXtermInstance(
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  // Issue #123: フォント変更後に WebGL のテクスチャアトラスを clear するため
+  // webgl addon を effect 間で参照できるよう ref に保持する。
+  const webglRef = useRef<WebglAddon | null>(null);
 
   // マウント時の初期値を ref に退避。初回 Terminal 生成に使う。
   // 以後のフォント/テーマ変化はリアクティブ effect 側で反映する。
@@ -80,19 +83,19 @@ export function useXtermInstance(
     //
     // disableWebgl=true (Canvas モード) の場合は WebGL を読み込まず DOM renderer のままにする。
     // 親の `transform: scale(zoom)` で WebGL canvas が GPU 補間されると滲むため。
-    let webgl: WebglAddon | null = null;
     if (!disableWebgl) {
       try {
-        webgl = new WebglAddon();
+        const webgl = new WebglAddon();
         webgl.onContextLoss(() => {
-          webgl?.dispose();
-          webgl = null;
+          webgl.dispose();
+          webglRef.current = null;
         });
         term.loadAddon(webgl);
+        webglRef.current = webgl;
       } catch (err) {
         // 例: WebGL 作成不可 → DOM renderer で続行 (問題なく動作する)
         console.warn('[xterm] WebGL addon 初期化失敗 → DOM renderer にフォールバック:', err);
-        webgl = null;
+        webglRef.current = null;
       }
     }
 
@@ -100,7 +103,8 @@ export function useXtermInstance(
     fitRef.current = fit;
 
     return () => {
-      webgl?.dispose();
+      webglRef.current?.dispose();
+      webglRef.current = null;
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
@@ -116,12 +120,23 @@ export function useXtermInstance(
     term.options.fontFamily = settings.terminalFontFamily || settings.editorFontFamily;
     term.options.fontSize = settings.terminalFontSize;
     term.options.theme = buildXtermTheme(settings.theme);
+    // Issue #123: WebGL renderer はグリフをテクスチャアトラスにキャッシュするため、
+    // fontFamily/fontSize を切り替えても古いフォントの glyph が描画され続けることがある。
+    // clearTextureAtlas() で強制的にアトラスを破棄して新フォントで再ラスタライズさせる。
+    try {
+      webglRef.current?.clearTextureAtlas();
+    } catch {
+      // dispose 直後など WebGL コンテキストが既に失われている場合は無視
+    }
     // Issue #113: フォント変更後に fit を呼ばないと xterm 内部の cols/rows と
     // コンテナの実 px サイズの整合が取れず、グリフキャッシュが古いセル幅のまま残って
     // 文字が滲んだり位置が崩れる。requestAnimationFrame で次の paint 後に再計測する。
     requestAnimationFrame(() => {
       try {
         fitRef.current?.fit();
+        // Issue #123: fit() が cols/rows を変えなかった場合、内部的に refresh が走らず
+        // 既に描画済みの行が古いフォント glyph のまま残ることがある。明示的に全行 refresh する。
+        termRef.current?.refresh(0, (termRef.current.rows ?? 1) - 1);
       } catch {
         // fit は container 不在 / Terminal dispose 直後で例外を投げ得る (無視で安全)
       }
