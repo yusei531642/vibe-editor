@@ -759,13 +759,36 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
     let app = hub.app_handle.lock().await.clone();
 
     let mut targets: Vec<(String, String)> = Vec::new();
+    let mut skipped_self: usize = 0;
+    let mut skipped_role_mismatch: Vec<(String, String)> = Vec::new();
     for (target_aid, target_role) in team_members {
         if target_aid == ctx.agent_id {
+            skipped_self += 1;
             continue;
         }
         if to == "all" || to == target_role {
             targets.push((target_aid, target_role));
+        } else {
+            skipped_role_mismatch.push((target_aid, target_role));
         }
+    }
+    tracing::debug!(
+        "[team_send] from agent={} role={} to={} → targets={} (self_skipped={}, role_mismatch={:?})",
+        ctx.agent_id,
+        ctx.role,
+        to,
+        targets.len(),
+        skipped_self,
+        skipped_role_mismatch
+    );
+    if targets.is_empty() {
+        tracing::warn!(
+            "[team_send] no targets for to={:?} in team={} (members in registry: self={} role_mismatch_examples={:?})",
+            to,
+            ctx.team_id,
+            skipped_self,
+            skipped_role_mismatch
+        );
     }
 
     let mut join_set = tokio::task::JoinSet::new();
