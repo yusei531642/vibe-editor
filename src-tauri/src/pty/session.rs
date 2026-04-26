@@ -118,20 +118,31 @@ pub fn resolve_valid_cwd(
 
 /// PTY を 1 つ生成、reader thread を起動、batcher を回し、exit watcher も spawn。
 /// 戻り値の SessionHandle は SessionRegistry に登録される。
-/// Issue #54: 子プロセスに渡さない環境変数を判定する。
+/// Issue #54 / #139: 子プロセスに渡さない環境変数を判定する。
 /// - 非 team 端末 (`is_team = false`) では `VIBE_TEAM_*` / `VIBE_AGENT_ID` も剥がす。
-///   team 端末では opts.env 経由で正しい値が後から差し込まれるのでここで剥がして問題ない。
-/// - シークレット接頭辞の denylist はエンドポイント毎に足し増やしていく。
+/// - シークレット接頭辞 / 接尾辞 / 完全一致 + 一般 secret 命名パターンの denylist。
+///
+/// 完全な allowlist 化は破壊的変更 (ユーザーの開発フローで使う任意 env が落ちる) なので、
+/// 当面は denylist を強化し、`*_TOKEN` `*_KEY` `*_SECRET` `*_PASSWORD` などの一般パターンも
+/// 弾く方式に拡張する。
 fn should_strip_env(key: &str, is_team: bool) -> bool {
     // vibe-editor 内部 env: team 外には漏らさない
     if !is_team && (key.starts_with("VIBE_TEAM_") || key == "VIBE_AGENT_ID") {
         return true;
     }
-    // 典型的シークレット接頭辞 / 完全一致 (ユーザー開発シェルからの漏出防止)
+    // team 端末では VIBE_TEAM_* / VIBE_AGENT_ID は明示的に流す。
+    // 以下の汎用 *_TOKEN パターンに `VIBE_TEAM_TOKEN` 等が引っかからないよう先に return false。
+    if is_team && (key.starts_with("VIBE_TEAM_") || key == "VIBE_AGENT_ID") {
+        return false;
+    }
+
+    let upper = key.to_ascii_uppercase();
+
+    // (1) 接頭辞 prefix denylist
     const SECRET_PREFIXES: &[&str] = &[
         "AWS_",
-        "GITHUB_TOKEN",
-        "GH_TOKEN",
+        "GITHUB_",
+        "GH_",
         "OPENAI_",
         "ANTHROPIC_",
         "AZURE_",
@@ -142,8 +153,75 @@ fn should_strip_env(key: &str, is_team: bool) -> bool {
         "NPM_TOKEN",
         "HF_TOKEN",
         "HUGGINGFACE_",
+        // Issue #139 で追加
+        "CLAUDE_",
+        "SLACK_",
+        "DISCORD_",
+        "TWILIO_",
+        "SENTRY_",
+        "SUPABASE_",
+        "DOPPLER_",
+        "VAULT_",
+        "HCP_",
+        "DOCKER_",
+        "GITLAB_",
+        "OP_SESSION_",
+        "OP_",
+        "POSTGRES_",
+        "MYSQL_",
+        "MARIADB_",
+        "REDIS_",
+        "MONGO_",
+        "MONGODB_",
+        "ELASTICSEARCH_",
+        "ELASTIC_",
+        "CIRCLECI_",
+        "BUILDKITE_",
+        "VERCEL_",
+        "NETLIFY_",
+        "RAILWAY_",
+        "FLY_",
+        "DATABASE_",
     ];
-    SECRET_PREFIXES.iter().any(|p| key.starts_with(p))
+    if SECRET_PREFIXES.iter().any(|p| upper.starts_with(p)) {
+        return true;
+    }
+
+    // (2) 接尾辞 suffix の一般パターン (*_TOKEN / *_KEY / *_SECRET / *_PASSWORD / *_PWD)
+    const SECRET_SUFFIXES: &[&str] = &[
+        "_TOKEN",
+        "_API_KEY",
+        "_SECRET",
+        "_SECRET_KEY",
+        "_PASSWORD",
+        "_PASSWD",
+        "_PWD",
+        "_AUTH",
+        "_ACCESS_KEY",
+    ];
+    if SECRET_SUFFIXES.iter().any(|s| upper.ends_with(s)) {
+        return true;
+    }
+
+    // (3) 完全一致 (パターンに引っ掛からない著名な env)
+    const SECRET_EXACT: &[&str] = &[
+        "DATABASE_URL",
+        "MYSQL_PWD",
+        "PGPASSWORD",
+        "REDIS_URL",
+        "MONGO_URL",
+        "MONGODB_URI",
+        "KUBECONFIG",
+        "DOCKER_AUTH_CONFIG",
+        "SSH_AUTH_SOCK",
+        "GPG_AGENT_INFO",
+        "AWS_PROFILE",
+    ];
+    if SECRET_EXACT.iter().any(|e| upper == *e) {
+        return true;
+    }
+
+    false
 }
 
 #[cfg(test)]
@@ -163,6 +241,22 @@ mod env_strip_tests {
         assert!(should_strip_env("GITHUB_TOKEN", false));
         assert!(should_strip_env("OPENAI_API_KEY", false));
         assert!(should_strip_env("ANTHROPIC_API_KEY", false));
+        // Issue #139 で追加した DB / cloud / dev tool 系
+        assert!(should_strip_env("DATABASE_URL", false));
+        assert!(should_strip_env("POSTGRES_PASSWORD", false));
+        assert!(should_strip_env("MYSQL_PWD", false));
+        assert!(should_strip_env("REDIS_URL", false));
+        assert!(should_strip_env("KUBECONFIG", false));
+        assert!(should_strip_env("DOCKER_AUTH_CONFIG", false));
+        assert!(should_strip_env("SSH_AUTH_SOCK", false));
+        assert!(should_strip_env("OP_SESSION_abc", false));
+        assert!(should_strip_env("DOPPLER_TOKEN", false));
+        assert!(should_strip_env("VAULT_TOKEN", false));
+        assert!(should_strip_env("CLAUDE_API_KEY", false));
+        assert!(should_strip_env("SLACK_TOKEN", false));
+        assert!(should_strip_env("MY_PRIVATE_TOKEN", false)); // suffix 一般パターン
+        assert!(should_strip_env("APP_SECRET", false));
+        assert!(should_strip_env("DB_PASSWORD", false));
     }
 
     #[test]
