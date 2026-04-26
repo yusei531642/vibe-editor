@@ -8,7 +8,7 @@
 // 対策: `<target>.tmp.<pid>.<rand>` に書き、fsync して rename で atomic 置換する。
 // POSIX も Windows も rename は same-volume なら atomic (Windows は MoveFileEx + REPLACE_EXISTING)。
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::path::Path;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -36,9 +36,29 @@ pub async fn atomic_write(target: &Path, bytes: &[u8]) -> Result<()> {
             .unwrap_or_else(|| Path::new(&tmp_name).to_path_buf())
     };
 
-    // 書き込み + fsync
+    // Issue #187 (Security): tmp が攻撃者によって symlink 先置きされている可能性に備え、
+    // O_CREAT | O_EXCL 相当の create_new=true で開く (既存があれば失敗)。
+    // 加えて Unix では O_NOFOLLOW を付けて symlink を follow させない。
     {
-        let mut f = fs::File::create(&tmp).await?;
+        let mut opts = fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            // O_NOFOLLOW (linux: 0x20000, macOS: 0x100). libc クレートを使わずに数値で指定するのは
+            // 非互換になりやすいので tokio が提供する custom_flags 経由を採用。
+            // libc が無い場合でも O_EXCL で symlink → target file 上書きはほぼ防げる。
+            #[cfg(target_os = "linux")]
+            opts.custom_flags(0x20000); // O_NOFOLLOW (Linux)
+            #[cfg(target_os = "macos")]
+            opts.custom_flags(0x0100); // O_NOFOLLOW (macOS / BSD)
+        }
+        let mut f = match opts.open(&tmp).await {
+            Ok(f) => f,
+            Err(e) => {
+                return Err(anyhow!("atomic_write open tmp failed: {e}"));
+            }
+        };
         f.write_all(bytes).await?;
         f.flush().await?;
         // sync_all で metadata も含めてディスクへ flush
