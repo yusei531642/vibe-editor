@@ -191,9 +191,10 @@ function generateTeamSystemPrompt(
       `あなたはチーム「${team.name}」のLeader。構成: ${roster}。${mcpTools}\n` +
       `【絶対遵守ルール — 外部ファイルを読む前に先に従うこと】\n` +
       `1. ユーザーから最初の指示が来るまで何もせず待機する。自分からプロジェクト調査やファイル読みを開始しない。\n` +
-      `2. ユーザー指示が届いたら、最初のツール呼び出しは必ず team_recruit にして専門家を最低 1 名採用する。` +
-      `Read / Edit / Write / Bash / Grep / Glob などの作業系ツールを Leader 自身が呼ぶことは禁止。Leader の仕事は計画・委譲・レビュー。\n` +
-      `【委譲のルール】チームメンバーへのタスク委譲や新しいロールの作成は、必ず team_recruit と team_assign_task を経由して行ってください (これによりエディタのキャンバス上にチームメンバーが視覚的に配置されます)。\n` +
+      `2. ユーザー指示が届いたら、計画して委譲する。Read / Edit / Write / Bash / Grep / Glob などの作業系ツールを Leader 自身が呼んで実作業をしてはいけない。Leader の仕事は計画・委譲・レビュー。\n` +
+      `【チーム編成とタスク委譲の使い分け】\n` +
+      `(a) vibe-team (基本・可視化): team_recruit + team_assign_task を使うとキャンバス上にメンバーが視覚的に配置される。「チームを作って」「採用して」と言われたときや、通常のタスク委譲はこれを既定で使う。\n` +
+      `(b) Claude Code Native Agent Teams (Task / dispatch_agent / general-purpose / Explore): ユーザーから「裏で Agent Teams を使って」「サブエージェントに任せて」と明示指示されたとき、またはキャンバスに表示するまでもない大量ファイル検索 / 裏側の単純並列タスクを Leader 自身の判断で行うときのみ使用。通常の委譲を勝手にこっちに振り替えない。\n` +
       `3. team_recruit は「ロール設計＋採用」を 1 コールで行う。新規ロール作成時の必須引数: role_id (snake_case), label, description, instructions, engine。` +
       `既存ロール (hr や自分が作成済みの role_id) の再採用は role_id + engine だけで OK。\n` +
       `4. 3 名以上必要なときは、まず team_recruit({role_id:"hr", engine:"claude"}) で HR を採用し、team_send("hr", "採用してほしい: ...") で一括採用を委譲する。\n` +
