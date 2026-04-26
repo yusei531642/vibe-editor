@@ -11,6 +11,7 @@
  *   - "Recent Teams" タブで過去チームを再開 (Card 配置完全復元)
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { Node } from '@xyflow/react';
 import {
   ChevronDown,
   FilePlus,
@@ -23,7 +24,7 @@ import {
   Users,
   History
 } from 'lucide-react';
-import type { CardType } from '../stores/canvas';
+import type { CardData, CardType } from '../stores/canvas';
 import type {
   Language,
   Team,
@@ -96,7 +97,21 @@ export function CanvasLayout(): JSX.Element {
   const viewMode = useUiStore((s) => s.viewMode);
   const isCanvasActive = viewMode === 'canvas';
   const cardCount = useCanvasStore((s) => s.nodes.length);
-  const nodes = useCanvasStore((s) => s.nodes);
+  // Issue #124: ドラッグ中は React Flow が onNodesChange で毎フレーム新しい nodes 配列を
+  // commit する。`nodes` を直接 selector で購読すると、CanvasLayout 配下の重い useMemo
+  // (autoSavePayload など) が毎フレーム再評価されて 30〜60% CPU を張り付かせる。
+  // → ドラッグ完了後 (nodes.some(n => n.dragging) === false) のスナップショットのみを
+  //    React state に反映する。team 復元や auto-save はこの「settled」配列を見る。
+  const [nodes, setNodes] = useState<Node<CardData>[]>(
+    () => useCanvasStore.getState().nodes
+  );
+  useEffect(() => {
+    return useCanvasStore.subscribe((state, prev) => {
+      if (state.nodes === prev.nodes) return;
+      if (state.nodes.some((n) => n.dragging)) return;
+      setNodes(state.nodes);
+    });
+  }, []);
   const viewport = useCanvasStore((s) => s.viewport);
   const clear = useCanvasStore((s) => s.clear);
   const addCards = useCanvasStore((s) => s.addCards);
