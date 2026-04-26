@@ -224,6 +224,26 @@
   justify-content: flex-start;
 }
 
+/* 「セットアップをもう一度」ボタンを outlined にして単独テキストの浮き感を解消 */
+.settings-shell__replay-btn.toolbar__btn {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.settings-shell__replay-btn.toolbar__btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  color: var(--text);
+}
+
+/* footer 左の「デフォルトに戻す」を destructive secondary 風に dim させ、
+   右の primary 「適用して保存」とのアクション優先度差を視覚的に明確化する */
+.modal--settings .modal__footer .settings-shell__reset.toolbar__btn {
+  color: var(--text-mute);
+}
+.modal--settings .modal__footer .settings-shell__reset.toolbar__btn:hover:not(:disabled) {
+  color: var(--warning, var(--text));
+}
+
 /* ---------- カスタムエージェント追加ボタン (nav) ---------- */
 .settings-shell__nav-item--add {
   color: var(--text-dim);

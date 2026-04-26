@@ -160,8 +160,10 @@ export function SettingsModal({
         '__addCustom'
       ]
     },
-    { label: isJa ? 'チーム' : 'Team', items: ['roles'] },
-    { label: 'MCP', items: ['mcp'] }
+    // vibe-team MCP のセットアップ手順は「チーム」機能の一部なので同グループに収める。
+    // 旧構成では MCP を独立グループにしていたが、グループラベル "MCP" と唯一の項目 "MCP" が
+    // 同名で並び、サイドバー上で MCP が 2 行重複しているように見える UI バグを生んでいた。
+    { label: isJa ? 'チーム' : 'Team', items: ['roles', 'mcp'] }
   ];
 
   const renderSection = (id: SectionId): JSX.Element | null => {
@@ -175,7 +177,7 @@ export function SettingsModal({
               <div className="settings-shell__replay">
                 <button
                   type="button"
-                  className="toolbar__btn"
+                  className="toolbar__btn settings-shell__replay-btn"
                   onClick={() => {
                     onClose();
                     onReplayOnboarding();
@@ -343,7 +345,11 @@ export function SettingsModal({
         </div>
 
         <footer className="modal__footer">
-          <button type="button" className="toolbar__btn" onClick={handleReset}>
+          <button
+            type="button"
+            className="toolbar__btn settings-shell__reset"
+            onClick={handleReset}
+          >
             {t('settings.reset')}
           </button>
           <div className="modal__footer-right">
