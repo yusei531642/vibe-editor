@@ -95,11 +95,15 @@ function FlowApp(): JSX.Element {
       //   - pendingPosIds / pendingDimIds: remaining 内に既存の position/dimensions 変更がある id の Set
       //     (旧 remaining.some 二重ループを Set.has の O(1) に置換)
       //   - lockedTeams: teamId → boolean のキャッシュ (isTeamLocked の重複呼び出しを削減)
+      // payload は CardData 内で複数のサブ型を持つため { teamId?: string } で局所キャストする。
+      // 同じキャストが index 構築 + position/dimensions 分岐で計 3 回走るので helper に集約。
+      const teamIdOf = (n: Node<CardData>): string | undefined =>
+        (n.data?.payload as { teamId?: string } | undefined)?.teamId;
       const nodesById = new Map<string, Node<CardData>>();
       const teamMembers = new Map<string, Node<CardData>[]>();
       for (const n of nodes) {
         nodesById.set(n.id, n);
-        const tid = (n.data?.payload as { teamId?: string } | undefined)?.teamId;
+        const tid = teamIdOf(n);
         if (tid) {
           let bucket = teamMembers.get(tid);
           if (!bucket) {
@@ -131,7 +135,7 @@ function FlowApp(): JSX.Element {
         if (c.type === 'position' && c.position) {
           const node = nodesById.get(c.id);
           if (!node) continue;
-          const teamId = (node.data?.payload as { teamId?: string } | undefined)?.teamId;
+          const teamId = teamIdOf(node);
           if (!teamId || !isLocked(teamId)) continue;
           const dx = c.position.x - node.position.x;
           const dy = c.position.y - node.position.y;
@@ -154,7 +158,7 @@ function FlowApp(): JSX.Element {
         if (c.type === 'dimensions' && c.dimensions && c.resizing) {
           const node = nodesById.get(c.id);
           if (!node) continue;
-          const teamId = (node.data?.payload as { teamId?: string } | undefined)?.teamId;
+          const teamId = teamIdOf(node);
           if (!teamId || !isLocked(teamId)) continue;
           const w = c.dimensions.width;
           const h = c.dimensions.height;

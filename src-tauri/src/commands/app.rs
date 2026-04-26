@@ -218,10 +218,19 @@ pub async fn app_setup_team_mcp(
                         active_canon.display()
                     );
                 }
-                (Err(e), _) | (_, Err(e)) => {
-                    tracing::warn!(
-                        "[setup_team_mcp] canonicalize failed for skill install gate: {e}"
-                    );
+                (req_res, active_res) => {
+                    // どちらか / 両方失敗。両方分けて出すことで「片方だけ失敗 → ディスク破損疑い」
+                    // 「両方失敗 → 設定経路の不整合」のデバッグ材料を残す。
+                    if let Err(e) = req_res {
+                        tracing::warn!(
+                            "[setup_team_mcp] canonicalize requested project_root failed: {e}"
+                        );
+                    }
+                    if let Err(e) = active_res {
+                        tracing::warn!(
+                            "[setup_team_mcp] canonicalize active project_root failed: {e}"
+                        );
+                    }
                 }
             }
         }

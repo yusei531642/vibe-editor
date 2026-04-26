@@ -304,8 +304,8 @@ export function SettingsModal({
           // Issue #195: Escape で閉じる + Tab で focus trap。
           if (e.key === 'Escape') {
             // IME 変換中の Escape は確定キャンセルとして使われるので絶対に握らない。
-            const composing = (e.nativeEvent as KeyboardEvent).isComposing;
-            if (composing) return;
+            // React 17+ では e.nativeEvent は KeyboardEvent 型に推論されるためキャスト不要。
+            if (e.nativeEvent.isComposing) return;
             const target = e.target as HTMLElement | null;
             const tag = target?.tagName;
             const isTextField =
@@ -336,11 +336,13 @@ export function SettingsModal({
           ).filter((el) => {
             // 1. dialog root 自身 (tabIndex=-1) を除外する保険
             if (el.tabIndex < 0) return false;
-            // 2. レイアウト上見えていない要素を除外。旧実装は offsetParent === null で判定していたが、
-            //    position: fixed の要素は offsetParent が常に null になるため誤って除外される。
-            //    getComputedStyle.display !== 'none' + visibility !== 'hidden' で堅牢にチェック。
-            const style = window.getComputedStyle(el);
-            return style.display !== 'none' && style.visibility !== 'hidden';
+            // 2. レイアウト上見えていない要素を除外。
+            //    旧実装は offsetParent === null だったが position: fixed で常に null になり誤除外。
+            //    getComputedStyle は確実だが Tab 押下ごとに layout thrashing しうるため、
+            //    getBoundingClientRect の width/height でレイアウト 1 回だけ走らせる軽量版に統一。
+            //    (display:none / visibility:hidden / 0 サイズ要素はすべて 0 になるので網羅できる)
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 || rect.height > 0;
           });
           if (focusables.length === 0) return;
           const first = focusables[0];
