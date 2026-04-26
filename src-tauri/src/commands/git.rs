@@ -78,17 +78,67 @@ async fn run_git(args: &[&str], cwd: &str) -> Result<String, String> {
 
 /// `git status --porcelain=v1 -z` の raw bytes を返す。
 /// -z は NUL 区切りなので UTF-8 変換せず bytes 単位で返す必要がある。
+///
+/// Issue #174: 巨大 monorepo で porcelain 出力が数十〜数百 MB 達する場合に備えて、
+/// stdout を pipe で受け取りつつ MAX_STDOUT_BYTES でハードキャップ。超過したら
+/// child を kill して残りを切り捨てる (renderer 側は entries が途中まで取れる)。
 async fn run_git_bytes(args: &[&str], cwd: &str) -> Result<Vec<u8>, String> {
-    let out = new_git_command()
+    use std::process::Stdio;
+    use tokio::io::AsyncReadExt;
+
+    const MAX_STDOUT_BYTES: usize = 16 * 1024 * 1024; // 16 MiB
+
+    let mut child = new_git_command()
         .args(args)
         .current_dir(cwd)
-        .output()
-        .await
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| format!("failed to spawn git: {e}"))?;
-    if !out.status.success() {
-        return Err(String::from_utf8_lossy(&out.stderr).into_owned());
+
+    let mut stdout_pipe = child
+        .stdout
+        .take()
+        .ok_or_else(|| "git stdout pipe missing".to_string())?;
+    let mut stderr_pipe = child.stderr.take();
+
+    let mut buf = Vec::with_capacity(64 * 1024);
+    let mut chunk = [0u8; 64 * 1024];
+    let mut truncated = false;
+    loop {
+        match stdout_pipe.read(&mut chunk).await {
+            Ok(0) => break,
+            Ok(n) => {
+                if buf.len() + n > MAX_STDOUT_BYTES {
+                    let remaining = MAX_STDOUT_BYTES - buf.len();
+                    if remaining > 0 {
+                        buf.extend_from_slice(&chunk[..remaining]);
+                    }
+                    truncated = true;
+                    let _ = child.kill().await;
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+            }
+            Err(_) => break,
+        }
     }
-    Ok(out.stdout)
+
+    let status = child.wait().await.map_err(|e| e.to_string())?;
+    if !status.success() && !truncated {
+        let mut stderr_buf = Vec::new();
+        if let Some(ref mut s) = stderr_pipe {
+            let _ = s.read_to_end(&mut stderr_buf).await;
+        }
+        return Err(String::from_utf8_lossy(&stderr_buf).into_owned());
+    }
+    if truncated {
+        tracing::warn!(
+            "[git] stdout truncated at {} bytes (porcelain output exceeded soft cap)",
+            MAX_STDOUT_BYTES
+        );
+    }
+    Ok(buf)
 }
 
 /// `--porcelain=v1 -z` の出力をパースする。
