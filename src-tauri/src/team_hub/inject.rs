@@ -1,14 +1,19 @@
-// PTY への 64B / 15ms チャンク注入
+// PTY への bracketed-paste 注入
 //
-// 旧 team-hub.ts の injectIntoPty を Rust 移植。
-// ConPTY バッファ上限の対策として実証済みの数値:
-// - 1 チャンク 64 byte
-// - チャンク間 15ms
-// - UTF-8 マルチバイト境界で切らない (継続バイト 0x80..=0xBF が先頭ならチャンク末尾を後退)
-// - banner `[Team ← <role>] ` を先頭に付与
-// - 4KB を超えるメッセージは ` …(truncated)` でトランケート
-// - 改行は ` ` または ` | ` に整形 (Claude Code はブラケットペースト送信不可)
-// - 全チャンク後に \r を送信して送信完了
+// 旧実装は改行を空白化 + 4KB トランケート + 64B/15ms チャンクで送る方式だったが、
+// 21 件 issue 起票のような長文 / 多行コンテンツでは末尾が truncated される問題があった。
+// (旧コメントには「Claude Code はブラケットペースト送信不可」とあったが、現行の
+//  Claude Code は普通にペーストを受け取り `[Pasted text #N +M lines]` として 1 件扱いに
+//  バンドルしてくれる。ユーザー画面で実証済み。)
+//
+// 改修方針:
+//  - 全体を `ESC [ 200 ~ ... ESC [ 201 ~` で囲んだ bracketed paste 形式で送る。
+//    Claude Code (および bracketed-paste 対応 TUI) は中身を「1 件のペースト」として扱う。
+//  - 改行は保持。空白化しない (paste 扱いなので生 \n がそのまま入る)。
+//  - 上限を 32 KiB に拡張 (旧 4 KiB)。Hub 側 SOFT_PAYLOAD_LIMIT (32 KiB) と整合。
+//  - ConPTY バッファ事故を避けるためチャンク化 (64 B / 15 ms) は維持。
+//  - 全チャンク後に `\r` を送って送信確定。
+//  - banner `[Team ← <role>] ` も paste 領域内に含めて 1 ブロック化する。
 
 use crate::pty::SessionRegistry;
 use std::sync::Arc;
@@ -17,47 +22,45 @@ use tokio::time::sleep;
 
 const CHUNK_SIZE: usize = 64;
 const CHUNK_DELAY_MS: u64 = 15;
-const MAX_PAYLOAD: usize = 4096;
+/// bracketed paste 化に伴い上限を引き上げ。Hub の SOFT_PAYLOAD_LIMIT と揃える。
+const MAX_PAYLOAD: usize = 32 * 1024;
 
-/// 1 メッセージを ConPTY-safe な形に整形してチャンク列に分割
+/// bracketed paste の開始マーカー (CSI 200 ~)
+const BP_START: &[u8] = b"\x1b[200~";
+/// bracketed paste の終了マーカー (CSI 201 ~)
+const BP_END: &[u8] = b"\x1b[201~";
+
+/// 1 メッセージを bracketed paste 形式に包んで ConPTY-safe な 64B チャンク列にする。
+///
+/// 出力フォーマット (1 つ目のチャンク先頭から):
+///     <ESC>[200~ <banner><body> <ESC>[201~
+///
+/// 改行はそのまま保持 (paste 扱い)。MAX_PAYLOAD 超過時は body 末尾を切って ` …(truncated)`。
 pub fn build_chunks(banner: &str, body: &str) -> Vec<Vec<u8>> {
-    // 改行整形
-    let flat: String = body
-        .chars()
-        .scan(false, |prev_nl, c| {
-            if c == '\n' {
-                let out = if *prev_nl { Some(' ') } else { Some(' ') };
-                *prev_nl = true;
-                out
-            } else {
-                *prev_nl = false;
-                Some(c)
-            }
-        })
-        .collect();
-    // 連続改行 (2 つ以上) は最初の Map で全て空白化済み — シンプルにそのまま使う
-    let truncated = if flat.len() > MAX_PAYLOAD {
-        let mut s: String = flat.chars().take(MAX_PAYLOAD).collect();
+    let truncated: String = if body.len() > MAX_PAYLOAD {
+        let mut s: String = body.chars().take(MAX_PAYLOAD).collect();
         s.push_str(" …(truncated)");
         s
     } else {
-        flat
+        body.to_string()
     };
 
-    let mut payload = String::with_capacity(banner.len() + truncated.len());
-    payload.push_str(banner);
-    payload.push_str(&truncated);
+    let mut payload: Vec<u8> =
+        Vec::with_capacity(BP_START.len() + banner.len() + truncated.len() + BP_END.len());
+    payload.extend_from_slice(BP_START);
+    payload.extend_from_slice(banner.as_bytes());
+    payload.extend_from_slice(truncated.as_bytes());
+    payload.extend_from_slice(BP_END);
 
-    let bytes = payload.into_bytes();
     let mut chunks = Vec::new();
     let mut i = 0;
-    while i < bytes.len() {
-        let mut end = (i + CHUNK_SIZE).min(bytes.len());
+    while i < payload.len() {
+        let mut end = (i + CHUNK_SIZE).min(payload.len());
         // UTF-8 継続バイト (0b10xxxxxx) の途中で切らないよう後退
-        while end < bytes.len() && (bytes[end] & 0xc0) == 0x80 {
+        while end < payload.len() && (payload[end] & 0xc0) == 0x80 {
             end -= 1;
         }
-        chunks.push(bytes[i..end].to_vec());
+        chunks.push(payload[i..end].to_vec());
         i = end;
     }
     chunks

@@ -199,7 +199,7 @@ function generateTeamSystemPrompt(
       `既存ロール (hr や自分が作成済みの role_id) の再採用は role_id + engine だけで OK。\n` +
       `4. 3 名以上必要なときは、まず team_recruit({role_id:"hr", engine:"claude"}) で HR を採用し、team_send("hr", "採用してほしい: ...") で一括採用を委譲する。\n` +
       `5. チームが揃ったら team_assign_task で割り振り、結果は [Team ← <role>] で届くので都度レビュー、追指示は team_send で行う。\n` +
-      `6. 【長文ペイロード・ルール (Hub が違反を拒否)】team_recruit.instructions / team_send.message / team_assign_task.description が次に該当するときは必ずファイル経由: ・5 行/400 文字超 ・構造化コンテンツ (3 件以上のリスト/YAML/JSON/code/表) ・bulk 指示 (例: 21 件 issue 起票)。手順は Write で .vibe-team/tmp/<short_id>.md に本文 → 引数には「1 行サマリ + パス」だけ。Hub が 2000 byte 超を拒否するので違反は即エラー。\n` +
+      `6. 【長文ペイロード・ルール】team_recruit.instructions / team_send.message / team_assign_task.description は bracketed paste で配送されるので改行入り YAML / code / リストも ~32 KiB まではそのままインラインで OK。32 KiB を超える本文のみ Write で .vibe-team/tmp/<short_id>.md に書き出してから引数には「サマリ + パス」を渡す (Hub が 32 KiB 超を拒否)。\n` +
       `設計思想や応用パターンの詳細は .claude/skills/vibe-team/SKILL.md を Read ツールで参照可 (補助情報、必須ではない)。`
     );
   }
@@ -215,7 +215,7 @@ function generateTeamSystemPrompt(
     `2. 指示が届いたら作業を完遂し、直後に team_send('leader', "完了報告: ...") で簡潔に結果を返す。\n` +
     `3. 報告後は静かなアイドル状態に戻る。ポーリング・「承認待ち」表示・自発的な追加質問は禁止。次の指示は [Team ← ...] で自動的に届く。\n` +
     `4. 自分から他メンバーにタスクを割り振ってはいけない (それは Leader の仕事)。\n` +
-    `5. 【長文ペイロード・ルール】team_send で長文を送るときは message に詰めず、Write で .vibe-team/tmp/<short_id>.md に書き出してからパスだけ渡す。`
+    `5. 【長文ペイロード・ルール】team_send は bracketed paste で配送されるので改行入りの内容も ~32 KiB まではそのまま OK。それを超える場合のみ Write で .vibe-team/tmp/<short_id>.md に書き出してパスを渡す。`
   );
 }
 

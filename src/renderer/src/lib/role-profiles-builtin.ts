@@ -51,9 +51,9 @@ export const WORKER_TEMPLATE_EN =
   '3. After reporting, return to a quiet idle state. Do NOT poll, do NOT print "waiting for approval",\n' +
   '   do NOT ask follow-up questions on your own. The next instruction will arrive as `[Team <- ...]`.\n' +
   '4. You are NOT allowed to assign tasks to other members. Only the Leader does that.\n' +
-  '5. LONG-PAYLOAD RULE — when sending long content via `team_send`, do not stuff it into the\n' +
-  '   message arg. Write the content to `.vibe-team/tmp/<short_id>.md` first, then send only a\n' +
-  '   short summary + the file path in `team_send` (e.g. "完了報告。詳細は .vibe-team/tmp/report_42.md").\n' +
+  '5. LONG-PAYLOAD RULE — `team_send` is delivered via bracketed paste, so multi-line content\n' +
+  '   up to ~32 KiB is OK inline. Above that the Hub rejects it; write to\n' +
+  '   `.vibe-team/tmp/<short_id>.md` and send a summary + path instead.\n' +
   '\n' +
   'For deeper context (recruitment philosophy, optional patterns), you MAY read\n' +
   '`.claude/skills/vibe-team/SKILL.md` with the Read tool, but it is not required for the rules above.\n' +
@@ -77,9 +77,9 @@ export const WORKER_TEMPLATE_JA =
   '3. 報告後は静かなアイドル状態に戻る。ポーリング・「承認待ち」表示・自発的な追加質問は禁止。' +
   '次の指示は `[Team ← ...]` で自動的に届く。\n' +
   '4. 自分から他メンバーにタスクを割り振ってはいけない。それは Leader の仕事。\n' +
-  '5. 【長文ペイロード・ルール】`team_send` で長文を送るときは message 引数に詰め込まない。' +
-  'まず `.vibe-team/tmp/<short_id>.md` に書き出してから、message には「サマリ + ファイルパス」だけを送る ' +
-  '(例: 「完了報告。詳細は .vibe-team/tmp/report_42.md」)。\n' +
+  '5. 【長文ペイロード・ルール】`team_send` は bracketed paste で配送されるので、' +
+  '改行入りの内容も ~32 KiB まではそのまま渡して大丈夫。それを超える場合のみ ' +
+  '`.vibe-team/tmp/<short_id>.md` に書き出して「サマリ + ファイルパス」を送る。\n' +
   '\n' +
   'より詳しい設計思想や応用パターンは `.claude/skills/vibe-team/SKILL.md` を Read ツールで読めば参照できますが、' +
   '上記ルールに従うために読み込みは必須ではありません。\n' +
@@ -130,19 +130,15 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         '   Results return as `[Team <- <role>] ...` — review them and follow up via `team_send`.\n' +
         '6. Engine choice: default to `claude` (coding, refactor, careful reasoning, file/git tools).\n' +
         '   Use `codex` only when there is an explicit reason.\n' +
-        '7. LONG-PAYLOAD RULE (strictly enforced — the Hub will reject violations).\n' +
-        '   ALWAYS use the file pattern when ANY of the following applies to the body of\n' +
-        '   `team_recruit.instructions`, `team_send.message`, or `team_assign_task.description`:\n' +
-        '     - longer than ~5 lines / ~400 chars\n' +
-        '     - contains structured content: lists of 3+ items, YAML / JSON / code blocks, tables\n' +
-        '     - bulk task descriptions (e.g. "create 21 issues", multi-step playbooks)\n' +
-        '   Pattern:\n' +
-        '     (a) Use the Write tool to save the full content to `.vibe-team/tmp/<short_id>.md`\n' +
-        '         (create the directory if needed; it is meant to be local/tmp and may be gitignored).\n' +
+        '7. LONG-PAYLOAD RULE.\n' +
+        '   Inline `team_send.message` / `team_assign_task.description` / `team_recruit.instructions`\n' +
+        '   are delivered via bracketed paste, so multi-line content (YAML, code blocks, lists) up to\n' +
+        '   ~32 KiB is fine inline — the receiver sees it as a single paste, not a typed-in stream.\n' +
+        '   For payloads ABOVE 32 KiB (huge playbooks, dozens of YAML blocks, very long briefs),\n' +
+        '   the Hub will reject the call. In that case:\n' +
+        '     (a) Use the Write tool to save the full content to `.vibe-team/tmp/<short_id>.md`.\n' +
         '     (b) Pass only a 1-line summary + the file path in the MCP arg, e.g.\n' +
-        '         `team_assign_task("alice", "21 件 issue 起票。詳細は .vibe-team/tmp/issue_bulk.md を参照")`.\n' +
-        '   The Hub now hard-rejects MCP args over 2000 bytes with an error explaining this rule —\n' +
-        '   this prevents PTY-chunking / receiver-input truncation that was breaking bulk delegations.\n' +
+        '         `team_assign_task("alice", "30 万字の playbook。詳細は .vibe-team/tmp/playbook.md")`.\n' +
         '\n' +
         'For deeper context and design heuristics, read `.claude/skills/vibe-team/SKILL.md` with the\n' +
         'Read tool AFTER you have already recruited the first member. It is supplementary, not required\n' +
@@ -175,19 +171,15 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         '   結果は `[Team ← <role>] ...` で届くので都度レビュー、追指示は `team_send` で行う。\n' +
         '6. エンジン選択: 既定は `claude` (コーディング・refactor・慎重な推論・file/git ツールに強い)。\n' +
         '   `codex` は明示的な理由があるときだけ選ぶ。\n' +
-        '7. 【長文ペイロード・ルール (Hub が違反を拒否します)】\n' +
-        '   `team_recruit.instructions` / `team_send.message` / `team_assign_task.description` の本文が' +
-        '次のどれかに該当するときは必ずファイル経由パターンを使う:\n' +
-        '     ・5 行 / 400 文字を超える\n' +
-        '     ・構造化コンテンツを含む (3 件以上のリスト / YAML / JSON / code ブロック / 表)\n' +
-        '     ・bulk なタスク指示 (例: 「21 件 issue 起票」「複数ステップの playbook」)\n' +
-        '   手順:\n' +
+        '7. 【長文ペイロード・ルール】\n' +
+        '   `team_send.message` / `team_assign_task.description` / `team_recruit.instructions` の' +
+        'インラインは bracketed paste で配送されるので、改行入りの YAML / code / リストも ~32 KiB ' +
+        'まではそのまま渡して大丈夫 (受信側は「1 件のペースト」として受け取り、tail が truncate しない)。\n' +
+        '   32 KiB を超える場合 (巨大 playbook, 数十件の YAML 等) は Hub が拒否するので、その場合のみ:\n' +
         '   (a) Write ツールで `.vibe-team/tmp/<short_id>.md` に本文を書き出す ' +
         '(ディレクトリが無ければ作成。一時領域なので gitignore して構わない)。\n' +
         '   (b) MCP 引数には「1 行サマリ + そのファイルパス」だけを渡す。例:\n' +
-        '       `team_assign_task("alice", "21 件 issue 起票。詳細は .vibe-team/tmp/issue_bulk.md を参照")`\n' +
-        '   Hub が 2000 byte を超える MCP 引数を拒否するようになっているので、違反すると即エラーが返る。' +
-        '直接送信は PTY のチャンク分割や受信側 Claude の入力上限で truncate するため、信頼できない。\n' +
+        '       `team_assign_task("alice", "30 万字の playbook。詳細は .vibe-team/tmp/playbook.md")`\n' +
         '\n' +
         '設計思想や応用パターンの詳細は `.claude/skills/vibe-team/SKILL.md` を Read ツールで読めば参照できる。' +
         'ただし最初の 1 名を採用した後の補助情報であり、上記の絶対ルールに従うために読む必要はない。\n' +
@@ -227,9 +219,9 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         '3. After all seats are filled (or some failed), report the outcome via\n' +
         '   `team_send("leader", "完了報告: ...")` and return to a quiet idle state.\n' +
         '4. Do NOT assign tasks — `team_assign_task` is the Leader\'s job, not yours.\n' +
-        '5. LONG-PAYLOAD RULE — never put long text directly into MCP args. If `team_recruit.instructions`\n' +
-        '   or `team_send.message` would exceed ~5 lines / ~400 chars, write it to `.vibe-team/tmp/<short_id>.md`\n' +
-        '   first and pass only a short summary + the file path in the MCP call.\n' +
+        '5. LONG-PAYLOAD RULE — `team_recruit.instructions` and `team_send.message` are delivered via\n' +
+        '   bracketed paste, so multi-line content up to ~32 KiB is fine inline. Above that the Hub\n' +
+        '   rejects the call; write to `.vibe-team/tmp/<short_id>.md` and pass summary + path instead.\n' +
         '\n' +
         'For optional context on bulk-hiring patterns, you may read `.claude/skills/vibe-team/SKILL.md`\n' +
         'with the Read tool, but it is not required.\n' +
@@ -250,9 +242,9 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         '3. 全員揃ったら (または一部失敗したら) `team_send("leader", "完了報告: ...")` で結果を返し、' +
         '静かなアイドル状態に戻る。\n' +
         '4. タスク割り当て (`team_assign_task`) は Leader の仕事。HR が勝手にタスクを割り当ててはいけない。\n' +
-        '5. 【長文ペイロード・ルール】MCP 引数に長文を直接書かない。' +
-        '`team_recruit.instructions` や `team_send.message` の本文が 5 行 / 400 文字を超えるなら、' +
-        'まず `.vibe-team/tmp/<short_id>.md` に書き出してから、MCP 引数には「サマリ + ファイルパス」だけを渡す。\n' +
+        '5. 【長文ペイロード・ルール】`team_recruit.instructions` / `team_send.message` は ' +
+        'bracketed paste で配送されるので、改行入りの内容も ~32 KiB まではそのまま渡して大丈夫。' +
+        '32 KiB を超える場合のみ `.vibe-team/tmp/<short_id>.md` に書き出して「サマリ + パス」を渡す。\n' +
         '\n' +
         '大量採用の応用パターンや背景は `.claude/skills/vibe-team/SKILL.md` を Read ツールで読めば参照できるが、' +
         '上記ルールに従うために読み込みは必須ではない。\n' +
