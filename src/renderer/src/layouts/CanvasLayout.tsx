@@ -269,6 +269,10 @@ export function CanvasLayout(): JSX.Element {
   //   2. debounce を 1500ms に延長。
   //   3. 直前保存値を ref に保持し、同一内容なら fs 書き込みをスキップ。
   const lastSavedKeyRef = useRef<string>('');
+  // Issue #167: recent を deps に含むと setRecent → effect 再走 → clearTimeout で
+  // debounce が永遠に flush されない問題があった。ref 経由で参照することで deps から外す。
+  const recentRef = useRef(recent);
+  recentRef.current = recent;
   const autoSavePayload = useMemo(() => {
     if (nodes.length === 0) return null;
     interface TeamEntryInfo { name: string; members: { role: TeamRole; agent: TerminalAgent }[]; canvasNodes: { agentId: string; x: number; y: number; width?: number; height?: number }[]; }
@@ -315,7 +319,8 @@ export function CanvasLayout(): JSX.Element {
       const nowIso = new Date().toISOString();
       const nextEntries: TeamHistoryEntry[] = [];
       for (const [teamId, info] of autoSavePayload.byTeam) {
-        const existing = recent.find((entry) => entry.id === teamId);
+        // Issue #167: recent を ref 経由で参照し effect deps から外す
+        const existing = recentRef.current.find((entry) => entry.id === teamId);
         const entry: TeamHistoryEntry = {
           id: teamId,
           name: info.members.length > 0 ? `${info.name} (${info.members.length})` : info.name,
@@ -345,7 +350,8 @@ export function CanvasLayout(): JSX.Element {
       }
     }, 1500);
     return () => window.clearTimeout(handle);
-  }, [autoSaveKey, autoSavePayload, projectRoot, recent]);
+    // Issue #167: recent を deps から除外。recentRef 経由で読むことで debounce flush を保証する。
+  }, [autoSaveKey, autoSavePayload, projectRoot]);
 
   // ----- カスタムチーム作成 (TeamCreateModal からのコールバック) -----
   const handleCreateCustomTeam = async (
