@@ -178,13 +178,10 @@ export function SettingsModal({
     // saved=true の状態で再度押されるのはボタンの disabled で防いでいるが、
     // 380ms 中に外部から閉じる操作が走ったあとに別経路でこの関数が呼ばれた場合の二重実行ガード。
     if (saved) return;
-    // onApply が throw した場合に「保存された ✓」のフィードバックを見せて閉じてしまうと
-    // ユーザーは保存に成功したと誤解する。例外を捕まえて、success path だけで saved=true に倒す。
-    try {
-      onApply(draft);
-    } catch (err) {
-      // err.message はスタックトレース / ファイルパス等の機微情報を含みうるため、
-      // ユーザー向け toast には汎用文言だけ出し、詳細は console.error にだけ残す (レビュー指摘)。
+    // onApply が同期で throw する場合と async (Promise reject) の両方をハンドリングする。
+    // 現状の SettingsModalProps では onApply は同期だが、将来 async 化されたときに
+    // unhandled rejection を起こさないよう Promise.resolve でラップしてから .catch する (レビュー指摘)。
+    const reportFailure = (err: unknown): void => {
       console.error('[settings] apply failed:', err);
       const isJaNow = draft.language === 'ja';
       showToast(
@@ -193,7 +190,18 @@ export function SettingsModal({
           : 'Failed to save settings. See the developer console for details.',
         { tone: 'error', duration: 6000 }
       );
-      return; // saved=true / setTimeout を始動しないことで、モーダルを閉じない
+    };
+    let result: unknown;
+    try {
+      result = onApply(draft);
+    } catch (err) {
+      // 同期 throw のケース
+      reportFailure(err);
+      return;
+    }
+    // 戻り値が thenable なら reject も拾う。non-thenable (void) なら何もしない。
+    if (result && typeof (result as PromiseLike<unknown>).then === 'function') {
+      Promise.resolve(result).catch(reportFailure);
     }
     // 保存ボタンを 380ms だけ ✓ 表示にしてから閉じる。
     // 「押した → 保存された → モーダルが消える」の因果が体感できるようにする (Linear / Vercel 風)。
@@ -323,25 +331,32 @@ export function SettingsModal({
         })
       }))
       .filter((g) => g.items.length > 0);
-    // deps 構成: navQuery (検索ワード) と groupsRaw (構造) と fixedLabels (言語切替) のみ。
-    // closure 内の untitled fallback は fixedLabels === FIXED_LABELS_JA で判別するため
-    // fixedLabels の参照変化で必然的に再評価される (= 言語切替を fixedLabels だけで検知できる)。
-    // customAgents は groupsRaw 経由で参照変化が伝播する。
-  }, [navQuery, groupsRaw, fixedLabels]);
+    // deps 構成: navQuery / groupsRaw / draft.language。
+    // 旧実装は fixedLabels (派生) を deps に入れていたが、groupsRaw のほうは
+    // [draft.customAgents, draft.language] という生プロパティ参照になっていて非対称だった (レビュー指摘)。
+    // → 言語切替を検知する deps を draft.language に統一して、両 useMemo の deps スタイルを揃える。
+    // closure 内の fixedLabels / untitled は draft.language が変わると再評価されるので問題ない。
+  }, [navQuery, groupsRaw, draft.language]);
 
   // 検索フィルタ後の groups に activeSection が含まれない場合、右ペインとサイドバーの
   // 選択状態が乖離する (例: "font" 検索で nav は fonts だけ表示するのに右ペインは general のまま)。
-  // → クエリが変わった瞬間にだけフィルタ結果の最初の項目に切り替えて整合させる。
+  // → クエリが変わった瞬間に整合チェックする。
   //
   // 旧コードは deps に groups を入れていたが、検索中に customAgents が増減すると groups が
-  // 変わって意図せず activeSection が先頭にリセットされる edge case があった (レビュー指摘)。
+  // 変わって意図せず activeSection が先頭にリセットされる edge case があった。
   // → 同期は navQuery 変化時のみに限定し、groups は ref 経由で最新値を読む。
   // 関数型更新で activeSection 自身を比較することで再レンダーループも防ぐ。
+  //
+  // クリア時 (navQuery="") の挙動: フィルタ前の groupsRaw に activeSection が含まれていれば
+  // そのまま維持、含まれていない (異常系) のみ先頭に戻す。これで「検索したまま放置 → クリア」
+  // の流れで activeSection がフィルタ中の先頭に張り付く問題 (レビュー指摘) を解消する。
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
+  const groupsRawRef = useRef(groupsRaw);
+  groupsRawRef.current = groupsRaw;
   useEffect(() => {
-    if (!navQuery.trim()) return;
-    const flat: SectionId[] = groupsRef.current
+    const source = navQuery.trim() ? groupsRef.current : groupsRawRef.current;
+    const flat: SectionId[] = source
       .flatMap((g) => g.items)
       .filter((id) => id !== '__addCustom');
     if (flat.length === 0) return;
