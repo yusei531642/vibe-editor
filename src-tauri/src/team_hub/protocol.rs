@@ -949,9 +949,15 @@ async fn team_assign_task(
             team.tasks.remove(0);
         }
     }
-    // 通知を team_send 経由で送る
+    // Issue #172: 通知の team_send を await せず fire-and-forget でバックグラウンド spawn する。
+    // assignee="all" のとき fan-out で sleep 累積して MCP RPC を秒単位でブロックしていたのを解消。
+    // 配信失敗のときも呼び出し側 (Leader) には task 作成結果だけを即返す。
     let notify_args = json!({ "to": assignee, "message": format!("[Task #{task_id}] {description}") });
-    let _ = team_send(hub, ctx, &notify_args).await;
+    let hub_clone = hub.clone();
+    let ctx_clone = ctx.clone();
+    tokio::spawn(async move {
+        let _ = team_send(&hub_clone, &ctx_clone, &notify_args).await;
+    });
     Ok(json!({ "success": true, "taskId": task_id }))
 }
 
