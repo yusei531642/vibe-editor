@@ -82,6 +82,9 @@ struct HubState {
     /// pending を含められるようにする (旧実装は registry の handshake 済みだけを見ていたため
     /// 並行 recruit で上限超過や singleton 重複が起きえた)。
     pending_recruits: HashMap<String, PendingRecruit>,
+    /// Issue #183: agent_id を初回 handshake で確定した role に bind する。
+    /// 別プロセスが同 agent_id で接続してきても異なる role を主張できなくする。
+    agent_role_bindings: HashMap<String, String>,
     /// renderer から同期された role profile 一覧 (team_list_role_profiles で返す)
     role_profile_summary: Vec<RoleProfileSummary>,
     /// Leader が team_create_role / team_recruit(role_definition=...) で動的に生成した
@@ -197,6 +200,7 @@ impl TeamHub {
                 bridge_path: PathBuf::new(),
                 pending_injects: HashMap::new(),
                 pending_recruits: HashMap::new(),
+                agent_role_bindings: HashMap::new(),
                 role_profile_summary: Vec::new(),
                 dynamic_roles: HashMap::new(),
             })),
@@ -314,14 +318,46 @@ impl TeamHub {
     }
 
     /// handshake 内で agent_id がマッチしたら呼ぶ。recruit が待機中ならここで resolve。
-    pub async fn resolve_pending_recruit(&self, agent_id: &str, role_profile_id: &str) {
+    /// Issue #183: client が送ってきた role が
+    ///   1. pending recruit の予約 role と一致するか (新規 recruit 経路)
+    ///   2. 既存 agent_role_bindings に bind 済み role と一致するか (再接続経路)
+    /// を照合する。どちらも不一致なら false を返してハンドラ側で接続切断。
+    /// 初回 handshake が成功したら agent_id → role を bind する。
+    pub async fn resolve_pending_recruit(
+        &self,
+        agent_id: &str,
+        role_profile_id: &str,
+    ) -> bool {
         let mut s = self.state.lock().await;
-        if let Some(p) = s.pending_recruits.remove(agent_id) {
+        if let Some(p) = s.pending_recruits.get(agent_id) {
+            if p.role_profile_id != role_profile_id {
+                tracing::warn!(
+                    "[teamhub] role mismatch on handshake (pending) agent={} expected={} got={}",
+                    agent_id, p.role_profile_id, role_profile_id
+                );
+                return false;
+            }
+            let p = s.pending_recruits.remove(agent_id).expect("just checked");
             let _ = p.tx.send(RecruitOutcome {
                 agent_id: agent_id.to_string(),
                 role_profile_id: role_profile_id.to_string(),
             });
         }
+        // 既に bind 済みの agent_id なら role 一致を強制
+        if let Some(bound) = s.agent_role_bindings.get(agent_id) {
+            if bound != role_profile_id {
+                tracing::warn!(
+                    "[teamhub] role mismatch on handshake (rebind) agent={} bound={} got={}",
+                    agent_id, bound, role_profile_id
+                );
+                return false;
+            }
+        } else {
+            // 初回 handshake で bind
+            s.agent_role_bindings
+                .insert(agent_id.to_string(), role_profile_id.to_string());
+        }
+        true
     }
 
     /// timeout 等でキャンセル: pending を破棄 (送信側 dropped で recv が Err になる)
@@ -548,7 +584,11 @@ async fn handle_client(
         ctx.agent_id
     );
     // 待機中の team_recruit があればここで resolve (caller への MCP response が解放される)
-    hub.resolve_pending_recruit(&ctx.agent_id, &ctx.role).await;
+    // Issue #183: client が予約 role と異なる role を主張していたら切断する。
+    if !hub.resolve_pending_recruit(&ctx.agent_id, &ctx.role).await {
+        tokio::time::sleep(AUTH_FAIL_DELAY).await;
+        return Ok(());
+    }
 
     // Issue #107 + #133: BufReader::lines() は行サイズに上限が無く DoS になる。
     // 旧実装は 1 byte ずつ read_exact を呼んでいたため、長文 message 1 行 (10 KB) で
