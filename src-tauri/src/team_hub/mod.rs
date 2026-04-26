@@ -342,10 +342,34 @@ impl TeamHub {
         state.token = hex_encode(&buf);
 
         // bridge スクリプトを `~/.vibe-editor/team-bridge.js` に書き出し
+        // Issue #143 (Security):
+        //   - symlink replacement attack 対策: 既存ファイルが symlink ならエラー扱いで除去
+        //   - 書き込み中クラッシュ耐性 + 他ユーザ可読性回避のため atomic_write を使う
         let dir = dirs::home_dir().unwrap_or_default().join(".vibe-editor");
         tokio::fs::create_dir_all(&dir).await?;
         let bridge_path = dir.join("team-bridge.js");
-        tokio::fs::write(&bridge_path, bridge::SOURCE).await?;
+        // 既存 path が symlink / regular file 以外なら削除して再生成する
+        if let Ok(meta) = tokio::fs::symlink_metadata(&bridge_path).await {
+            let ft = meta.file_type();
+            if ft.is_symlink() || (!ft.is_file()) {
+                tracing::warn!(
+                    "[teamhub] removing pre-existing non-regular bridge path (symlink={}, dir={})",
+                    ft.is_symlink(),
+                    ft.is_dir()
+                );
+                let _ = tokio::fs::remove_file(&bridge_path).await;
+            }
+        }
+        crate::commands::atomic_write::atomic_write(&bridge_path, bridge::SOURCE.as_bytes())
+            .await
+            .map_err(|e| anyhow::anyhow!("atomic_write bridge.js failed: {e:#}"))?;
+        // Unix: 自分自身しか読めないように 0o600 を強制 (best-effort)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perm = std::fs::Permissions::from_mode(0o600);
+            let _ = tokio::fs::set_permissions(&bridge_path, perm).await;
+        }
         state.bridge_path = bridge_path;
 
         // TCP listen
