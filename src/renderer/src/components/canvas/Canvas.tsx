@@ -96,38 +96,72 @@ function FlowApp(): JSX.Element {
         : changes;
       if (remaining.length === 0) return;
 
-      // ----- チーム同期ドラッグ -----
-      // teamId を持つカードがロック状態でドラッグされたら、同 teamId の他カードへ
-      // 同じ delta を broadcast する。これでチーム全員が一塊で動く。
+      // ----- チーム同期ドラッグ + 同期リサイズ -----
+      // teamId を持つカードがロック状態でドラッグ / リサイズされたら、同 teamId の他カードへ
+      // 同じ変化を broadcast する。これでチーム全員が一塊で動き、揃ったサイズに変わる。
       const extra: NodeChange<Node<CardData>>[] = [];
       for (const c of remaining) {
-        if (c.type !== 'position' || !c.position) continue;
-        const node = nodes.find((n) => n.id === c.id);
-        if (!node) continue;
-        const teamId = (node.data?.payload as { teamId?: string } | undefined)?.teamId;
-        if (!teamId) continue;
-        if (!isTeamLocked(teamId)) continue;
-        const dx = c.position.x - node.position.x;
-        const dy = c.position.y - node.position.y;
-        if (dx === 0 && dy === 0) continue;
-        for (const other of nodes) {
-          if (other.id === node.id) continue;
-          const otherTeam = (other.data?.payload as { teamId?: string } | undefined)?.teamId;
-          if (otherTeam !== teamId) continue;
-          // 既にこのフレームで同じ id の position 変更が来ていたらスキップ (二重適用回避)
-          if (
-            remaining.some(
-              (x) => x.type === 'position' && 'id' in x && x.id === other.id
-            )
-          ) {
-            continue;
+        // 位置同期 (ドラッグ): delta を全員に伝える
+        if (c.type === 'position' && c.position) {
+          const node = nodes.find((n) => n.id === c.id);
+          if (!node) continue;
+          const teamId = (node.data?.payload as { teamId?: string } | undefined)?.teamId;
+          if (!teamId) continue;
+          if (!isTeamLocked(teamId)) continue;
+          const dx = c.position.x - node.position.x;
+          const dy = c.position.y - node.position.y;
+          if (dx === 0 && dy === 0) continue;
+          for (const other of nodes) {
+            if (other.id === node.id) continue;
+            const otherTeam = (other.data?.payload as { teamId?: string } | undefined)?.teamId;
+            if (otherTeam !== teamId) continue;
+            // 既にこのフレームで同じ id の position 変更が来ていたらスキップ (二重適用回避)
+            if (
+              remaining.some(
+                (x) => x.type === 'position' && 'id' in x && x.id === other.id
+              )
+            ) {
+              continue;
+            }
+            extra.push({
+              id: other.id,
+              type: 'position',
+              position: { x: other.position.x + dx, y: other.position.y + dy },
+              dragging: c.dragging
+            });
           }
-          extra.push({
-            id: other.id,
-            type: 'position',
-            position: { x: other.position.x + dx, y: other.position.y + dy },
-            dragging: c.dragging
-          });
+          continue;
+        }
+        // サイズ同期 (NodeResizer): リサイズ後のサイズに全員揃える
+        if (c.type === 'dimensions' && c.dimensions && c.resizing) {
+          const node = nodes.find((n) => n.id === c.id);
+          if (!node) continue;
+          const teamId = (node.data?.payload as { teamId?: string } | undefined)?.teamId;
+          if (!teamId) continue;
+          if (!isTeamLocked(teamId)) continue;
+          const w = c.dimensions.width;
+          const h = c.dimensions.height;
+          for (const other of nodes) {
+            if (other.id === node.id) continue;
+            const otherTeam = (other.data?.payload as { teamId?: string } | undefined)?.teamId;
+            if (otherTeam !== teamId) continue;
+            // 既に同じ id の dimensions 変更が来ていたらスキップ
+            if (
+              remaining.some(
+                (x) => x.type === 'dimensions' && 'id' in x && x.id === other.id
+              )
+            ) {
+              continue;
+            }
+            extra.push({
+              id: other.id,
+              type: 'dimensions',
+              dimensions: { width: w, height: h },
+              resizing: c.resizing,
+              setAttributes: true
+            });
+          }
+          continue;
         }
       }
 
