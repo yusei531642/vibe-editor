@@ -16,10 +16,26 @@ use tokio::process::Command;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+/// Issue #184 (Security): 悪意リポの `.git/config` に `core.fsmonitor` /
+/// `core.hooksPath` を仕込むと git_status 呼出時に任意コマンドが実行されて RCE
+/// (CVE-2022-24765 系) になる。renderer から呼ばれるすべての git に対して、
+/// hook / fsmonitor / GPG signing を `-c` で無効化してから起動する。
+///
+/// `-c protocol.version=2` も明示してリポ側 protocol 強制で旧版に落とされる
+/// CVE-2022-39253 系の経路も塞ぐ。
 fn new_git_command() -> Command {
-    let cmd = Command::new("git");
-    #[cfg(windows)]
-    let mut cmd = cmd;
+    let mut cmd = Command::new("git");
+    cmd.arg("-c").arg("core.fsmonitor=")
+        .arg("-c").arg("core.hooksPath=")
+        .arg("-c").arg("core.editor=:")
+        .arg("-c").arg("core.askpass=:")
+        .arg("-c").arg("commit.gpgsign=false")
+        .arg("-c").arg("tag.gpgsign=false")
+        .arg("-c").arg("gpg.program=:")
+        .arg("-c").arg("protocol.version=2");
+    // GIT_TERMINAL_PROMPT=0 で credential prompt が無限待機しないように
+    cmd.env("GIT_TERMINAL_PROMPT", "0");
+    cmd.env("GIT_OPTIONAL_LOCKS", "0");
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
