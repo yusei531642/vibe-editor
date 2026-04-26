@@ -59,28 +59,35 @@ fn is_claimed(session_id: &str) -> bool {
     guard.contains_key(session_id)
 }
 
-/// Issue #31: 同 encoded directory に別 project が集まる場合に備え、jsonl の最初の `cwd`
-/// フィールドを読み、期待する project_root と一致するか確認する。
-/// ファイルが小さい/まだ書き込み途中のときは None を返し fail-open (claim 許可)。
+/// Issue #31 + #175: 同 encoded directory に別 project の jsonl が集まる場合に備えた検証。
+/// 旧実装は cwd が読めない / 空文字のとき fail-open で true を返していたため、jsonl 作成
+/// 直後の不完全状態と watcher polling が重なると別 project の sessionId を誤 claim していた。
+///
+/// 新方針: 「明示的に同 project と確認できたケースのみ true」。具体的には:
+///   - cwd が読めて normalize 一致 → true
+///   - cwd が読めて不一致 / 空文字 → false
+///   - 8 行以内に cwd フィールドが現れない → false (= fail-closed)
+///   - file open 失敗 → false (= fail-closed)
 fn jsonl_matches_project(jsonl_path: &Path, expected_norm: &str) -> bool {
     use std::io::{BufRead, BufReader};
     let file = match std::fs::File::open(jsonl_path) {
         Ok(f) => f,
-        Err(_) => return true,
+        Err(_) => return false,
     };
     let reader = BufReader::new(file);
-    // 先頭 8 行までを検査 (cwd は meta/first user entry に書かれる)
     for line in reader.lines().take(8).flatten() {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
             if let Some(c) = v.get("cwd").and_then(|c| c.as_str()) {
-                if c.trim().is_empty() {
-                    return true;
+                let trimmed = c.trim();
+                if trimmed.is_empty() {
+                    return false;
                 }
-                return super::path_norm::normalize_project_root(c) == expected_norm;
+                return super::path_norm::normalize_project_root(trimmed) == expected_norm;
             }
         }
     }
-    true
+    // cwd を含む行が無い → 不完全 jsonl の可能性が高い。fail-closed で claim させない。
+    false
 }
 
 fn projects_dir(project_root: &str) -> PathBuf {
