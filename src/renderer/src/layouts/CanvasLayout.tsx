@@ -309,8 +309,12 @@ export function CanvasLayout(): JSX.Element {
           canvasState: { nodes: info.canvasNodes, viewport: autoSavePayload.viewport }
         };
         nextEntries.push(entry);
-        void window.api.teamHistory.save(entry).catch((err) => {
-          console.warn('[recent] save failed:', err);
+      }
+      // Issue #132: チームごとに save IPC を撃つと N チーム分 N 回 atomic_write が走る。
+      // saveBatch で 1 IPC + 1 disk write にまとめる。
+      if (nextEntries.length > 0) {
+        void window.api.teamHistory.saveBatch(nextEntries).catch((err) => {
+          console.warn('[recent] saveBatch failed:', err);
         });
       }
       if (nextEntries.length > 0) {

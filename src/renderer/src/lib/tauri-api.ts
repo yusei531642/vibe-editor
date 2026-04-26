@@ -212,6 +212,9 @@ export const api = {
       invoke('team_history_list', { projectRoot }),
     save: (entry: TeamHistoryEntry): Promise<MutationResult> =>
       invoke('team_history_save', { entry }),
+    /** Issue #132: 複数チームを 1 IPC + 1 disk write でまとめて保存する */
+    saveBatch: (entries: TeamHistoryEntry[]): Promise<MutationResult> =>
+      invoke('team_history_save_batch', { entries }),
     delete: (id: string): Promise<MutationResult> => invoke('team_history_delete', { id })
   },
 
