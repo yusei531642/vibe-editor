@@ -41,11 +41,17 @@ export function QuickNav({ open, onClose }: QuickNavProps): JSX.Element | null {
         const data = n.data ?? {};
         const title = String(data.title ?? n.id);
         const cardType = String(data.cardType ?? n.type ?? '');
-        const role = (data.payload as { role?: string } | undefined)?.role;
-        const meta = metaOf(role);
+        // Issue #194: canvas store v2 マイグレーションで legacy `role` は基本 undefined になり、
+        // 全カードがデフォルト紫 + 汎用 glyph で表示されて QuickNav が機能ほぼ無価値だった。
+        // AgentNodeCard と同じく roleProfileId を優先し、無ければ legacy role を fallback。
+        const payload = data.payload as
+          | { roleProfileId?: string; role?: string }
+          | undefined;
+        const roleId = payload?.roleProfileId ?? payload?.role;
+        const meta = metaOf(roleId);
         const subtitle = meta ? meta.label : cardType;
-        const haystack = `${title} ${subtitle} ${role ?? ''}`.toLowerCase();
-        return { node: n, title, subtitle, role, haystack };
+        const haystack = `${title} ${subtitle} ${roleId ?? ''}`.toLowerCase();
+        return { node: n, title, subtitle, role: roleId, haystack };
       })
       .filter((i) => !q || i.haystack.includes(q));
   }, [nodes, query]);

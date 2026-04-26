@@ -47,6 +47,8 @@ export function SettingsModal({
   const t = useT();
   const [draft, setDraft] = useState<AppSettings>(initial);
   const [activeSection, setActiveSection] = useState<SectionId>('general');
+  // Issue #195: focus trap + Escape + autofocus 用のルート ref
+  const dialogRef = useRef<HTMLDivElement | null>(null);
 
   // Issue #178: open 中に外部から settings が更新されると useEffect が再発火して
   // ユーザー入力中の draft が消える事故があった。
@@ -69,6 +71,24 @@ export function SettingsModal({
     );
     if (!exists) setActiveSection('general');
   }, [activeSection, draft.customAgents]);
+
+  // Issue #195: マウント直後にダイアログ内の最初の focusable に focus を移す。
+  // 何もせず開くと focus は背景 (Canvas/FileTree) に残り、Tab で背後に抜ける起点になる。
+  // setTimeout のマジックナンバーを避けるため requestAnimationFrame を使い、
+  // 描画完了直後の最初のフレームで focus を移す。
+  useEffect(() => {
+    if (!open) return;
+    let raf = 0;
+    raf = window.requestAnimationFrame(() => {
+      const root = dialogRef.current;
+      if (!root) return;
+      const target = root.querySelector<HTMLElement>(
+        '[autofocus], button, [href], input, select, textarea, [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])'
+      );
+      target?.focus();
+    });
+    return () => window.cancelAnimationFrame(raf);
+  }, [open]);
 
   const { mounted, dataState, motion } = useSpringMount(open, 180);
   if (!mounted) return null;
@@ -269,10 +289,51 @@ export function SettingsModal({
       onClick={onClose}
     >
       <div
+        ref={dialogRef}
         className="modal modal--settings"
         data-state={dataState}
         data-motion={motion}
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={isJa ? '設定' : 'Settings'}
+        onKeyDown={(e) => {
+          // Issue #195: Escape で閉じる + Tab で focus trap。
+          // Escape は input/textarea/IME 確定中はスキップ (IME 確定キャンセル等の標準挙動を妨げない)。
+          if (e.key === 'Escape') {
+            const target = e.target as HTMLElement | null;
+            const tag = target?.tagName;
+            const isTextField =
+              tag === 'INPUT' ||
+              tag === 'TEXTAREA' ||
+              target?.getAttribute('contenteditable') === 'true';
+            // nativeEvent.isComposing は IME 変換中 true。確定前の Escape を漏らさない。
+            const composing = (e.nativeEvent as KeyboardEvent).isComposing;
+            if (isTextField && composing) return;
+            e.preventDefault();
+            onClose();
+            return;
+          }
+          if (e.key !== 'Tab') return;
+          const root = dialogRef.current;
+          if (!root) return;
+          const focusables = Array.from(
+            root.querySelectorAll<HTMLElement>(
+              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])'
+            )
+          ).filter((el) => el.offsetParent !== null);
+          if (focusables.length === 0) return;
+          const first = focusables[0];
+          const last = focusables[focusables.length - 1];
+          const active = document.activeElement as HTMLElement | null;
+          if (e.shiftKey && active === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && active === last) {
+            e.preventDefault();
+            first.focus();
+          }
+        }}
       >
         <header className="modal__header">
           <div className="modal__title-group" style={{ display: 'flex', alignItems: 'center' }}>
