@@ -241,37 +241,40 @@ async fn dispatch_tool(
     }
 }
 
-/// caller の role が要求された permission を持つか検証する。
-/// renderer が同期した role_profile_summary を参照。
+/// Issue #136 (Security): caller の role が要求された permission を持つか検証する。
+///
+/// 旧実装は renderer から同期された `role_profile_summary` の can_* フラグを SSOT に
+/// していた。renderer 内コード実行 (XSS 等) を獲得した攻撃者が任意 role に
+/// canRecruit/canCreateRoleProfile=true を仕込んだ summary を Hub に同期し、
+/// 任意 system prompt の worker を spawn できる権限昇格経路があった。
+///
+/// 修正方針: permission は Rust 側の immutable builtin テーブルだけを参照し、
+/// renderer の summary は UI label/desc 等の表示用途に限定する。動的 role は
+/// 常に can_* = false 扱い (recruit / dismiss / role 作成は不可)。
 async fn caller_has_permission(
-    hub: &TeamHub,
+    _hub: &TeamHub,
     caller_role: &str,
     perm: &str,
 ) -> bool {
-    let summary = hub.get_role_profile_summary().await;
-    if let Some(p) = summary.iter().find(|p| p.id == caller_role) {
-        match perm {
-            "canRecruit" => p.can_recruit,
-            "canDismiss" => p.can_dismiss,
-            "canAssignTasks" => p.can_assign_tasks,
-            "canCreateRoleProfile" => p.can_create_role_profile,
-            _ => false,
-        }
-    } else {
-        // role_profile が summary に無い (renderer 起動中の race condition / 古い builtin 等)
-        // → 既知 builtin (leader / hr) はハードコードされた既定権限で fallback。
-        //   leader: 全権、hr: 採用 + タスク割振 + ロール登録 (HR は Leader 代理採用のため
-        //   canCreateRoleProfile も必要)。
-        match (caller_role, perm) {
-            ("leader", "canRecruit") => true,
-            ("leader", "canDismiss") => true,
-            ("leader", "canAssignTasks") => true,
-            ("leader", "canCreateRoleProfile") => true,
-            ("hr", "canRecruit") => true,
-            ("hr", "canAssignTasks") => true,
-            ("hr", "canCreateRoleProfile") => true,
-            _ => false,
-        }
+    builtin_role_permission(caller_role, perm)
+}
+
+/// builtin role の hardcoded 権限テーブル。
+/// renderer から差し替えられないため、ここで false のロールは絶対に該当 perm を持てない。
+fn builtin_role_permission(role: &str, perm: &str) -> bool {
+    match (role, perm) {
+        // Leader: 全権
+        ("leader", "canRecruit") => true,
+        ("leader", "canDismiss") => true,
+        ("leader", "canAssignTasks") => true,
+        ("leader", "canCreateRoleProfile") => true,
+        // HR: 採用 + タスク割振 + 動的ロール登録 (Leader 代理として)
+        ("hr", "canRecruit") => true,
+        ("hr", "canAssignTasks") => true,
+        ("hr", "canCreateRoleProfile") => true,
+        // 一般ワーカー (planner / programmer / researcher / reviewer 等) はいずれも不可。
+        // 動的ロール (renderer が作った任意 id) も match しないので全 false。
+        _ => false,
     }
 }
 
