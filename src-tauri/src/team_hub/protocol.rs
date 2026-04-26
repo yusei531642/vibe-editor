@@ -19,9 +19,15 @@ const MAX_DYNAMIC_LABEL_LEN: usize = 200;
 const MAX_DYNAMIC_DESCRIPTION_LEN: usize = 1000;
 /// チーム 1 つあたりの動的ロール数上限 (DoS 抑止)
 const MAX_DYNAMIC_ROLES_PER_TEAM: usize = 64;
-/// Issue #107: team_send 1 message の最大長。これ以上は呼び出し側を拒否する
+/// Issue #107: team_send 1 message の最大長 (ハードリミット)。これ以上は呼び出し側を拒否する
 /// (単に切ると context が崩れて user 体験が悪いので reject に倒す)。
 const MAX_MESSAGE_LEN: usize = 64 * 1024; // 64 KiB
+/// 「長文ペイロード・ルール」の閾値。これを超えたら `.vibe-team/tmp/<short_id>.md` に
+/// 書き出してファイルパスを送るパターンを強制する (Leader/HR/Worker のプロンプト規約と一致)。
+/// PTY 注入のチャンク化や受信側 Claude の入力制限で truncate が起きやすいため、
+/// 直接送信を弾いてエージェントにファイル経由を選ばせる。
+/// 2000 byte = 約 5〜10 行 + 短いリストくらい。21 連続の YAML 等は確実に超える設計。
+const SOFT_PAYLOAD_LIMIT: usize = 2000;
 /// Issue #107: チームごとに保持する message 履歴の上限。超過分は古い順に破棄。
 /// 件数ベースで持つことで、Hub の長期常駐でメモリが青天井に伸びるのを防ぐ。
 const MAX_MESSAGES_PER_TEAM: usize = 1000;
@@ -683,12 +689,26 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
     if to.is_empty() || message.is_empty() {
         return Err("to and message are required".into());
     }
-    // Issue #107: 1 メッセージの上限を超えるものは拒否 (途中で truncate すると意味が壊れる)
+    // Issue #107: 1 メッセージのハードリミット超過は拒否 (途中で truncate すると意味が壊れる)
     if message.len() > MAX_MESSAGE_LEN {
         return Err(format!(
             "message too large: {} bytes (limit {} bytes)",
             message.len(),
             MAX_MESSAGE_LEN
+        ));
+    }
+    // 「長文ペイロード・ルール」: SOFT_PAYLOAD_LIMIT 超過は弾いてファイル経由を強制する。
+    // PTY 注入のチャンク分割や受信側 Claude 入力制限で truncate しやすいので、
+    // 「2000 文字超は .vibe-team/tmp/<short_id>.md に書き出してパスを送る」設計に倒す。
+    if message.len() > SOFT_PAYLOAD_LIMIT {
+        return Err(format!(
+            "message exceeds the long-payload threshold ({} > {} bytes). \
+             Per the vibe-team protocol, write the full content to `.vibe-team/tmp/<short_id>.md` \
+             with the Write tool, then call team_send again with a brief summary plus the file path. \
+             Long inline payloads are unreliable because PTY chunking and receiver input limits can \
+             truncate them mid-stream.",
+            message.len(),
+            SOFT_PAYLOAD_LIMIT
         ));
     }
 
@@ -858,6 +878,19 @@ async fn team_assign_task(
     let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
     if assignee.is_empty() || description.is_empty() {
         return Err("assignee and description are required".into());
+    }
+    // 「長文ペイロード・ルール」: description も SOFT_PAYLOAD_LIMIT で弾いてファイル経由を強制。
+    // bulk な指示 (21 連続 issue 起票の YAML 等) はここで必ず途中切れしないために。
+    if description.len() > SOFT_PAYLOAD_LIMIT {
+        return Err(format!(
+            "description exceeds the long-payload threshold ({} > {} bytes). \
+             Write the full task brief to `.vibe-team/tmp/<short_id>.md` with the Write tool first, \
+             then call team_assign_task again with a brief summary plus the file path \
+             (e.g. \"21 件起票。詳細は .vibe-team/tmp/issue_bulk.md を参照\"). \
+             Long inline payloads truncate due to PTY chunking and receiver input limits.",
+            description.len(),
+            SOFT_PAYLOAD_LIMIT
+        ));
     }
     let task_id;
     let timestamp = Utc::now().to_rfc3339();
