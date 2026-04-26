@@ -24,6 +24,12 @@ use tokio::sync::{oneshot, Mutex, Semaphore};
 
 /// Issue #51: ハンドシェイクに要する最大時間。超過したら接続を切る。
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+/// Issue #168: handshake 後の idle 上限。これを超えて何も来なければ接続を切る。
+/// wedged process が permit を占有して DoS しないようにするため。
+const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+/// Issue #168: write 側 timeout。client が peer side で TCP buffer を読まずに
+/// 詰まらせると write_all が永遠に await しうるため、書き込みごとに頭打ち。
+const WRITE_TIMEOUT: Duration = Duration::from_secs(15);
 /// Issue #51: ハンドシェイク 1 行分の最大バイト長 (メモリ膨張防止)
 const HANDSHAKE_LINE_LIMIT: usize = 1024;
 /// Issue #51: 同時に保持できるクライアント数の上限
@@ -560,10 +566,18 @@ async fn handle_client(
         // tokio の BufReader::read_until は max 制限が無いので、自前で take してから読む。
         // ただし client が \n を送ってこないと無限読みになるため、LIMIT+1 で take。
         let mut limited = (&mut reader).take((RPC_LINE_LIMIT as u64) + 1);
-        match limited.read_until(b'\n', &mut buf).await {
-            Ok(0) => return Ok(()), // EOF / 切断
-            Ok(_) => {}
-            Err(_) => return Ok(()),
+        // Issue #168: idle timeout 付きで読み込む。一定時間無音なら接続を切って
+        // permit を解放し、wedged client の occupation DoS を防ぐ。
+        match tokio::time::timeout(IDLE_TIMEOUT, limited.read_until(b'\n', &mut buf)).await {
+            Ok(Ok(0)) => return Ok(()), // EOF / 切断
+            Ok(Ok(_)) => {}
+            Ok(Err(_)) => return Ok(()),
+            Err(_) => {
+                tracing::warn!(
+                    "[teamhub] dropping idle client (no data for {IDLE_TIMEOUT:?})"
+                );
+                return Ok(());
+            }
         }
         if buf.last() != Some(&b'\n') {
             // limit に達して \n 未到達 → overflowed。残りを \n まで捨てる。
@@ -622,15 +636,26 @@ async fn handle_client(
             }
         };
         if let Some(resp) = protocol::handle(&hub, &ctx, &req).await {
-            // 書き込み失敗は log にとどめ、loop 継続。連続失敗が続けば最終的に
-            // 上の read_until で EOF/エラーが取れて自然終了する。
-            if let Err(e) = wr.write_all(resp.to_string().as_bytes()).await {
-                tracing::warn!("[teamhub] response write_all failed: {e}");
-                continue;
-            }
-            if let Err(e) = wr.write_all(b"\n").await {
-                tracing::warn!("[teamhub] response newline write failed: {e}");
-                continue;
+            // Issue #168: 書き込みも WRITE_TIMEOUT 付き。peer 側が TCP recv buffer を
+            // 読まずに詰まらせるケースで write_all が永遠に await するのを防ぐ。
+            let body = resp.to_string();
+            let write_fut = async {
+                wr.write_all(body.as_bytes()).await?;
+                wr.write_all(b"\n").await?;
+                Ok::<(), std::io::Error>(())
+            };
+            match tokio::time::timeout(WRITE_TIMEOUT, write_fut).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    tracing::warn!("[teamhub] response write failed: {e}");
+                    return Ok(());
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "[teamhub] dropping wedged client (write timeout {WRITE_TIMEOUT:?})"
+                    );
+                    return Ok(());
+                }
             }
         }
     }
