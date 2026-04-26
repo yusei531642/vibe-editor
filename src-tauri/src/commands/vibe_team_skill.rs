@@ -16,8 +16,10 @@
 // _init / 空 team_id ではスキップする。既存ファイルを上書きするかは forceOverwrite で制御。
 
 use crate::commands::atomic_write::atomic_write;
+use crate::state::AppState;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use tauri::State;
 use tokio::fs;
 
 /// Skill ファイル本文の現行バージョン。SKILL.md 先頭に埋め込んでおき、
@@ -25,13 +27,6 @@ use tokio::fs;
 const SKILL_VERSION: &str = "1.5.0";
 
 /// vibe-team Skill 本文。Claude Code の Skill 形式 (frontmatter + Markdown body) で書く。
-///
-/// 内容の方針:
-///   - Leader / HR / 動的ワーカーの 3 役それぞれの責務を 1 セクションずつ。
-///   - team_recruit ツールの引数と「設計＋採用 1 コール」フローを具体例つきで示す。
-///   - 全エージェント共通の「絶対ルール」を最後にまとめる (Issue #112 対策の待機ルール、
-///     報告フロー、ポーリング禁止)。
-///   - エンジン (claude / codex) の選択指針も記述。
 const SKILL_BODY: &str = include_str!("./vibe_team_skill_body.md");
 
 #[derive(Serialize, Default)]
@@ -47,11 +42,6 @@ pub struct InstallSkillResult {
     pub error: Option<String>,
 }
 
-/// `<project_root>/.claude/skills/vibe-team/SKILL.md` を書き出す。
-///
-/// - `force_overwrite=false` の場合、既存ファイルの先頭に同 SKILL_VERSION のヘッダがあれば no-op。
-///   ユーザーが編集していたら尊重する (再上書きしない)。
-/// - `force_overwrite=true` の場合、無条件で上書き (ヘッダもバージョン行も最新版に揃う)。
 fn skill_dir(project_root: &Path) -> PathBuf {
     project_root.join(".claude").join("skills").join("vibe-team")
 }
@@ -74,38 +64,25 @@ fn current_skill_text() -> String {
     out
 }
 
-#[tauri::command]
-pub async fn app_install_vibe_team_skill(
-    project_root: String,
-    force_overwrite: Option<bool>,
-) -> InstallSkillResult {
-    let force = force_overwrite.unwrap_or(false);
-    let trimmed = project_root.trim();
-    if trimmed.is_empty() {
-        return InstallSkillResult {
-            ok: false,
-            error: Some("project_root is empty".into()),
-            ..Default::default()
-        };
-    }
-    let root = PathBuf::from(trimmed);
+/// 実際の書き出し処理。境界チェックを通過した後の root を渡すこと。
+/// renderer から直接呼ばせない (state を経由した command 経由でのみ呼ばれる)。
+async fn install_skill_at(root: &Path, force: bool) -> InstallSkillResult {
     if !root.is_dir() {
         return InstallSkillResult {
             ok: false,
-            error: Some(format!("project_root is not a directory: {trimmed}")),
+            error: Some(format!(
+                "project_root is not a directory: {}",
+                root.display()
+            )),
             ..Default::default()
         };
     }
-    let dir = skill_dir(&root);
-    let path = skill_path(&root);
+    let dir = skill_dir(root);
+    let path = skill_path(root);
 
-    // 既存ファイルが「同じバージョン」のヘッダで始まっていれば、ユーザーが触っていない
-    // バンドル版のはずなので、念のため最新内容で同期する (本文の更新を反映させる)。
-    // ヘッダが無い or バージョンが違う = ユーザーが編集している可能性 → force=false なら触らない。
     let new_text = current_skill_text();
     let header_prefix = header_line();
     let mut overwritten = false;
-    let mut skipped = false;
 
     if let Ok(existing) = fs::read_to_string(&path).await {
         let starts_with_current_header = existing.starts_with(&header_prefix);
@@ -120,11 +97,10 @@ pub async fn app_install_vibe_team_skill(
         }
         if !force && !starts_with_current_header {
             // ユーザー編集を上書きしない
-            skipped = true;
             return InstallSkillResult {
                 ok: true,
                 path: Some(path.to_string_lossy().into_owned()),
-                skipped,
+                skipped: true,
                 ..Default::default()
             };
         }
@@ -158,10 +134,82 @@ pub async fn app_install_vibe_team_skill(
     }
 }
 
+#[tauri::command]
+pub async fn app_install_vibe_team_skill(
+    state: State<'_, AppState>,
+    project_root: String,
+    force_overwrite: Option<bool>,
+) -> Result<InstallSkillResult, String> {
+    let force = force_overwrite.unwrap_or(false);
+    let trimmed = project_root.trim();
+    if trimmed.is_empty() {
+        return Ok(InstallSkillResult {
+            ok: false,
+            error: Some("project_root is empty".into()),
+            ..Default::default()
+        });
+    }
+    // Issue #135 (Security): renderer から来る project_root が AppState の現在値と一致
+    // するか canonicalize 比較する。一致しないとユーザー HOME 等の任意ディレクトリ配下に
+    // .claude/skills/vibe-team/SKILL.md を作成できてしまい AI hijack 経路になる。
+    let active = state
+        .project_root
+        .lock()
+        .ok()
+        .and_then(|g| g.clone())
+        .unwrap_or_default();
+    if active.trim().is_empty() {
+        return Ok(InstallSkillResult {
+            ok: false,
+            error: Some("no active project_root configured".into()),
+            ..Default::default()
+        });
+    }
+    let req_canon = match std::fs::canonicalize(trimmed) {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(InstallSkillResult {
+                ok: false,
+                error: Some(format!("canonicalize requested project_root failed: {e}")),
+                ..Default::default()
+            });
+        }
+    };
+    let active_canon = match std::fs::canonicalize(active.trim()) {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(InstallSkillResult {
+                ok: false,
+                error: Some(format!("canonicalize active project_root failed: {e}")),
+                ..Default::default()
+            });
+        }
+    };
+    if req_canon != active_canon {
+        return Ok(InstallSkillResult {
+            ok: false,
+            error: Some("project_root does not match active project".into()),
+            ..Default::default()
+        });
+    }
+    Ok(install_skill_at(&req_canon, force).await)
+}
+
 /// 内部呼び出し版 (setup_team_mcp など他コマンドから使う)。force=false。
-/// エラーは握りつぶして best-effort で動作する。
+/// state チェックは呼び出し側で済んでいる前提。エラーは握りつぶして best-effort で動作する。
 pub async fn install_skill_best_effort(project_root: &str) {
-    let result = app_install_vibe_team_skill(project_root.to_string(), Some(false)).await;
+    let trimmed = project_root.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    let root = match std::fs::canonicalize(trimmed) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!("[skill] canonicalize failed (best-effort): {e}");
+            return;
+        }
+    };
+    let result = install_skill_at(&root, false).await;
     if !result.ok {
         if let Some(e) = result.error {
             tracing::warn!("[skill] install failed (best-effort): {e}");
