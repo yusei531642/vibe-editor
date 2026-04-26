@@ -192,7 +192,9 @@ function generateTeamSystemPrompt(
       `【絶対遵守ルール — 外部ファイルを読む前に先に従うこと】\n` +
       `1. ユーザーから最初の指示が来るまで何もせず待機する。自分からプロジェクト調査やファイル読みを開始しない。\n` +
       `2. ユーザー指示が届いたら、最初のツール呼び出しは必ず team_recruit にして専門家を最低 1 名採用する。` +
-      `Read / Edit / Write / Bash / Grep / Glob などの作業系ツールを Leader 自身が呼ぶことは禁止。Leader の仕事は計画・委譲・レビュー。\n` +
+      `Read / Edit / Write / Bash / Grep / Glob などの作業系ツールを Leader 自身が呼ぶことは禁止。` +
+      `さらに Claude Code 内蔵の Task ツール / サブエージェント (dispatch_agent / general-purpose / Explore 等) で代用するのも禁止 — ` +
+      `委譲は必ず team_recruit + team_assign_task 経由で行い、実作業はキャンバス上の vibe-team メンバーが担当する。Leader の仕事は計画・委譲・レビュー。\n` +
       `3. team_recruit は「ロール設計＋採用」を 1 コールで行う。新規ロール作成時の必須引数: role_id (snake_case), label, description, instructions, engine。` +
       `既存ロール (hr や自分が作成済みの role_id) の再採用は role_id + engine だけで OK。\n` +
       `4. 3 名以上必要なときは、まず team_recruit({role_id:"hr", engine:"claude"}) で HR を採用し、team_send("hr", "採用してほしい: ...") で一括採用を委譲する。\n` +

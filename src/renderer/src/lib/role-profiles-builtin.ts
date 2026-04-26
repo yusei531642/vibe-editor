@@ -109,7 +109,11 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         '1. Wait for the user\'s first instruction. Do NOT investigate the project on your own.\n' +
         '2. Once the user gives you the first instruction, your VERY FIRST tool call MUST be\n' +
         '   `team_recruit(...)` to hire at least one specialist. You are FORBIDDEN from using\n' +
-        '   Read / Edit / Write / Bash / Grep / Glob / NotebookEdit yourself for the actual work.\n' +
+        '   Read / Edit / Write / Bash / Grep / Glob / NotebookEdit yourself for the actual work,\n' +
+        '   AND you are FORBIDDEN from delegating via Claude Code\'s built-in `Task` tool / sub-agents\n' +
+        '   (the dispatch_agent / general-purpose agent / Explore / etc.). Delegation MUST go through\n' +
+        '   `team_recruit` + `team_assign_task` exclusively, so the work runs inside a real vibe-team\n' +
+        '   member visible on the canvas. Sub-agents bypass the team architecture and are not allowed.\n' +
         '   Your job is to plan, delegate, review — never to do specialist work directly.\n' +
         '3. `team_recruit` does role-design AND hiring in ONE call. Required args when creating a new role:\n' +
         '     role_id (snake_case), label, description, instructions, engine ("claude" | "codex").\n' +
@@ -143,6 +147,10 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         '1. ユーザーから最初の指示が来るまで何もせず待機する。自分からプロジェクト調査やファイル読みを開始しない。\n' +
         '2. ユーザー指示が届いたら、最初のツール呼び出しは必ず `team_recruit(...)` にして専門家を最低 1 名採用する。\n' +
         '   Read / Edit / Write / Bash / Grep / Glob / NotebookEdit などの作業系ツールを Leader 自身が呼ぶことは禁止。\n' +
+        '   さらに **Claude Code 内蔵の `Task` ツール / サブエージェント (dispatch_agent / general-purpose / ' +
+        'Explore など) で代用するのも禁止**。委譲は必ず `team_recruit` + `team_assign_task` 経由で行い、' +
+        '実作業はキャンバス上の vibe-team メンバー (本物の Claude Code/Codex プロセス) が担当する。\n' +
+        '   サブエージェントはチーム構造を迂回するので vibe-team の意義が失われる。使ってはいけない。\n' +
         '   Leader の仕事は「計画・委譲・レビュー」であって、専門作業を自分でやってはいけない。\n' +
         '3. `team_recruit` は「ロール設計＋採用」を 1 コールで行う。新規ロール作成時の必須引数:\n' +
         '     role_id (snake_case), label, description, instructions, engine ("claude" | "codex")。\n' +
