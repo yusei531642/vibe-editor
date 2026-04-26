@@ -17,6 +17,7 @@ import {
 import type { AgentConfig, AppSettings } from '../../../types/shared';
 import { DEFAULT_SETTINGS } from '../../../types/shared';
 import { useT } from '../lib/i18n';
+import { useToast } from '../lib/toast-context';
 import { useSpringMount } from '../lib/use-animated-mount';
 import { EDITOR_FONT_PRESETS, UI_FONT_PRESETS } from '../lib/settings-options';
 import { LanguageSection } from './settings/LanguageSection';
@@ -107,6 +108,7 @@ export function SettingsModal({
   onReplayOnboarding
 }: SettingsModalProps): JSX.Element | null {
   const t = useT();
+  const { showToast } = useToast();
   const [draft, setDraft] = useState<AppSettings>(initial);
   const [activeSection, setActiveSection] = useState<SectionId>('general');
   // 「適用して保存」押下時に短時間だけ ✓ アイコンに切り替えて操作完了を伝える
@@ -172,7 +174,14 @@ export function SettingsModal({
       onApply(draft);
     } catch (err) {
       console.error('[settings] apply failed:', err);
-      return; // saved=true / setTimeout を始動しないことで、エラーは UI から飲み込まれない
+      // toast でユーザーにも保存失敗を明示 (旧実装は console のみで UI 上は無音だった)。
+      const detail = err instanceof Error ? err.message : String(err);
+      const isJaNow = draft.language === 'ja';
+      showToast(
+        isJaNow ? `設定の保存に失敗しました: ${detail}` : `Failed to save settings: ${detail}`,
+        { tone: 'error', duration: 6000 }
+      );
+      return; // saved=true / setTimeout を始動しないことで、モーダルを閉じない
     }
     // 保存ボタンを 380ms だけ ✓ 表示にしてから閉じる。
     // 「押した → 保存された → モーダルが消える」の因果が体感できるようにする (Linear / Vercel 風)。
@@ -262,7 +271,10 @@ export function SettingsModal({
         { label: isJa ? 'チーム' : 'Team', items: ['roles', 'mcp'] }
       ];
     },
-    [draft.customAgents, isJa]
+    // deps は customAgents と同じく draft の生プロパティを直接参照する形で統一する。
+    // isJa は draft.language === 'ja' の派生 boolean で毎レンダー再評価されるため、
+    // 意図を明確にするには元の draft.language を deps に入れる方が読みやすい (レビュー指摘)。
+    [draft.customAgents, draft.language]
   );
 
   // 検索ワードで items を絞り込む。`__addCustom` は検索中だけ非表示 (新規追加は通常時のみ)。
@@ -294,22 +306,27 @@ export function SettingsModal({
         })
       }))
       .filter((g) => g.items.length > 0);
-  }, [navQuery, groupsRaw, fixedLabels, draft.customAgents, isJa]);
+    // 旧コードは fixedLabels と isJa の両方を deps に入れていたが、fixedLabels は
+    // FIXED_LABELS_JA / _EN のモジュール定数を isJa で選んだだけなので isJa は冗長 (レビュー指摘)。
+    // fixedLabels が変われば必然的に isJa も切り替わっており、`fixedLabels` だけで十分。
+    // groupsRaw deps は draft.customAgents と draft.language をモジュールスコープ参照で
+    // 拾うので isJa を抜くのと同様の理由で `draft.customAgents` を直接入れる。
+  }, [navQuery, groupsRaw, fixedLabels, draft.customAgents]);
 
   // 検索フィルタ後の groups に activeSection が含まれない場合、右ペインとサイドバーの
   // 選択状態が乖離する (例: "font" 検索で nav は fonts だけ表示するのに右ペインは general のまま)。
   // → フィルタ結果の最初の項目に自動で切り替えて整合させる。検索クリア時は最後に選んだ
   //    項目を維持する (ユーザーが意図的にクリアした想定)。
+  // deps から activeSection を外し、setActiveSection(prev => ...) の関数型更新で自分自身を読む。
+  // (deps に入れると setActiveSection → 再レンダー → useEffect 再実行のループが理論上発生しうる)
   useEffect(() => {
     if (!navQuery.trim()) return;
     const flat: SectionId[] = groups
       .flatMap((g) => g.items)
       .filter((id) => id !== '__addCustom');
     if (flat.length === 0) return;
-    if (!flat.includes(activeSection)) {
-      setActiveSection(flat[0]);
-    }
-  }, [navQuery, groups, activeSection]);
+    setActiveSection((prev) => (flat.includes(prev) ? prev : flat[0]));
+  }, [navQuery, groups]);
 
   const renderSection = (id: SectionId): JSX.Element | null => {
     switch (id) {
