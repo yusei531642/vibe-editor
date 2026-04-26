@@ -1,4 +1,5 @@
 import { Circle, Pin, X } from 'lucide-react';
+import { useT } from '../lib/i18n';
 
 export interface TabItem {
   id: string;
@@ -25,6 +26,7 @@ export function TabBar({
   onClose,
   onTogglePin
 }: TabBarProps): JSX.Element {
+  const t = useT();
   return (
     <div className="tabbar" role="tablist">
       {tabs.map((tab) => {
@@ -53,11 +55,11 @@ export function TabBar({
           >
             <span className="tabbar__indicators">
               {tab.pinned ? (
-                <Pin size={12} strokeWidth={2} className="tabbar__pin" aria-label="ピン留め中" />
+                <Pin size={12} strokeWidth={2} className="tabbar__pin" aria-label={t('tab.pinned')} />
               ) : null}
               {tab.busy ? <span className="tabbar__spinner" aria-hidden="true" /> : null}
               {tab.hasActivity && !tab.busy ? (
-                <span className="tabbar__activity" title="新しい出力" />
+                <span className="tabbar__activity" title={t('tab.newOutput')} />
               ) : null}
               {tab.dirty ? (
                 <Circle
@@ -80,8 +82,8 @@ export function TabBar({
                   e.stopPropagation();
                   onTogglePin(tab.id);
                 }}
-                title={tab.pinned ? 'ピンを外す' : 'ピン留め'}
-                aria-label={tab.pinned ? 'ピンを外す' : 'ピン留め'}
+                title={tab.pinned ? t('tab.unpin') : t('tab.pin')}
+                aria-label={tab.pinned ? t('tab.unpin') : t('tab.pin')}
               >
                 <Pin size={12} strokeWidth={2} />
               </button>
@@ -95,8 +97,8 @@ export function TabBar({
                   e.stopPropagation();
                   onClose(tab.id);
                 }}
-                aria-label="タブを閉じる"
-                title="閉じる (Ctrl+W)"
+                aria-label={t('tab.close')}
+                title={t('tab.closeWithShortcut')}
               >
                 <X size={13} strokeWidth={2} />
               </button>

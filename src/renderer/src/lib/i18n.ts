@@ -259,6 +259,18 @@ const ja: Dict = {
   'sessions.messages': '{count} 件',
   'sessions.loadMore': '残り {remaining} 件を表示',
 
+  // ---------- Tab ----------
+  'tab.pinned': 'ピン留め中',
+  'tab.newOutput': '新しい出力',
+  'tab.pin': 'ピン留め',
+  'tab.unpin': 'ピンを外す',
+  'tab.close': 'タブを閉じる',
+  'tab.closeWithShortcut': '閉じる (Ctrl+W)',
+  'fonts.family': 'フォントファミリ',
+  'fonts.custom': '（カスタム）',
+  'fonts.size': 'サイズ (px)',
+  'fonts.customCss': 'カスタム CSS font-family',
+
   // ---------- Roles ----------
   'role.leader': 'Leader',
   'role.planner': 'Planner',
@@ -712,6 +724,18 @@ const en: Dict = {
   'sessions.resume': 'Resume session {id}',
   'sessions.messages': '{count} msgs',
   'sessions.loadMore': 'Load {remaining} more',
+
+  // ---------- Tab ----------
+  'tab.pinned': 'Pinned',
+  'tab.newOutput': 'New output',
+  'tab.pin': 'Pin tab',
+  'tab.unpin': 'Unpin',
+  'tab.close': 'Close tab',
+  'tab.closeWithShortcut': 'Close (Ctrl+W)',
+  'fonts.family': 'Font family',
+  'fonts.custom': '(custom)',
+  'fonts.size': 'Size (px)',
+  'fonts.customCss': 'Custom CSS font-family',
 
   // ---------- Roles ----------
   'role.leader': 'Leader',

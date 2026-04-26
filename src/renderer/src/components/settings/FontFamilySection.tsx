@@ -1,4 +1,5 @@
 import type { AppSettings } from '../../../../types/shared';
+import { useT } from '../../lib/i18n';
 import type { NumberSettingKey, StringSettingKey, UpdateSetting } from './types';
 
 interface Props {
@@ -22,6 +23,7 @@ export function FontFamilySection({
   draft,
   update
 }: Props): JSX.Element {
+  const t = useT();
   const family = draft[familyKey];
   const size = draft[sizeKey];
   const selectedPreset = presets.find((p) => p.value === family)?.value ?? '__custom__';
@@ -31,7 +33,7 @@ export function FontFamilySection({
       <h3>{title}</h3>
       <div className="modal__row">
         <label className="modal__label">
-          <span>フォントファミリ</span>
+          <span>{t('fonts.family')}</span>
           <select
             value={selectedPreset}
             onChange={(e) => {
@@ -45,11 +47,11 @@ export function FontFamilySection({
                 {p.label}
               </option>
             ))}
-            <option value="__custom__">（カスタム）</option>
+            <option value="__custom__">{t('fonts.custom')}</option>
           </select>
         </label>
         <label className="modal__label">
-          <span>サイズ (px)</span>
+          <span>{t('fonts.size')}</span>
           <input
             type="number"
             min={10}
@@ -60,7 +62,7 @@ export function FontFamilySection({
         </label>
       </div>
       <label className="modal__label modal__label--full">
-        <span>カスタム CSS font-family</span>
+        <span>{t('fonts.customCss')}</span>
         <input
           type="text"
           value={family}
