@@ -329,15 +329,19 @@ export function SettingsModal({
           if (!root) return;
           const focusables = Array.from(
             root.querySelectorAll<HTMLElement>(
-              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [contenteditable]:not([contenteditable="false"]), [tabindex]'
+              // 負値 tabindex はセレクタ側で除外 ([tabindex^="-"] にマッチする要素を NOT する)。
+              // querySelector レベルで切ると後段 filter のコストが減る。
+              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex^="-"])'
             )
-          ).filter(
-            // 1. レイアウト上見えていない要素 (display:none 等) を除外
-            // 2. tabindex の負値 ("-1" / "-2" 等) を除外
-            //    旧実装は :not([tabindex="-1"]) のみで -2 等が漏れていた → el.tabIndex >= 0 で網羅
-            //    また dialog root 自身 (tabIndex=-1) もここで除外される
-            (el) => el.offsetParent !== null && el.tabIndex >= 0
-          );
+          ).filter((el) => {
+            // 1. dialog root 自身 (tabIndex=-1) を除外する保険
+            if (el.tabIndex < 0) return false;
+            // 2. レイアウト上見えていない要素を除外。旧実装は offsetParent === null で判定していたが、
+            //    position: fixed の要素は offsetParent が常に null になるため誤って除外される。
+            //    getComputedStyle.display !== 'none' + visibility !== 'hidden' で堅牢にチェック。
+            const style = window.getComputedStyle(el);
+            return style.display !== 'none' && style.visibility !== 'hidden';
+          });
           if (focusables.length === 0) return;
           const first = focusables[0];
           const last = focusables[focusables.length - 1];

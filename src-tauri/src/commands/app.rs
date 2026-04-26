@@ -198,10 +198,13 @@ pub async fn app_setup_team_mcp(
                 "[setup_team_mcp] skipping skill install: no active project_root configured"
             );
         } else {
-            match (
-                std::fs::canonicalize(trimmed),
-                std::fs::canonicalize(active.trim()),
-            ) {
+            // canonicalize は async fn 内では tokio::fs を使う (network mount 等で blocking I/O が
+            // Tokio worker を塞ぐのを避けるため)。req と active は独立なので join で並列実行。
+            let (req_res, active_res) = tokio::join!(
+                tokio::fs::canonicalize(trimmed),
+                tokio::fs::canonicalize(active.trim())
+            );
+            match (req_res, active_res) {
                 (Ok(req_canon), Ok(active_canon)) if req_canon == active_canon => {
                     crate::commands::vibe_team_skill::install_skill_best_effort(
                         &req_canon.to_string_lossy(),

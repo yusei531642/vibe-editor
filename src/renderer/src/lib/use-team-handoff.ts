@@ -65,6 +65,17 @@ export function useTeamHandoff(callback: (p: HandoffPayload) => void): void {
       //   - 0 のまま: 本当に誰も居ない → u() で unlisten + initPromise クリア
       //   - >0     : 再マウントが間に合った → 既存 listen を再利用 (initPromise=myInit のまま)
       // どちらの分岐でも listen は 1 本だけ、二重発火しない。
+      //
+      // 詳細な race シナリオ (レビュー検証用):
+      //   t0: マウント A cleanup → listeners.delete(wrapperA) → listeners.size = 0
+      //   t1: ensureRegistered() を呼んでいたマウント B が listeners.add(wrapperB) → size = 1
+      //       B の myInit は ensureRegistered の if (initPromise) return initPromise で
+      //       同じ Promise (= A の myInit) を取得済み
+      //   t2: A の cleanup .then が resolve → listeners.size > 0 → return (unlisten せず)
+      //   t3: B の cleanup → listeners.size = 0
+      //   t4: B の cleanup .then が resolve → listeners.size = 0 → u() で unlisten
+      //       initPromise === myInit (B) なので null クリア
+      // listen は 1 本だけ、unlisten も 1 回だけ。リークなし。
       void myInit
         .then((u) => {
           if (listeners.size > 0) return;
