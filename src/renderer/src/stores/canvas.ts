@@ -64,10 +64,17 @@ export type StageView = 'stage' | 'list' | 'focus';
 const NODE_W = 480;
 const NODE_H = 320;
 
-let counter = 0;
+/**
+ * Issue #157: 旧 `Date.now() + counter` 方式は zustand persist 復元 + リロード後の
+ * counter リセットで稀に衝突しうる。crypto.randomUUID() で衝突確率を実質ゼロに。
+ * (Tauri WebView2 / 主要ブラウザでサポート済み。fallback 環境では Math.random ベースで補う)。
+ */
 function newId(prefix: string): string {
-  counter += 1;
-  return `${prefix}-${Date.now().toString(36)}-${counter}`;
+  const u =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}-${u}`;
 }
 
 /**
