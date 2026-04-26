@@ -308,10 +308,11 @@ export function SettingsModal({
             if (e.nativeEvent.isComposing) return;
             const target = e.target as HTMLElement | null;
             const tag = target?.tagName;
+            // contenteditable は inherit で親から継承されるケースがあるため、
+            // 文字列比較の getAttribute ではなく DOM プロパティ isContentEditable を使う
+            // (継承込みの正しい判定が出る)。レビュー指摘。
             const isTextField =
-              tag === 'INPUT' ||
-              tag === 'TEXTAREA' ||
-              target?.getAttribute('contenteditable') === 'true';
+              tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable === true;
             e.preventDefault();
             // 入力中の Escape で即閉じると入力中のテキストが lost するため、
             // 1 回目は input から blur して dialog root に focus を退避するだけにする。
@@ -338,10 +339,18 @@ export function SettingsModal({
             // 1. tabIndex の負値 (-2 等) と dialog root (tabIndex=-1) を除外
             if (el.tabIndex < 0) return false;
             // 2. レイアウト上見えていない要素を除外。
-            //    旧実装は offsetParent === null だったが position: fixed で常に null になり誤除外。
-            //    getComputedStyle は確実だが Tab 押下ごとに layout thrashing しうるため、
-            //    getBoundingClientRect の width/height でレイアウト 1 回だけ走らせる軽量版に統一。
-            //    (display:none / visibility:hidden / 0 サイズ要素はすべて 0 になるので網羅できる)
+            //    旧 getBoundingClientRect だけだと visibility:hidden の要素が rect=占有領域を
+            //    持つため通過してしまう (レビュー指摘)。
+            //    Chromium が提供する Element.checkVisibility() は display:none / visibility:hidden /
+            //    content-visibility:hidden を 1 回呼ぶだけで判定できる。Tauri は WebView2 (Chromium)
+            //    なので利用可能。型未定義環境用に typeof チェックで guard し、未対応時は
+            //    旧来の rect ベース判定にフォールバック。
+            const checkVisibility = (el as unknown as {
+              checkVisibility?: (opts?: { checkVisibilityCSS?: boolean }) => boolean;
+            }).checkVisibility;
+            if (typeof checkVisibility === 'function') {
+              return checkVisibility.call(el, { checkVisibilityCSS: true });
+            }
             const rect = el.getBoundingClientRect();
             return rect.width > 0 || rect.height > 0;
           });
