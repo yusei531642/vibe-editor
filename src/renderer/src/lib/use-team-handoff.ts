@@ -21,10 +21,15 @@ export interface HandoffPayload {
 
 type Listener = (p: HandoffPayload) => void;
 const listeners = new Set<Listener>();
-let unlisten: UnlistenFn | null = null;
-let initPromise: Promise<void> | null = null;
+/**
+ * Issue #192: 旧実装は `unlisten` を別変数に保持し、`listen()` の resolve を待たずに
+ * cleanup が走ると「resolve 後に届く unlisten が誰からも呼ばれない孤児」になり、
+ * 次のマウントで `initPromise === null` を見て 2 本目の listen が張られて二重発火していた。
+ * 修正: Promise 自体に UnlistenFn を持たせ、cleanup は必ず resolve を待ってから unlisten を呼ぶ。
+ */
+let initPromise: Promise<UnlistenFn> | null = null;
 
-function ensureRegistered(): Promise<void> {
+function ensureRegistered(): Promise<UnlistenFn> {
   if (initPromise) return initPromise;
   initPromise = listen<HandoffPayload>('team:handoff', (e) => {
     for (const cb of listeners) {
@@ -34,8 +39,6 @@ function ensureRegistered(): Promise<void> {
         console.warn('[handoff] listener threw:', err);
       }
     }
-  }).then((u) => {
-    unlisten = u;
   });
   return initPromise;
 }
@@ -51,16 +54,25 @@ export function useTeamHandoff(callback: (p: HandoffPayload) => void): void {
   useEffect(() => {
     const wrapper: Listener = (p) => cbRef.current(p);
     listeners.add(wrapper);
-    void ensureRegistered();
+    const myInit = ensureRegistered();
     return () => {
       listeners.delete(wrapper);
-      // すべての subscriber が抜けたら Tauri listener も止める。
-      if (listeners.size === 0) {
-        const u = unlisten;
-        unlisten = null;
-        initPromise = null;
-        if (u) u();
-      }
+      if (listeners.size !== 0) return;
+      // 全 subscriber が抜けた → Tauri listener を止めて initPromise をリセット。
+      // listen() がまだ resolve していなくても、Promise.then で resolve 後に呼ぶことで
+      // 「unlisten が孤児になり次マウントで二重 listen」 (Issue #192) を防ぐ。
+      // ただし then 内で listeners.size を再確認し、別フックが先に再 mount していれば
+      // unlisten せずにそのまま使い回す (false-positive cleanup を避ける)。
+      const stale = initPromise;
+      initPromise = null;
+      void myInit.then((u) => {
+        if (listeners.size > 0 && initPromise === null) {
+          // 再マウントが間に合った: この listen をそのまま再活用する
+          initPromise = stale;
+        } else {
+          u();
+        }
+      });
     };
   }, []);
 }
