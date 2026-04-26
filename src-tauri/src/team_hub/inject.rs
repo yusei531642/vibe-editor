@@ -84,9 +84,17 @@ pub async fn inject(
     }
 
     // 最初のチャンクは即時、以降は 15ms 間隔
+    // Issue #145: session.write は std::sync::Mutex + blocking I/O なので tokio worker を
+    // 直接塞ぐ。spawn_blocking でブロッキングプールに逃がし、async runtime を解放する。
     let mut iter = chunks.into_iter();
     if let Some(first) = iter.next() {
-        if session.write(&first).is_err() {
+        let s = session.clone();
+        if tokio::task::spawn_blocking(move || s.write(&first))
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .is_none()
+        {
             return false;
         }
     }
@@ -96,11 +104,18 @@ pub async fn inject(
         if registry.get_by_agent(agent_id).is_none() {
             return false;
         }
-        if session.write(&chunk).is_err() {
+        let s = session.clone();
+        if tokio::task::spawn_blocking(move || s.write(&chunk))
+            .await
+            .ok()
+            .and_then(|r| r.ok())
+            .is_none()
+        {
             return false;
         }
     }
     sleep(Duration::from_millis(CHUNK_DELAY_MS)).await;
-    let _ = session.write(b"\r");
+    let s = session.clone();
+    let _ = tokio::task::spawn_blocking(move || s.write(b"\r")).await;
     true
 }
