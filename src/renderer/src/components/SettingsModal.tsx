@@ -51,6 +51,24 @@ interface SettingsModalProps {
  */
 type SectionId = string;
 
+/** セクション ID → サイドバー Lucide アイコン。
+ *  関数内で定義するとレンダーごとに新規 JSX が生成されるため、コンポーネント外に置く。 */
+const SECTION_ICONS: Record<string, JSX.Element> = {
+  general: <SettingsIcon size={14} strokeWidth={1.85} />,
+  appearance: <Palette size={14} strokeWidth={1.85} />,
+  fonts: <Type size={14} strokeWidth={1.85} />,
+  claude: <Bot size={14} strokeWidth={1.85} />,
+  codex: <Code2 size={14} strokeWidth={1.85} />,
+  roles: <Users size={14} strokeWidth={1.85} />,
+  mcp: <Plug size={14} strokeWidth={1.85} />
+};
+const CUSTOM_ICON: JSX.Element = <Sparkles size={14} strokeWidth={1.85} />;
+function iconFor(id: SectionId): JSX.Element {
+  if (SECTION_ICONS[id]) return SECTION_ICONS[id];
+  if (id.startsWith('custom:')) return CUSTOM_ICON;
+  return SECTION_ICONS.general;
+}
+
 export function SettingsModal({
   open,
   initial,
@@ -63,6 +81,9 @@ export function SettingsModal({
   const [activeSection, setActiveSection] = useState<SectionId>('general');
   // 「適用して保存」押下時に短時間だけ ✓ アイコンに切り替えて操作完了を伝える
   const [saved, setSaved] = useState(false);
+  // saved → false / onClose に切り替える deferred timer。
+  // unmount / 直前の Apply キャンセルで必ずクリアする (アンマウント済み state 更新警告を防ぐ)
+  const saveTimerRef = useRef<number | null>(null);
   // サイドバー検索 (空文字なら全表示)
   const [navQuery, setNavQuery] = useState('');
 
@@ -88,6 +109,18 @@ export function SettingsModal({
     if (!exists) setActiveSection('general');
   }, [activeSection, draft.customAgents]);
 
+  // unmount 時に保存フィードバックタイマーを必ずクリア。
+  // 旧実装は handleApply 内の window.setTimeout を握っておらず、
+  // 380ms 以内に外部から閉じられるとアンマウント済みコンポーネントへの setSaved(false) が走る。
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const { mounted, dataState, motion } = useSpringMount(open, 180);
   if (!mounted) return null;
 
@@ -100,7 +133,9 @@ export function SettingsModal({
     // 保存ボタンを 380ms だけ ✓ 表示にしてから閉じる。
     // 「押した → 保存された → モーダルが消える」の因果が体感できるようにする (Linear / Vercel 風)。
     setSaved(true);
-    window.setTimeout(() => {
+    if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = window.setTimeout(() => {
+      saveTimerRef.current = null;
       setSaved(false);
       onClose();
     }, 380);
@@ -135,31 +170,6 @@ export function SettingsModal({
         roles: { label: 'Role profiles', title: 'Role profiles', desc: 'Team member role templates' },
         mcp: { label: 'MCP', title: 'MCP', desc: 'How to install vibe-team MCP' }
       };
-
-  /** セクション ID → サイドバー Lucide アイコン (視認性向上 + 視覚スキャン高速化)。
-   *  カスタムエージェントは Sparkles で代用。 */
-  const iconFor = (id: SectionId): JSX.Element => {
-    const props = { size: 14, strokeWidth: 1.85 } as const;
-    switch (id) {
-      case 'general':
-        return <SettingsIcon {...props} />;
-      case 'appearance':
-        return <Palette {...props} />;
-      case 'fonts':
-        return <Type {...props} />;
-      case 'claude':
-        return <Bot {...props} />;
-      case 'codex':
-        return <Code2 {...props} />;
-      case 'roles':
-        return <Users {...props} />;
-      case 'mcp':
-        return <Plug {...props} />;
-      default:
-        if (id.startsWith('custom:')) return <Sparkles {...props} />;
-        return <SettingsIcon {...props} />;
-    }
-  };
 
   /** 指定 id のラベル情報を返す (固定 + カスタム動的) */
   const labelOf = (id: SectionId): { label: string; title: string; desc: string } => {
@@ -198,25 +208,35 @@ export function SettingsModal({
     setActiveSection(`custom:${id}`);
   };
 
-  const groupsRaw: Array<{ label: string | null; items: SectionId[] }> = [
-    { label: null, items: ['general', 'appearance', 'fonts'] },
-    {
-      label: isJa ? 'エージェント' : 'Agents',
-      items: [
-        'claude',
-        'codex',
-        ...customAgents.map((a) => `custom:${a.id}`),
-        '__addCustom'
-      ]
-    },
-    // vibe-team MCP のセットアップ手順は「チーム」機能の一部なので同グループに収める。
-    // 旧構成では MCP を独立グループにしていたが、グループラベル "MCP" と唯一の項目 "MCP" が
-    // 同名で並び、サイドバー上で MCP が 2 行重複しているように見える UI バグを生んでいた。
-    { label: isJa ? 'チーム' : 'Team', items: ['roles', 'mcp'] }
-  ];
+  // groupsRaw は customAgents と isJa から導出される。useMemo で安定化させ、
+  // 後段 useMemo (groups) の依存配列で正しく検出させる。
+  // (旧実装は毎レンダーで新しい配列を作っており groups の useMemo がメモ化されていなかった)
+  const groupsRaw = useMemo<
+    Array<{ label: string | null; items: SectionId[] }>
+  >(
+    () => [
+      { label: null, items: ['general', 'appearance', 'fonts'] },
+      {
+        label: isJa ? 'エージェント' : 'Agents',
+        items: [
+          'claude',
+          'codex',
+          ...customAgents.map((a) => `custom:${a.id}`),
+          '__addCustom'
+        ]
+      },
+      // vibe-team MCP のセットアップ手順は「チーム」機能の一部なので同グループに収める。
+      // 旧構成では MCP を独立グループにしていたが、グループラベル "MCP" と唯一の項目 "MCP" が
+      // 同名で並び、サイドバー上で MCP が 2 行重複しているように見える UI バグを生んでいた。
+      { label: isJa ? 'チーム' : 'Team', items: ['roles', 'mcp'] }
+    ],
+    [customAgents, isJa]
+  );
 
   // 検索ワードで items を絞り込む。`__addCustom` は検索中だけ非表示 (新規追加は通常時のみ)。
   // 検索結果が空のグループはラベルごと除外する。
+  // labelOf はレンダー毎に再生成されるが内部の参照 (customAgents/isJa) は groupsRaw と同根なので、
+  // groupsRaw の deps に揃えて実質同じタイミングで再評価される。eslint-disable は外せる。
   const groups = useMemo(() => {
     const q = navQuery.trim().toLowerCase();
     if (!q) return groupsRaw;
@@ -230,9 +250,9 @@ export function SettingsModal({
         })
       }))
       .filter((g) => g.items.length > 0);
-    // labelOf は customAgents と isJa から導出されるラベルを返すので両方を deps に
+    // labelOf は closure 経由で customAgents/isJa を読むが、それらは groupsRaw 経由で再評価される
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navQuery, customAgents, isJa]);
+  }, [navQuery, groupsRaw]);
 
   const renderSection = (id: SectionId): JSX.Element | null => {
     switch (id) {

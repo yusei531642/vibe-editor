@@ -579,7 +579,6 @@
     border-color 160ms cubic-bezier(0.25, 1, 0.5, 1),
     box-shadow 200ms cubic-bezier(0.25, 1, 0.5, 1),
     transform 200ms cubic-bezier(0.25, 1, 0.5, 1);
-  will-change: transform;
 }
 
 .modal--settings .theme-card:hover,
@@ -589,6 +588,9 @@
   border-color: var(--border-strong);
   transform: translateY(-1px);
   box-shadow: 0 4px 14px -8px rgba(0, 0, 0, 0.45);
+  /* 旧コミットでは will-change: transform をカードに常時付けていたが、
+     全カード分の GPU レイヤを常駐させて余計な VRAM を食う。hover 時だけに絞る。 */
+  will-change: transform;
 }
 
 .modal--settings .theme-card:active,
