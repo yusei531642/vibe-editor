@@ -1605,10 +1605,23 @@ export function App(): JSX.Element {
         }
         return;
       }
+      // Issue #162: Ctrl+Shift+P (パレット toggle) と Ctrl+, (設定) は modal open 中でも
+      // 反応してよい (toggle 用途のため)。それ以外のショートカット (Ctrl+S / Ctrl+Tab /
+      // Ctrl+W / Ctrl+Shift+T) は modal/palette open 中はブロックする。
+      const modalIsOpen = paletteOpen || settingsOpen;
       if (e.shiftKey && (e.key === 'P' || e.key === 'p')) {
         e.preventDefault();
         e.stopPropagation();
         setPaletteOpen((v) => !v);
+        return;
+      }
+      if (e.key === ',') {
+        e.preventDefault();
+        setSettingsOpen(true);
+        return;
+      }
+      if (modalIsOpen) {
+        // 以降の保存・タブ切替・タブ閉じはブロック
         return;
       }
       if (!e.shiftKey && (e.key === 's' || e.key === 'S')) {
@@ -1617,11 +1630,6 @@ export function App(): JSX.Element {
           e.stopPropagation();
           void saveEditorTab(activeTabId);
         }
-        return;
-      }
-      if (e.key === ',') {
-        e.preventDefault();
-        setSettingsOpen(true);
         return;
       }
       if (e.key === 'Tab') {
@@ -1633,8 +1641,6 @@ export function App(): JSX.Element {
       if (e.key === 'w' || e.key === 'W') {
         // Issue #38: フォーカスが xterm (Claude / Codex / シェル) の中にあるときは
         // Ctrl+W を「直前の単語を削除」として PTY に素通しさせる。
-        // DOM tree で ".xterm" 祖先がいるかで判定 (xterm.js は focusable な
-        // textarea を .xterm の中に配置するため、activeElement がそこに入る)。
         const active = document.activeElement as HTMLElement | null;
         const inTerminal = active?.closest?.('.xterm') !== undefined &&
           active?.closest?.('.xterm') !== null;
