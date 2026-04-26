@@ -34,22 +34,27 @@ jobs:
 
     runs-on: ${{ matrix.platform }}
     steps:
-      - uses: actions/checkout@v4
+      # Issue #188 (Security): mutable tag (@v4 / @stable / @v0.5.22) のみだと、上流が
+      # force-update or 乗っ取られた場合に同 job 内の TAURI_SIGNING_PRIVATE_KEY /
+      # PASSWORD / GITHUB_TOKEN を吸い出され署名済み悪意 updater を Releases に push
+      # 可能 (#142 と合流すると全ユーザに自動配信)。各 action を SHA pin する。
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
           cache: npm
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-04-26
         with:
           # macOS universal は両方の target を必要とする
+          toolchain: stable
           targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
 
       - name: Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@400e7407cfd7a091e5fbb6afec01ec146c432b7c # v2.7.7
         with:
           workspaces: ./src-tauri -> target
 
@@ -68,7 +73,7 @@ jobs:
         run: npm ci
 
       - name: Build & release
-        uses: tauri-apps/tauri-action@v0.5.22
+        uses: tauri-apps/tauri-action@7a7e7e08c0179083619ead83e4669b4718a9f191 # v0.5.22
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # tauri 自動アップデート用の署名鍵 (GitHub Secrets から)
