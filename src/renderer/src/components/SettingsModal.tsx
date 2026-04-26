@@ -78,8 +78,7 @@ export function SettingsModal({
   // 描画完了直後の最初のフレームで focus を移す。
   useEffect(() => {
     if (!open) return;
-    let raf = 0;
-    raf = window.requestAnimationFrame(() => {
+    const raf = window.requestAnimationFrame(() => {
       const root = dialogRef.current;
       if (!root) return;
       const target = root.querySelector<HTMLElement>(
@@ -297,20 +296,31 @@ export function SettingsModal({
         role="dialog"
         aria-modal="true"
         aria-label={isJa ? '設定' : 'Settings'}
+        // Issue #195: dialog root を programmatic focus ターゲットにするため tabindex=-1。
+        // Escape を入力フィールドから受けたとき、まず root に focus を退避してから次の
+        // Escape で閉じる UX (vscode / macOS native と同じ) を実現する。
+        tabIndex={-1}
         onKeyDown={(e) => {
           // Issue #195: Escape で閉じる + Tab で focus trap。
-          // Escape は input/textarea/IME 確定中はスキップ (IME 確定キャンセル等の標準挙動を妨げない)。
           if (e.key === 'Escape') {
+            // IME 変換中の Escape は確定キャンセルとして使われるので絶対に握らない。
+            const composing = (e.nativeEvent as KeyboardEvent).isComposing;
+            if (composing) return;
             const target = e.target as HTMLElement | null;
             const tag = target?.tagName;
             const isTextField =
               tag === 'INPUT' ||
               tag === 'TEXTAREA' ||
               target?.getAttribute('contenteditable') === 'true';
-            // nativeEvent.isComposing は IME 変換中 true。確定前の Escape を漏らさない。
-            const composing = (e.nativeEvent as KeyboardEvent).isComposing;
-            if (isTextField && composing) return;
             e.preventDefault();
+            // 入力中の Escape で即閉じると入力中のテキストが lost するため、
+            // 1 回目は input から blur して dialog root に focus を退避するだけにする。
+            // (2 回目の Escape は target=dialog なのでこの分岐に入らず onClose に進む)
+            if (isTextField && target) {
+              target.blur();
+              dialogRef.current?.focus();
+              return;
+            }
             onClose();
             return;
           }
@@ -319,9 +329,15 @@ export function SettingsModal({
           if (!root) return;
           const focusables = Array.from(
             root.querySelectorAll<HTMLElement>(
-              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])'
+              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [contenteditable]:not([contenteditable="false"]), [tabindex]'
             )
-          ).filter((el) => el.offsetParent !== null);
+          ).filter(
+            // 1. レイアウト上見えていない要素 (display:none 等) を除外
+            // 2. tabindex の負値 ("-1" / "-2" 等) を除外
+            //    旧実装は :not([tabindex="-1"]) のみで -2 等が漏れていた → el.tabIndex >= 0 で網羅
+            //    また dialog root 自身 (tabIndex=-1) もここで除外される
+            (el) => el.offsetParent !== null && el.tabIndex >= 0
+          );
           if (focusables.length === 0) return;
           const first = focusables[0];
           const last = focusables[focusables.length - 1];

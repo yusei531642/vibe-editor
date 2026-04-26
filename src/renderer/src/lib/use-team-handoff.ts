@@ -58,15 +58,20 @@ export function useTeamHandoff(callback: (p: HandoffPayload) => void): void {
     return () => {
       listeners.delete(wrapper);
       if (listeners.size !== 0) return;
-      // 全 subscriber が抜けた → Tauri listener を止めて initPromise をリセット。
-      // listen() がまだ resolve していなくても、Promise.then で resolve 後に必ず unlisten を
-      // 呼ぶことで「unlisten が孤児になり次マウントで二重 listen」 (Issue #192) を防ぐ。
-      // 再マウントは ensureRegistered() で新しい listen を作るので、古い myInit は確実に閉じる。
-      // (旧コミットでは「再マウントが間に合えば stale を再活用」する最適化を入れていたが、
-      //  cleanup 高頻度時の世代管理が複雑になりレビューで race を指摘された。listen 1 回分の
-      //  コストは無視できるので常に閉じる単純形に戻す。)
-      initPromise = null;
-      void myInit.then((u) => u()).catch(() => {});
+      // Issue #192: cleanup 時点で listeners=0 でも、unlisten 完了前に再マウントが間に合うと
+      // 「古い initPromise を即 null → 新マウントが NEW listen を生成 → 古い listen は
+      //  まだ生きていて二重発火」となる race があるため、resolve まで initPromise を null に
+      // しない。resolve 時に listeners.size を再確認し、
+      //   - 0 のまま: 本当に誰も居ない → u() で unlisten + initPromise クリア
+      //   - >0     : 再マウントが間に合った → 既存 listen を再利用 (initPromise=myInit のまま)
+      // どちらの分岐でも listen は 1 本だけ、二重発火しない。
+      void myInit
+        .then((u) => {
+          if (listeners.size > 0) return;
+          u();
+          if (initPromise === myInit) initPromise = null;
+        })
+        .catch(() => {});
     };
   }, []);
 }
