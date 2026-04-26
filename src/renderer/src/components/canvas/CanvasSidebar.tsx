@@ -14,6 +14,7 @@ import { useSettings } from '../../lib/settings-context';
 import { useT } from '../../lib/i18n';
 import { useUiStore } from '../../stores/ui';
 import { ROLE_META } from '../../lib/team-roles';
+import { useFilesChanged } from '../../lib/use-files-changed';
 
 interface CanvasSidebarProps {
   /** 外部 (CanvasLayout の Rail) から制御したい場合に渡す。省略時はローカル state */
@@ -94,6 +95,10 @@ export function CanvasSidebar({
     void refreshGit();
     void refreshSessions();
   }, [refreshGit, refreshSessions]);
+  // Issue #128: 外部からの変更を検知して git status を再取得 (Sidebar Changes バッジを最新化)
+  useFilesChanged(() => {
+    void refreshGit();
+  });
 
   // 親 (CanvasLayout) の Rail バッジに件数を通知
   useEffect(() => {

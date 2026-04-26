@@ -3,11 +3,12 @@
  *
  * payload: { projectRoot, relPath }
  */
-import { memo, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { GitDiffResult } from '../../../../../types/shared';
 import { CardFrame } from '../CardFrame';
 import { DiffView } from '../../DiffView';
+import { useFilesChanged } from '../../../lib/use-files-changed';
 
 interface DiffPayload {
   projectRoot: string;
@@ -24,6 +25,21 @@ function DiffCardImpl({ id, data }: NodeProps): JSX.Element {
   const [result, setResult] = useState<GitDiffResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [sideBySide, setSideBySide] = useState(true);
+
+  const refresh = useCallback(() => {
+    if (!projectRoot || !relPath) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    void window.api.git
+      .diff(projectRoot, relPath, originalRelPath)
+      .then(setResult)
+      .catch(() => {
+        /* noop */
+      })
+      .finally(() => setLoading(false));
+  }, [projectRoot, relPath, originalRelPath]);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,6 +61,9 @@ function DiffCardImpl({ id, data }: NodeProps): JSX.Element {
       cancelled = true;
     };
   }, [projectRoot, relPath, originalRelPath]);
+
+  // Issue #128: 外部からの変更を検知して自動更新
+  useFilesChanged(refresh);
 
   return (
     <>

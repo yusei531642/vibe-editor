@@ -10,6 +10,7 @@ import { CardFrame } from '../CardFrame';
 import { ChangesPanel } from '../../ChangesPanel';
 import { useCanvasStore } from '../../../stores/canvas';
 import { useSettings } from '../../../lib/settings-context';
+import { useFilesChanged } from '../../../lib/use-files-changed';
 
 interface ChangesPayload {
   projectRoot?: string;
@@ -39,6 +40,8 @@ function ChangesCardImpl({ id, data, positionAbsoluteX, positionAbsoluteY }: Nod
   useEffect(() => {
     refresh();
   }, [refresh]);
+  // Issue #128: 外部からの変更 (git pull / 他エディタ / agent の編集) を検知して自動更新
+  useFilesChanged(refresh);
 
   const handleOpenDiff = useCallback(
     (file: { path: string; originalPath?: string }) => {
