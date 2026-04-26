@@ -49,7 +49,11 @@ import { useRecruitListener } from './lib/use-recruit-listener';
 import { ClaudeNotFound } from './components/ClaudeNotFound';
 import { TeamCreateModal } from './components/TeamCreateModal';
 import { useT } from './lib/i18n';
-import { useSettings } from './lib/settings-context';
+import {
+  useSettingsActions,
+  useSettingsLoading,
+  useSettingsValue
+} from './lib/settings-context';
 import { useToast } from './lib/toast-context';
 import { useUiStore } from './stores/ui';
 import { webviewZoom } from './lib/webview-zoom';
@@ -227,12 +231,25 @@ function generateTeamAction(_tab: TerminalTab): string | undefined {
 }
 
 export function App(): JSX.Element {
-  const {
-    settings,
-    loading: settingsLoading,
-    update: updateSettings,
-    reset: resetSettings
-  } = useSettings();
+  const settingsLoading = useSettingsLoading();
+  const { update: updateSettings, reset: resetSettings } = useSettingsActions();
+  const settings = {
+    claudeCommand: useSettingsValue('claudeCommand'),
+    claudeArgs: useSettingsValue('claudeArgs'),
+    claudeCwd: useSettingsValue('claudeCwd'),
+    lastOpenedRoot: useSettingsValue('lastOpenedRoot'),
+    recentProjects: useSettingsValue('recentProjects'),
+    workspaceFolders: useSettingsValue('workspaceFolders'),
+    claudeCodePanelWidth: useSettingsValue('claudeCodePanelWidth'),
+    codexCommand: useSettingsValue('codexCommand'),
+    codexArgs: useSettingsValue('codexArgs'),
+    teamPresets: useSettingsValue('teamPresets'),
+    language: useSettingsValue('language'),
+    theme: useSettingsValue('theme'),
+    density: useSettingsValue('density'),
+    hasCompletedOnboarding: useSettingsValue('hasCompletedOnboarding'),
+    mcpAutoSetup: useSettingsValue('mcpAutoSetup')
+  };
   const { showToast, dismissToast } = useToast();
   const t = useT();
   // Canvas モードでは App が裏で常時マウントされるが、下の初回タブ生成

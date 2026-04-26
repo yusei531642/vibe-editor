@@ -38,7 +38,6 @@ fn new_git_command() -> Command {
     cmd.env("GIT_OPTIONAL_LOCKS", "0");
     #[cfg(windows)]
     {
-        use std::os::windows::process::CommandExt;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     cmd
@@ -370,16 +369,25 @@ pub async fn git_diff(
     let original = head.clone().unwrap_or_default();
     // Issue #35: read_to_string() は非 UTF-8 で失敗し、worktree 側が空文字になって
     // diff が「全削除」に見えてしまう。raw bytes → from_utf8_lossy で落としどころを作る。
-    let (modified, worktree_is_lossy) = match tokio::fs::read(&abs).await {
-        Ok(bytes) => match std::str::from_utf8(&bytes) {
-            Ok(s) => (s.to_string(), false),
-            Err(_) => (String::from_utf8_lossy(&bytes).into_owned(), true),
-        },
-        Err(_) => (String::new(), false),
+    let worktree_too_large = tokio::fs::metadata(&abs)
+        .await
+        .map(|m| m.len() > MAX_DIFF_BYTES as u64)
+        .unwrap_or(false);
+    let (modified, worktree_is_lossy) = if worktree_too_large {
+        (String::new(), false)
+    } else {
+        match tokio::fs::read(&abs).await {
+            Ok(bytes) => match std::str::from_utf8(&bytes) {
+                Ok(s) => (s.to_string(), false),
+                Err(_) => (String::from_utf8_lossy(&bytes).into_owned(), true),
+            },
+            Err(_) => (String::new(), false),
+        }
     };
     let is_deleted = !abs.exists();
     // NUL-byte を含むファイル、または非 UTF-8 (lossy)、巨大ファイル時は バイナリ扱い。
     let is_binary = head_too_large
+        || worktree_too_large
         || modified.len() > MAX_DIFF_BYTES
         || original.contains('\u{0}')
         || modified.contains('\u{0}')

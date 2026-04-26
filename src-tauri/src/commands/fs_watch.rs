@@ -30,6 +30,65 @@ fn path_is_ignored(path: &Path, root: &Path) -> bool {
     })
 }
 
+/// Issue #204:
+/// renderer 由来の root を無条件に再帰監視しない。
+/// ユーザーの「プロジェクト」として自然なディレクトリだけを許可し、
+/// ルートドライブ / ホーム直下 / 明らかなシステム領域は拒否する。
+fn is_safe_watch_root(root: &Path) -> bool {
+    let Ok(canon) = root.canonicalize() else {
+        return false;
+    };
+    let Ok(meta) = std::fs::metadata(&canon) else {
+        return false;
+    };
+    if !meta.is_dir() {
+        return false;
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        let home_canon = home.canonicalize().unwrap_or(home);
+        if canon == home_canon {
+            return false;
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let lower = canon.to_string_lossy().to_lowercase();
+        if lower.len() <= 3 && lower.ends_with(":\\") {
+            return false;
+        }
+        if lower == "c:\\" {
+            return false;
+        }
+        for prefix in [
+            "c:\\windows",
+            "c:\\program files",
+            "c:\\program files (x86)",
+            "c:\\programdata",
+        ] {
+            if lower.starts_with(prefix) {
+                return false;
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        if canon == Path::new("/") {
+            return false;
+        }
+        let lower = canon.to_string_lossy();
+        for prefix in ["/etc", "/sys", "/proc", "/dev", "/usr", "/bin", "/sbin", "/boot"] {
+            if lower.starts_with(prefix) {
+                return false;
+            }
+        }
+    }
+
+    true
+}
+
 /// 現在動いている watcher を識別する世代カウンタ。
 /// Issue #146: 旧実装は ROOT 文字列の一致だけで「自分が現役か」を判定していたため、
 /// 同じ root を 2 回 start すると watcher が並走してしまう余地があり、また
@@ -65,6 +124,10 @@ pub fn start_for_root(app: AppHandle, root: String) {
         let root_path = PathBuf::from(&my_root);
         if !root_path.exists() {
             tracing::debug!("[fs_watch] root does not exist: {my_root}");
+            return;
+        }
+        if !is_safe_watch_root(&root_path) {
+            tracing::warn!("[fs_watch] refusing unsafe watch root: {my_root}");
             return;
         }
 

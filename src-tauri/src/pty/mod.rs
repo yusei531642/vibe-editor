@@ -17,4 +17,4 @@ pub mod registry;
 pub mod session;
 
 pub use registry::SessionRegistry;
-pub use session::{spawn_session, SessionHandle, SpawnOptions};
+pub use session::{spawn_session, SpawnOptions, UserWriteOutcome};

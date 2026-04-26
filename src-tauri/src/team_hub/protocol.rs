@@ -765,7 +765,7 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
     // 単調増加カウンタにすることで上限を超えても一意性を保つ。
     team.next_message_id = team.next_message_id.saturating_add(1);
     let msg_id = team.next_message_id;
-    team.messages.push(TeamMessage {
+    team.messages.push_back(TeamMessage {
         id: msg_id,
         from: ctx.role.clone(),
         from_agent_id: ctx.agent_id.clone(),
@@ -774,10 +774,10 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         timestamp: timestamp.clone(),
         read_by: vec![ctx.agent_id.clone()],
     });
-    // Issue #107: 上限超過分は古い順に破棄してメモリ青天井を防ぐ。
-    // Vec::remove(0) は O(n) だが MAX_MESSAGES_PER_TEAM 程度なら許容できる。
+    // Issue #107 / #216: 上限超過分は古い順に破棄してメモリ青天井を防ぐ。
+    // VecDeque::pop_front() で O(1) eviction にする。
     while team.messages.len() > MAX_MESSAGES_PER_TEAM {
-        team.messages.remove(0);
+        let _ = team.messages.pop_front();
     }
     drop(state);
 
@@ -1030,7 +1030,7 @@ async fn team_assign_task(
         // 単調増加カウンタで一意性を保つ。
         team.next_task_id = team.next_task_id.saturating_add(1);
         task_id = team.next_task_id;
-        team.tasks.push(TeamTask {
+        team.tasks.push_back(TeamTask {
             id: task_id,
             assigned_to: assignee.to_string(),
             description: description.to_string(),
@@ -1038,9 +1038,9 @@ async fn team_assign_task(
             created_by: ctx.role.clone(),
             created_at: timestamp,
         });
-        // Issue #107: tasks も件数上限で古い順に破棄
+        // Issue #107 / #216: tasks も件数上限で古い順に O(1) で破棄
         while team.tasks.len() > MAX_TASKS_PER_TEAM {
-            team.tasks.remove(0);
+            let _ = team.tasks.pop_front();
         }
     }
     // Issue #172: 通知の team_send を await せず fire-and-forget でバックグラウンド spawn する。

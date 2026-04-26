@@ -67,6 +67,10 @@ export function useFitToContainer(options: {
     if (!term || !fit) return;
     try {
       fit.fit();
+      // Issue #190: 長時間稼働後に非可視→可視やレイアウト変動を跨ぐと、
+      // xterm の既存行が再描画されず「入力した瞬間だけ見える」状態になることがある。
+      // fit 後に全行 refresh して scrollback の再ラスタライズを強制する。
+      term.refresh(0, Math.max(0, term.rows - 1));
       // PTY 側へのサイズ通知は debounce
       if (ptyIdRef.current) {
         schedulePtyResize(term.cols, term.rows);

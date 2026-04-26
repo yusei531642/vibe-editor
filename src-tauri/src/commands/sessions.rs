@@ -16,6 +16,7 @@ pub struct SessionInfo {
     pub title: String,
     pub message_count: u32,
     pub last_modified_at: String,
+    pub last_modified_ms: i64,
 }
 
 fn projects_dir(root: &str) -> PathBuf {
@@ -45,6 +46,7 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
         id: String,
         path: PathBuf,
         last_modified_at: String,
+        last_modified_ms: i64,
     }
     let mut candidates: Vec<Candidate> = Vec::new();
     while let Ok(Some(entry)) = rd.next_entry().await {
@@ -66,10 +68,17 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
             .ok()
             .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339())
             .unwrap_or_default();
+        let last_modified_ms = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis().min(i64::MAX as u128) as i64)
+            .unwrap_or(0);
         candidates.push(Candidate {
             id,
             path,
             last_modified_at,
+            last_modified_ms,
         });
     }
 
@@ -117,6 +126,7 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
                 title,
                 message_count: count,
                 last_modified_at: cand.last_modified_at,
+                last_modified_ms: cand.last_modified_ms,
             });
         }
     }

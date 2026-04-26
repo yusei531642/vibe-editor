@@ -90,6 +90,33 @@ function mergeCanvasMembers(
   });
 }
 
+function serializeAutoSavePayload(payload: {
+  byTeam: Map<
+    string,
+    {
+      name: string;
+      canvasNodes: { agentId: string; x: number; y: number; width?: number; height?: number }[];
+    }
+  >;
+  viewport: { x: number; y: number; zoom: number };
+}): string {
+  const parts: string[] = [];
+  for (const [teamId, info] of payload.byTeam) {
+    parts.push(
+      `${teamId}|${info.name}|` +
+        info.canvasNodes
+          .map((c) => `${c.agentId}@${c.x},${c.y}:${c.width}x${c.height}`)
+          .sort()
+          .join(',')
+    );
+  }
+  parts.sort();
+  return (
+    parts.join('##') +
+    `##vp:${Math.round(payload.viewport.x)},${Math.round(payload.viewport.y)}:${payload.viewport.zoom.toFixed(2)}`
+  );
+}
+
 export function CanvasLayout(): JSX.Element {
   const setViewMode = useUiStore((s) => s.setViewMode);
   // bug: 旧実装では main.tsx 側で viewMode === 'canvas' のときだけ CanvasLayout を
@@ -303,19 +330,9 @@ export function CanvasLayout(): JSX.Element {
     return { byTeam, viewport };
   }, [nodes, viewport]);
 
-  const autoSaveKey = useMemo(() => {
-    if (!autoSavePayload) return '';
-    const { byTeam, viewport: vp } = autoSavePayload;
-    const parts: string[] = [];
-    for (const [teamId, info] of byTeam) {
-      parts.push(`${teamId}|${info.name}|` + info.canvasNodes.map((c) => `${c.agentId}@${c.x},${c.y}:${c.width}x${c.height}`).sort().join(','));
-    }
-    parts.sort();
-    return parts.join('##') + `##vp:${Math.round(vp.x)},${Math.round(vp.y)}:${vp.zoom.toFixed(2)}`;
-  }, [autoSavePayload]);
-
   useEffect(() => {
     if (!autoSavePayload) return;
+    const autoSaveKey = serializeAutoSavePayload(autoSavePayload);
     if (autoSaveKey === lastSavedKeyRef.current) return;
     const handle = window.setTimeout(() => {
       // debounce タイマー発火時点でも最新 key が変わらなければ保存
@@ -355,7 +372,7 @@ export function CanvasLayout(): JSX.Element {
     }, 1500);
     return () => window.clearTimeout(handle);
     // Issue #167: recent を deps から除外。recentRef 経由で読むことで debounce flush を保証する。
-  }, [autoSaveKey, autoSavePayload, projectRoot]);
+  }, [autoSavePayload, projectRoot]);
 
   // ----- カスタムチーム作成 (TeamCreateModal からのコールバック) -----
   const handleCreateCustomTeam = async (

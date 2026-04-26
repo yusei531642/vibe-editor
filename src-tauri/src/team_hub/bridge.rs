@@ -1,7 +1,7 @@
 // team-bridge.js のソース (旧 team-hub.ts の BRIDGE_SOURCE 定数)
 //
 // 各 Claude Code / Codex プロセスに spawn される薄い MCP ブリッジ。
-// stdio MCP (JSON-RPC) を TeamHub TCP に中継するだけ。
+// stdio MCP (JSON-RPC) を TeamHub のローカル socket / named pipe に中継するだけ。
 // 内容は本文末尾に const SOURCE: &str として埋め込む (Rust binary に同梱)。
 //
 // 注意: 旧 Node 実装と完全互換。テンプレート文字列の `\\n` などはそのまま保持。
@@ -17,7 +17,7 @@ pub const SOURCE: &str = r#"#!/usr/bin/env node
 /**
  * team-bridge.js — vibe-editor が自動生成する薄いMCPブリッジ。
  * stdio MCP (Claude Code / Codex が喋る JSON-RPC) を、メインプロセス側の
- * TeamHub TCP サーバーへ中継するだけ。状態も永続化も持たない。
+ * TeamHub のローカル socket / named pipe へ中継するだけ。状態も永続化も持たない。
  */
 const net = require('net');
 
@@ -35,8 +35,24 @@ if (MISSING_HUB_ENV) {
   process.stderr.write('[team-bridge] missing VIBE_TEAM_SOCKET or VIBE_TEAM_TOKEN — team tools disabled\n');
 }
 
-const [host, portStr] = SOCKET.split(':');
-const port = parseInt(portStr || '0', 10);
+function resolveConnectionTarget(raw) {
+  const trimmed = (raw || '').trim();
+  if (!trimmed) return null;
+  if (
+    trimmed.startsWith('\\\\.\\pipe\\') ||
+    trimmed.startsWith('/') ||
+    trimmed.startsWith('./') ||
+    trimmed.startsWith('../')
+  ) {
+    return { path: trimmed };
+  }
+  const m = /^(.*):(\d+)$/.exec(trimmed);
+  if (m) {
+    return { host: m[1] || '127.0.0.1', port: parseInt(m[2], 10) };
+  }
+  return { path: trimmed };
+}
+const connectionTarget = resolveConnectionTarget(SOCKET);
 
 let socket = null;
 let connected = false;
@@ -64,7 +80,7 @@ function nextBackoffMs() {
 }
 
 function connect() {
-  socket = net.createConnection({ host: host || '127.0.0.1', port }, () => {
+  socket = net.createConnection(connectionTarget, () => {
     const hello = JSON.stringify({ token: TOKEN, teamId: TEAM_ID, role: ROLE, agentId: AGENT_ID });
     socket.write(hello + '\n');
     connected = true;

@@ -3,11 +3,12 @@
 // portable-pty 経由で PTY を spawn、SessionRegistry に登録、
 // terminal:data:{id} / terminal:exit:{id} イベントを emit する。
 
-use crate::pty::{spawn_session, SpawnOptions};
+use crate::pty::{spawn_session, SpawnOptions, UserWriteOutcome};
 use crate::state::AppState;
 use crate::team_hub::inject::build_chunks;
 use crate::util::log_redact::redact_home;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -63,6 +64,108 @@ fn resolve_command(command: Option<String>, args: Option<Vec<String>>) -> (Strin
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "claude".to_string());
     (cmd, args.unwrap_or_default())
+}
+
+fn command_basename(command: &str) -> String {
+    let lower = command.trim().to_ascii_lowercase().replace('\\', "/");
+    std::path::Path::new(&lower)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or(lower.as_str())
+        .to_string()
+}
+
+fn configured_terminal_commands() -> HashSet<String> {
+    let mut out = HashSet::new();
+    let Some(home) = dirs::home_dir() else {
+        return out;
+    };
+    let path = home.join(".vibe-editor").join("settings.json");
+    let Ok(bytes) = std::fs::read(path) else {
+        return out;
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return out;
+    };
+    let mut push = |raw: Option<&str>| {
+        if let Some(cmd) = raw.map(str::trim).filter(|s| !s.is_empty()) {
+            out.insert(cmd.to_ascii_lowercase());
+        }
+    };
+    push(value.get("claudeCommand").and_then(|v| v.as_str()));
+    push(value.get("codexCommand").and_then(|v| v.as_str()));
+    if let Some(custom) = value.get("customAgents").and_then(|v| v.as_array()) {
+        for agent in custom {
+            push(agent.get("command").and_then(|v| v.as_str()));
+        }
+    }
+    out
+}
+
+/// Issue #201:
+/// renderer 由来の任意コマンド実行を避けるため、起動できるバイナリを
+/// 1. 組み込み allowlist (Claude / Codex / 代表的な対話シェル)
+/// 2. ユーザーが settings.json に保存した既知の command
+/// に限定する。
+fn is_allowed_terminal_command(command: &str) -> bool {
+    const SAFE_BASENAMES: &[&str] = &[
+        "claude",
+        "codex",
+        "bash",
+        "sh",
+        "zsh",
+        "fish",
+        "pwsh",
+        "powershell",
+        "cmd",
+        "nu",
+    ];
+    let trimmed = command.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let basename = command_basename(trimmed);
+    if SAFE_BASENAMES.contains(&basename.as_str()) {
+        return true;
+    }
+    configured_terminal_commands().contains(&trimmed.to_ascii_lowercase())
+}
+
+fn reject_immediate_exec_args(command: &str, args: &[String]) -> Option<&'static str> {
+    let basename = command_basename(command);
+    let lower_args: Vec<String> = args.iter().map(|a| a.trim().to_ascii_lowercase()).collect();
+    let has_any = |candidates: &[&str]| lower_args.iter().any(|arg| candidates.contains(&arg.as_str()));
+    match basename.as_str() {
+        "bash" | "sh" | "zsh" | "fish" => {
+            if has_any(&["-c", "-lc"]) {
+                Some("shell immediate-exec flags (-c / -lc) are blocked")
+            } else {
+                None
+            }
+        }
+        "pwsh" | "powershell" => {
+            if has_any(&["-c", "-command", "/command", "-encodedcommand", "-file"]) {
+                Some("PowerShell immediate-exec flags (-Command / -EncodedCommand / -File) are blocked")
+            } else {
+                None
+            }
+        }
+        "cmd" => {
+            if has_any(&["/c", "/k"]) {
+                Some("cmd immediate-exec flags (/c /k) are blocked")
+            } else {
+                None
+            }
+        }
+        "nu" => {
+            if has_any(&["-c", "--commands"]) {
+                Some("nushell immediate-exec flags (-c / --commands) are blocked")
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
 }
 
 /// Issue #99: Codex の system prompt を一時ファイルに書き、`--config model_instructions_file=...`
@@ -206,6 +309,20 @@ pub async fn terminal_create(
     opts: TerminalCreateOptions,
 ) -> Result<TerminalCreateResult, String> {
     let (command, mut args) = resolve_command(opts.command, opts.args);
+    if !is_allowed_terminal_command(&command) {
+        return Ok(TerminalCreateResult {
+            ok: false,
+            error: Some(format!("command is not allowed: {command}")),
+            ..Default::default()
+        });
+    }
+    if let Some(reason) = reject_immediate_exec_args(&command, &args) {
+        return Ok(TerminalCreateResult {
+            ok: false,
+            error: Some(reason.to_string()),
+            ..Default::default()
+        });
+    }
     let (cwd, warning) =
         crate::pty::session::resolve_valid_cwd(&opts.cwd, opts.fallback_cwd.as_deref());
 
@@ -262,8 +379,8 @@ pub async fn terminal_create(
     // チーム所属端末なら TeamHub の socket/token と team/agent/role を env に注入
     let mut env = opts.env.unwrap_or_default();
     if let Some(team_id) = &opts.team_id {
-        let (port, token, _) = state.team_hub.info().await;
-        env.insert("VIBE_TEAM_SOCKET".into(), format!("127.0.0.1:{port}"));
+        let (socket, token, _) = state.team_hub.info().await;
+        env.insert("VIBE_TEAM_SOCKET".into(), socket);
         env.insert("VIBE_TEAM_TOKEN".into(), token);
         env.insert("VIBE_TEAM_ID".into(), team_id.clone());
         if let Some(role) = &opts.role {
@@ -354,9 +471,21 @@ pub async fn terminal_write(
     data: String,
 ) -> Result<(), String> {
     if let Some(s) = state.pty_registry.get(&id) {
-        // Issue #153: prompt injection 中はユーザー入力を drop して、
-        // codex への初手指示と xterm のキー入力が混ざるのを防ぐ。
-        let _ = s.user_write(data.as_bytes()).map_err(|e| e.to_string())?;
+        match s.user_write(data.as_bytes()).map_err(|e| e.to_string())? {
+            UserWriteOutcome::Written | UserWriteOutcome::SuppressedInjecting => {}
+            UserWriteOutcome::DroppedTooLarge => {
+                tracing::warn!(
+                    "[terminal] dropped oversized terminal_write payload for {id}: {} bytes",
+                    data.len()
+                );
+            }
+            UserWriteOutcome::DroppedRateLimited => {
+                tracing::warn!(
+                    "[terminal] rate-limited terminal_write for {id}: {} bytes",
+                    data.len()
+                );
+            }
+        }
     }
     Ok(())
 }

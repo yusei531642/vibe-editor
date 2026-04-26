@@ -19,19 +19,19 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 20
+          node-version: 20.19.0
           cache: npm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-04-26
 
       - name: Restore Rust cache
-        uses: swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@400e7407cfd7a091e5fbb6afec01ec146c432b7c # v2.7.7
         with:
           workspaces: ./src-tauri -> target
 
@@ -64,14 +64,19 @@ jobs:
       #   - npm audit: production deps の moderate 以上で fail。dev-only の脆弱性 (vite/esbuild の
       #     dev server 系 advisory 等) は --omit=dev で除外する。direct dependency に当たるものは
       #     overrides で fix 版に固定済み。
-      #   - cargo audit: RustSec の advisory を参照。CI が落ちないようにまずは continue-on-error で
-      #     可視化のみ。落とす運用に切り替えるときはここから外す。
+      #   - cargo audit: src-tauri/.cargo/audit.toml で既知の unmaintained advisory を
+      #     明示 ignore しつつ、新規 advisory / vulnerability は fail させる。
       - name: npm audit (production)
         run: npm audit --omit=dev --audit-level=moderate
+
+      # Issue #220: advisory DB ベースの npm audit だけでは、typosquat / 署名不整合 /
+      # unsigned publish を検知できない。registry の署名検証も CI で必須化する。
+      - name: npm audit signatures
+        run: npm audit signatures
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked
 
       - name: Cargo audit
-        run: cargo audit --file src-tauri/Cargo.lock
-        continue-on-error: true
+        working-directory: src-tauri
+        run: cargo audit

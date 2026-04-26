@@ -69,9 +69,9 @@ export function SessionsPanel({
     [locale]
   );
   // Issue #130: lastModifiedAt の Date.parse を毎レンダーから 1 回だけに削減。
-  // sessions の identity が変わったときだけ再計算される。
+  // さらに Rust 側で事前計算した lastModifiedMs を優先して、fetch のたびの再 parse も避ける。
   const sessionTimes = useMemo(
-    () => sessions.map((s) => Date.parse(s.lastModifiedAt) || 0),
+    () => sessions.map((s) => s.lastModifiedMs ?? (Date.parse(s.lastModifiedAt) || 0)),
     [sessions]
   );
   const teamTimes = useMemo(

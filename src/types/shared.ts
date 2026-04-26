@@ -198,6 +198,8 @@ export interface SessionInfo {
   title: string;
   messageCount: number;
   lastModifiedAt: string;
+  /** Rust 側で事前計算した epoch ms。SessionsPanel の再描画ごとの Date.parse を避ける。 */
+  lastModifiedMs?: number;
 }
 
 // ---------- エージェント & チーム ----------

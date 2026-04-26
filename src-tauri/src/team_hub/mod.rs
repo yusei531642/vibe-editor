@@ -1,9 +1,10 @@
 // TeamHub モジュール
 //
-// 旧 src/main/team-hub.ts (Node.js TCP + JSON-RPC) の Rust 移植版。
+// 旧 src/main/team-hub.ts (Node.js loopback TCP + JSON-RPC) の Rust 移植版。
 //
 // 役割:
-// - 各 Claude Code / Codex プロセスに spawn される team-bridge.js から TCP 接続を受ける
+// - 各 Claude Code / Codex プロセスに spawn される team-bridge.js から
+//   ローカル IPC (Unix domain socket / Windows named pipe) 接続を受ける
 // - JSON-RPC line protocol (初期化 / tools/list / tools/call) を処理
 // - team_send 等のツール呼び出しを PTY に直接 write 注入する (64B / 15ms)
 
@@ -14,13 +15,18 @@ pub mod protocol;
 use crate::pty::SessionRegistry;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+#[cfg(unix)]
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use tokio::net::TcpListener;
+use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::{oneshot, Mutex, Semaphore};
+#[cfg(unix)]
+use tokio::net::UnixListener;
+#[cfg(windows)]
+use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
 
 /// Issue #51: ハンドシェイクに要する最大時間。超過したら接続を切る。
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -41,6 +47,50 @@ const AUTH_FAIL_DELAY: Duration = Duration::from_millis(300);
 /// 上限超過は parse error を返してその行を破棄する。
 pub(crate) const RPC_LINE_LIMIT: usize = 256 * 1024; // 256 KiB / line
 
+#[cfg(unix)]
+async fn ensure_private_runtime_dir(dir: &Path) -> Result<()> {
+    tokio::fs::create_dir_all(dir).await?;
+    use std::os::unix::fs::PermissionsExt;
+    let perm = std::fs::Permissions::from_mode(0o700);
+    let _ = tokio::fs::set_permissions(dir, perm).await;
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn bind_local_listener() -> Result<(UnixListener, String)> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow!("failed to resolve home directory"))?;
+    let dir = home.join(".vibe-editor").join("team-hub");
+    ensure_private_runtime_dir(&dir).await?;
+    let path = dir.join(format!("hub-{}.sock", std::process::id()));
+    if let Ok(meta) = tokio::fs::symlink_metadata(&path).await {
+        let ft = meta.file_type();
+        if ft.is_dir() {
+            tokio::fs::remove_dir_all(&path).await?;
+        } else {
+            tokio::fs::remove_file(&path).await?;
+        }
+    }
+    let listener = UnixListener::bind(&path)?;
+    use std::os::unix::fs::PermissionsExt;
+    let _ = tokio::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).await;
+    Ok((listener, path.to_string_lossy().into_owned()))
+}
+
+#[cfg(windows)]
+fn new_pipe_endpoint() -> String {
+    format!(r"\\.\pipe\vibe-editor-team-hub-{}", uuid::Uuid::new_v4())
+}
+
+#[cfg(windows)]
+fn create_pipe_server(endpoint: &str, first_instance: bool) -> Result<NamedPipeServer> {
+    let mut options = ServerOptions::new();
+    options.reject_remote_clients(true);
+    if first_instance {
+        options.first_pipe_instance(true);
+    }
+    Ok(options.create(endpoint)?)
+}
+
 /// Issue #50: 固定長バイト列の constant-time 比較。
 /// 先頭一致 prefix の長さに処理時間が依存しないようにする。
 /// ※ 長さだけは leak するが、token 長は固定なので問題ない。
@@ -57,7 +107,7 @@ fn constant_time_eq_bytes(a: &[u8], b: &[u8]) -> bool {
 
 #[derive(Clone)]
 pub struct TeamHub {
-    pub(crate) state: Arc<Mutex<HubState>>,
+    state: Arc<Mutex<HubState>>,
     pub(crate) registry: Arc<SessionRegistry>,
     /// 任意で AppHandle を保持。`set_app_handle` で setup 後に注入する。
     /// Phase 3: protocol::team_send が `team:handoff` event を emit するために使う。
@@ -69,8 +119,9 @@ struct HubState {
     teams: HashMap<String, TeamInfo>,
     /// アクティブな team_id (MCP 設定の参照カウント)
     active_teams: HashSet<String>,
-    /// listen ポート (0 なら未起動)
-    port: u16,
+    /// bridge.js が net.createConnection() に渡す接続先文字列。
+    /// Unix は socket path、Windows は named pipe path。
+    endpoint: String,
     /// ハンドシェイクトークン (16 進 48 文字)
     token: String,
     /// 書き出し済みの bridge スクリプトパス
@@ -149,8 +200,8 @@ pub struct PendingRecruit {
 pub struct TeamInfo {
     pub id: String,
     pub name: String,
-    pub messages: Vec<TeamMessage>,
-    pub tasks: Vec<TeamTask>,
+    pub messages: VecDeque<TeamMessage>,
+    pub tasks: VecDeque<TeamTask>,
     /// 次に採番する message_id (Issue #115)。
     /// 旧実装は `messages.len() + 1` を使っていたため、履歴上限到達後はずっと同値になり ID 衝突した。
     /// 単調増加カウンタにすることで上限到達後も一意性を保つ。saturating_add で u32::MAX を超えたら
@@ -195,7 +246,7 @@ impl TeamHub {
             state: Arc::new(Mutex::new(HubState {
                 teams: HashMap::new(),
                 active_teams: HashSet::new(),
-                port: 0,
+                endpoint: String::new(),
                 token: String::new(),
                 bridge_path: PathBuf::new(),
                 pending_injects: HashMap::new(),
@@ -374,7 +425,7 @@ impl TeamHub {
 
     pub async fn start(&self) -> Result<()> {
         let mut state = self.state.lock().await;
-        if state.port != 0 {
+        if !state.endpoint.is_empty() {
             return Ok(());
         }
         // ハンドシェイクトークンを生成 (24 byte → hex 48 文字)
@@ -413,74 +464,106 @@ impl TeamHub {
             let _ = tokio::fs::set_permissions(&bridge_path, perm).await;
         }
         state.bridge_path = bridge_path;
-
-        // TCP listen
-        // Issue #141 (Security): TCP loopback は同マシン同ユーザの他プロセスから接続可能。
-        // 真の解決は UDS / Named Pipe + ACL 移行 (大規模変更のため別 issue で追跡) だが、
-        // 暫定で peer addr を accept 後に明示 check し、127.0.0.1 以外は即 drop する。
-        // (本来は loopback bind 時点で他からは届かないが、defense-in-depth として明示する)
-        let listener = TcpListener::bind("127.0.0.1:0").await?;
-        let local = listener.local_addr()?;
-        state.port = local.port();
         let token = state.token.clone();
-        drop(state);
 
-        // Issue #51: 同時クライアント数を Semaphore で制限し、空きを待てない接続は即 drop
-        let sem = Arc::new(Semaphore::new(MAX_CONCURRENT_CLIENTS));
-        let hub = self.clone();
-        tokio::spawn(async move {
-            loop {
-                let (sock, peer) = match listener.accept().await {
-                    Ok(s) => s,
-                    Err(e) => {
-                        tracing::warn!("teamhub accept failed: {e}");
-                        continue;
-                    }
-                };
-                // Issue #141: peer が loopback (127.0.0.1 / ::1) でなければ即切断。
-                // bind が 127.0.0.1 なので普通は届かないが、二重防御として明示。
-                let is_loopback = match peer.ip() {
-                    std::net::IpAddr::V4(v4) => v4.is_loopback(),
-                    std::net::IpAddr::V6(v6) => v6.is_loopback(),
-                };
-                if !is_loopback {
-                    tracing::warn!("[teamhub] rejecting non-loopback peer {peer}");
-                    drop(sock);
-                    continue;
+        #[cfg(unix)]
+        {
+            let (listener, endpoint) = bind_local_listener().await?;
+            state.endpoint = endpoint.clone();
+            drop(state);
+
+            let sem = Arc::new(Semaphore::new(MAX_CONCURRENT_CLIENTS));
+            let hub = self.clone();
+            tokio::spawn(async move {
+                loop {
+                    let (sock, _) = match listener.accept().await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            tracing::warn!("teamhub accept failed: {e}");
+                            continue;
+                        }
+                    };
+                    let permit = match sem.clone().try_acquire_owned() {
+                        Ok(p) => p,
+                        Err(_) => {
+                            tracing::warn!(
+                                "[teamhub] rejecting connection: client limit ({}) reached",
+                                MAX_CONCURRENT_CLIENTS
+                            );
+                            drop(sock);
+                            continue;
+                        }
+                    };
+                    let hub2 = hub.clone();
+                    let token = token.clone();
+                    tokio::spawn(async move {
+                        let _permit = permit;
+                        if let Err(e) = handle_client(hub2, sock, token).await {
+                            tracing::debug!("teamhub client error: {e:#}");
+                        }
+                    });
                 }
-                // 空きを待たず try_acquire。枠が無ければ接続を即 close して攻撃耐性を上げる。
-                let permit = match sem.clone().try_acquire_owned() {
-                    Ok(p) => p,
-                    Err(_) => {
-                        tracing::warn!(
-                            "[teamhub] rejecting connection: client limit ({}) reached",
-                            MAX_CONCURRENT_CLIENTS
-                        );
-                        drop(sock);
-                        continue;
+            });
+            tracing::info!("[teamhub] listening on local unix socket");
+            tracing::debug!("[teamhub] endpoint={endpoint}");
+            return Ok(());
+        }
+
+        #[cfg(windows)]
+        {
+            let endpoint = new_pipe_endpoint();
+            let mut listener = create_pipe_server(&endpoint, true)?;
+            state.endpoint = endpoint.clone();
+            drop(state);
+
+            let sem = Arc::new(Semaphore::new(MAX_CONCURRENT_CLIENTS));
+            let hub = self.clone();
+            let endpoint_for_loop = endpoint.clone();
+            tokio::spawn(async move {
+                loop {
+                    if let Err(e) = listener.connect().await {
+                        tracing::warn!("teamhub pipe connect failed: {e}");
+                        break;
                     }
-                };
-                let hub2 = hub.clone();
-                let token = token.clone();
-                tokio::spawn(async move {
-                    let _permit = permit; // クライアント終了時に drop されて枠を返す
-                    if let Err(e) = handle_client(hub2, sock, token).await {
-                        tracing::debug!("teamhub client error: {e:#}");
-                    }
-                });
-            }
-        });
-        // Issue #140: port は同 LAN 攻撃者が brute-force 起点に使えるため debug only で残す。
-        // info にはポート無しのメッセージだけ残す。
-        tracing::info!("[teamhub] listening on loopback");
-        tracing::debug!("[teamhub] listening on 127.0.0.1:{}", local.port());
-        Ok(())
+                    let connected = listener;
+                    listener = match create_pipe_server(&endpoint_for_loop, false) {
+                        Ok(next) => next,
+                        Err(e) => {
+                            tracing::error!("teamhub pipe rebind failed: {e:#}");
+                            break;
+                        }
+                    };
+                    let permit = match sem.clone().try_acquire_owned() {
+                        Ok(p) => p,
+                        Err(_) => {
+                            tracing::warn!(
+                                "[teamhub] rejecting connection: client limit ({}) reached",
+                                MAX_CONCURRENT_CLIENTS
+                            );
+                            drop(connected);
+                            continue;
+                        }
+                    };
+                    let hub2 = hub.clone();
+                    let token = token.clone();
+                    tokio::spawn(async move {
+                        let _permit = permit;
+                        if let Err(e) = handle_client(hub2, connected, token).await {
+                            tracing::debug!("teamhub client error: {e:#}");
+                        }
+                    });
+                }
+            });
+            tracing::info!("[teamhub] listening on local named pipe");
+            tracing::debug!("[teamhub] endpoint={endpoint}");
+            return Ok(());
+        }
     }
 
-    pub async fn info(&self) -> (u16, String, String) {
+    pub async fn info(&self) -> (String, String, String) {
         let s = self.state.lock().await;
         (
-            s.port,
+            s.endpoint.clone(),
             s.token.clone(),
             s.bridge_path.to_string_lossy().into_owned(),
         )
@@ -526,12 +609,11 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
-async fn handle_client(
-    hub: TeamHub,
-    sock: tokio::net::TcpStream,
-    expected_token: String,
-) -> Result<()> {
-    let (rd, mut wr) = sock.into_split();
+async fn handle_client<S>(hub: TeamHub, sock: S, expected_token: String) -> Result<()>
+where
+    S: AsyncRead + AsyncWrite + Unpin,
+{
+    let (rd, mut wr) = tokio::io::split(sock);
     let mut reader = BufReader::new(rd);
 
     // Issue #51: ハンドシェイク 1 行の最大長は HANDSHAKE_LINE_LIMIT。超過したら拒否。
@@ -611,7 +693,7 @@ async fn handle_client(
     // → AsyncBufReadExt::read_until(b'\n', ...) でまとめ取りし、戻り値が
     //   RPC_LINE_LIMIT を超えていたらその場で破棄する方針に変更。
     //   read_until は内部 BufReader バッファごと一気にコピーするので poll 回数が激減する。
-    use tokio::io::{AsyncBufReadExt, AsyncReadExt};
+    use tokio::io::AsyncReadExt;
     let mut buf: Vec<u8> = Vec::with_capacity(4096);
     loop {
         buf.clear();

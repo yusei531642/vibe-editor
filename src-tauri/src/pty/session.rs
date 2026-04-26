@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 
@@ -48,7 +49,27 @@ pub struct SessionHandle {
     /// `inject_codex_prompt_to_pty` 等が begin/end で立て下げる。
     /// renderer 側からの terminal_write は user_write 経由でこのフラグを見る。
     injecting: std::sync::atomic::AtomicBool,
+    /// Issue #214: terminal_write の 1 端末ごとのレート制限。
+    write_budget: Mutex<WriteBudget>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UserWriteOutcome {
+    Written,
+    SuppressedInjecting,
+    DroppedTooLarge,
+    DroppedRateLimited,
+}
+
+#[derive(Debug)]
+struct WriteBudget {
+    window_started_at: Instant,
+    bytes_in_window: usize,
+}
+
+const MAX_TERMINAL_WRITE_BYTES_PER_CALL: usize = 64 * 1024;
+const MAX_TERMINAL_WRITE_BYTES_PER_SEC: usize = 256 * 1024;
+const TERMINAL_WRITE_WINDOW: Duration = Duration::from_secs(1);
 
 impl SessionHandle {
     /// 内部 / inject 経路用: フラグの状態にかかわらず常に書き込む。
@@ -62,14 +83,35 @@ impl SessionHandle {
         Ok(())
     }
 
-    /// Issue #153: ユーザー入力 (renderer の terminal_write) 経路は inject 中なら drop。
-    /// 戻り値: 実際に書き込んだら true、injecting で抑止したら false。
-    pub fn user_write(&self, data: &[u8]) -> Result<bool> {
+    /// Issue #153 / #214:
+    /// - inject 中は drop
+    /// - 1 回の payload は 64 KiB 上限
+    /// - 1 秒あたり 256 KiB を超える入力は drop
+    pub fn user_write(&self, data: &[u8]) -> Result<UserWriteOutcome> {
         if self.injecting.load(std::sync::atomic::Ordering::Acquire) {
-            return Ok(false);
+            return Ok(UserWriteOutcome::SuppressedInjecting);
+        }
+        if data.len() > MAX_TERMINAL_WRITE_BYTES_PER_CALL {
+            return Ok(UserWriteOutcome::DroppedTooLarge);
+        }
+        {
+            let mut budget = self
+                .write_budget
+                .lock()
+                .map_err(|e| anyhow!("write_budget lock poisoned: {e}"))?;
+            let now = Instant::now();
+            if now.duration_since(budget.window_started_at) >= TERMINAL_WRITE_WINDOW {
+                budget.window_started_at = now;
+                budget.bytes_in_window = 0;
+            }
+            if budget.bytes_in_window.saturating_add(data.len()) > MAX_TERMINAL_WRITE_BYTES_PER_SEC
+            {
+                return Ok(UserWriteOutcome::DroppedRateLimited);
+            }
+            budget.bytes_in_window += data.len();
         }
         self.write(data)?;
-        Ok(true)
+        Ok(UserWriteOutcome::Written)
     }
 
     pub fn set_injecting(&self, on: bool) {
@@ -151,156 +193,87 @@ pub fn resolve_valid_cwd(
     )
 }
 
-/// PTY を 1 つ生成、reader thread を起動、batcher を回し、exit watcher も spawn。
-/// 戻り値の SessionHandle は SessionRegistry に登録される。
-/// Issue #54 / #139: 子プロセスに渡さない環境変数を判定する。
-/// - 非 team 端末 (`is_team = false`) では `VIBE_TEAM_*` / `VIBE_AGENT_ID` も剥がす。
-/// - シークレット接頭辞 / 接尾辞 / 完全一致 + 一般 secret 命名パターンの denylist。
-///
-/// 完全な allowlist 化は破壊的変更 (ユーザーの開発フローで使う任意 env が落ちる) なので、
-/// 当面は denylist を強化し、`*_TOKEN` `*_KEY` `*_SECRET` `*_PASSWORD` などの一般パターンも
-/// 弾く方式に拡張する。
-fn should_strip_env(key: &str, is_team: bool) -> bool {
-    // vibe-editor 内部 env: team 外には漏らさない
-    if !is_team && (key.starts_with("VIBE_TEAM_") || key == "VIBE_AGENT_ID") {
-        return true;
-    }
-    // team 端末では VIBE_TEAM_* / VIBE_AGENT_ID は明示的に流す。
-    // 以下の汎用 *_TOKEN パターンに `VIBE_TEAM_TOKEN` 等が引っかからないよう先に return false。
-    if is_team && (key.starts_with("VIBE_TEAM_") || key == "VIBE_AGENT_ID") {
-        return false;
-    }
-
+/// Issue #211:
+/// 親プロセス env を denylist ではなく allowlist で継承する。
+/// TeamHub 用の内部 env は `opts.env` から明示注入されたものだけが後段で渡る。
+fn should_inherit_env(key: &str) -> bool {
     let upper = key.to_ascii_uppercase();
-
-    // (1) 接頭辞 prefix denylist
-    const SECRET_PREFIXES: &[&str] = &[
-        "AWS_",
-        "GITHUB_",
-        "GH_",
-        "OPENAI_",
-        "ANTHROPIC_",
-        "AZURE_",
-        "GCP_",
-        "GOOGLE_APPLICATION_CREDENTIALS",
-        "CLOUDFLARE_",
-        "STRIPE_",
-        "NPM_TOKEN",
-        "HF_TOKEN",
-        "HUGGINGFACE_",
-        // Issue #139 で追加
-        "CLAUDE_",
-        "SLACK_",
-        "DISCORD_",
-        "TWILIO_",
-        "SENTRY_",
-        "SUPABASE_",
-        "DOPPLER_",
-        "VAULT_",
-        "HCP_",
-        "DOCKER_",
-        "GITLAB_",
-        "OP_SESSION_",
-        "OP_",
-        "POSTGRES_",
-        "MYSQL_",
-        "MARIADB_",
-        "REDIS_",
-        "MONGO_",
-        "MONGODB_",
-        "ELASTICSEARCH_",
-        "ELASTIC_",
-        "CIRCLECI_",
-        "BUILDKITE_",
-        "VERCEL_",
-        "NETLIFY_",
-        "RAILWAY_",
-        "FLY_",
-        "DATABASE_",
-    ];
-    if SECRET_PREFIXES.iter().any(|p| upper.starts_with(p)) {
+    if upper.starts_with("LC_") || upper.starts_with("XDG_") {
         return true;
     }
-
-    // (2) 接尾辞 suffix の一般パターン (*_TOKEN / *_KEY / *_SECRET / *_PASSWORD / *_PWD)
-    const SECRET_SUFFIXES: &[&str] = &[
-        "_TOKEN",
-        "_API_KEY",
-        "_SECRET",
-        "_SECRET_KEY",
-        "_PASSWORD",
-        "_PASSWD",
-        "_PWD",
-        "_AUTH",
-        "_ACCESS_KEY",
-    ];
-    if SECRET_SUFFIXES.iter().any(|s| upper.ends_with(s)) {
-        return true;
-    }
-
-    // (3) 完全一致 (パターンに引っ掛からない著名な env)
-    const SECRET_EXACT: &[&str] = &[
-        "DATABASE_URL",
-        "MYSQL_PWD",
-        "PGPASSWORD",
-        "REDIS_URL",
-        "MONGO_URL",
-        "MONGODB_URI",
-        "KUBECONFIG",
-        "DOCKER_AUTH_CONFIG",
-        "SSH_AUTH_SOCK",
-        "GPG_AGENT_INFO",
-        "AWS_PROFILE",
-    ];
-    if SECRET_EXACT.iter().any(|e| upper == *e) {
-        return true;
-    }
-
-    false
+    matches!(
+        upper.as_str(),
+        "PATH"
+            | "PATHEXT"
+            | "HOME"
+            | "PWD"
+            | "USER"
+            | "USERNAME"
+            | "LOGNAME"
+            | "LANG"
+            | "TERM"
+            | "COLORTERM"
+            | "SHELL"
+            | "TMP"
+            | "TEMP"
+            | "TMPDIR"
+            | "TZ"
+            | "SYSTEMROOT"
+            | "WINDIR"
+            | "COMSPEC"
+            | "APPDATA"
+            | "LOCALAPPDATA"
+            | "PROGRAMDATA"
+            | "PROGRAMFILES"
+            | "PROGRAMFILES(X86)"
+            | "COMMONPROGRAMFILES"
+            | "COMMONPROGRAMFILES(X86)"
+            | "USERPROFILE"
+            | "HOMEDRIVE"
+            | "HOMEPATH"
+            | "OS"
+            | "NUMBER_OF_PROCESSORS"
+            | "PROCESSOR_ARCHITECTURE"
+            | "PROCESSOR_IDENTIFIER"
+            | "WT_SESSION"
+            | "WT_PROFILE_ID"
+            | "MSYSTEM"
+            | "WSLENV"
+            | "WSL_DISTRO_NAME"
+    )
 }
 
 #[cfg(test)]
 mod env_strip_tests {
-    use super::should_strip_env;
+    use super::should_inherit_env;
 
     #[test]
-    fn strips_vibe_team_in_nonteam_mode() {
-        assert!(should_strip_env("VIBE_TEAM_TOKEN", false));
-        assert!(should_strip_env("VIBE_AGENT_ID", false));
-        assert!(!should_strip_env("VIBE_TEAM_TOKEN", true));
+    fn blocks_internal_team_env_from_parent_process() {
+        assert!(!should_inherit_env("VIBE_TEAM_SOCKET"));
+        assert!(!should_inherit_env("VIBE_TEAM_TOKEN"));
+        assert!(!should_inherit_env("VIBE_AGENT_ID"));
     }
 
     #[test]
-    fn strips_common_secrets() {
-        assert!(should_strip_env("AWS_SECRET_ACCESS_KEY", false));
-        assert!(should_strip_env("GITHUB_TOKEN", false));
-        assert!(should_strip_env("OPENAI_API_KEY", false));
-        assert!(should_strip_env("ANTHROPIC_API_KEY", false));
-        // Issue #139 で追加した DB / cloud / dev tool 系
-        assert!(should_strip_env("DATABASE_URL", false));
-        assert!(should_strip_env("POSTGRES_PASSWORD", false));
-        assert!(should_strip_env("MYSQL_PWD", false));
-        assert!(should_strip_env("REDIS_URL", false));
-        assert!(should_strip_env("KUBECONFIG", false));
-        assert!(should_strip_env("DOCKER_AUTH_CONFIG", false));
-        assert!(should_strip_env("SSH_AUTH_SOCK", false));
-        assert!(should_strip_env("OP_SESSION_abc", false));
-        assert!(should_strip_env("DOPPLER_TOKEN", false));
-        assert!(should_strip_env("VAULT_TOKEN", false));
-        assert!(should_strip_env("CLAUDE_API_KEY", false));
-        assert!(should_strip_env("SLACK_TOKEN", false));
-        assert!(should_strip_env("MY_PRIVATE_TOKEN", false)); // suffix 一般パターン
-        assert!(should_strip_env("APP_SECRET", false));
-        assert!(should_strip_env("DB_PASSWORD", false));
+    fn blocks_common_secrets_by_default() {
+        assert!(!should_inherit_env("AWS_SECRET_ACCESS_KEY"));
+        assert!(!should_inherit_env("GITHUB_TOKEN"));
+        assert!(!should_inherit_env("OPENAI_API_KEY"));
+        assert!(!should_inherit_env("ANTHROPIC_API_KEY"));
+        assert!(!should_inherit_env("DATABASE_URL"));
+        assert!(!should_inherit_env("DOCKER_AUTH_CONFIG"));
+        assert!(!should_inherit_env("SSH_AUTH_SOCK"));
     }
 
     #[test]
     fn keeps_ordinary_env() {
-        assert!(!should_strip_env("PATH", false));
-        assert!(!should_strip_env("HOME", false));
-        assert!(!should_strip_env("LANG", false));
-        assert!(!should_strip_env("USER", false));
-        assert!(!should_strip_env("TERM", false));
+        assert!(should_inherit_env("PATH"));
+        assert!(should_inherit_env("HOME"));
+        assert!(should_inherit_env("LANG"));
+        assert!(should_inherit_env("USER"));
+        assert!(should_inherit_env("TERM"));
+        assert!(should_inherit_env("LC_ALL"));
+        assert!(should_inherit_env("XDG_RUNTIME_DIR"));
     }
 }
 
@@ -328,22 +301,8 @@ pub fn spawn_session(
         cmd.arg(a);
     }
     cmd.cwd(&opts.cwd);
-    // 既存 env を継承しつつ上書きする。
-    // Issue #54: ただし機密が漏れる可能性があるもの (開発者シェルの API key や、
-    // 以前の team 端末が親 env に残した VIBE_TEAM_*) は明示的に除外する。
-    //
-    // 除外方針:
-    //   1. 典型的なシークレット接頭辞を denylist で落とす (AWS_, GITHUB_TOKEN, etc)
-    //   2. VIBE_TEAM_* / VIBE_AGENT_ID は team 用途なので、非 team 端末では必ず除去
-    //      (team 端末では opts.env で明示的に上書きされる)
-    //   3. HOME / PATH / USER / LANG 等の基本 env は継承する (whitelist にすると
-    //      SHELL 起動や npx 実行が動かなくなるので現実的ではない)
-    let is_team = opts
-        .env
-        .iter()
-        .any(|(k, _)| k == "VIBE_TEAM_TOKEN" || k == "VIBE_TEAM_SOCKET");
     for (k, v) in std::env::vars() {
-        if should_strip_env(&k, is_team) {
+        if !should_inherit_env(&k) {
             continue;
         }
         cmd.env(k, v);
@@ -420,5 +379,9 @@ pub fn spawn_session(
         team_id: opts.team_id,
         role: opts.role,
         injecting: std::sync::atomic::AtomicBool::new(false),
+        write_budget: Mutex::new(WriteBudget {
+            window_started_at: Instant::now(),
+            bytes_in_window: 0,
+        }),
     })
 }

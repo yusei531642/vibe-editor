@@ -580,6 +580,7 @@ pub async fn files_list(project_root: String, rel_path: String) -> FileListResul
 
 #[tauri::command]
 pub async fn files_read(project_root: String, rel_path: String) -> FileReadResult {
+    const MAX_READ_BYTES: u64 = 50 * 1024 * 1024;
     let abs = match safe_join(&project_root, &rel_path) {
         Some(p) => p,
         None => {
@@ -591,6 +592,29 @@ pub async fn files_read(project_root: String, rel_path: String) -> FileReadResul
             }
         }
     };
+    let meta = match tokio::fs::metadata(&abs).await {
+        Ok(m) => m,
+        Err(e) => {
+            return FileReadResult {
+                ok: false,
+                error: Some(e.to_string()),
+                path: rel_path,
+                ..Default::default()
+            }
+        }
+    };
+    if meta.len() > MAX_READ_BYTES {
+        return FileReadResult {
+            ok: false,
+            error: Some(format!(
+                "file too large to open safely ({} bytes > {} bytes limit)",
+                meta.len(),
+                MAX_READ_BYTES
+            )),
+            path: rel_path,
+            ..Default::default()
+        };
+    }
     let bytes = match tokio::fs::read(&abs).await {
         Ok(b) => b,
         Err(e) => {
@@ -610,9 +634,8 @@ pub async fn files_read(project_root: String, rel_path: String) -> FileReadResul
     // Issue #65 / #104: 開いた時点の mtime と size を返して、save 時の external-change 検出に使う
     // Issue #119: 加えて内容の SHA-256 を返す。FS が秒精度しか無く、かつ同サイズで書き換えられた
     // 場合に mtime/size 両方で見逃しても、内容ハッシュの不一致で conflict を確定できる。
-    let meta = tokio::fs::metadata(&abs).await.ok();
-    let mtime_ms = meta.as_ref().and_then(mtime_ms_of);
-    let size_bytes = meta.as_ref().map(|m| m.len());
+    let mtime_ms = mtime_ms_of(&meta);
+    let size_bytes = Some(meta.len());
     let content_hash = if !is_binary { Some(sha256_hex(&bytes)) } else { None };
     FileReadResult {
         ok: true,

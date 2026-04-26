@@ -235,8 +235,7 @@ pub async fn app_setup_team_mcp(
             }
         }
     }
-    let (port, token, bridge_path) = hub.info().await;
-    let socket = format!("127.0.0.1:{port}");
+    let (socket, token, bridge_path) = hub.info().await;
     let desired = crate::mcp_config::bridge_desired(&socket, &token, &bridge_path);
 
     // Issue #118: claude / codex のどちらか片方だけが書き換わった「半端状態」を残さない。
@@ -367,9 +366,9 @@ pub async fn app_get_mcp_server_path(state: State<'_, AppState>) -> Result<Strin
 pub async fn app_get_team_hub_info(
     state: State<'_, AppState>,
 ) -> Result<TeamHubInfo, String> {
-    let (port, token, bridge_path) = state.team_hub.info().await;
+    let (socket, token, bridge_path) = state.team_hub.info().await;
     Ok(TeamHubInfo {
-        socket: format!("127.0.0.1:{port}"),
+        socket,
         token,
         bridge_path,
     })

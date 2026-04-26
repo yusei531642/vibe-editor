@@ -83,6 +83,21 @@ export function usePtySession(options: UsePtySessionOptions): void {
     // 対して古い async が listener を付ける」race が発生しうる。
     // effect-local な localDisposed を併用し、再 run でも確実に古い spawn を無効化する。
     let localDisposed = false;
+    let repairFrame: number | null = null;
+
+    const scheduleRenderRepair = (): void => {
+      if (repairFrame !== null) return;
+      repairFrame = window.requestAnimationFrame(() => {
+        repairFrame = null;
+        const liveTerm = termRef.current;
+        if (!liveTerm) return;
+        try {
+          liveTerm.refresh(0, Math.max(0, liveTerm.rows - 1));
+        } catch {
+          /* dispose 直後などの refresh 失敗は無視 */
+        }
+      });
+    };
 
     // 初期サイズ調整
     let initialCols = 80;
@@ -150,6 +165,9 @@ export function usePtySession(options: UsePtySessionOptions): void {
 
         offData = window.api.terminal.onData(res.id, (data) => {
           term.write(data);
+          if (data.includes('\n') || data.includes('\r') || data.length >= 4096) {
+            scheduleRenderRepair();
+          }
           callbacksRef.current.onActivity?.();
           observeChunkRef.current(data);
         });
@@ -198,6 +216,10 @@ export function usePtySession(options: UsePtySessionOptions): void {
       offData?.();
       offExit?.();
       offSessionId?.();
+      if (repairFrame !== null) {
+        window.cancelAnimationFrame(repairFrame);
+        repairFrame = null;
+      }
       if (ptyIdRef.current) {
         void window.api.terminal.kill(ptyIdRef.current);
         ptyIdRef.current = null;
