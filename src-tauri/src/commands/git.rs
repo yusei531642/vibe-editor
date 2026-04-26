@@ -242,12 +242,65 @@ pub async fn git_diff(
         }
     };
 
-    let head = run_git(
-        &["show", &format!("HEAD:{head_path}")],
-        &project_root,
+    // Issue #154 #1: project_root が submodule / worktree 内のとき、cwd を project_root に
+    // して `git show HEAD:` を回すと git は親リポを見て head_path 不在として誤判定する。
+    // `git rev-parse --show-toplevel` で「このリポの本物のトップ」を求めて cwd にする。
+    let repo_root = run_git(&["rev-parse", "--show-toplevel"], &project_root)
+        .await
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|_| project_root.clone());
+
+    // git の HEAD blob path は repo_root 相対なので、project_root → repo_root の差分を埋める。
+    // safe_join 後に repo_root に含まれるかどうかを確認し、相対化する。
+    let abs_head_target = match crate::commands::files::safe_join(&project_root, head_path) {
+        Some(p) => p,
+        None => {
+            return GitDiffResult {
+                ok: false,
+                error: Some("invalid head path".into()),
+                path: rel_path,
+                ..Default::default()
+            };
+        }
+    };
+    let head_path_for_git = match abs_head_target.strip_prefix(&repo_root) {
+        Ok(p) => p.to_string_lossy().replace('\\', "/"),
+        Err(_) => head_path.to_string(),
+    };
+
+    // Issue #154 #3: is_new 判定を i18n 不依存にする。
+    // `git ls-tree HEAD -- <path>` の stdout が空なら HEAD に存在しない。
+    let ls_tree = run_git(
+        &["ls-tree", "HEAD", "--", &head_path_for_git],
+        &repo_root,
     )
-    .await;
-    let is_new = matches!(&head, Err(e) if e.contains("does not exist") || e.contains("exists on disk, but not in"));
+    .await
+    .unwrap_or_default();
+    let is_new = ls_tree.trim().is_empty();
+
+    // Issue #154 #2: 巨大ファイルでの OOM 防止。`git cat-file -s HEAD:<path>` でサイズを
+    // 先に取り、5 MB を超えるなら head 取得をスキップして binary 扱いにする。
+    const MAX_DIFF_BYTES: usize = 5 * 1024 * 1024;
+    let head_size: usize = run_git(
+        &["cat-file", "-s", &format!("HEAD:{head_path_for_git}")],
+        &repo_root,
+    )
+    .await
+    .ok()
+    .and_then(|s| s.trim().parse().ok())
+    .unwrap_or(0);
+    let head_too_large = head_size > MAX_DIFF_BYTES;
+
+    let head = if head_too_large || is_new {
+        // 大きすぎ / 新規 → HEAD 取得しない (binary placeholder で表示)
+        Err("(skipped: file too large or new)".to_string())
+    } else {
+        run_git(
+            &["show", &format!("HEAD:{head_path_for_git}")],
+            &repo_root,
+        )
+        .await
+    };
     let original = head.clone().unwrap_or_default();
     // Issue #35: read_to_string() は非 UTF-8 で失敗し、worktree 側が空文字になって
     // diff が「全削除」に見えてしまう。raw bytes → from_utf8_lossy で落としどころを作る。
@@ -259,9 +312,12 @@ pub async fn git_diff(
         Err(_) => (String::new(), false),
     };
     let is_deleted = !abs.exists();
-    // NUL-byte を含むファイル、または非 UTF-8 (lossy) はバイナリ扱い (DiffEditor は placeholder)。
-    let is_binary =
-        original.contains('\u{0}') || modified.contains('\u{0}') || worktree_is_lossy;
+    // NUL-byte を含むファイル、または非 UTF-8 (lossy)、巨大ファイル時は バイナリ扱い。
+    let is_binary = head_too_large
+        || modified.len() > MAX_DIFF_BYTES
+        || original.contains('\u{0}')
+        || modified.contains('\u{0}')
+        || worktree_is_lossy;
 
     GitDiffResult {
         ok: true,
