@@ -67,6 +67,33 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
     applyTheme(settings.theme, settings.uiFontFamily, settings.uiFontSize);
   }, [settings.theme, settings.uiFontFamily, settings.uiFontSize]);
 
+  // Issue #161: webview zoom を settings から復元 + apply のたびに settings に書き戻す。
+  // restore は loading 完了直後の 1 回だけ。callback は永続化される設定が in-memory に
+  // 反映され続けるよう常時登録。
+  useEffect(() => {
+    if (loading) return;
+    void import('./webview-zoom').then(({ webviewZoom }) => {
+      webviewZoom.restoreFromSettings(settings.webviewZoom);
+      webviewZoom.setPersistCallback((next) => {
+        // settingsRef に直接書き戻す + 永続化トリガ (debounce 経路に乗る)
+        const updated = { ...settingsRef.current, webviewZoom: next };
+        settingsRef.current = updated;
+        if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = window.setTimeout(() => {
+          saveTimerRef.current = null;
+          void window.api.settings.save(settingsRef.current).catch(() => {});
+        }, 200);
+      });
+    });
+    return () => {
+      void import('./webview-zoom').then(({ webviewZoom }) => {
+        webviewZoom.setPersistCallback(null);
+      });
+    };
+    // 復元は初回 loading 解除時のみ。以降は callback 経由で保存だけする。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
+
   // 情報密度を DOM に反映
   useEffect(() => {
     applyDensity(settings.density);

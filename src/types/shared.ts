@@ -100,6 +100,12 @@ export interface AppSettings {
    * 手順に従って手動で ~/.claude.json / ~/.codex/config.toml を編集する。
    */
   mcpAutoSetup?: boolean;
+  /**
+   * Issue #161: webview zoom factor (0.5〜3.0)。Ctrl+=/-/0 や Shift+wheel で変動。
+   * 旧実装は永続化していなかったため、再起動後に内部 current=1.0 と実際の zoom が
+   * 食い違って Ctrl+= で逆に縮む現象が起きていた。
+   */
+  webviewZoom?: number;
 }
 
 export interface ClaudeCheckResult {
