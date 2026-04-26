@@ -588,9 +588,9 @@
   border-color: var(--border-strong);
   transform: translateY(-1px);
   box-shadow: 0 4px 14px -8px rgba(0, 0, 0, 0.45);
-  /* 旧コミットでは will-change: transform をカードに常時付けていたが、
-     全カード分の GPU レイヤを常駐させて余計な VRAM を食う。hover 時だけに絞る。 */
-  will-change: transform;
+  /* will-change: transform は撤去。hover で初めて付与してもブラウザが GPU 準備する時間が無く
+     最適化効果が薄い (レビュー指摘)。常時付与は GPU メモリを無駄に食うので、
+     Chromium の auto-promote ヒューリスティックに任せる方が賢明。 */
 }
 
 .modal--settings .theme-card:active,

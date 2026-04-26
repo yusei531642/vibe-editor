@@ -82,8 +82,9 @@ export function SettingsModal({
   // 「適用して保存」押下時に短時間だけ ✓ アイコンに切り替えて操作完了を伝える
   const [saved, setSaved] = useState(false);
   // saved → false / onClose に切り替える deferred timer。
-  // unmount / 直前の Apply キャンセルで必ずクリアする (アンマウント済み state 更新警告を防ぐ)
-  const saveTimerRef = useRef<number | null>(null);
+  // unmount / 直前の Apply キャンセルで必ずクリアする (アンマウント済み state 更新警告を防ぐ)。
+  // 型は ReturnType を使うことで browser (number) / Node 系 (NodeJS.Timeout) どちらでも安全。
+  const saveTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
   // サイドバー検索 (空文字なら全表示)
   const [navQuery, setNavQuery] = useState('');
 
@@ -96,6 +97,9 @@ export function SettingsModal({
     if (open && !wasOpenRef.current) {
       setDraft(initial);
       setActiveSection('general');
+      // 直前の保存フィードバックが残っていれば初期化 (handleApply が onClose 後に setSaved(false)
+      // を省略したぶんを、再オープン時にここで戻す)
+      setSaved(false);
     }
     wasOpenRef.current = open;
   }, [open, initial]);
@@ -136,7 +140,8 @@ export function SettingsModal({
     if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
     saveTimerRef.current = window.setTimeout(() => {
       saveTimerRef.current = null;
-      setSaved(false);
+      // setSaved(false) は呼ばない: onClose で親がアンマウントするので不要な再レンダーを生むだけ。
+      // (再 open 時は wasOpenRef effect が draft を initial に戻し、saved も初期値 false に戻る)
       onClose();
     }, 380);
   };
@@ -235,24 +240,33 @@ export function SettingsModal({
 
   // 検索ワードで items を絞り込む。`__addCustom` は検索中だけ非表示 (新規追加は通常時のみ)。
   // 検索結果が空のグループはラベルごと除外する。
-  // labelOf はレンダー毎に再生成されるが内部の参照 (customAgents/isJa) は groupsRaw と同根なので、
-  // groupsRaw の deps に揃えて実質同じタイミングで再評価される。eslint-disable は外せる。
+  // labelOf を closure で参照していた旧実装は eslint-disable で exhaustive-deps を抑制していたが、
+  // 将来 labelOf が customAgents / isJa 以外の state も読むようになるとメモ化バグの種になる。
+  // → 検索フィルタ用のラベル解決を useMemo 内にインライン化し、必要な依存を明示する。
   const groups = useMemo(() => {
     const q = navQuery.trim().toLowerCase();
     if (!q) return groupsRaw;
+    const fixedLabelMap = fixedLabels;
+    const customLabelMap = new Map(customAgents.map((a) => [a.id, a.name] as const));
+    const labelForFilter = (id: SectionId): string => {
+      if (fixedLabelMap[id]) return fixedLabelMap[id].label;
+      if (id.startsWith('custom:')) {
+        const aid = id.slice('custom:'.length);
+        return customLabelMap.get(aid) || (isJa ? '（無名）' : '(untitled)');
+      }
+      return id;
+    };
     return groupsRaw
       .map((g) => ({
         label: g.label,
         items: g.items.filter((id) => {
           if (id === '__addCustom') return false;
-          const { label } = labelOf(id);
+          const label = labelForFilter(id);
           return label.toLowerCase().includes(q) || id.toLowerCase().includes(q);
         })
       }))
       .filter((g) => g.items.length > 0);
-    // labelOf は closure 経由で customAgents/isJa を読むが、それらは groupsRaw 経由で再評価される
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [navQuery, groupsRaw]);
+  }, [navQuery, groupsRaw, fixedLabels, customAgents, isJa]);
 
   const renderSection = (id: SectionId): JSX.Element | null => {
     switch (id) {
