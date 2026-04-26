@@ -433,25 +433,32 @@
 .modal--settings .modal__theme-grid,
 .modal--settings .lang-grid,
 .modal--settings .density-grid {
-  gap: 12px;
+  gap: 10px;
 }
 
 /*
- * Claude 公式風: theme/lang/density カード選択 UI をフラットに統一。
- * hover で translate/shadow を付与せず、border/bg の微変化のみ。
- * selected は brand-glow の ring で明示 (heavy shadow は禁止)。
+ * Linear / Raycast 風カード選択 UI:
+ *   - アクセントカラーは「保存ボタン」など主アクションのために温存。
+ *     選択状態は subtle な背景 + 1px border + 右上の小さな accent dot で表現する
+ *     (heavy ring / 太枠は避け、画面全体の色ノイズを抑える)。
+ *   - hover で translateY(-1px) + soft shadow をかけて触覚的な反応を出す
+ *     (マイクロインタラクション)。
+ *   - 密度は若干高め: padding 12px / radius 12px / gap 10px。
  */
 .modal--settings .theme-card,
 .modal--settings .lang-card,
 .modal--settings .density-card {
-  padding: 14px;
-  border-width: 1px;
-  border-radius: var(--radius-md, 14px);
+  position: relative;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
   background: var(--bg-panel);
   transition:
-    background-color var(--dur-fast, 180ms) var(--ease-standard),
-    border-color var(--dur-fast, 180ms) var(--ease-standard),
-    box-shadow var(--dur-fast, 180ms) var(--ease-standard);
+    background-color 160ms cubic-bezier(0.25, 1, 0.5, 1),
+    border-color 160ms cubic-bezier(0.25, 1, 0.5, 1),
+    box-shadow 200ms cubic-bezier(0.25, 1, 0.5, 1),
+    transform 200ms cubic-bezier(0.25, 1, 0.5, 1);
+  will-change: transform;
 }
 
 .modal--settings .theme-card:hover,
@@ -459,13 +466,84 @@
 .modal--settings .density-card:hover {
   background: var(--bg-elev);
   border-color: var(--border-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px -8px rgba(0, 0, 0, 0.45);
+}
+
+.modal--settings .theme-card:active,
+.modal--settings .lang-card:active,
+.modal--settings .density-card:active {
+  transform: translateY(0);
+  box-shadow: none;
 }
 
 .modal--settings .theme-card.is-selected,
 .modal--settings .lang-card.is-selected,
 .modal--settings .density-card.is-selected {
-  border-color: var(--claude-brand, var(--accent));
-  box-shadow: 0 0 0 3px var(--claude-brand-glow, rgba(217, 119, 87, 0.12));
+  /* 選択は「ほんの少し明るい背景 + やや強い境界」だけで示し、
+     accent はカード右上の dot にのみ用いる */
+  background: var(--bg-elev);
+  border-color: var(--border-strong);
+  box-shadow: none;
+}
+
+/* 選択カード右上の accent dot (アクセント色を 1 ヶ所に集約) */
+.modal--settings .theme-card.is-selected::after,
+.modal--settings .lang-card.is-selected::after,
+.modal--settings .density-card.is-selected::after {
+  content: '';
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--claude-brand, var(--accent));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--claude-brand, var(--accent)) 18%, transparent);
+}
+
+/* タイポグラフィ階層: ラベル (主表記) を 1px 強く、補足はより dim に。
+   モーダル内のカード共通 (lang / density) で揃える */
+.modal--settings .lang-card strong,
+.modal--settings .density-card strong {
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.modal--settings .lang-card span,
+.modal--settings .density-card span {
+  color: var(--text-mute);
+  opacity: 0.85;
+}
+
+/* 「適用して保存」ボタン: 押下時の ✓ フィードバック幅をチラつかせない */
+.settings-shell__apply.toolbar__btn {
+  min-width: 96px;
+  justify-content: center;
+}
+.settings-shell__apply.toolbar__btn.is-saved {
+  /* 保存完了の瞬間だけ accent をやや明るく + 軽くスケール */
+  background: color-mix(in srgb, var(--accent) 92%, white 8%);
+  transform: scale(0.985);
+  pointer-events: none;
+}
+.settings-shell__apply.toolbar__btn.is-saved svg {
+  animation: settings-saved-pop 240ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes settings-saved-pop {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 @media (max-width: 860px) {

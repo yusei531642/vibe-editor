@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowLeft, Plus } from 'lucide-react';
+import { ArrowLeft, Check, Plus } from 'lucide-react';
 import type { AgentConfig, AppSettings } from '../../../types/shared';
 import { DEFAULT_SETTINGS } from '../../../types/shared';
 import { useT } from '../lib/i18n';
@@ -47,6 +47,8 @@ export function SettingsModal({
   const t = useT();
   const [draft, setDraft] = useState<AppSettings>(initial);
   const [activeSection, setActiveSection] = useState<SectionId>('general');
+  // 「適用して保存」押下時に短時間だけ ✓ アイコンに切り替えて操作完了を伝える
+  const [saved, setSaved] = useState(false);
 
   // Issue #178: open 中に外部から settings が更新されると useEffect が再発火して
   // ユーザー入力中の draft が消える事故があった。
@@ -79,7 +81,13 @@ export function SettingsModal({
 
   const handleApply = (): void => {
     onApply(draft);
-    onClose();
+    // 保存ボタンを 380ms だけ ✓ 表示にしてから閉じる。
+    // 「押した → 保存された → モーダルが消える」の因果が体感できるようにする (Linear / Vercel 風)。
+    setSaved(true);
+    window.setTimeout(() => {
+      setSaved(false);
+      onClose();
+    }, 380);
   };
 
   // Issue #28: Reset は draft だけを DEFAULT_SETTINGS に戻す。
@@ -358,10 +366,18 @@ export function SettingsModal({
             </button>
             <button
               type="button"
-              className="toolbar__btn toolbar__btn--primary"
+              className={`toolbar__btn toolbar__btn--primary settings-shell__apply${
+                saved ? ' is-saved' : ''
+              }`}
               onClick={handleApply}
+              disabled={saved}
+              aria-label={t('settings.apply')}
             >
-              {t('settings.apply')}
+              {saved ? (
+                <Check size={14} strokeWidth={2.5} />
+              ) : (
+                t('settings.apply')
+              )}
             </button>
           </div>
         </footer>
