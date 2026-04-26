@@ -6,6 +6,7 @@
 use crate::pty::{spawn_session, SpawnOptions};
 use crate::state::AppState;
 use crate::team_hub::inject::build_chunks;
+use crate::util::log_redact::redact_home;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -225,10 +226,18 @@ pub async fn terminal_create(
         None
     };
 
+    // Issue #140 (Security): args 内の絶対パス (Codex --config model_instructions_file=...
+    // 等) や cwd の絶対パスが bug report ログに残ると user 名 / OS 構成 / project 情報が漏れる。
+    // INFO level は引数省略・cwd の home 部分を ~ にマスクし、詳細は DEBUG にだけ残す。
     tracing::info!(
-        "[IPC] terminal_create command={command} args={args:?} cwd={cwd} cols={} rows={}",
+        "[IPC] terminal_create command={command} args.len={} cwd={} cols={} rows={}",
+        args.len(),
+        redact_home(&cwd),
         opts.cols,
         opts.rows
+    );
+    tracing::debug!(
+        "[IPC] terminal_create (verbose) args={args:?} cwd={cwd}"
     );
 
     if let Some(w) = &warning {

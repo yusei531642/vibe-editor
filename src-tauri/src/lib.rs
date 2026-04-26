@@ -9,6 +9,7 @@ mod mcp_config;
 mod pty;
 mod state;
 mod team_hub;
+mod util;
 
 use tauri::Manager;
 #[allow(unused_imports)]

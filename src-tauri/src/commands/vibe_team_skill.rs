@@ -121,8 +121,14 @@ async fn install_skill_at(root: &Path, force: bool) -> InstallSkillResult {
             ..Default::default()
         };
     }
+    // Issue #140: 絶対パスを INFO ログに残すと bug report で home / user 名が漏れる。
+    // INFO はマスク済み path、DEBUG にだけ生 path を残す。
     tracing::info!(
         "[skill] vibe-team SKILL.md installed at {} (overwrite={overwritten})",
+        crate::util::log_redact::redact_home(&path.to_string_lossy())
+    );
+    tracing::debug!(
+        "[skill] vibe-team SKILL.md installed at (raw) {}",
         path.display()
     );
     InstallSkillResult {

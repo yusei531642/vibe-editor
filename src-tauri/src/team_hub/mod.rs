@@ -389,7 +389,10 @@ impl TeamHub {
                 });
             }
         });
-        tracing::info!("[teamhub] listening on 127.0.0.1:{}", local.port());
+        // Issue #140: port は同 LAN 攻撃者が brute-force 起点に使えるため debug only で残す。
+        // info にはポート無しのメッセージだけ残す。
+        tracing::info!("[teamhub] listening on loopback");
+        tracing::debug!("[teamhub] listening on 127.0.0.1:{}", local.port());
         Ok(())
     }
 
