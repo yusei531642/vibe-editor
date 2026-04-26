@@ -32,23 +32,56 @@ const BP_END: &[u8] = b"\x1b[201~";
 
 /// 1 メッセージを bracketed paste 形式に包んで ConPTY-safe な 64B チャンク列にする。
 ///
+/// Issue #186 (Security): PTY に流す文字列に ESC / 他 C0 制御文字が含まれると、
+/// 受信端末で OSC 52 (クリップボード書換) / OSC 2 (タイトル偽装) / CSI 2J (画面消去) /
+/// その他 cursor 誘導など、任意の端末乗っ取り経路が成立する。bracketed paste で囲んでも
+/// 内側の ESC は端末によっては解釈されてしまう (PT mode の実装差異)。
+///
+/// 防御方針: payload 中の以下の制御文字を「U+FFFD `?`」相当に置換して中和する。
+/// - \x1b (ESC)
+/// - \x07 (BEL): OSC 終端としても使われる
+/// - \x00 (NUL): pty バッファの不正切断要因
+/// - \x08 (BS) / \x7f (DEL): 受信側 readline の手前消し悪用防止
+/// - \x9b (CSI 単一バイト): 一部端末で ESC[ 相当に解釈される
+/// 改行 (`\n`) と TAB (`\t`) は paste の意味的内容なので維持する。
+fn sanitize_for_paste(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        let code = ch as u32;
+        let dangerous = matches!(ch, '\x1b' | '\x07' | '\x00' | '\x08' | '\x7f')
+            || code == 0x9b
+            || (code < 0x20 && ch != '\n' && ch != '\t' && ch != '\r');
+        if dangerous {
+            out.push('?'); // 視覚的に「ここに非表示制御があった」が分かる代替
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
 /// 出力フォーマット (1 つ目のチャンク先頭から):
 ///     <ESC>[200~ <banner><body> <ESC>[201~
 ///
 /// 改行はそのまま保持 (paste 扱い)。MAX_PAYLOAD 超過時は body 末尾を切って ` …(truncated)`。
+/// Issue #186: banner / body 両方を sanitize_for_paste で中和してから組み立てる。
 pub fn build_chunks(banner: &str, body: &str) -> Vec<Vec<u8>> {
-    let truncated: String = if body.len() > MAX_PAYLOAD {
-        let mut s: String = body.chars().take(MAX_PAYLOAD).collect();
+    let banner_clean = sanitize_for_paste(banner);
+    let body_clean = sanitize_for_paste(body);
+
+    let truncated: String = if body_clean.len() > MAX_PAYLOAD {
+        let mut s: String = body_clean.chars().take(MAX_PAYLOAD).collect();
         s.push_str(" …(truncated)");
         s
     } else {
-        body.to_string()
+        body_clean
     };
 
-    let mut payload: Vec<u8> =
-        Vec::with_capacity(BP_START.len() + banner.len() + truncated.len() + BP_END.len());
+    let mut payload: Vec<u8> = Vec::with_capacity(
+        BP_START.len() + banner_clean.len() + truncated.len() + BP_END.len(),
+    );
     payload.extend_from_slice(BP_START);
-    payload.extend_from_slice(banner.as_bytes());
+    payload.extend_from_slice(banner_clean.as_bytes());
     payload.extend_from_slice(truncated.as_bytes());
     payload.extend_from_slice(BP_END);
 
