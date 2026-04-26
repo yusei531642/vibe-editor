@@ -591,13 +591,9 @@ async fn handle_client(
             tracing::warn!(
                 "[teamhub] dropping RPC line: exceeded {RPC_LINE_LIMIT} bytes"
             );
-            let err = serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": null,
-                "error": { "code": -32700, "message": "Parse error: line too long" }
-            });
-            wr.write_all(err.to_string().as_bytes()).await?;
-            wr.write_all(b"\n").await?;
+            // Issue #149: line too long の段階では req.id が読めないので、JSON-RPC 仕様上
+            // notification と区別できない。仕様準拠のため error 応答を送らずに drop する。
+            // 書き込み I/O 失敗で client loop ごと切断するのも避ける。
             continue;
         }
 
@@ -608,35 +604,34 @@ async fn handle_client(
         if buf.is_empty() {
             continue;
         }
+        // Issue #149: 書き込み I/O 失敗で client loop ごと終了するのを避ける。
+        // ECONNRESET 等の一時的な失敗は log + continue で次の line を待つ。
+        // notification (id=null) には仕様上 error を返さない。
         let line_str = match std::str::from_utf8(&buf) {
             Ok(s) => s,
             Err(_) => {
-                let err = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": null,
-                    "error": { "code": -32700, "message": "Parse error: invalid utf-8" }
-                });
-                wr.write_all(err.to_string().as_bytes()).await?;
-                wr.write_all(b"\n").await?;
+                tracing::warn!("[teamhub] dropping invalid utf-8 line");
                 continue;
             }
         };
         let req: serde_json::Value = match serde_json::from_str(line_str) {
             Ok(v) => v,
             Err(_) => {
-                let err = serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": null,
-                    "error": { "code": -32700, "message": "Parse error" }
-                });
-                wr.write_all(err.to_string().as_bytes()).await?;
-                wr.write_all(b"\n").await?;
+                tracing::warn!("[teamhub] dropping unparseable JSON line");
                 continue;
             }
         };
         if let Some(resp) = protocol::handle(&hub, &ctx, &req).await {
-            wr.write_all(resp.to_string().as_bytes()).await?;
-            wr.write_all(b"\n").await?;
+            // 書き込み失敗は log にとどめ、loop 継続。連続失敗が続けば最終的に
+            // 上の read_until で EOF/エラーが取れて自然終了する。
+            if let Err(e) = wr.write_all(resp.to_string().as_bytes()).await {
+                tracing::warn!("[teamhub] response write_all failed: {e}");
+                continue;
+            }
+            if let Err(e) = wr.write_all(b"\n").await {
+                tracing::warn!("[teamhub] response newline write failed: {e}");
+                continue;
+            }
         }
     }
 }
