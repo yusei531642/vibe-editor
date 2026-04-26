@@ -94,6 +94,12 @@ impl SessionRegistry {
                     g.by_agent.remove(aid);
                 }
             }
+            // Issue #144: registry から外しただけだと、Arc の参照が他所に残っているとき
+            // 子プロセス / reader thread が永久に生き続ける。明示的に kill を要求して、
+            // PTY master 経由の read を EOF にし、reader thread を自然終了させる。
+            // ※ Drop impl も kill するが「最後の Arc が drop されるまで」遅れるため、
+            //   ここで早期 kill しておく。
+            let _ = handle.kill();
             Some(handle)
         } else {
             None

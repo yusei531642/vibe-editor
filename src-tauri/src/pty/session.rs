@@ -81,6 +81,21 @@ impl SessionHandle {
     }
 }
 
+/// Issue #144: SessionHandle が drop されたタイミングで child プロセスを必ず kill する。
+/// SessionRegistry::remove() は kill を呼ばずに Map から外すだけだったため、
+/// Arc の参照が残っている間 reader thread が PTY master を保持し続け、
+/// 子プロセス + reader thread が孤立リークしていた。
+///
+/// drop でも kill を呼ぶことで「registry から外す = reader が EOF を読む = thread 終了」
+/// が確実に成立する。kill 時の Mutex poison はこの段階では recovery 不能なので無視 (best-effort)。
+impl Drop for SessionHandle {
+    fn drop(&mut self) {
+        if let Ok(mut k) = self.killer.lock() {
+            let _ = k.kill();
+        }
+    }
+}
+
 /// `cwd` の検証 (旧 resolveValidCwd と同等)。
 /// 無効なら fallback → カレントディレクトリ。warning メッセージも返す。
 pub fn resolve_valid_cwd(
