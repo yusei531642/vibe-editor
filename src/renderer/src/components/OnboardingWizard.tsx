@@ -58,8 +58,13 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
   // 元のテーマ/言語を覚えておき、ウィザードがキャンセル (あるいは絶対に閉じないが念のため) された
   // 場合に備える。基本は完了時に draftTheme がそのまま採用される。
   const originalThemeRef = useRef<ThemeName>(settings.theme);
+  const originalUiFontFamilyRef = useRef(settings.uiFontFamily);
+  const originalUiFontSizeRef = useRef(settings.uiFontSize);
+  const completedRef = useRef(false);
   useEffect(() => {
     originalThemeRef.current = settings.theme;
+    originalUiFontFamilyRef.current = settings.uiFontFamily;
+    originalUiFontSizeRef.current = settings.uiFontSize;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -67,6 +72,19 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
   useEffect(() => {
     applyTheme(draftTheme, settings.uiFontFamily, settings.uiFontSize);
   }, [draftTheme, settings.uiFontFamily, settings.uiFontSize]);
+
+  // Issue #164: ウィザードが完了せず unmount された場合 (外部から閉じられた等) に
+  // ライブプレビューで書き換えた DOM を必ず元の theme に戻す。
+  useEffect(() => {
+    return () => {
+      if (completedRef.current) return; // 通常完了時はそのまま draftTheme が永続化される
+      applyTheme(
+        originalThemeRef.current,
+        originalUiFontFamilyRef.current,
+        originalUiFontSizeRef.current
+      );
+    };
+  }, []);
 
   const t = useCallback(
     (key: string, params?: Record<string, string | number>) =>
@@ -102,6 +120,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
   }, [t]);
 
   const finish = useCallback(() => {
+    completedRef.current = true; // unmount cleanup でロールバックしない
     const patch: Partial<AppSettings> = {
       language: draftLanguage,
       theme: draftTheme,
