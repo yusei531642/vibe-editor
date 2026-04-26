@@ -30,6 +30,35 @@ export interface UpdaterDeps {
 const MAX_BODY_CHARS = 600;
 let didAutoCheck = false;
 
+/**
+ * Issue #142: downgrade 防止。Tauri plugin-updater は通常 update.version > current で
+ * しか update を返さないが、CI で生成する `latest.json` の version 文字列が手動で
+ * いじられた等のエッジケースに備えて、renderer 側でも明示的に semver 比較を行う。
+ *
+ * セマンティックバージョンの簡易比較。プレリリース部分は trailing tail として string 比較
+ * (主目的は「より小さいバージョン」が来たときに updater を抑止すること)。
+ */
+function isStrictlyNewer(candidate: string, current: string): boolean {
+  const parse = (v: string): { nums: number[]; tail: string } => {
+    const m = v.match(/^v?(\d+)\.(\d+)\.(\d+)(.*)$/);
+    if (!m) return { nums: [0, 0, 0], tail: v };
+    return {
+      nums: [Number(m[1]), Number(m[2]), Number(m[3])],
+      tail: m[4]
+    };
+  };
+  const a = parse(candidate);
+  const b = parse(current);
+  for (let i = 0; i < 3; i++) {
+    if (a.nums[i] > b.nums[i]) return true;
+    if (a.nums[i] < b.nums[i]) return false;
+  }
+  // メジャー / マイナー / パッチが一致したら tail 比較
+  // 例: 1.3.1-beta.2 > 1.3.1-beta.1 は安全側で false (= 同等扱い) とし、
+  // 純粋な「より古いバージョン」が偽装してきたケースだけ防げれば十分。
+  return a.tail > b.tail && b.tail !== '';
+}
+
 function isWindowsPlatform(): boolean {
   // Tauri 2 の navigator.userAgentData が WebView2 で undefined になりうるので両対応
   if (typeof navigator !== 'undefined') {
@@ -69,6 +98,24 @@ export async function checkForUpdates(deps: UpdaterDeps): Promise<void> {
     return;
   }
   didAutoCheck = true;
+
+  // Issue #142 (Security): downgrade 防止。
+  // current 版本が取れない場合 (古い Tauri など) はチェックを skip するが、
+  // 通常 update.currentVersion が入っているはず。明示的に semver 比較する。
+  const currentVersion = (update as unknown as { currentVersion?: string }).currentVersion ?? '';
+  if (currentVersion && !isStrictlyNewer(update.version, currentVersion)) {
+    console.warn(
+      '[updater] suppressing non-newer update offer:',
+      'candidate=',
+      update.version,
+      'current=',
+      currentVersion
+    );
+    if (manual) {
+      showToast(translate(language, 'updater.upToDate'), { tone: 'success' });
+    }
+    return;
+  }
 
   // ---------- 2. confirm dialog (Tauri native) ----------
   const rawBody = update.body ?? '';
