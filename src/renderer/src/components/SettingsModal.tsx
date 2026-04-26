@@ -329,12 +329,13 @@ export function SettingsModal({
           if (!root) return;
           const focusables = Array.from(
             root.querySelectorAll<HTMLElement>(
-              // 負値 tabindex はセレクタ側で除外 ([tabindex^="-"] にマッチする要素を NOT する)。
-              // querySelector レベルで切ると後段 filter のコストが減る。
-              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex^="-"])'
+              // セレクタ側は典型的な -1 だけを除外し、それ以外の負値や空文字 ([tabindex=""] 等) は
+              // 後段 filter の el.tabIndex < 0 に委ねる (CSS attribute selector の前方一致は
+              // ブラウザ間で挙動差があり、正規実装に統一するほうが堅牢)。
+              'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])'
             )
           ).filter((el) => {
-            // 1. dialog root 自身 (tabIndex=-1) を除外する保険
+            // 1. tabIndex の負値 (-2 等) と dialog root (tabIndex=-1) を除外
             if (el.tabIndex < 0) return false;
             // 2. レイアウト上見えていない要素を除外。
             //    旧実装は offsetParent === null だったが position: fixed で常に null になり誤除外。

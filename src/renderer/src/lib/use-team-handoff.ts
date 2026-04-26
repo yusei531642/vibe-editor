@@ -82,7 +82,11 @@ export function useTeamHandoff(callback: (p: HandoffPayload) => void): void {
           u();
           if (initPromise === myInit) initPromise = null;
         })
-        .catch(() => {});
+        .catch((err) => {
+          // 旧コードは catch を空に握り潰していたが、Tauri IPC が壊れた等で listen() が
+          // 失敗したケースが完全に sile になってしまうため最低限 console.warn で残す。
+          console.warn('[handoff] listen() failed in cleanup path:', err);
+        });
     };
   }, []);
 }
