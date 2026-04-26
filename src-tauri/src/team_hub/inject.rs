@@ -100,9 +100,19 @@ pub async fn inject(
     }
     for chunk in iter {
         sleep(Duration::from_millis(CHUNK_DELAY_MS)).await;
-        // セッションがまだ生きているか確認
-        if registry.get_by_agent(agent_id).is_none() {
-            return false;
+        // Issue #151: 「同じ agent_id でも別 PTY に置き換わっている」場合に、後半チャンクが
+        // 新 session に書き込まれて文章が「旧 + 新」混合になる事故を防ぐ。
+        // 最初に取った Arc<SessionHandle> と毎回比較し、別物なら inject を中断する。
+        match registry.get_by_agent(agent_id) {
+            Some(current) => {
+                if !Arc::ptr_eq(&current, &session) {
+                    tracing::warn!(
+                        "[inject] aborting: session for agent {agent_id} was replaced mid-inject"
+                    );
+                    return false;
+                }
+            }
+            None => return false,
         }
         let s = session.clone();
         if tokio::task::spawn_blocking(move || s.write(&chunk))
