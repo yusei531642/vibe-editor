@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { useState } from 'react';
 import type { TeamRole } from '../../../types/shared';
+import { useTeamHandoff } from './use-team-handoff';
 
 /**
  * ActivityEvent — ActivityPanel が表示するイベントの共通型。
@@ -20,17 +20,6 @@ export interface ActivityEvent {
   teamName?: string | null;
 }
 
-interface HandoffPayload {
-  teamId: string;
-  fromAgentId: string;
-  fromRole: string;
-  toAgentId: string;
-  toRole: string;
-  preview: string;
-  messageId: number;
-  timestamp?: string;
-}
-
 /** ring buffer 最大件数。古いものから捨てる。 */
 const MAX_EVENTS = 200;
 
@@ -45,35 +34,24 @@ export function useActivityFeed(): {
 } {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
 
-  // Rust TeamHub の team:handoff を listen して自動的に feed に追加する。
-  useEffect(() => {
-    let unlisten: UnlistenFn | null = null;
-    let cancelled = false;
-    void listen<HandoffPayload>('team:handoff', (e) => {
-      const p = e.payload;
-      const ts = Date.now();
-      const ev: ActivityEvent = {
-        id: `handoff-${p.messageId}-${ts}`,
-        ts,
-        kind: 'handoff',
-        fromRole: p.fromRole,
-        toRole: p.toRole,
-        title: `${p.fromRole} → ${p.toRole}`,
-        body: p.preview
-      };
-      setEvents((prev) => {
-        const next = [ev, ...prev];
-        return next.length > MAX_EVENTS ? next.slice(0, MAX_EVENTS) : next;
-      });
-    }).then((u) => {
-      if (cancelled) u();
-      else unlisten = u;
-    });
-    return () => {
-      cancelled = true;
-      unlisten?.();
+  // Issue #158: Rust TeamHub の team:handoff は use-team-handoff の集約 listener 経由で
+  // 受け取る。Canvas など他の購読者と Tauri 側 listen を共有するので二重登録にならない。
+  useTeamHandoff((p) => {
+    const ts = Date.now();
+    const ev: ActivityEvent = {
+      id: `handoff-${p.messageId}-${ts}`,
+      ts,
+      kind: 'handoff',
+      fromRole: p.fromRole,
+      toRole: p.toRole,
+      title: `${p.fromRole} → ${p.toRole}`,
+      body: p.preview
     };
-  }, []);
+    setEvents((prev) => {
+      const next = [ev, ...prev];
+      return next.length > MAX_EVENTS ? next.slice(0, MAX_EVENTS) : next;
+    });
+  });
 
   return {
     events,

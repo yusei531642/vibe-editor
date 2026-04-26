@@ -22,7 +22,7 @@ import {
   type EdgeChange
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { useTeamHandoff } from '../../lib/use-team-handoff';
 import TerminalCard from './cards/TerminalCard';
 import AgentNodeCard from './cards/AgentNodeCard';
 import EditorCard from './cards/EditorCard';
@@ -53,17 +53,6 @@ const nodeTypes = {
 const edgeTypes = {
   handoff: HandoffEdge
 };
-
-interface HandoffPayload {
-  teamId: string;
-  fromAgentId: string;
-  fromRole: string;
-  toAgentId: string;
-  toRole: string;
-  preview: string;
-  messageId: number;
-  timestamp: string;
-}
 
 function FlowApp(): JSX.Element {
   const t = useT();
@@ -236,40 +225,25 @@ function FlowApp(): JSX.Element {
     [t, handleAddClaudeAgent]
   );
 
-  // hand-off event を listen → 該当 agent ノード間に一時 edge を追加
-  useEffect(() => {
-    let unlisten: UnlistenFn | null = null;
-    let cancelled = false;
-    void listen<HandoffPayload>('team:handoff', (e) => {
-      const p = e.payload;
-      // ノード id を agentId から逆引き
-      const currentNodes = useCanvasStore.getState().nodes;
-      const fromNode = currentNodes.find(
-        (n) => n.data?.cardType === 'agent' && (n.data.payload as { agentId?: string } | undefined)?.agentId === p.fromAgentId
-      );
-      const toNode = currentNodes.find(
-        (n) => n.data?.cardType === 'agent' && (n.data.payload as { agentId?: string } | undefined)?.agentId === p.toAgentId
-      );
-      if (!fromNode || !toNode) return;
-      pulseEdge({
-        id: `handoff-${p.messageId}-${Date.now()}`,
-        source: fromNode.id,
-        target: toNode.id,
-        type: 'handoff',
-        data: { color: colorOf(p.fromRole), preview: p.preview, fromRole: p.fromRole }
-      });
-    }).then((u) => {
-      if (cancelled) {
-        u();
-      } else {
-        unlisten = u;
-      }
+  // Issue #158: hand-off event は use-team-handoff の集約 listener 経由で受け取る。
+  // Tauri listen は ActivityFeed と共有なので二重登録にならない。
+  useTeamHandoff((p) => {
+    const currentNodes = useCanvasStore.getState().nodes;
+    const fromNode = currentNodes.find(
+      (n) => n.data?.cardType === 'agent' && (n.data.payload as { agentId?: string } | undefined)?.agentId === p.fromAgentId
+    );
+    const toNode = currentNodes.find(
+      (n) => n.data?.cardType === 'agent' && (n.data.payload as { agentId?: string } | undefined)?.agentId === p.toAgentId
+    );
+    if (!fromNode || !toNode) return;
+    pulseEdge({
+      id: `handoff-${p.messageId}-${Date.now()}`,
+      source: fromNode.id,
+      target: toNode.id,
+      type: 'handoff',
+      data: { color: colorOf(p.fromRole), preview: p.preview, fromRole: p.fromRole }
     });
-    return () => {
-      cancelled = true;
-      unlisten?.();
-    };
-  }, [pulseEdge]);
+  });
 
   const minimapColor = useCallback((node: Node) => {
     const data = node.data as CardData | undefined;
