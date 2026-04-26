@@ -18,6 +18,17 @@ import { buildXtermTheme } from './xterm-theme';
  */
 const SCROLLBACK_LINES = 2000;
 
+/*
+ * Issue #126: Chromium の active WebGL context 上限は通常 16 (実装依存だが Tauri/WebView2
+ * でも同等)。MAX_TERMINALS=30 のうち 16 個目以降の WebGL 作成が成功しても、新しい context
+ * を作るたびに古い context が暗黙 lost され、ランダムに DOM renderer に降格する。
+ * → 同時 active な WebGL は 8 までに制限し、それ以降は最初から DOM renderer で生成する。
+ *   8 という値はリーダーボードで余裕を持たせた経験値 (Canvas モードで disableWebgl=true
+ *   になる場合と合わせて、IDE モードでも 8 ターミナル分だけ GPU 加速を享受できる)。
+ */
+const MAX_ACTIVE_WEBGL = 8;
+let activeWebglCount = 0;
+
 /**
  * xterm.js `Terminal` インスタンスと `FitAddon` をマウント中 1 回だけ生成し、
  * フォント/テーマの変更を反映させるフック。
@@ -83,15 +94,22 @@ export function useXtermInstance(
     //
     // disableWebgl=true (Canvas モード) の場合は WebGL を読み込まず DOM renderer のままにする。
     // 親の `transform: scale(zoom)` で WebGL canvas が GPU 補間されると滲むため。
-    if (!disableWebgl) {
+    let webglOwned = false;
+    if (!disableWebgl && activeWebglCount < MAX_ACTIVE_WEBGL) {
       try {
         const webgl = new WebglAddon();
         webgl.onContextLoss(() => {
           webgl.dispose();
+          if (webglOwned) {
+            webglOwned = false;
+            activeWebglCount = Math.max(0, activeWebglCount - 1);
+          }
           webglRef.current = null;
         });
         term.loadAddon(webgl);
         webglRef.current = webgl;
+        webglOwned = true;
+        activeWebglCount += 1;
       } catch (err) {
         // 例: WebGL 作成不可 → DOM renderer で続行 (問題なく動作する)
         console.warn('[xterm] WebGL addon 初期化失敗 → DOM renderer にフォールバック:', err);
@@ -105,6 +123,10 @@ export function useXtermInstance(
     return () => {
       webglRef.current?.dispose();
       webglRef.current = null;
+      if (webglOwned) {
+        webglOwned = false;
+        activeWebglCount = Math.max(0, activeWebglCount - 1);
+      }
       term.dispose();
       termRef.current = null;
       fitRef.current = null;
