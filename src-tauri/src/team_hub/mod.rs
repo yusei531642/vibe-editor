@@ -415,6 +415,10 @@ impl TeamHub {
         state.bridge_path = bridge_path;
 
         // TCP listen
+        // Issue #141 (Security): TCP loopback は同マシン同ユーザの他プロセスから接続可能。
+        // 真の解決は UDS / Named Pipe + ACL 移行 (大規模変更のため別 issue で追跡) だが、
+        // 暫定で peer addr を accept 後に明示 check し、127.0.0.1 以外は即 drop する。
+        // (本来は loopback bind 時点で他からは届かないが、defense-in-depth として明示する)
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let local = listener.local_addr()?;
         state.port = local.port();
@@ -426,13 +430,24 @@ impl TeamHub {
         let hub = self.clone();
         tokio::spawn(async move {
             loop {
-                let (sock, _) = match listener.accept().await {
+                let (sock, peer) = match listener.accept().await {
                     Ok(s) => s,
                     Err(e) => {
                         tracing::warn!("teamhub accept failed: {e}");
                         continue;
                     }
                 };
+                // Issue #141: peer が loopback (127.0.0.1 / ::1) でなければ即切断。
+                // bind が 127.0.0.1 なので普通は届かないが、二重防御として明示。
+                let is_loopback = match peer.ip() {
+                    std::net::IpAddr::V4(v4) => v4.is_loopback(),
+                    std::net::IpAddr::V6(v6) => v6.is_loopback(),
+                };
+                if !is_loopback {
+                    tracing::warn!("[teamhub] rejecting non-loopback peer {peer}");
+                    drop(sock);
+                    continue;
+                }
                 // 空きを待たず try_acquire。枠が無ければ接続を即 close して攻撃耐性を上げる。
                 let permit = match sem.clone().try_acquire_owned() {
                     Ok(p) => p,
