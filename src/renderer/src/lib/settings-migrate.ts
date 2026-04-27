@@ -89,6 +89,19 @@ export function migrateSettings(raw: unknown): AppSettings {
     }
   }
 
+  // --- Version 3 → 4: terminalFontFamily の fallback chain 強化 ---
+  // Canvas モード DOM renderer で Block Elements / Box Drawing が描けず
+  // Anthropic ロゴ ASCII art が ▓ / □ に化ける問題を fix。旧 default 値を
+  // そのまま使っているユーザーだけ新 default に置き換え、ユーザーが UI 等で
+  // 明示的に変えていた場合は尊重する。
+  if (version < 4) {
+    const OLD_TERMINAL_FONT_DEFAULT_V3 =
+      "'JetBrains Mono Variable', 'Geist Mono Variable', 'Cascadia Code', 'Consolas', monospace";
+    if (data.terminalFontFamily === OLD_TERMINAL_FONT_DEFAULT_V3) {
+      data.terminalFontFamily = DEFAULT_SETTINGS.terminalFontFamily;
+    }
+  }
+
   data.schemaVersion = APP_SETTINGS_SCHEMA_VERSION;
   // 最終マージで欠損フィールドを DEFAULT_SETTINGS で埋める
   return { ...DEFAULT_SETTINGS, ...data } as AppSettings;
