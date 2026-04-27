@@ -45,6 +45,7 @@ import { useT } from '../lib/i18n';
 import { useUiStore } from '../stores/ui';
 import { useCanvasStore } from '../stores/canvas';
 import {
+  BUILTIN_PRESETS,
   DEFAULT_SPAWN_PRESET,
   presetPosition,
   type WorkspacePreset
@@ -70,10 +71,31 @@ function formatAgentCount(count: number, language: Language): string {
   return language === 'ja' ? `${count} エージェント` : `${count} agents`;
 }
 
+function formatPresetAgents(preset: WorkspacePreset): string {
+  const agents = Array.from(new Set(preset.members.map((member) => member.agent)));
+  return agents
+    .map((agent) => {
+      if (agent === 'claude') return 'Claude';
+      if (agent === 'codex') return 'Codex';
+      return agent;
+    })
+    .join(' / ');
+}
+
 function mergeCanvasMembers(
-  currentMembers: { role: TeamRole; agent: TerminalAgent }[],
+  currentMembers: {
+    role: TeamRole;
+    agent: TerminalAgent;
+    /** Canvas 上で検出済みの最新 session id (payload.resumeSessionId)。あれば最優先。 */
+    sessionId?: string | null;
+    /** ユーザーが手動でリネームしたタブ名 (node.data.title)。 */
+    customLabel?: string | null;
+  }[],
   existingEntry?: TeamHistoryEntry
 ): TeamHistoryEntry['members'] {
+  // 既存 history は同じ {role, agent} キーで FIFO に session を割り当てる。
+  // Canvas 上の payload に sessionId があればそれを最優先する (= claude_watcher が
+  // 出力 jsonl から検出して setCardPayload で書き戻した最新値)。
   const sessionQueues = new Map<string, Array<string | null>>();
   for (const member of existingEntry?.members ?? []) {
     const key = `${member.role}:${member.agent}`;
@@ -85,8 +107,15 @@ function mergeCanvasMembers(
   return currentMembers.map((member) => {
     const key = `${member.role}:${member.agent}`;
     const queue = sessionQueues.get(key);
-    const sessionId = queue && queue.length > 0 ? queue.shift() ?? null : null;
-    return { ...member, sessionId };
+    const fromHistory = queue && queue.length > 0 ? queue.shift() ?? null : null;
+    // Canvas 側の値を優先。null/undefined のときだけ history queue にフォールバック。
+    const sessionId = member.sessionId ?? fromHistory;
+    return {
+      role: member.role,
+      agent: member.agent,
+      sessionId,
+      customLabel: member.customLabel ?? null
+    };
   });
 }
 
@@ -95,6 +124,12 @@ function serializeAutoSavePayload(payload: {
     string,
     {
       name: string;
+      members: {
+        role: TeamRole;
+        agent: TerminalAgent;
+        sessionId: string | null;
+        customLabel: string | null;
+      }[];
       canvasNodes: { agentId: string; x: number; y: number; width?: number; height?: number }[];
     }
   >;
@@ -102,8 +137,16 @@ function serializeAutoSavePayload(payload: {
 }): string {
   const parts: string[] = [];
   for (const [teamId, info] of payload.byTeam) {
+    // Phase 3: members の sessionId / customLabel もキーに含める。
+    //   旧実装は position と dimension しか見ておらず、claude_watcher が後から
+    //   resumeSessionId を payload に書き込んでも auto-save がトリガーされず、
+    //   team-history.json に session_id が永久に書かれない欠陥があった。
+    const memberKey = info.members
+      .map((m) => `${m.role}:${m.agent}:${m.sessionId ?? ''}:${m.customLabel ?? ''}`)
+      .sort()
+      .join(',');
     parts.push(
-      `${teamId}|${info.name}|` +
+      `${teamId}|${info.name}|${memberKey}|` +
         info.canvasNodes
           .map((c) => `${c.agentId}@${c.x},${c.y}:${c.width}x${c.height}`)
           .sort()
@@ -153,6 +196,17 @@ export function CanvasLayout(): JSX.Element {
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const availableUpdate = useUiStore((s) => s.availableUpdate);
+  const setCanvasMenuBarSlot = useUiStore((s) => s.setCanvasMenuBarSlot);
+  // canvas-header に App.tsx の MenuBar を portal 経由で描画させる slot。
+  // mount/unmount で店舗の参照を更新し、IDE モード復帰時は明示的に null を流して
+  // App.tsx 側が portal を畳み Topbar 描画に戻すようにする。
+  const menuBarSlotRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    setCanvasMenuBarSlot(menuBarSlotRef.current);
+    return () => {
+      setCanvasMenuBarSlot(null);
+    };
+  }, [setCanvasMenuBarSlot]);
   const { showToast, dismissToast } = useToast();
   const [spawnOpen, setSpawnOpen] = useState(false);
   const [addCardOpen, setAddCardOpen] = useState(false);
@@ -306,16 +360,34 @@ export function CanvasLayout(): JSX.Element {
   recentRef.current = recent;
   const autoSavePayload = useMemo(() => {
     if (nodes.length === 0) return null;
-    interface TeamEntryInfo { name: string; members: { role: TeamRole; agent: TerminalAgent }[]; canvasNodes: { agentId: string; x: number; y: number; width?: number; height?: number }[]; }
+    interface CanvasMember {
+      role: TeamRole;
+      agent: TerminalAgent;
+      /** payload.resumeSessionId — claude_watcher が検出した最新値 */
+      sessionId: string | null;
+      /** node.data.title (ユーザーがリネームしたタブ名)。 */
+      customLabel: string | null;
+    }
+    interface TeamEntryInfo { name: string; members: CanvasMember[]; canvasNodes: { agentId: string; x: number; y: number; width?: number; height?: number }[]; }
     const byTeam = new Map<string, TeamEntryInfo>();
     for (const n of nodes) {
-      const p = (n.data?.payload ?? {}) as { teamId?: string; agentId?: string; role?: string; agent?: string };
+      const p = (n.data?.payload ?? {}) as {
+        teamId?: string;
+        agentId?: string;
+        role?: string;
+        agent?: string;
+        resumeSessionId?: string | null;
+      };
       if (!p.teamId || !p.agentId) continue;
       const title = String(n.data?.title ?? 'Team');
       const entry = byTeam.get(p.teamId) ?? { name: title, members: [], canvasNodes: [] };
       entry.members.push({
         role: (p.role ?? 'leader') as TeamRole,
-        agent: (p.agent ?? 'claude') as TerminalAgent
+        agent: (p.agent ?? 'claude') as TerminalAgent,
+        // Phase 3: 検出済みの最新 sessionId を team-history に流し込み、× で閉じても
+        //   resume できるようにする。null のときは mergeCanvasMembers が既存 history から拾う。
+        sessionId: p.resumeSessionId ?? null,
+        customLabel: title
       });
       entry.canvasNodes.push({
         agentId: p.agentId,
@@ -512,14 +584,19 @@ export function CanvasLayout(): JSX.Element {
       const label = ROLE_META[m.role]?.label ?? m.role ?? 'Agent';
       return {
         type: 'agent' as const,
-        title: label,
+        // ユーザーが手動リネームしたタブ名を復元
+        title: m.customLabel ?? label,
         position: pos,
         payload: {
           agent: m.agent,
           role: m.role,
           teamId: entry.id,
           agentId,
-          cwd
+          cwd,
+          // ★ Bug fix: team-history.json の sessionId を payload に流して
+          //   AgentNodeCard が `claude --resume <id>` で起動するようにする。
+          //   旧実装はこのキーを忘れていたため、履歴復元しても常に新規セッションになっていた。
+          resumeSessionId: m.sessionId ?? undefined
         }
       };
     });
@@ -603,6 +680,9 @@ export function CanvasLayout(): JSX.Element {
           <MonitorSmartphone size={14} strokeWidth={1.75} />
           Canvas
         </span>
+        {/* App.tsx の MenuBar (ファイル / 表示 / ヘルプ) はここに portal される。
+            IDE モードでは App 側の Topbar に表示される。 */}
+        <div ref={menuBarSlotRef} className="canvas-header__menubar-slot" />
         <span className="canvas-header__count">{formatCardCount(cardCount, settings.language)}</span>
         <div className="canvas-header__spacer" />
 
@@ -686,46 +766,36 @@ export function CanvasLayout(): JSX.Element {
               </div>
               {tab === 'preset' && (
                 <>
-                  <button
-                    type="button"
-                    className="canvas-popover__item canvas-popover__item--emph"
-                    onClick={() => {
-                      setSpawnOpen(false);
-                      setTeamModalOpen(true);
-                    }}
-                  >
-                    <Plus size={13} />
-                    {t('canvas.customTeam')}
-                  </button>
-                  {(settings.teamPresets ?? []).length > 0 && (
-                    <div className="canvas-popover__section">{t('canvas.savedPresets')}</div>
-                  )}
-                  {(settings.teamPresets ?? []).map((sp) => (
-                    <SavedPresetItem
-                      key={sp.id}
-                      preset={sp}
-                      agentCountLabel={formatAgentCount(sp.members.length, settings.language)}
-                      deleteLabel={t('canvas.deletePreset')}
+                  {/* Builtin プリセットを表示。
+                      - Leader のみ (Claude / Codex)
+                      - Leader + HR (Claude / Codex)
+                      旧「カスタムチームを作成」と保存済み preset は撤去 (機能は要望時に復活させる)。 */}
+                  {BUILTIN_PRESETS.map((bp) => (
+                    <button
+                      key={bp.id}
+                      type="button"
+                      className="canvas-popover__preset"
                       onClick={() => {
-                        const leaderM = sp.members.find((m) => m.role === 'leader');
-                        const others = sp.members.filter((m) => m.role !== 'leader');
-                        void handleCreateCustomTeam(
-                          sp.name,
-                          { agent: leaderM?.agent ?? 'claude' },
-                          others
-                        );
                         setSpawnOpen(false);
+                        void applyPreset(bp);
                       }}
-                      onDelete={() => {
-                        if (
-                          window.confirm(
-                            t('canvas.deletePresetConfirm', { name: sp.name })
-                          )
-                        ) {
-                          handleDeleteTeamPreset(sp.id);
-                        }
-                      }}
-                    />
+                    >
+                      <div className="canvas-popover__preset-title-row">
+                        <span className="canvas-popover__preset-title">{bp.name}</span>
+                        <span className="canvas-popover__preset-sub">
+                          {formatAgentCount(bp.members.length, settings.language)}
+                        </span>
+                        <span className="canvas-popover__preset-sub">
+                          {formatPresetAgents(bp)}
+                        </span>
+                      </div>
+                      <div className="canvas-popover__preset-desc">{bp.description}</div>
+                      <div className="canvas-popover__preset-roles">
+                        {bp.members.map((m, i) => (
+                          <RoleDot key={`${m.role}-${m.agent}-${i}`} role={m.role} agent={m.agent} />
+                        ))}
+                      </div>
+                    </button>
                   ))}
                 </>
               )}
@@ -756,8 +826,9 @@ export function CanvasLayout(): JSX.Element {
           <button
             type="button"
             className="canvas-btn canvas-btn--ghost"
-            onClick={() => {
-              if (window.confirm(t('canvas.clearConfirm'))) clear();
+            onClick={async () => {
+              const { confirmAsync } = await import('../lib/tauri-api');
+              if (await confirmAsync(t('canvas.clearConfirm'))) clear();
             }}
           >
             {t('canvas.clear')}

@@ -4,6 +4,7 @@ import {
   Bot,
   Check,
   Code2,
+  FileText,
   Palette,
   Plug,
   Plus,
@@ -27,9 +28,11 @@ import { FontFamilySection } from './settings/FontFamilySection';
 import { TerminalSection } from './settings/TerminalSection';
 import { RoleProfilesSection } from './settings/RoleProfilesSection';
 import { DensitySection } from './settings/DensitySection';
+import { CloseBehaviorSection } from './settings/CloseBehaviorSection';
 import { CommandOptionsSection } from './settings/CommandOptionsSection';
 import { CustomAgentEditor } from './settings/CustomAgentEditor';
 import { McpSection } from './settings/McpSection';
+import { LogsSection } from './settings/LogsSection';
 
 interface SettingsModalProps {
   open: boolean;
@@ -48,7 +51,7 @@ interface SettingsModalProps {
 
 /**
  * SectionId はカスタムエージェント対応のため動的な文字列。
- * 固定セクション: 'general' | 'appearance' | 'fonts' | 'claude' | 'codex' | 'mcp'
+ * 固定セクション: 'general' | 'appearance' | 'fonts' | 'logs' | 'claude' | 'codex' | 'mcp'
  * カスタムエージェント: `custom:${agentId}`
  */
 type SectionId = string;
@@ -69,6 +72,7 @@ const SECTION_ICON_TYPES: Record<string, LucideIcon> = {
   general: SettingsIcon,
   appearance: Palette,
   fonts: Type,
+  logs: FileText,
   claude: Bot,
   codex: Code2,
   roles: Users,
@@ -89,6 +93,7 @@ const FIXED_LABELS_JA: Record<string, FixedLabelEntry> = {
   general: { label: '一般', title: '一般', desc: '言語と密度設定' },
   appearance: { label: '表示', title: '表示', desc: 'テーマと配色' },
   fonts: { label: 'フォント', title: 'フォント', desc: 'UI / エディタ / ターミナルのフォント' },
+  logs: { label: 'ログ', title: 'ログ', desc: '起動エラーと内部ログ' },
   claude: { label: 'Claude Code', title: 'Claude Code', desc: '起動コマンドと引数' },
   codex: { label: 'Codex', title: 'Codex', desc: '起動コマンドと引数' },
   roles: { label: 'ロール定義', title: 'ロール定義', desc: 'チームメンバーの役割テンプレ' },
@@ -98,6 +103,7 @@ const FIXED_LABELS_EN: Record<string, FixedLabelEntry> = {
   general: { label: 'General', title: 'General', desc: 'Language and density' },
   appearance: { label: 'Appearance', title: 'Appearance', desc: 'Theme and surfaces' },
   fonts: { label: 'Fonts', title: 'Typography', desc: 'UI / editor / terminal fonts' },
+  logs: { label: 'Logs', title: 'Logs', desc: 'Startup errors and internal logs' },
   claude: { label: 'Claude Code', title: 'Claude Code', desc: 'Launch command and args' },
   codex: { label: 'Codex', title: 'Codex', desc: 'Launch command and args' },
   roles: { label: 'Role profiles', title: 'Role profiles', desc: 'Team member role templates' },
@@ -297,7 +303,7 @@ export function SettingsModal({
     () => {
       const agents = draft.customAgents ?? [];
       return [
-        { label: null, items: ['general', 'appearance', 'fonts'] },
+        { label: null, items: ['general', 'appearance', 'fonts', 'logs'] },
         {
           label: isJa ? 'エージェント' : 'Agents',
           items: [
@@ -396,6 +402,7 @@ export function SettingsModal({
           <>
             <LanguageSection draft={draft} update={update} />
             <DensitySection draft={draft} update={update} />
+            <CloseBehaviorSection draft={draft} update={update} />
             {onReplayOnboarding && (
               <div className="settings-shell__replay">
                 <button
@@ -436,6 +443,8 @@ export function SettingsModal({
             <TerminalSection draft={draft} update={update} />
           </>
         );
+      case 'logs':
+        return <LogsSection language={draft.language} />;
       case 'claude':
         return (
           <CommandOptionsSection

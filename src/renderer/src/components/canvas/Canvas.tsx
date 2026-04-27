@@ -65,12 +65,7 @@ function FlowApp(): JSX.Element {
   // ユーザー操作 (× / 右クリック / Delete) からの削除はチーム全員カスケード前に確認を挟む。
   const confirmRemoveCard = useConfirmRemoveCard();
   const pulseEdge = useCanvasStore((s) => s.pulseEdge);
-  const setTeamLock = useCanvasStore((s) => s.setTeamLock);
-  // 個別の getter は store から都度引く (selector は使わない: teamLocks 全体購読すると
-  // ロック切替で全カード再レンダーになるため、必要時に getState で参照する)。
-  const isTeamLocked = useCallback((teamId: string): boolean => {
-    return useCanvasStore.getState().isTeamLocked(teamId);
-  }, []);
+  const autoArrangeTeam = useCanvasStore((s) => s.autoArrangeTeam);
 
   const onNodesChange = useCallback(
     (changes: NodeChange<Node<CardData>>[]) => {
@@ -85,104 +80,12 @@ function FlowApp(): JSX.Element {
         : changes;
       if (remaining.length === 0) return;
 
-      // Issue #196: 旧実装は変更ごとに `nodes.find` + `for (other of nodes)` + 内側 `remaining.some(...)`
-      // で O(N×M) になっており、6 人チーム × 4 種カード = 24 ノード規模で 1 px ドラッグごとに
-      // 数百ステップ走り 16ms フレーム予算を超えやすかった。
-      //
-      // 修正: 1 フレームに 1 度だけインデックスを構築し、内部ループを O(チームサイズ) + O(1) に落とす。
-      //   - nodesById: id → Node のマップ (旧 nodes.find = O(N))
-      //   - teamMembers: teamId → Node[] のマップ (旧 nodes 全走査をチーム単位に絞る)
-      //   - pendingPosIds / pendingDimIds: remaining 内に既存の position/dimensions 変更がある id の Set
-      //     (旧 remaining.some 二重ループを Set.has の O(1) に置換)
-      //   - lockedTeams: teamId → boolean のキャッシュ (isTeamLocked の重複呼び出しを削減)
-      // payload は CardData 内で複数のサブ型を持つため { teamId?: string } で局所キャストする。
-      // 同じキャストが index 構築 + position/dimensions 分岐で計 3 回走るので helper に集約。
-      const teamIdOf = (n: Node<CardData>): string | undefined =>
-        (n.data?.payload as { teamId?: string } | undefined)?.teamId;
-      const nodesById = new Map<string, Node<CardData>>();
-      const teamMembers = new Map<string, Node<CardData>[]>();
-      for (const n of nodes) {
-        nodesById.set(n.id, n);
-        const tid = teamIdOf(n);
-        if (tid) {
-          let bucket = teamMembers.get(tid);
-          if (!bucket) {
-            bucket = [];
-            teamMembers.set(tid, bucket);
-          }
-          bucket.push(n);
-        }
-      }
-      const pendingPosIds = new Set<string>();
-      const pendingDimIds = new Set<string>();
-      for (const c of remaining) {
-        if (c.type === 'position' && 'id' in c) pendingPosIds.add(c.id);
-        else if (c.type === 'dimensions' && 'id' in c) pendingDimIds.add(c.id);
-      }
-      const lockedTeams = new Map<string, boolean>();
-      const isLocked = (tid: string): boolean => {
-        const cached = lockedTeams.get(tid);
-        if (cached !== undefined) return cached;
-        const v = isTeamLocked(tid);
-        lockedTeams.set(tid, v);
-        return v;
-      };
-
-      // ----- チーム同期ドラッグ + 同期リサイズ -----
-      const extra: NodeChange<Node<CardData>>[] = [];
-      for (const c of remaining) {
-        // 位置同期 (ドラッグ): delta を全員に伝える
-        if (c.type === 'position' && c.position) {
-          const node = nodesById.get(c.id);
-          if (!node) continue;
-          const teamId = teamIdOf(node);
-          if (!teamId || !isLocked(teamId)) continue;
-          const dx = c.position.x - node.position.x;
-          const dy = c.position.y - node.position.y;
-          if (dx === 0 && dy === 0) continue;
-          const members = teamMembers.get(teamId);
-          if (!members) continue;
-          for (const other of members) {
-            if (other.id === node.id) continue;
-            if (pendingPosIds.has(other.id)) continue;
-            extra.push({
-              id: other.id,
-              type: 'position',
-              position: { x: other.position.x + dx, y: other.position.y + dy },
-              dragging: c.dragging
-            });
-          }
-          continue;
-        }
-        // サイズ同期 (NodeResizer): リサイズ後のサイズに全員揃える
-        if (c.type === 'dimensions' && c.dimensions && c.resizing) {
-          const node = nodesById.get(c.id);
-          if (!node) continue;
-          const teamId = teamIdOf(node);
-          if (!teamId || !isLocked(teamId)) continue;
-          const w = c.dimensions.width;
-          const h = c.dimensions.height;
-          const members = teamMembers.get(teamId);
-          if (!members) continue;
-          for (const other of members) {
-            if (other.id === node.id) continue;
-            if (pendingDimIds.has(other.id)) continue;
-            extra.push({
-              id: other.id,
-              type: 'dimensions',
-              dimensions: { width: w, height: h },
-              resizing: c.resizing,
-              setAttributes: true
-            });
-          }
-          continue;
-        }
-      }
-
-      const allChanges = extra.length > 0 ? [...remaining, ...extra] : remaining;
-      setNodes(applyNodeChanges(allChanges, nodes));
+      // 旧「チーム固定 (teamLocks)」機能で行っていた同期ドラッグ/同期リサイズは廃止。
+      // 「間違って動かす」混乱の主因だったため、各カードは常に独立して動く。
+      // チームを揃えたい場合は右クリック → 自動整理 (autoArrangeTeam) を使う。
+      setNodes(applyNodeChanges(remaining, nodes));
     },
-    [nodes, setNodes, confirmRemoveCard, isTeamLocked]
+    [nodes, setNodes, confirmRemoveCard]
   );
   const onEdgesChange = useCallback(
     (changes: EdgeChange<Edge>[]) => setEdges(applyEdgeChanges(changes, edges)),
@@ -217,10 +120,11 @@ function FlowApp(): JSX.Element {
       const teamId = (node.data?.payload as { teamId?: string } | undefined)?.teamId;
       const items: ContextMenuItem[] = [];
       if (teamId) {
-        const locked = isTeamLocked(teamId);
+        // チーム所属カードでは「自動整理」を最上段に置く。
+        // Leader 直下の 3 列グリッドにメンバーを並べ直す (Leader 自身は動かない)。
         items.push({
-          label: locked ? t('canvasMenu.unlockTeam') : t('canvasMenu.lockTeam'),
-          action: () => setTeamLock(teamId, !locked),
+          label: t('canvasMenu.autoArrangeTeam'),
+          action: () => autoArrangeTeam(teamId),
           divider: true
         });
       }
@@ -230,7 +134,7 @@ function FlowApp(): JSX.Element {
       });
       setContextMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [isTeamLocked, confirmRemoveCard, setTeamLock, t]
+    [autoArrangeTeam, confirmRemoveCard, t]
   );
 
   // 空のキャンバス (Pane) で右クリックされたとき: 「ここに Claude を追加」を出す。

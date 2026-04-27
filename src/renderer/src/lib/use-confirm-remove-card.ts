@@ -10,34 +10,38 @@
 import { useCallback } from 'react';
 import { useCanvasStore } from '../stores/canvas';
 import { useT } from './i18n';
+import { confirmAsync } from './tauri-api';
 
 export function useConfirmRemoveCard(): (id: string) => void {
   const t = useT();
   return useCallback(
     (id: string) => {
-      const state = useCanvasStore.getState();
-      const target = state.nodes.find((n) => n.id === id);
-      const teamId = (target?.data?.payload as { teamId?: string } | undefined)?.teamId;
-      if (teamId) {
-        const teamMembers = state.nodes.filter((n) => {
-          const tid = (n.data?.payload as { teamId?: string } | undefined)?.teamId;
-          return tid === teamId;
-        });
-        if (teamMembers.length > 1) {
-          // チーム名は payload.teamName / data.title から拾う (どちらかが入っていれば良い)。
-          const teamName =
-            (target?.data?.payload as { teamName?: string } | undefined)?.teamName ??
-            teamId;
-          const ok = window.confirm(
-            t('agentCard.confirmCloseTeam', {
-              count: teamMembers.length,
-              name: teamName
-            })
-          );
-          if (!ok) return;
+      // Tauri WebView は window.confirm() を直接使えない (`dialog.confirm not allowed`)。
+      // confirmAsync はネイティブ ask ダイアログを async で出すため、IIFE で包んで
+      // 呼び出し側 (右クリック / × / Delete キー) は引き続き同期的に呼べるように見せる。
+      void (async () => {
+        const state = useCanvasStore.getState();
+        const target = state.nodes.find((n) => n.id === id);
+        const teamId = (target?.data?.payload as { teamId?: string } | undefined)?.teamId;
+        if (teamId) {
+          const teamMembers = state.nodes.filter((n) => {
+            const tid = (n.data?.payload as { teamId?: string } | undefined)?.teamId;
+            return tid === teamId;
+          });
+          if (teamMembers.length > 1) {
+            const teamName =
+              (target?.data?.payload as { teamName?: string } | undefined)?.teamName ?? teamId;
+            const ok = await confirmAsync(
+              t('agentCard.confirmCloseTeam', {
+                count: teamMembers.length,
+                name: teamName
+              })
+            );
+            if (!ok) return;
+          }
         }
-      }
-      state.removeCard(id);
+        state.removeCard(id);
+      })();
     },
     [t]
   );

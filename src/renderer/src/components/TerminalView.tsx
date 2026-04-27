@@ -35,6 +35,8 @@ interface TerminalViewProps {
   visible: boolean;
   /** 起動後に自動送信するメッセージ（配列なら順番に送信） */
   initialMessage?: string | string[];
+  /** 複数端末を一括起動するとき、spawn を少しずらすための遅延 */
+  spawnDelayMs?: number;
   /** TeamHub 用のエージェント識別子 */
   agentId?: string;
   /** TeamHub のメッセージ注入時に from として表示されるロール */
@@ -80,6 +82,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       teamId,
       visible,
       initialMessage,
+      spawnDelayMs,
       agentId,
       role,
       codexInstructions,
@@ -162,7 +165,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       callbacksRef,
       ptyIdRef,
       disposedRef,
-      observeChunk
+      observeChunk,
+      spawnDelayMs
     });
 
     // --- Ctrl+C / Ctrl+V / 画像ペースト (不変式 #4) ---

@@ -31,8 +31,16 @@ const AGENT_ID = process.env.VIBE_AGENT_ID || '';
 // するのではなく、initialize を明示的にエラーで返すことで Claude / Codex が
 // vibe-team MCP を「失敗サーバ」として認識できるようにする (ユーザーが気付きやすい)。
 const MISSING_HUB_ENV = !SOCKET || !TOKEN;
+// vibe-team は team mode 専用。team_id / agent_id / role が空のまま hub に handshake すると
+// 必ず弾かれて 300ms ごとの reconnect ループ (handshake rejected: empty field のスパム) に
+// なるため、env が揃っていない場合は接続を試行せず localFallback に倒す。
+// これは「単独 Claude (チーム所属でない agent) でも MCP 設定だけは有効」な状態で起きる。
+const MISSING_TEAM_CTX = !TEAM_ID || !AGENT_ID || !ROLE || ROLE === 'unknown';
+const HUB_DISABLED = MISSING_HUB_ENV || MISSING_TEAM_CTX;
 if (MISSING_HUB_ENV) {
   process.stderr.write('[team-bridge] missing VIBE_TEAM_SOCKET or VIBE_TEAM_TOKEN — team tools disabled\n');
+} else if (MISSING_TEAM_CTX) {
+  process.stderr.write('[team-bridge] no team context (VIBE_TEAM_ID / VIBE_AGENT_ID / VIBE_TEAM_ROLE missing) — team tools disabled for this agent\n');
 }
 
 function resolveConnectionTarget(raw) {
@@ -134,7 +142,7 @@ function connect() {
   socket.on('error', () => { /* onClose で処理 */ });
 }
 
-if (!MISSING_HUB_ENV) connect();
+if (!HUB_DISABLED) connect();
 
 let stdinBuf = '';
 process.stdin.setEncoding('utf-8');
@@ -152,7 +160,7 @@ process.stdin.on('data', (chunk) => {
     //   3) それ以外の未接続: connect 中 → pendingOut に積み、connect 後に flush
     // 旧実装は (3) でも localFallback を呼んでいたため、initialize が null 応答 →
     // クライアントが応答待ちで詰まる、または成功扱いされてしまう問題があった。
-    if (MISSING_HUB_ENV || givenUp) {
+    if (HUB_DISABLED || givenUp) {
       try {
         const req = JSON.parse(line);
         const resp = localFallback(req);
@@ -182,7 +190,9 @@ function localFallback(req) {
   const { method, id } = req;
   const reason = MISSING_HUB_ENV
     ? 'vibe-team bridge is not configured (VIBE_TEAM_SOCKET / VIBE_TEAM_TOKEN missing)'
-    : 'vibe-team hub is unreachable (gave up reconnecting)';
+    : MISSING_TEAM_CTX
+      ? 'vibe-team is disabled for this agent (no team context)'
+      : 'vibe-team hub is unreachable (gave up reconnecting)';
   if (id !== undefined && id !== null) {
     return {
       jsonrpc: '2.0', id,

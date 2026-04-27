@@ -3400,6 +3400,7 @@ body.is-resizing * {
   display: flex;
   flex-direction: column;
   height: 100%;
+  min-height: 0;
   font-size: 12.5px;
 }
 
@@ -3540,8 +3541,10 @@ body.is-resizing * {
 
 .filetree__body {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  overflow-y: scroll;
   padding-bottom: 12px;
+  scrollbar-gutter: stable;
 }
 
 .filetree__body::-webkit-scrollbar {
@@ -4318,3 +4321,76 @@ body.is-resizing * {
 
 /* GFM タスクリスト用のクラスが付くこともあるので一応 */
 .md-preview .task-list-item { list-style: none; margin-left: -1.4em; }
+
+/* ---------- Top-level error boundary fallback ----------
+ * main.tsx の TopLevelErrorBoundary が渡すフォールバック UI のスタイル。
+ * 内側で起きた React レンダリング例外をキャッチし、最低限ユーザーが
+ * 「再読み込み / 続ける」を選択できるパネルを出す。 */
+.vibe-error-fallback {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: var(--bg, #14110f);
+  color: var(--text, #f8f8f6);
+  font-family: var(--ui-font, system-ui, sans-serif);
+}
+.vibe-error-fallback__card {
+  width: min(560px, calc(100vw - 48px));
+  padding: 28px 32px;
+  background: var(--bg-panel, #1f1e1d);
+  border: 1px solid var(--border, rgba(248, 248, 246, 0.12));
+  border-radius: 12px;
+}
+.vibe-error-fallback__card h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+  font-weight: 500;
+  color: var(--text, #f8f8f6);
+}
+.vibe-error-fallback__card pre {
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  font-family: var(--mono-font, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim, #c3c2b7);
+  background: color-mix(in srgb, var(--accent, #d97757) 6%, transparent);
+  border: 1px solid var(--border, rgba(248, 248, 246, 0.12));
+  border-radius: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+}
+.vibe-error-fallback__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.vibe-error-fallback__actions button {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border, rgba(248, 248, 246, 0.12));
+  background: transparent;
+  color: var(--text-dim, #c3c2b7);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.vibe-error-fallback__actions button:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.04));
+  color: var(--text, #f8f8f6);
+}
+.vibe-error-fallback__actions .vibe-error-fallback__primary {
+  background: var(--accent, #d97757);
+  border-color: var(--accent, #d97757);
+  color: #fff;
+}
+.vibe-error-fallback__actions .vibe-error-fallback__primary:hover {
+  filter: brightness(0.96);
+  background: var(--accent, #d97757);
+  color: #fff;
+}

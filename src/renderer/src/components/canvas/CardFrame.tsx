@@ -69,8 +69,15 @@ export function CardFrame({ id, title, accent, children }: CardFrameProps): JSX.
         </span>
         <button
           type="button"
-          className="nodrag"
-          onClick={() => confirmRemoveCard(id)}
+          className="nodrag nopan"
+          // React Flow がカード選択で 1 回目の click を消費し、× を 2 回押さないと
+          // 閉じない事故を防ぐため、pointerdown / mousedown を含めて propagation を止める。
+          onPointerDown={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            confirmRemoveCard(id);
+          }}
           style={{
             // 旧 padding 2/6 + font 14 は押しにくかったので 28x28 のヒット領域に拡大
             width: 28,

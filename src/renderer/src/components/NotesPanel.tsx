@@ -69,9 +69,10 @@ export function NotesPanel(): JSX.Element {
     }
   };
 
-  const onClear = (): void => {
+  const onClear = async (): Promise<void> => {
     if (draft.length === 0) return;
-    if (!window.confirm(t('notes.confirmClear'))) return;
+    const { confirmAsync } = await import('../lib/tauri-api');
+    if (!(await confirmAsync(t('notes.confirmClear')))) return;
     onChange('');
   };
 

@@ -1,6 +1,11 @@
 /* =========================================================================
-   Onboarding Wizard — Claude.ai ネイティブ風初回セットアップ
+   Onboarding Wizard — Editorial / Claude.ai 公式風
+   .claude/skills/claude-design 準拠 (warm off-white, hairline border, no shadow,
+   single accent, breathing space)。旧版の dot grid + radial glow は撤去し、
+   "editorial spread" を意識したクワイエットな余白勝負レイアウトに置き換え。
    ========================================================================= */
+
+/* ---------- 全画面 backdrop ---------- */
 
 .onboarding {
   position: fixed;
@@ -8,122 +13,110 @@
   z-index: 9000;
   display: grid;
   place-items: center;
-  padding: 32px;
-  background:
-    radial-gradient(
-      circle at 18% 12%,
-      color-mix(in srgb, var(--accent) 14%, transparent) 0%,
-      transparent 46%
-    ),
-    radial-gradient(
-      circle at 88% 92%,
-      color-mix(in srgb, var(--accent) 8%, transparent) 0%,
-      transparent 52%
-    ),
-    var(--bg);
+  padding: 48px 32px;
+  background: var(--bg);
+  /* 左上にだけ非常に薄い brand glow を置いて空気感を出す。
+     旧版 (radial 14% + 8%) は装飾過多だったので 6% 単発に絞る。 */
+  background-image: radial-gradient(
+    ellipse 70% 60% at 18% 8%,
+    color-mix(in srgb, var(--accent) 6%, transparent) 0%,
+    transparent 60%
+  );
   opacity: 0;
-  transition: opacity 260ms var(--ease-out-soft, ease-out);
+  transition: opacity 220ms cubic-bezier(0.4, 0, 0.2, 1);
   isolation: isolate;
 }
 
-.onboarding[data-state='opening'] {
-  opacity: 0;
-}
-.onboarding[data-state='open'] {
-  opacity: 1;
-}
-.onboarding[data-state='closing'] {
-  opacity: 0;
-}
-
-/* 微細なドットグリッドをノイズ代わりに敷く — Claude.ai 系の温度感を出す */
-.onboarding::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background-image: radial-gradient(
-    circle,
-    color-mix(in srgb, var(--text) 6%, transparent) 1px,
-    transparent 1.5px
-  );
-  background-size: 24px 24px;
-  opacity: 0.35;
-  mask-image: radial-gradient(ellipse at center, #000 20%, transparent 75%);
-  -webkit-mask-image: radial-gradient(ellipse at center, #000 20%, transparent 75%);
-}
+.onboarding[data-state='opening'] { opacity: 0; }
+.onboarding[data-state='open']    { opacity: 1; }
+.onboarding[data-state='closing'] { opacity: 0; }
 
 /* ---------- カード ---------- */
 
 .onboarding__card {
   position: relative;
   z-index: 1;
-  width: min(640px, calc(100vw - 48px));
-  max-height: calc(100vh - 48px);
+  width: min(680px, calc(100vw - 48px));
+  max-height: calc(100vh - 96px);
   overflow-y: auto;
-  padding: 44px 56px 28px;
+  padding: 56px 64px 32px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg, 16px);
-  box-shadow:
-    0 24px 80px rgba(0, 0, 0, 0.32),
-    0 0 0 1px var(--border) inset;
-  transform: translateY(8px) scale(0.985);
+  border-radius: 16px;
+  /* shadow なし — hairline border + 左端 accent stripe のみで階層を表現 */
+  transform: translateY(6px);
   opacity: 0;
   transition:
-    opacity 220ms var(--ease-out-soft, ease-out),
-    transform 280ms var(--ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1));
+    opacity 220ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 240ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .onboarding__card[data-state='open'] {
   opacity: 1;
-  transform: translateY(0) scale(1);
+  transform: translateY(0);
 }
 
-.onboarding__card::-webkit-scrollbar {
-  width: 8px;
+/* 左端の細い brand アクセント (Linear 風) — 全ステップ共通 */
+.onboarding__card::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 24px;
+  bottom: 24px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+  opacity: 0.85;
 }
+
+.onboarding__card::-webkit-scrollbar { width: 8px; }
 .onboarding__card::-webkit-scrollbar-thumb {
   background: var(--border);
   border-radius: 999px;
 }
 
-/* ---------- プログレスインジケータ ---------- */
+/* ---------- Editorial step counter ---------- */
 
 .onboarding__progress {
   display: flex;
-  gap: 6px;
-  justify-content: center;
-  margin-bottom: 24px;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 36px;
+  font-family: var(--ui-font);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  /* Inter の tabular numerals + 等幅 — counter "01 / 04" が揺れない */
+  font-feature-settings: 'tnum', 'lnum', 'cv02', 'cv11', 'ss03';
+  font-variant-numeric: tabular-nums;
 }
 
-.onboarding__progress-pill {
-  display: block;
-  width: 16px;
-  height: 4px;
-  border-radius: 999px;
-  background: var(--border-strong);
-  transition:
-    width 320ms var(--ease-out-soft, ease-out),
-    background-color 240ms var(--ease-out-soft, ease-out),
-    box-shadow 240ms var(--ease-out-soft, ease-out);
+.onboarding__progress-counter {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
 }
 
-.onboarding__progress-pill[data-state='active'] {
-  width: 26px;
-  background: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+.onboarding__progress-counter strong {
+  color: var(--text);
+  font-weight: 600;
 }
 
-.onboarding__progress-pill[data-state='done'] {
-  width: 16px;
-  background: color-mix(in srgb, var(--accent) 72%, transparent);
+.onboarding__progress-rule {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
 }
 
-/* ---------- ステップコンテナ ---------- */
+.onboarding__progress-label {
+  color: var(--text-dim);
+}
+
+/* ---------- ステップトランジション ---------- */
 
 .onboarding__step {
-  animation: onboarding-step-in 320ms var(--ease-out-soft, ease-out);
+  animation: onboarding-step-in 220ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .onboarding__step[data-direction='prev'] {
@@ -131,24 +124,12 @@
 }
 
 @keyframes onboarding-step-in {
-  from {
-    opacity: 0;
-    transform: translateX(14px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+  from { opacity: 0; transform: translateX(8px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
 @keyframes onboarding-step-in-prev {
-  from {
-    opacity: 0;
-    transform: translateX(-14px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
-  }
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
 }
 
 /* ---------- Hero (Welcome / Done) ---------- */
@@ -156,79 +137,93 @@
 .onboarding__hero {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
+  align-items: flex-start;
+  text-align: left;
   padding: 8px 0 4px;
 }
 
 .onboarding__brand {
-  width: 72px;
-  height: 72px;
-  border-radius: 18px;
+  width: 56px;
+  height: 56px;
+  border-radius: 12px;
   display: grid;
   place-items: center;
-  background: var(--accent);
-  color: #fff;
-  margin-bottom: 28px;
-  box-shadow:
-    0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent),
-    0 0 0 14px color-mix(in srgb, var(--accent) 6%, transparent),
-    0 12px 40px color-mix(in srgb, var(--accent) 30%, transparent);
-  animation: onboarding-brand-pulse 3.2s ease-in-out infinite;
+  background: transparent;
+  margin-bottom: 32px;
+  /* 旧 pulse 削除。落ち着いた静止アイコン + わずかな glow のみ */
+  filter: drop-shadow(0 0 16px color-mix(in srgb, var(--accent) 24%, transparent));
 }
 
 .onboarding__brand--image {
   background: transparent;
-  object-fit: cover;
+  object-fit: contain;
   user-select: none;
   -webkit-user-drag: none;
 }
 
-@keyframes onboarding-brand-pulse {
-  0%, 100% {
-    box-shadow:
-      0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent),
-      0 0 0 14px color-mix(in srgb, var(--accent) 6%, transparent),
-      0 12px 40px color-mix(in srgb, var(--accent) 30%, transparent);
-  }
-  50% {
-    box-shadow:
-      0 0 0 8px color-mix(in srgb, var(--accent) 18%, transparent),
-      0 0 0 20px color-mix(in srgb, var(--accent) 8%, transparent),
-      0 16px 48px color-mix(in srgb, var(--accent) 38%, transparent);
-  }
+.onboarding__eyebrow {
+  font-family: var(--ui-font);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-feature-settings: 'cv02', 'cv11', 'ss03';
 }
 
-.onboarding__eyebrow {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-mute);
-  margin-bottom: 12px;
+.onboarding__eyebrow::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
 }
 
 .onboarding__title {
-  font-family:
-    'Source Serif 4', 'Source Serif Pro', 'Noto Serif JP', Georgia, serif;
-  font-size: 30px;
-  font-weight: 400;
-  line-height: 1.25;
+  font-family: var(--font-claude-response);
+  font-size: 40px;
+  /* Source Serif 4 Variable は wght 軸 200-900。Claude.ai 実測の細字 (330) を採用。
+     opsz 軸 (8-60) は font-size に応じて自動 — display 用のヘアライン serif を引き出す。 */
+  font-weight: 330;
+  font-variation-settings: 'opsz' 40, 'wght' 330;
+  font-feature-settings: 'kern', 'liga', 'calt', 'onum', 'pnum';
+  line-height: 1.16;
   color: var(--text);
-  margin: 0 0 14px;
-  letter-spacing: -0.005em;
+  margin: 0 0 16px;
+  letter-spacing: -0.014em;
+  max-width: 18ch;
+  /* JP fallback (Hiragino/Yu Mincho) でも軽さを保つため optical-sizing を auto に */
+  font-optical-sizing: auto;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .onboarding__title--sm {
-  font-size: 24px;
+  font-size: 30px;
+  font-variation-settings: 'opsz' 30, 'wght' 360;
+  font-weight: 360;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
 }
 
 .onboarding__subtitle {
-  font-size: 14.5px;
+  font-family: var(--font-claude-response);
+  font-size: 17px;
+  font-weight: 380;
+  font-variation-settings: 'opsz' 17, 'wght' 380;
+  font-feature-settings: 'kern', 'liga', 'onum';
   line-height: 1.6;
   color: var(--text-dim);
-  margin: 0 auto 28px;
-  max-width: 440px;
+  margin: 0 0 36px;
+  max-width: 52ch;
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
 }
 
 /* ---------- 汎用 body (Appearance / Workspace) ---------- */
@@ -236,30 +231,31 @@
 .onboarding__body {
   display: flex;
   flex-direction: column;
-  gap: 28px;
+  gap: 36px;
   padding: 4px 0 8px;
 }
 
 .onboarding__header {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  text-align: center;
+  align-items: flex-start;
+  text-align: left;
 }
 
 .onboarding__section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
 .onboarding__section-label {
+  font-family: var(--ui-font);
   font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-mute);
-  padding: 0 2px;
+  padding: 0;
 }
 
 /* ---------- 言語トグル ---------- */
@@ -271,148 +267,164 @@
 
 .onboarding__lang-pill {
   flex: 1;
-  padding: 10px 16px;
-  border-radius: 10px;
+  padding: 10px 18px;
+  border-radius: 6px;
   background: transparent;
   border: 1px solid var(--border);
   color: var(--text-dim);
+  font-family: var(--ui-font);
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
+  text-align: left;
   transition:
-    background-color 160ms var(--ease-out-soft, ease-out),
-    border-color 160ms var(--ease-out-soft, ease-out),
-    color 160ms var(--ease-out-soft, ease-out),
-    box-shadow 160ms var(--ease-out-soft, ease-out);
+    background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 150ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .onboarding__lang-pill:hover {
   border-color: var(--border-strong);
   color: var(--text);
+  background: var(--bg-hover);
 }
 
 .onboarding__lang-pill[data-active='true'] {
-  background: var(--bg-active);
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
   color: var(--text);
-  border-color: color-mix(in srgb, var(--accent) 32%, var(--border));
-  box-shadow: inset 2px 0 0 var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
 }
 
-/* ---------- テーマグリッド ---------- */
+/* ---------- テーマグリッド (swatch スタイル) ---------- */
 
 .onboarding__theme-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  gap: 12px;
 }
 
 .onboarding__theme-card {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px 8px 10px;
+  gap: 10px;
+  padding: 14px;
   background: transparent;
   border: 1px solid var(--border);
   border-radius: 12px;
   cursor: pointer;
   text-align: left;
+  position: relative;
   transition:
-    border-color 160ms var(--ease-out-soft, ease-out),
-    box-shadow 160ms var(--ease-out-soft, ease-out),
-    background-color 160ms var(--ease-out-soft, ease-out);
+    border-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .onboarding__theme-card:hover {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
 }
 
 .onboarding__theme-card[data-active='true'] {
   border-color: var(--accent);
-  box-shadow:
-    0 0 0 1px var(--accent),
-    0 0 0 6px color-mix(in srgb, var(--accent) 16%, transparent);
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
 }
 
+/* swatch: 上半分が bg、下半分が bg-panel、accent dot が右下 */
 .onboarding__theme-preview {
   position: relative;
-  height: 68px;
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 10px 12px;
+  height: 56px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
 .onboarding__theme-preview-bar {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 10px;
-  opacity: 0.75;
+  height: 60%;
+  width: 100%;
 }
 
 .onboarding__theme-preview-line {
-  height: 6px;
-  border-radius: 2px;
-  width: 72%;
-  margin-top: auto;
-}
-
-.onboarding__theme-preview-line + .onboarding__theme-preview-line {
-  margin-top: 0;
+  /* 旧: 横棒3本のラフ wireframe → 削除。swatch のみで十分。 */
+  display: none;
 }
 
 .onboarding__theme-preview-dot {
   position: absolute;
-  bottom: 10px;
-  right: 12px;
+  bottom: 8px;
+  right: 10px;
   width: 8px;
   height: 8px;
   border-radius: 999px;
+  box-shadow: 0 0 0 2px var(--bg-panel);
 }
 
 .onboarding__theme-name {
-  font-size: 12px;
+  font-family: var(--ui-font);
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-dim);
-  padding: 0 2px;
+  line-height: 1.2;
 }
 
 .onboarding__theme-card[data-active='true'] .onboarding__theme-name {
   color: var(--text);
+  font-weight: 600;
+}
+
+/* selected check mark, 右上に小さく */
+.onboarding__theme-check {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  display: grid;
+  place-items: center;
+  opacity: 0;
+  transform: scale(0.6);
+  transition:
+    opacity 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.onboarding__theme-card[data-active='true'] .onboarding__theme-check {
+  opacity: 1;
+  transform: scale(1);
 }
 
 /* ---------- Workspace ---------- */
 
 .onboarding__section--folder {
-  align-items: center;
-  gap: 16px;
+  align-items: stretch;
+  gap: 14px;
 }
 
 .onboarding__folder-empty {
   width: 100%;
-  min-height: 88px;
-  border: 1px dashed var(--border-strong);
+  min-height: 64px;
+  border: 1px dashed var(--border);
   border-radius: 12px;
   display: grid;
   place-items: center;
   color: var(--text-mute);
-  background: color-mix(in srgb, var(--bg) 40%, transparent);
+  background: transparent;
+  /* 旧版より静かに */
 }
 
 .onboarding__folder-pill {
   width: 100%;
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  background: var(--bg-active);
-  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  gap: 14px;
+  padding: 14px 16px;
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
   border-radius: 12px;
-  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .onboarding__folder-icon {
@@ -429,6 +441,7 @@
 }
 
 .onboarding__folder-name {
+  font-family: var(--ui-font);
   font-size: 14px;
   font-weight: 600;
   color: var(--text);
@@ -438,6 +451,7 @@
 }
 
 .onboarding__folder-path {
+  font-family: var(--mono-font);
   font-size: 11.5px;
   color: var(--text-mute);
   overflow: hidden;
@@ -454,8 +468,8 @@
   padding: 4px 8px;
   border-radius: 6px;
   transition:
-    background 120ms var(--ease-out-soft, ease-out),
-    color 120ms var(--ease-out-soft, ease-out);
+    background 120ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 120ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .onboarding__folder-clear:hover {
@@ -466,53 +480,57 @@
 /* ---------- Done ---------- */
 
 .onboarding__done-mark {
-  width: 84px;
-  height: 84px;
+  width: 56px;
+  height: 56px;
   border-radius: 999px;
   display: grid;
   place-items: center;
   margin-bottom: 28px;
-  box-shadow:
-    0 0 0 8px color-mix(in srgb, var(--accent) 14%, transparent),
-    0 0 0 18px color-mix(in srgb, var(--accent) 6%, transparent),
-    0 16px 48px color-mix(in srgb, var(--accent) 32%, transparent);
-  animation: onboarding-done-pop 420ms var(--ease-spring, cubic-bezier(0.34, 1.56, 0.64, 1));
+  /* 旧 pulse glow 削除 — シンプルな塗り + 1px outline で品位を保つ */
+  background: var(--accent);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 12%, transparent);
+  animation: onboarding-done-fadein 320ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-@keyframes onboarding-done-pop {
-  from {
-    opacity: 0;
-    transform: scale(0.7);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
+@keyframes onboarding-done-fadein {
+  from { opacity: 0; transform: scale(0.92); }
+  to   { opacity: 1; transform: scale(1); }
 }
 
 .onboarding__summary {
   display: grid;
-  gap: 10px;
-  margin: 16px auto 28px;
-  padding: 16px 20px;
+  gap: 0;
+  margin: 8px 0 32px;
+  padding: 0;
   width: 100%;
-  max-width: 420px;
-  background: color-mix(in srgb, var(--bg) 50%, transparent);
+  max-width: 100%;
+  background: transparent;
   border: 1px solid var(--border);
   border-radius: 12px;
+  overflow: hidden;
 }
 
 .onboarding__summary-row {
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  gap: 12px;
+  gap: 16px;
+  font-family: var(--ui-font);
   font-size: 13px;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border);
+}
+
+.onboarding__summary-row:last-child {
+  border-bottom: none;
 }
 
 .onboarding__summary-row dt {
   color: var(--text-mute);
   font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 11px;
 }
 
 .onboarding__summary-row dd {
@@ -523,6 +541,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 60%;
+  text-align: right;
 }
 
 /* ---------- ナビゲーション ---------- */
@@ -532,45 +551,85 @@
   justify-content: space-between;
   align-items: center;
   gap: 12px;
-  margin-top: 28px;
-  padding-top: 20px;
+  margin-top: 36px;
+  padding-top: 24px;
   border-top: 1px solid var(--border);
 }
 
 .onboarding__nav--center {
-  justify-content: center;
+  justify-content: flex-start;
   border-top: none;
   padding-top: 8px;
 }
 
 .onboarding__nav-right {
   display: flex;
-  gap: 10px;
+  gap: 12px;
   align-items: center;
 }
+
+.onboarding__nav-hint {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding-top: 0;
+  font-family: var(--ui-font);
+  font-size: 11.5px;
+  color: var(--text-mute);
+  letter-spacing: 0.02em;
+  font-feature-settings: 'cv02', 'cv11', 'ss03';
+}
+
+.onboarding__nav-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--mono-font);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  background: var(--bg);
+}
+
+/* ---------- Buttons ---------- */
 
 .onboarding__btn {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 10px 18px;
-  border-radius: 10px;
+  gap: 8px;
+  padding: 9px 16px;
+  border-radius: 6px;
+  font-family: var(--ui-font);
   font-size: 13.5px;
-  font-weight: 600;
+  font-weight: 500;
+  letter-spacing: -0.005em;
+  font-feature-settings: 'kern', 'liga', 'calt', 'cv02', 'cv11', 'ss03';
   cursor: pointer;
   border: 1px solid transparent;
   background: transparent;
   color: var(--text);
   transition:
-    background-color 160ms var(--ease-out-soft, ease-out),
-    border-color 160ms var(--ease-out-soft, ease-out),
-    box-shadow 160ms var(--ease-out-soft, ease-out),
-    color 160ms var(--ease-out-soft, ease-out);
+    background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    border-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 150ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.onboarding__btn:disabled {
-  opacity: 0.5;
-  cursor: progress;
+.onboarding__btn:disabled,
+.onboarding__btn[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: saturate(0.7);
+}
+
+.onboarding__btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
 .onboarding__btn--ghost {
@@ -588,16 +647,17 @@
   background: var(--accent);
   color: #fff;
   border-color: var(--accent);
+  font-weight: 600;
 }
 .onboarding__btn--primary:hover {
-  background: var(--accent-hover);
-  border-color: var(--accent-hover);
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 22%, transparent);
+  background: var(--accent-hover, var(--accent));
+  border-color: var(--accent-hover, var(--accent));
+  filter: brightness(0.96);
 }
 
 .onboarding__btn--large {
-  padding: 13px 26px;
-  font-size: 14.5px;
+  padding: 12px 22px;
+  font-size: 14px;
 }
 
 .onboarding__btn--wide {
@@ -605,16 +665,56 @@
   justify-content: center;
 }
 
-/* ---------- Dark/Light 微調整 ---------- */
+/* ---------- ライトテーマ微調整 ---------- */
 
-[data-theme='claude-light'] .onboarding__card,
-[data-theme='light'] .onboarding__card {
-  box-shadow:
-    0 24px 60px rgba(20, 20, 19, 0.14),
-    0 0 0 1px var(--border) inset;
+[data-theme='claude-light'] .onboarding,
+[data-theme='light'] .onboarding {
+  background-image: radial-gradient(
+    ellipse 70% 60% at 18% 8%,
+    color-mix(in srgb, var(--accent) 4%, transparent) 0%,
+    transparent 60%
+  );
 }
 
-[data-theme='claude-light'] .onboarding::before,
-[data-theme='light'] .onboarding::before {
-  opacity: 0.22;
+/* ---------- Glass テーマ対策 (透過防止) ----------
+   glass テーマは --bg / --bg-panel が半透明 (例: bg = rgba(0,0,0,0)) のため、
+   wizard の backdrop と card が背後の IDE を素通りさせてしまう。
+   wizard はモーダルなので背後を遮蔽するのが正解 — 半透明をやめて near-opaque な
+   ダークパネルでオーバーライドする。 */
+[data-theme='glass'] .onboarding {
+  background:
+    radial-gradient(
+      ellipse 70% 60% at 18% 8%,
+      color-mix(in srgb, var(--accent) 8%, transparent) 0%,
+      transparent 60%
+    ),
+    rgba(8, 8, 8, 0.96);
+  /* IDE 側が 1.5% でも透けると落ち着かないので backdrop-filter で念押し */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+[data-theme='glass'] .onboarding__card {
+  background: rgba(22, 22, 22, 0.98);
+  border-color: rgba(255, 255, 255, 0.10);
+}
+
+/* レスポンシブ — 狭い viewport */
+@media (max-width: 560px) {
+  .onboarding {
+    padding: 24px 16px;
+  }
+  .onboarding__card {
+    padding: 36px 28px 24px;
+    border-radius: 12px;
+  }
+  .onboarding__title {
+    font-size: 32px;
+  }
+  .onboarding__title--sm {
+    font-size: 24px;
+  }
+  .onboarding__theme-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }

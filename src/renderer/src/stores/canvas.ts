@@ -51,12 +51,10 @@ interface CanvasState {
   /** Canvas の見え方切替: stage=ラジアル / list=リスト / focus=フォーカス */
   stageView: StageView;
   setStageView: (v: StageView) => void;
-  /** teamId ごとの「カードを一緒に動かすか」状態。
-   *  未設定は「ロック (= 一緒に動く)」がデフォルト。
-   *  チーム編成時は一緒に動かしたいケースが多いので、明示的に解除されるまでロック扱い。 */
-  teamLocks: Record<string, boolean>;
-  setTeamLock: (teamId: string, locked: boolean) => void;
-  isTeamLocked: (teamId: string) => boolean;
+  /** 指定 teamId のメンバーを Leader 直下の 3 列グリッドに整列し直す。
+   *  リーダーは現在位置を維持し、その他メンバーが整列対象。
+   *  右クリック → 自動整理 メニューから呼ばれる。 */
+  autoArrangeTeam: (teamId: string) => void;
 }
 
 export type StageView = 'stage' | 'list' | 'focus';
@@ -141,30 +139,22 @@ export const useCanvasStore = create<CanvasState>()(
       removeCard: (id, options) =>
         set((state) => {
           const cascadeTeam = options?.cascadeTeam !== false; // 既定: チーム単位カスケード
-          // cascadeTeam=true (× ボタン等): 同 teamId 全員 + teamLocks も掃除
+          // cascadeTeam=true (× ボタン等): 同 teamId 全員を一括削除
           // cascadeTeam=false (team_dismiss 1 名解雇): 指定 id だけを閉じ、Leader や他メンバーは残す
           const target = state.nodes.find((n) => n.id === id);
           const teamId = (target?.data?.payload as { teamId?: string } | undefined)?.teamId;
           const ids = new Set<string>([id]);
-          let teamLocksNext = state.teamLocks;
           if (cascadeTeam && teamId) {
             for (const n of state.nodes) {
               const tid = (n.data?.payload as { teamId?: string } | undefined)?.teamId;
               if (tid === teamId) ids.add(n.id);
-            }
-            // ロック状態も一緒に掃除 (再度同じ teamId を立てる将来のために残骸を残さない)
-            if (teamId in state.teamLocks) {
-              const next = { ...state.teamLocks };
-              delete next[teamId];
-              teamLocksNext = next;
             }
           }
           return {
             nodes: state.nodes.filter((n) => !ids.has(n.id)),
             edges: state.edges.filter(
               (e) => !ids.has(e.source) && !ids.has(e.target)
-            ),
-            teamLocks: teamLocksNext
+            )
           };
         }),
       setCardTitle: (id, title) =>
@@ -203,17 +193,51 @@ export const useCanvasStore = create<CanvasState>()(
           window.clearTimeout(h);
         }
         pulseTimers.clear();
-        set({ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 }, teamLocks: {} });
+        set({ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 } });
       },
       stageView: 'stage',
       setStageView: (v) => set({ stageView: v }),
-      teamLocks: {},
-      setTeamLock: (teamId, locked) =>
-        set({ teamLocks: { ...get().teamLocks, [teamId]: locked } }),
-      isTeamLocked: (teamId) => {
-        const v = get().teamLocks[teamId];
-        return v === undefined ? true : v;
-      }
+      autoArrangeTeam: (teamId) =>
+        set((state) => {
+          // チームメンバーを抽出
+          const members = state.nodes.filter((n) => {
+            const tid = (n.data?.payload as { teamId?: string } | undefined)?.teamId;
+            return tid === teamId;
+          });
+          if (members.length === 0) return state;
+          // Leader を特定 (role === 'leader')。見つからなければ最も左上のメンバーを leader 代用。
+          const leader =
+            members.find((n) => {
+              const role = (n.data?.payload as { role?: string } | undefined)?.role;
+              return role === 'leader';
+            }) ??
+            [...members].sort((a, b) => a.position.y - b.position.y || a.position.x - b.position.x)[0];
+          // findRecruitPosition (use-recruit-listener.ts) と同じセル寸法・3 列グリッドで詰め直す。
+          const COLS = 3;
+          const GAP_X = 32;
+          const GAP_Y = 60;
+          const cellW = NODE_W + GAP_X;
+          const cellH = NODE_H + GAP_Y;
+          const startX = leader.position.x + NODE_W / 2 - (cellW * COLS) / 2 + GAP_X / 2;
+          const startY = leader.position.y + NODE_H + GAP_Y;
+          // members の登場順 (= 採用順) を保ったままインデックスを振り直す
+          const others = members.filter((n) => n.id !== leader.id);
+          const newPosById = new Map<string, { x: number; y: number }>();
+          others.forEach((n, i) => {
+            const col = i % COLS;
+            const row = Math.floor(i / COLS);
+            newPosById.set(n.id, {
+              x: startX + col * cellW,
+              y: startY + row * cellH
+            });
+          });
+          return {
+            nodes: state.nodes.map((n) => {
+              const next = newPosById.get(n.id);
+              return next ? { ...n, position: next } : n;
+            })
+          };
+        })
     }),
     {
       name: 'vibe-editor:canvas',
@@ -234,13 +258,13 @@ export const useCanvasStore = create<CanvasState>()(
         }
         return persisted as CanvasState;
       },
-      // 永続化: nodes / viewport / stageView / teamLocks。
+      // 永続化: nodes / viewport / stageView。
       // edges は一時的な hand-off アニメに使うので含めない。
+      // teamLocks (旧「チーム固定」) は削除済み — 単独移動が常に正の挙動。
       partialize: (s) => ({
         nodes: s.nodes,
         viewport: s.viewport,
-        stageView: s.stageView,
-        teamLocks: s.teamLocks
+        stageView: s.stageView
       })
     }
   )

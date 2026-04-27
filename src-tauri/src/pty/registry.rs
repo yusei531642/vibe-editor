@@ -70,6 +70,13 @@ impl SessionRegistry {
             .and_then(|sid| g.by_id.get(sid).cloned())
     }
 
+    /// agent_id に紐づく session id を返す (terminal_create の idempotency 用)。
+    /// React.StrictMode で同 agent の terminal_create が連続発火するのを「既存を返す」で吸収する。
+    pub fn id_by_agent(&self, agent_id: &str) -> Option<String> {
+        let g = recover(self.inner.lock());
+        g.by_agent.get(agent_id).cloned()
+    }
+
     /// 同一 team_id の (agent_id, role) ペア一覧 (TeamHub の broadcast/team_info で使う)
     pub fn list_team_members(&self, team_id: &str) -> Vec<(String, String)> {
         let g = recover(self.inner.lock());

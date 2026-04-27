@@ -89,6 +89,15 @@ export function migrateSettings(raw: unknown): AppSettings {
     }
   }
 
+  // --- Version 3 → 4: hasCompletedOnboarding を lastOnboardedVersion に置き換え ---
+  // 旧 boolean では「アップデート直後に再表示する」が表現できず、
+  // v1→v2 で履歴があるユーザーを自動で完了扱いにしていたため初回ユーザー以外に wizard が出なかった。
+  // ここで強制的に null にして、初回起動 / 既存ユーザー / アップデート組すべてに次回 wizard を表示し直す。
+  if (version < 4) {
+    delete data.hasCompletedOnboarding;
+    data.lastOnboardedVersion = null;
+  }
+
   data.schemaVersion = APP_SETTINGS_SCHEMA_VERSION;
   // 最終マージで欠損フィールドを DEFAULT_SETTINGS で埋める
   return { ...DEFAULT_SETTINGS, ...data } as AppSettings;

@@ -13,7 +13,7 @@ export type Density = 'compact' | 'normal' | 'comfortable';
 export type Language = 'ja' | 'en';
 
 /** Issue #75: AppSettings の現在スキーマ。破壊変更時に上げる。 */
-export const APP_SETTINGS_SCHEMA_VERSION = 3;
+export const APP_SETTINGS_SCHEMA_VERSION = 4;
 
 /**
  * ユーザーが自由に追加できるエージェントの設定。
@@ -84,11 +84,14 @@ export interface AppSettings {
    */
   notepad: string;
   /**
-   * 初回セットアップウィザードを完了したか。
-   * false / undefined の場合、起動時にウィザードを表示する。
-   * 設定モーダルから再実行するとこの値が false に戻る。
+   * 最後にセットアップウィザードを完了したアプリのバージョン (例: "1.1.5")。
+   * 現在のアプリ version と一致しないとき (= 未完了 / 初回起動 / アップデート直後) に
+   * 起動時にウィザードを表示する。設定モーダルから再実行すると null に戻り、wizard が再表示される。
+   *
+   * 旧フィールド `hasCompletedOnboarding` は schema v4 で廃止し、migration で削除する。
+   * boolean 1 つでは「アップデート後に再度見せる」が表現できなかったため。
    */
-  hasCompletedOnboarding?: boolean;
+  lastOnboardedVersion?: string | null;
   /**
    * Claude / Codex 以外のカスタムエージェント。
    * 設定モーダルの「エージェント」グループで CRUD できる。
@@ -106,6 +109,13 @@ export interface AppSettings {
    * 食い違って Ctrl+= で逆に縮む現象が起きていた。
    */
   webviewZoom?: number;
+  /**
+   * × ボタンを押したときの挙動。
+   *   - "tray": ウィンドウを隠してトレイに常駐 (PTY/Team は走らせ続ける)。デフォルト。
+   *   - "quit": 旧挙動。PTY を全 kill してプロセス終了。
+   * Rust 側 lib.rs の CloseRequested ハンドラがこの値を都度 settings.json から sync 読みする。
+   */
+  closeBehavior?: 'tray' | 'quit';
 }
 
 export interface ClaudeCheckResult {
@@ -155,9 +165,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   codexArgs: '',
   teamPresets: [],
   notepad: '',
-  hasCompletedOnboarding: false,
+  lastOnboardedVersion: null,
   customAgents: [],
-  mcpAutoSetup: true
+  mcpAutoSetup: true,
+  closeBehavior: 'tray'
 };
 
 /** git status --porcelain のエントリ */

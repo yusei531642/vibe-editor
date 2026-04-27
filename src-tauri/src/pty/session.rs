@@ -160,10 +160,7 @@ impl Drop for SessionHandle {
 
 /// `cwd` の検証 (旧 resolveValidCwd と同等)。
 /// 無効なら fallback → カレントディレクトリ。warning メッセージも返す。
-pub fn resolve_valid_cwd(
-    requested: &str,
-    fallback: Option<&str>,
-) -> (String, Option<String>) {
+pub fn resolve_valid_cwd(requested: &str, fallback: Option<&str>) -> (String, Option<String>) {
     let is_dir = |p: &str| !p.is_empty() && Path::new(p).is_dir();
     if is_dir(requested) {
         return (requested.to_string(), None);
@@ -174,7 +171,11 @@ pub fn resolve_valid_cwd(
                 fb.to_string(),
                 Some(format!(
                     "指定された作業ディレクトリが無効です: {} → {} で起動します",
-                    if requested.is_empty() { "(未設定)" } else { requested },
+                    if requested.is_empty() {
+                        "(未設定)"
+                    } else {
+                        requested
+                    },
                     fb
                 )),
             );
@@ -187,7 +188,11 @@ pub fn resolve_valid_cwd(
         cwd.clone(),
         Some(format!(
             "作業ディレクトリが無効です: {} → プロセス既定の {} で起動します",
-            if requested.is_empty() { "(未設定)" } else { requested },
+            if requested.is_empty() {
+                "(未設定)"
+            } else {
+                requested
+            },
             cwd
         )),
     )
@@ -293,9 +298,30 @@ pub fn spawn_session(
 
     // Windows: PATHEXT 経由で .cmd / .bat / .exe を解決する。
     // 旧 node-pty は内部で同等処理をしていたため、claude → claude.cmd の自動解決が必要。
-    let resolved_command = which::which(&opts.command)
+    let initial_resolved = which::which(&opts.command)
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| opts.command.clone());
+
+    // Windows の npm は `claude` (拡張子なし /bin/sh shim) と `claude.cmd` を並べて置く。
+    // which が拡張子なし shim を先に拾うと CreateProcess できないため、.cmd 兄弟を優先する。
+    let spawn_candidate =
+        prefer_cmd_sibling_for_extensionless_shim(&initial_resolved).unwrap_or(initial_resolved);
+
+    // Issue (claude immediate exit): npm が生成する `claude.cmd` (および類似の .cmd
+    //   shim) を経由すると cmd.exe が間に挟まり、`%*` 展開で巨大な
+    //   `--append-system-prompt "...改行入りの長文..."` 引数が parse 失敗して即 exit する。
+    //   .cmd 内部で参照されている実 `.exe` パスを抜き出して、それを直接 spawn する。
+    let resolved_command = unwrap_cmd_shim_to_exe(&spawn_candidate).unwrap_or(spawn_candidate);
+    tracing::info!(
+        "[pty] spawn tid={} requested={} resolved={} cwd={} cols={} rows={} args.len={}",
+        id,
+        opts.command,
+        resolved_command,
+        opts.cwd,
+        opts.cols,
+        opts.rows,
+        opts.args.len()
+    );
     let mut cmd = CommandBuilder::new(&resolved_command);
     for a in &opts.args {
         cmd.arg(a);
@@ -354,15 +380,26 @@ pub fn spawn_session(
     let exit_event_clone = exit_event.clone();
     let registry_for_exit = registry.clone();
     let id_for_exit = id.clone();
+    let id_for_exit_log = id_for_exit.clone();
     std::thread::spawn(move || {
+        let started = std::time::Instant::now();
         let exit_status = child.wait().ok();
+        let exit_code = exit_status
+            .as_ref()
+            .map(|s| s.exit_code() as i64)
+            .unwrap_or(-1);
         let info = TerminalExitInfo {
-            exit_code: exit_status
-                .as_ref()
-                .map(|s| s.exit_code() as i64)
-                .unwrap_or(-1),
+            exit_code,
             signal: None,
         };
+        // Issue: claude が起動直後 (~500ms 以内) に exit するとデバッグ手がかりが無いので
+        //   exit code と life duration を必ずログに残す。
+        tracing::info!(
+            "[pty] child exit tid={} exit_code={} after_ms={}",
+            id_for_exit_log,
+            exit_code,
+            started.elapsed().as_millis()
+        );
         if let Err(e) = app_for_exit.emit(&exit_event_clone, info) {
             tracing::warn!("emit {exit_event_clone} failed: {e}");
         }
@@ -384,4 +421,162 @@ pub fn spawn_session(
             bytes_in_window: 0,
         }),
     })
+}
+
+/// Windows npm は `foo` (sh 用) / `foo.cmd` / `foo.ps1` を同じディレクトリに置く。
+/// `which` が拡張子なしの `foo` を返した場合、Windows の CreateProcess では直接起動
+/// できないので、隣にある `foo.cmd` を起点にする。
+fn prefer_cmd_sibling_for_extensionless_shim(path: &str) -> Option<String> {
+    if !cfg!(windows) {
+        return None;
+    }
+    let p = Path::new(path);
+    if p.extension().is_some() {
+        return None;
+    }
+    let cmd = p.with_extension("cmd");
+    if cmd.exists() {
+        return Some(cmd.to_string_lossy().into_owned());
+    }
+    None
+}
+
+/// Windows: npm が生成する `xxx.cmd` shim (内部で `"%dp0%\path\to\xxx.exe" %*` のように
+/// 真のバイナリを呼ぶ batch wrapper) を直接 .exe に解決する。
+///
+/// 経緯:
+///   `claude.cmd` 経由で spawn すると Windows は cmd.exe を間に挟み、`%*` で巨大な
+///   `--append-system-prompt "...改行入りの長文..."` を展開するときに parse 失敗して
+///   即 exit (exit_code=1) する現象があった。.exe を直接 spawn すれば cmd.exe を経由
+///   しないので長大引数も問題なく渡せる。
+///
+/// 戻り値: 解決できたら `Some(<exe絶対パス>)`。.cmd でない / 中身が解析できない / 参照
+///         先 .exe が存在しない場合は `None` で呼び出し側は元の path をそのまま使う。
+fn unwrap_cmd_shim_to_exe(cmd_path: &str) -> Option<String> {
+    if !cmd_path.to_lowercase().ends_with(".cmd") {
+        return None;
+    }
+    let content = std::fs::read_to_string(cmd_path).ok()?;
+    let cmd_dir = Path::new(cmd_path).parent()?;
+    let cmd_dir_str = cmd_dir.to_string_lossy().into_owned();
+    for line in content.lines() {
+        let trimmed = line.trim_start_matches('@').trim();
+        if trimmed.is_empty()
+            || trimmed.starts_with(':')
+            || trimmed.starts_with("REM ")
+            || trimmed.starts_with("rem ")
+        {
+            continue;
+        }
+        // `"<path>.exe" ...` または `<path>.exe ...` を探す。
+        // 簡易 parser: 最初に出現する `.exe` の前後を quote で抜き出す。
+        let lower = trimmed.to_lowercase();
+        // ★ ここで `?` を使うと .exe を含まない行で関数全体が None で抜けてしまうので
+        //   continue で次行へ進める。
+        let exe_idx = match lower.find(".exe") {
+            Some(i) => i,
+            None => continue,
+        };
+        let after_exe = exe_idx + 4;
+        // 前方: 最後の '"' があればそこから、なければ行頭から
+        let before = &trimmed[..after_exe];
+        let raw_path = if let Some(q) = before.rfind('"') {
+            // q は開きクォート: その次のバイトから .exe 末尾までが中身
+            trimmed[q + 1..after_exe].to_string()
+        } else {
+            // クォート無し: スペース区切りの最後のトークンを取る
+            before
+                .rsplit_once(char::is_whitespace)
+                .map(|(_, last)| last.to_string())
+                .unwrap_or_else(|| before.to_string())
+        };
+        // %dp0% / %~dp0 を cmd_dir に展開。trailing backslash 込みで OK。
+        let cmd_dir_with_sep = format!("{cmd_dir_str}\\");
+        let expanded = raw_path
+            .replace("%~dp0", &cmd_dir_with_sep)
+            .replace("%dp0%", &cmd_dir_with_sep);
+        let candidate = Path::new(&expanded);
+        if candidate.exists() {
+            tracing::info!(
+                "[pty] unwrapped .cmd shim {} -> {}",
+                cmd_path,
+                candidate.display()
+            );
+            return Some(candidate.to_string_lossy().into_owned());
+        } else {
+            tracing::debug!(
+                "[pty] .cmd shim parse: candidate {} does not exist",
+                candidate.display()
+            );
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod cmd_shim_tests {
+    use super::*;
+
+    #[test]
+    fn unwrap_npm_style_cmd_shim() {
+        // 実際の npm shim のテンプレートでテスト
+        let dir = tempfile_dir();
+        let exe_dir = dir.join("node_modules").join("foo").join("bin");
+        std::fs::create_dir_all(&exe_dir).unwrap();
+        let exe_path = exe_dir.join("foo.exe");
+        std::fs::File::create(&exe_path).unwrap();
+        let cmd_path = dir.join("foo.cmd");
+        std::fs::write(
+            &cmd_path,
+            concat!(
+                "@ECHO off\n",
+                "GOTO start\n",
+                ":find_dp0\n",
+                "SET dp0=%~dp0\n",
+                "EXIT /b\n",
+                ":start\n",
+                "SETLOCAL\n",
+                "CALL :find_dp0\n",
+                "\"%dp0%\\node_modules\\foo\\bin\\foo.exe\"   %*\n"
+            ),
+        )
+        .unwrap();
+        let resolved = unwrap_cmd_shim_to_exe(&cmd_path.to_string_lossy()).unwrap();
+        assert_eq!(
+            std::path::Path::new(&resolved),
+            exe_path.as_path(),
+            "should resolve to the .exe inside the .cmd shim"
+        );
+    }
+
+    #[test]
+    fn prefers_cmd_sibling_for_extensionless_npm_shim_on_windows() {
+        let dir = tempfile_dir();
+        let sh_path = dir.join("foo");
+        let cmd_path = dir.join("foo.cmd");
+        std::fs::write(&sh_path, "#!/bin/sh\n").unwrap();
+        std::fs::write(&cmd_path, "@ECHO off\n").unwrap();
+
+        let resolved = prefer_cmd_sibling_for_extensionless_shim(&sh_path.to_string_lossy());
+        if cfg!(windows) {
+            assert_eq!(
+                resolved.as_deref(),
+                Some(cmd_path.to_string_lossy().as_ref())
+            );
+        } else {
+            assert!(resolved.is_none());
+        }
+    }
+
+    fn tempfile_dir() -> std::path::PathBuf {
+        let base = std::env::temp_dir().join(format!(
+            "vibe-shim-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&base).unwrap();
+        base
+    }
 }

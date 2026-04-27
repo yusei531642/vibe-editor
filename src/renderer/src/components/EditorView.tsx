@@ -37,6 +37,12 @@ export function EditorView({
   const { settings } = useSettings();
   const theme = useMonacoTheme();
   const t = useT();
+  const language = detectLanguage(path);
+  const isMarkdown = language === 'markdown';
+  // .md ファイルは既定でプレビュー表示。loading/error/binary の前でも必ず呼ぶ。
+  // React Hooks は render ごとに同じ順序で呼ぶ必要があるため、早期 return の後に置かない。
+  const [previewMode, setPreviewMode] = useState<boolean>(true);
+  const showPreview = isMarkdown && previewMode;
 
   if (loading) {
     return (
@@ -65,12 +71,6 @@ export function EditorView({
       </div>
     );
   }
-
-  const language = detectLanguage(path);
-  const isMarkdown = language === 'markdown';
-  // .md ファイルは既定でプレビュー表示。トグルでコード編集に切替。
-  const [previewMode, setPreviewMode] = useState<boolean>(true);
-  const showPreview = isMarkdown && previewMode;
 
   return (
     <div className="diffview">

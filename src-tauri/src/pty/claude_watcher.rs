@@ -63,31 +63,50 @@ fn is_claimed(session_id: &str) -> bool {
 /// 旧実装は cwd が読めない / 空文字のとき fail-open で true を返していたため、jsonl 作成
 /// 直後の不完全状態と watcher polling が重なると別 project の sessionId を誤 claim していた。
 ///
-/// 新方針: 「明示的に同 project と確認できたケースのみ true」。具体的には:
-///   - cwd が読めて normalize 一致 → true
-///   - cwd が読めて不一致 / 空文字 → false
-///   - 8 行以内に cwd フィールドが現れない → false (= fail-closed)
-///   - file open 失敗 → false (= fail-closed)
-fn jsonl_matches_project(jsonl_path: &Path, expected_norm: &str) -> bool {
+/// 戻り値:
+///   - Match    : cwd が読めて normalize 一致 → 即 claim 候補
+///   - Mismatch : cwd が読めて不一致 / 空文字 → 別 project (今後再評価しない)
+///   - Pending  : 16 行以内に cwd フィールドが現れない → 不完全 jsonl の可能性が高い。
+///                呼び出し側はこれを snapshot に **追加しない** ことで、追記後の Modify
+///                イベントで再評価する。
+///
+/// 旧実装の Bug:
+///   Claude Code 最近版では jsonl 先頭が `last-prompt` / `permission-mode` (cwd なし) で始まる。
+///   旧 fail-closed `false` 戻りでは呼び出し側がこれを「Mismatch (= 別プロジェクト)」と
+///   同じ扱いにして snapshot に積み、追記後も再評価されず sessionId 検出が永久に失敗していた。
+pub enum JsonlCheck {
+    Match,
+    Mismatch,
+    Pending,
+}
+
+fn jsonl_matches_project(jsonl_path: &Path, expected_norm: &str) -> JsonlCheck {
     use std::io::{BufRead, BufReader};
     let file = match std::fs::File::open(jsonl_path) {
         Ok(f) => f,
-        Err(_) => return false,
+        // open 失敗は今は読めないだけかもしれないので Pending にして再評価する
+        Err(_) => return JsonlCheck::Pending,
     };
     let reader = BufReader::new(file);
-    for line in reader.lines().take(8).flatten() {
+    // 旧実装は 8 行までだったが、Claude Code の jsonl 先頭メタ行 (last-prompt /
+    // permission-mode / file-history-snapshot 等) が増えたため 16 行に拡大する。
+    for line in reader.lines().take(16).flatten() {
         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
             if let Some(c) = v.get("cwd").and_then(|c| c.as_str()) {
                 let trimmed = c.trim();
                 if trimmed.is_empty() {
-                    return false;
+                    return JsonlCheck::Mismatch;
                 }
-                return super::path_norm::normalize_project_root(trimmed) == expected_norm;
+                return if super::path_norm::normalize_project_root(trimmed) == expected_norm {
+                    JsonlCheck::Match
+                } else {
+                    JsonlCheck::Mismatch
+                };
             }
         }
     }
-    // cwd を含む行が無い → 不完全 jsonl の可能性が高い。fail-closed で claim させない。
-    false
+    // cwd 行が見つからない → まだ書き込み途中の可能性。次の Modify で再評価。
+    JsonlCheck::Pending
 }
 
 fn projects_dir(project_root: &str) -> PathBuf {
@@ -177,18 +196,13 @@ pub fn spawn_watcher(
             return;
         }
 
-        // 最大 60 秒だけ監視 (Claude が起動して session を作るのは通常数秒以内)
-        let deadline = std::time::Instant::now() + Duration::from_secs(60);
-        while std::time::Instant::now() < deadline {
-            if !is_alive() {
-                break;
-            }
+        // Claude Code は起動しただけでは jsonl/sessionId を作らず、初回入力後に作ることがある。
+        // 60 秒で諦めると、起動後しばらく待ってから話しかけたセッションが保存されない。
+        // PTY が生きている間は見張り続け、閉じられたら自然に終了する。
+        while is_alive() {
             match rx.recv_timeout(Duration::from_millis(500)) {
                 Ok(Ok(event)) => {
-                    if !matches!(
-                        event.kind,
-                        EventKind::Create(_) | EventKind::Modify(_)
-                    ) {
+                    if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
                         continue;
                     }
                     let current = list_session_ids(&dir);
@@ -202,17 +216,31 @@ pub fn spawn_watcher(
                     new_ids.sort();
                     // Issue #31 対策用 normalize。毎イベント再計算しても軽量 (canonicalize は
                     // 最初にキャッシュされる OS FS cache にヒットする)。
-                    let expected_norm =
-                        super::path_norm::normalize_project_root(&project_root);
+                    let expected_norm = super::path_norm::normalize_project_root(&project_root);
+                    // Pending (cwd 未書き込み) の id は次の Modify で再評価したいので
+                    // snapshot に積まないように分離して保持する。
+                    let mut pending_ids: HashSet<String> = HashSet::new();
+                    let mut claimed_in_loop = false;
                     for candidate in new_ids {
-                        // jsonl の cwd が一致しないなら別 project の衝突なのでスキップ
                         let candidate_path = dir.join(format!("{}.jsonl", candidate));
-                        if !jsonl_matches_project(&candidate_path, &expected_norm) {
-                            tracing::debug!(
-                                "[claude_watcher] skip {} (cwd mismatch)",
-                                candidate
-                            );
-                            continue;
+                        match jsonl_matches_project(&candidate_path, &expected_norm) {
+                            JsonlCheck::Pending => {
+                                tracing::debug!(
+                                    "[claude_watcher] {} cwd not yet written — will retry",
+                                    candidate
+                                );
+                                pending_ids.insert(candidate.clone());
+                                continue;
+                            }
+                            JsonlCheck::Mismatch => {
+                                tracing::debug!(
+                                    "[claude_watcher] skip {} (cwd mismatch)",
+                                    candidate
+                                );
+                                // snapshot に追加されて再評価から外れる (loop 外で extend)
+                                continue;
+                            }
+                            JsonlCheck::Match => {}
                         }
                         if !try_claim(candidate) {
                             // 競合で claim できず → 次の候補へ
@@ -228,16 +256,25 @@ pub fn spawn_watcher(
                                 candidate
                             );
                         }
+                        claimed_in_loop = true;
+                        break;
+                    }
+                    if claimed_in_loop {
                         return;
                     }
                     // まだ自分の番が来ていない → snapshot を更新して次イベントを待つ。
-                    // (他の watcher が claim した id は snapshot に足し、次回の difference から除外する)
-                    snapshot.extend(current.into_iter());
+                    // (他 watcher が claim した id や Mismatch 確定の id は snapshot に積む。
+                    //  Pending の id は積まずに残し、次の Modify イベントで再評価する。)
+                    for id in current {
+                        if !pending_ids.contains(&id) {
+                            snapshot.insert(id);
+                        }
+                    }
                 }
                 Ok(Err(_)) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(_) => break,
             }
         }
-        tracing::debug!("[claude_watcher] tid={} watcher exit (timeout / dead)", terminal_id);
+        tracing::debug!("[claude_watcher] tid={} watcher exit (dead)", terminal_id);
     });
 }

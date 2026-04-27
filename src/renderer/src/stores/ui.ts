@@ -36,6 +36,14 @@ interface UiState {
    *  null = 更新なし or 未チェック。永続化しない (再起動時に再検出する)。 */
   availableUpdate: AvailableUpdateInfo | null;
   setAvailableUpdate: (info: AvailableUpdateInfo | null) => void;
+  /**
+   * Canvas モードで App の MenuBar を埋め込むための slot DOM 参照。
+   * CanvasLayout 内 canvas-header に配置した <div> を mount 時に登録し、
+   * App.tsx 側はこの slot に対して createPortal で MenuBar を転送する。
+   * IDE モードでは null。永続化しない。
+   */
+  canvasMenuBarSlot: HTMLElement | null;
+  setCanvasMenuBarSlot: (el: HTMLElement | null) => void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -56,15 +64,27 @@ export const useUiStore = create<UiState>()(
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
       toggleSidebar: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
       availableUpdate: null,
-      setAvailableUpdate: (info) => set({ availableUpdate: info })
+      setAvailableUpdate: (info) => set({ availableUpdate: info }),
+      canvasMenuBarSlot: null,
+      setCanvasMenuBarSlot: (el) => set({ canvasMenuBarSlot: el })
     }),
     {
       name: 'vibe-editor:ui',
       partialize: (s) => ({
-        viewMode: s.viewMode,
         activityOpen: s.activityOpen,
         sidebarCollapsed: s.sidebarCollapsed
-      })
+      }),
+      merge: (persisted, current) => {
+        const saved = persisted as Partial<UiState> | undefined;
+        return {
+          ...current,
+          // 起動時は必ず IDE から始める。Canvas は重い Team/PTY 復元を伴うため、
+          // ユーザーが開いたタイミングで初めて読み込む。
+          viewMode: 'ide',
+          activityOpen: saved?.activityOpen ?? current.activityOpen,
+          sidebarCollapsed: saved?.sidebarCollapsed ?? current.sidebarCollapsed
+        };
+      }
     }
   )
 );

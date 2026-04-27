@@ -40,6 +40,8 @@ export interface UsePtySessionOptions {
   disposedRef: MutableRefObject<boolean>;
   /** onData 到着時に呼ばれる観察コールバック (auto-initial-message 用) */
   observeChunk: (data: string) => void;
+  /** Team 起動時など、複数 PTY の同時 spawn を避けるための遅延 */
+  spawnDelayMs?: number;
 }
 
 /**
@@ -64,7 +66,8 @@ export function usePtySession(options: UsePtySessionOptions): void {
     callbacksRef,
     ptyIdRef,
     disposedRef,
-    observeChunk
+    observeChunk,
+    spawnDelayMs = 0
   } = options;
 
   const observeChunkRef = useRef(observeChunk);
@@ -84,6 +87,7 @@ export function usePtySession(options: UsePtySessionOptions): void {
     // effect-local な localDisposed を併用し、再 run でも確実に古い spawn を無効化する。
     let localDisposed = false;
     let repairFrame: number | null = null;
+    let startTimer: number | null = null;
 
     const scheduleRenderRepair = (): void => {
       if (repairFrame !== null) return;
@@ -116,6 +120,16 @@ export function usePtySession(options: UsePtySessionOptions): void {
 
     (async () => {
       try {
+        const delay = Math.max(0, spawnDelayMs);
+        if (delay > 0) {
+          callbacksRef.current.onStatus?.(`起動待機中… ${Math.round(delay / 100) / 10}秒`);
+          await new Promise<void>((resolve) => {
+            startTimer = window.setTimeout(resolve, delay);
+          });
+          startTimer = null;
+          if (localDisposed || disposedRef.current) return;
+        }
+
         callbacksRef.current.onStatus?.(`${command} を起動中…`);
         // 不変式 #2: 初回 spawn 時点のスナップショットを使う (以後の prop 変化は無視)
         const snap = snapRef.current;
@@ -134,9 +148,16 @@ export function usePtySession(options: UsePtySessionOptions): void {
         });
 
         if (localDisposed || disposedRef.current) {
-          // 古い effect の戻り値だった場合、spawn 済みの pty は責任を持って kill
+          // 古い effect の戻り値だった場合、spawn 済みの pty は少し待ってから掃除する。
+          // StrictMode 再マウントでは Rust 側が同じ id を再利用するため、即 kill すると
+          // 新しい effect が掴んだばかりの PTY まで落としてしまう。
           if (res.ok && res.id) {
-            void window.api.terminal.kill(res.id);
+            const idToKill = res.id;
+            window.setTimeout(() => {
+              if (disposedRef.current || ptyIdRef.current !== idToKill) {
+                void window.api.terminal.kill(idToKill);
+              }
+            }, 300);
           }
           return;
         }
@@ -216,13 +237,35 @@ export function usePtySession(options: UsePtySessionOptions): void {
       offData?.();
       offExit?.();
       offSessionId?.();
+      if (startTimer !== null) {
+        window.clearTimeout(startTimer);
+        startTimer = null;
+      }
       if (repairFrame !== null) {
         window.cancelAnimationFrame(repairFrame);
         repairFrame = null;
       }
-      if (ptyIdRef.current) {
-        void window.api.terminal.kill(ptyIdRef.current);
-        ptyIdRef.current = null;
+      // ★ React.StrictMode 対策:
+      //   dev では mount → cleanup → mount が連続で走る (cleanup は実際には unmount されない
+      //   偽イベント)。即 kill すると Rust 側で「同 agent_id の registry エントリを replace
+      //   して旧 PTY を kill」が連鎖し、Claude が起動完了する前に PTY が消滅する。
+      //   結果:
+      //     - claude_watcher が is_alive=false で即 exit → sessionId を永久に検出できない
+      //     - team-history の sessionId が null のまま → 履歴復元時に --resume が効かない
+      //   対策:
+      //     unmount → 200ms 待ってから kill 判定する。この間に effect が再 run して
+      //     同じ id を再利用していれば kill しない。別 id に切り替わった場合は古い PTY だけ掃除する。
+      const idToKill = ptyIdRef.current;
+      if (idToKill) {
+        window.setTimeout(() => {
+          // StrictMode の再マウントで同じ id が再利用されている場合だけ守る。
+          if (disposedRef.current || ptyIdRef.current !== idToKill) {
+            void window.api.terminal.kill(idToKill);
+            if (ptyIdRef.current === idToKill) {
+              ptyIdRef.current = null;
+            }
+          }
+        }, 200);
       }
     };
     // 不変式 #1: deps は [cwd, command] のみ。

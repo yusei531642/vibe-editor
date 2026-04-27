@@ -7,7 +7,7 @@
 
 use crate::state::AppState;
 use serde::Serialize;
-use tauri::State;
+use tauri::{Manager, State};
 
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -59,6 +59,23 @@ pub struct AppUserInfo {
     pub webview_version: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppLogInfo {
+    pub path: String,
+    pub content: String,
+    pub exists: bool,
+    pub truncated: bool,
+    pub max_bytes: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppMutationResult {
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamMcpMember {
@@ -72,7 +89,11 @@ pub fn app_get_project_root(state: State<AppState>) -> String {
     // Issue #147: poison しても recovery して値を返す。
     crate::state::lock_project_root_recover(&state.project_root)
         .clone()
-        .or_else(|| std::env::current_dir().ok().map(|p| p.to_string_lossy().into_owned()))
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned())
+        })
         .unwrap_or_default()
 }
 
@@ -91,7 +112,11 @@ pub fn app_set_project_root(
     // Issue #147: poison していても recovery して書き込む。失敗で常時死亡しない。
     let mut guard = crate::state::lock_project_root_recover(&state.project_root);
     let trimmed = project_root.trim().to_string();
-    *guard = if trimmed.is_empty() { None } else { Some(trimmed.clone()) };
+    *guard = if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.clone())
+    };
     drop(guard);
     // Issue #66: watcher は project_root 変更ごとに付け替える
     if !trimmed.is_empty() {
@@ -103,6 +128,17 @@ pub fn app_set_project_root(
 #[tauri::command]
 pub fn app_restart(app: tauri::AppHandle) {
     app.restart();
+}
+
+/// Issue: トレイメニュー / 設定モーダルから明示的にプロセス終了する。
+/// CloseRequested 経路 (× ボタン) は close-to-tray のため hide() するだけだが、
+/// この経路は PTY を kill_all してから即時 exit する。
+#[tauri::command]
+pub fn app_quit(app: tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    tracing::info!("[lifecycle] app_quit invoked — killing PTY and exiting");
+    state.pty_registry.kill_all();
+    app.exit(0);
 }
 
 #[tauri::command]
@@ -329,9 +365,7 @@ pub async fn app_cleanup_team_mcp(
                     "{error_msg} (rollback claude also failed: {re:#}; please review ~/.claude.json manually)"
                 );
             } else {
-                tracing::warn!(
-                    "[mcp] codex cleanup failed, claude restored to previous state"
-                );
+                tracing::warn!("[mcp] codex cleanup failed, claude restored to previous state");
             }
             return Ok(CleanupTeamMcpResult {
                 ok: false,
@@ -363,9 +397,7 @@ pub async fn app_get_mcp_server_path(state: State<'_, AppState>) -> Result<Strin
 }
 
 #[tauri::command]
-pub async fn app_get_team_hub_info(
-    state: State<'_, AppState>,
-) -> Result<TeamHubInfo, String> {
+pub async fn app_get_team_hub_info(state: State<'_, AppState>) -> Result<TeamHubInfo, String> {
     let (socket, token, bridge_path) = state.team_hub.info().await;
     Ok(TeamHubInfo {
         socket,
@@ -410,6 +442,54 @@ pub fn app_get_user_info(app: tauri::AppHandle) -> AppUserInfo {
     }
 }
 
+#[tauri::command]
+pub async fn app_get_log_info(max_bytes: Option<u64>) -> Result<AppLogInfo, String> {
+    let (content, exists, max_bytes, truncated) = crate::util::app_log::read_tail(max_bytes).await?;
+    Ok(AppLogInfo {
+        path: crate::util::app_log::log_path()
+            .to_string_lossy()
+            .into_owned(),
+        content,
+        exists,
+        truncated,
+        max_bytes,
+    })
+}
+
+#[tauri::command]
+pub async fn app_clear_log() -> AppMutationResult {
+    match crate::util::app_log::clear().await {
+        Ok(()) => AppMutationResult {
+            ok: true,
+            error: None,
+        },
+        Err(err) => AppMutationResult {
+            ok: false,
+            error: Some(err),
+        },
+    }
+}
+
+#[tauri::command]
+pub fn app_append_renderer_log(level: String, message: String) -> AppMutationResult {
+    let level = level.trim().to_ascii_lowercase();
+    let mut chars = message.chars();
+    let mut message: String = chars.by_ref().take(20_000).collect();
+    if chars.next().is_some() {
+        message.push_str("... [truncated]");
+    }
+    match level.as_str() {
+        "error" => tracing::error!("[renderer] {message}"),
+        "warn" | "warning" => tracing::warn!("[renderer] {message}"),
+        "debug" => tracing::debug!("[renderer] {message}"),
+        _ => tracing::info!("[renderer] {message}"),
+    }
+    AppMutationResult {
+        ok: true,
+        error: None,
+    }
+}
+
 /// Issue #49: 許可するスキームの allowlist。
 /// - `http`/`https`: 通常の Web ページ (Release ページ、ドキュメント等)
 /// - `mailto`: メール feedback
@@ -440,10 +520,7 @@ fn is_safe_external_url(url: &str) -> bool {
 }
 
 #[tauri::command]
-pub async fn app_open_external(
-    app: tauri::AppHandle,
-    url: String,
-) -> OpenExternalResult {
+pub async fn app_open_external(app: tauri::AppHandle, url: String) -> OpenExternalResult {
     use tauri_plugin_opener::OpenerExt;
     // Issue #49: スキーム検証 — allowlist 外は即拒否
     if !is_safe_external_url(&url) {
@@ -456,6 +533,71 @@ pub async fn app_open_external(
         };
     }
     match app.opener().open_url(&url, None::<&str>) {
+        Ok(_) => OpenExternalResult {
+            ok: true,
+            error: None,
+        },
+        Err(e) => OpenExternalResult {
+            ok: false,
+            error: Some(e.to_string()),
+        },
+    }
+}
+
+#[tauri::command]
+pub async fn app_reveal_path(path: String) -> OpenExternalResult {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed.len() > 32767 {
+        return OpenExternalResult {
+            ok: false,
+            error: Some("invalid path".into()),
+        };
+    }
+
+    let target = std::path::PathBuf::from(trimmed);
+    if !target.is_absolute() {
+        return OpenExternalResult {
+            ok: false,
+            error: Some("path must be absolute".into()),
+        };
+    }
+    if !target.exists() {
+        return OpenExternalResult {
+            ok: false,
+            error: Some("path does not exist".into()),
+        };
+    }
+
+    #[cfg(target_os = "windows")]
+    let spawn_result = {
+        let mut cmd = std::process::Command::new("explorer.exe");
+        if target.is_file() {
+            cmd.arg(format!("/select,{}", target.display()));
+        } else {
+            cmd.arg(&target);
+        }
+        cmd.spawn()
+    };
+
+    #[cfg(target_os = "macos")]
+    let spawn_result = std::process::Command::new("open")
+        .arg("-R")
+        .arg(&target)
+        .spawn();
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let spawn_result = {
+        let open_target = if target.is_dir() {
+            target.as_path()
+        } else {
+            target.parent().unwrap_or(target.as_path())
+        };
+        std::process::Command::new("xdg-open")
+            .arg(open_target)
+            .spawn()
+    };
+
+    match spawn_result {
         Ok(_) => OpenExternalResult {
             ok: true,
             error: None,

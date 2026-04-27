@@ -26,15 +26,14 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
     update('customAgents', next);
   };
 
-  const remove = (): void => {
-    if (
-      !window.confirm(
-        isJa
-          ? `カスタムエージェント "${agent.name}" を削除しますか？`
-          : `Delete custom agent "${agent.name}"?`
-      )
-    )
-      return;
+  const remove = async (): Promise<void> => {
+    const { confirmAsync } = await import('../../lib/tauri-api');
+    const ok = await confirmAsync(
+      isJa
+        ? `カスタムエージェント "${agent.name}" を削除しますか？`
+        : `Delete custom agent "${agent.name}"?`
+    );
+    if (!ok) return;
     update(
       'customAgents',
       (draft.customAgents ?? []).filter((a) => a.id !== agent.id)

@@ -7,14 +7,39 @@ use crate::pty::{spawn_session, SpawnOptions, UserWriteOutcome};
 use crate::state::AppState;
 use crate::team_hub::inject::build_chunks;
 use crate::util::log_redact::redact_home;
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex as StdMutex;
 use std::time::Duration;
 use tauri::{AppHandle, State};
+use tokio::sync::Mutex as TokioMutex;
 use uuid::Uuid;
+
+/// agent_id 単位の terminal_create 直列化用 Mutex マップ。
+///
+/// React.StrictMode 二重 mount で同一 agent_id の terminal_create が ~10ms 以内に
+/// 並行発火した場合、両方とも `id_by_agent` チェックを通過してから spawn_session →
+/// registry.insert で後者が前者を replace_kill してしまう。watcher は is_alive=false で
+/// 即 exit し、Claude が起動完了する前に PTY が消滅する。
+///
+/// 対策: agent_id ごとに Tokio Mutex を 1 つ持ち、idempotent check と spawn_session +
+/// registry.insert を一連の critical section として直列化する。
+static AGENT_SPAWN_LOCKS: Lazy<StdMutex<HashMap<String, Arc<TokioMutex<()>>>>> =
+    Lazy::new(|| StdMutex::new(HashMap::new()));
+
+fn agent_spawn_lock(agent_id: &str) -> Arc<TokioMutex<()>> {
+    let mut map = match AGENT_SPAWN_LOCKS.lock() {
+        Ok(g) => g,
+        Err(p) => p.into_inner(),
+    };
+    map.entry(agent_id.to_string())
+        .or_insert_with(|| Arc::new(TokioMutex::new(())))
+        .clone()
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -134,7 +159,11 @@ fn is_allowed_terminal_command(command: &str) -> bool {
 fn reject_immediate_exec_args(command: &str, args: &[String]) -> Option<&'static str> {
     let basename = command_basename(command);
     let lower_args: Vec<String> = args.iter().map(|a| a.trim().to_ascii_lowercase()).collect();
-    let has_any = |candidates: &[&str]| lower_args.iter().any(|arg| candidates.contains(&arg.as_str()));
+    let has_any = |candidates: &[&str]| {
+        lower_args
+            .iter()
+            .any(|arg| candidates.contains(&arg.as_str()))
+    };
     match basename.as_str() {
         "bash" | "sh" | "zsh" | "fish" => {
             if has_any(&["-c", "-lc"]) {
@@ -202,8 +231,12 @@ async fn cleanup_old_codex_instructions(dir: &std::path::Path) {
     };
     let now = std::time::SystemTime::now();
     while let Ok(Some(entry)) = rd.next_entry().await {
-        let Ok(meta) = entry.metadata().await else { continue };
-        let Ok(modified) = meta.modified() else { continue };
+        let Ok(meta) = entry.metadata().await else {
+            continue;
+        };
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
         let age = now.duration_since(modified).unwrap_or_default();
         if age.as_secs() > TTL_SECS {
             let _ = tokio::fs::remove_file(entry.path()).await;
@@ -282,6 +315,38 @@ fn is_codex_command(command: &str) -> bool {
     basename == "codex" || basename.ends_with("-codex") || basename.starts_with("codex-")
 }
 
+fn summarize_args_for_log(args: &[String]) -> Vec<String> {
+    const MAX_ARGS: usize = 12;
+    const MAX_INLINE_CHARS: usize = 160;
+    let mut out = Vec::new();
+    let mut redact_next = false;
+    for arg in args.iter().take(MAX_ARGS) {
+        if redact_next {
+            out.push(format!("<redacted {} chars>", arg.chars().count()));
+            redact_next = false;
+            continue;
+        }
+        if matches!(
+            arg.as_str(),
+            "--append-system-prompt" | "--system-prompt" | "--prompt"
+        ) {
+            out.push(arg.clone());
+            redact_next = true;
+            continue;
+        }
+        let char_count = arg.chars().count();
+        if char_count > MAX_INLINE_CHARS || arg.contains('\n') || arg.contains('\r') {
+            out.push(format!("<{char_count} chars>"));
+        } else {
+            out.push(redact_home(arg));
+        }
+    }
+    if args.len() > MAX_ARGS {
+        out.push(format!("... ({} more args)", args.len() - MAX_ARGS));
+    }
+    out
+}
+
 #[cfg(test)]
 mod codex_command_tests {
     use super::is_codex_command;
@@ -299,6 +364,29 @@ mod codex_command_tests {
         assert!(!is_codex_command("claude"));
         assert!(!is_codex_command("bash"));
         assert!(!is_codex_command(""));
+    }
+}
+
+#[cfg(test)]
+mod arg_log_tests {
+    use super::summarize_args_for_log;
+
+    #[test]
+    fn redacts_system_prompt_value() {
+        let args = vec![
+            "--append-system-prompt".to_string(),
+            "secret prompt body".to_string(),
+        ];
+        let summarized = summarize_args_for_log(&args);
+        assert_eq!(summarized[0], "--append-system-prompt");
+        assert!(summarized[1].starts_with("<redacted "));
+        assert!(!summarized[1].contains("secret"));
+    }
+
+    #[test]
+    fn summarizes_multiline_args() {
+        let args = vec!["line1\nline2".to_string()];
+        assert_eq!(summarize_args_for_log(&args), vec!["<11 chars>"]);
     }
 }
 
@@ -323,6 +411,37 @@ pub async fn terminal_create(
             ..Default::default()
         });
     }
+    // ★ React.StrictMode / 並行 mount 対策: agent_id 単位の Mutex で
+    //   「idempotent check + spawn_session + registry.insert」を 1 つの critical section に纏める。
+    //   旧実装は idempotent check だけ先行で行い、その後 spawn_session が走る間に同 agent_id
+    //   で 2 本目の terminal_create が空 registry を見て通過してしまい、両方が spawn して
+    //   後者が前者を replace_kill する race があった。
+    //   guard は関数末尾までスコープ内で保持される (drop で release)。
+    //
+    //   注意: agent_id が無いケース (= 通常 terminal タブなど) は直列化しない。
+    let _agent_guard: Option<tokio::sync::OwnedMutexGuard<()>> =
+        if let Some(aid) = opts.agent_id.as_deref() {
+            let lock = agent_spawn_lock(aid);
+            let guard = lock.lock_owned().await;
+            // critical section 内で再度 registry を見る — Mutex 取得待ち中に他の terminal_create
+            // が完了していれば、ここで idempotent reuse できる。
+            if let Some(existing_id) = state.pty_registry.id_by_agent(aid) {
+                tracing::info!(
+                    "[IPC] terminal_create idempotent reuse agent_id={aid} -> id={existing_id}"
+                );
+                return Ok(TerminalCreateResult {
+                    ok: true,
+                    id: Some(existing_id),
+                    command: Some(command.clone()),
+                    warning: None,
+                    error: None,
+                });
+            }
+            Some(guard)
+        } else {
+            None
+        };
+
     let (cwd, warning) =
         crate::pty::session::resolve_valid_cwd(&opts.cwd, opts.fallback_cwd.as_deref());
 
@@ -342,9 +461,7 @@ pub async fn terminal_create(
         {
             if let Some(path) = prepare_codex_instructions_file(instr).await {
                 let path_str = path.to_string_lossy().into_owned();
-                tracing::info!(
-                    "[terminal] codex model_instructions_file={path_str}"
-                );
+                tracing::info!("[terminal] codex model_instructions_file={path_str}");
                 args.push("--config".to_string());
                 args.push(format!("model_instructions_file={path_str}"));
             }
@@ -367,7 +484,9 @@ pub async fn terminal_create(
         opts.rows
     );
     tracing::debug!(
-        "[IPC] terminal_create (verbose) args={args:?} cwd={cwd}"
+        "[IPC] terminal_create (verbose) args={:?} cwd={}",
+        summarize_args_for_log(&args),
+        redact_home(&cwd)
     );
 
     if let Some(w) = &warning {
@@ -403,7 +522,12 @@ pub async fn terminal_create(
         role: opts.role,
     };
 
-    match spawn_session(app.clone(), id.clone(), spawn_opts, state.pty_registry.clone()) {
+    match spawn_session(
+        app.clone(),
+        id.clone(),
+        spawn_opts,
+        state.pty_registry.clone(),
+    ) {
         Ok(handle) => {
             state.pty_registry.insert(id.clone(), handle);
 
@@ -440,9 +564,12 @@ pub async fn terminal_create(
                 } else {
                     watcher_root
                 };
-                crate::pty::claude_watcher::spawn_watcher(app.clone(), watcher_id.clone(), actual_root, move || {
-                    registry.get(&watcher_id).is_some()
-                });
+                crate::pty::claude_watcher::spawn_watcher(
+                    app.clone(),
+                    watcher_id.clone(),
+                    actual_root,
+                    move || registry.get(&watcher_id).is_some(),
+                );
             }
             let cmdline = std::iter::once(command.clone())
                 .chain(args.iter().cloned())
@@ -499,7 +626,10 @@ pub async fn terminal_resize(
 ) -> Result<(), String> {
     if let Some(s) = state.pty_registry.get(&id) {
         // resize 失敗は無害なので握りつぶす (旧実装と同じ)
-        let _ = s.resize(cols.min(u32::from(u16::MAX)) as u16, rows.min(u32::from(u16::MAX)) as u16);
+        let _ = s.resize(
+            cols.min(u32::from(u16::MAX)) as u16,
+            rows.min(u32::from(u16::MAX)) as u16,
+        );
     }
     Ok(())
 }

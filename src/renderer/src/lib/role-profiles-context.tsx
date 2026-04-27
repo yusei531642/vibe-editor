@@ -17,6 +17,7 @@ import {
   type ReactNode
 } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { safeUnlisten } from './tauri-api';
 import type {
   Language,
   RoleProfile,
@@ -208,16 +209,20 @@ export function RoleProfilesProvider({ children }: { children: ReactNode }): JSX
           teamId
         }
       }));
-    }).then((u) => {
-      if (disposed) {
-        u();
-      } else {
-        unlisten = u;
-      }
-    });
+    })
+      .then((u) => {
+        if (disposed) {
+          safeUnlisten(u);
+        } else {
+          unlisten = u;
+        }
+      })
+      .catch(() => undefined);
     return () => {
       disposed = true;
-      unlisten?.();
+      // unlisten 由来の race 例外 (handlerId undefined) を吸収する。
+      safeUnlisten(unlisten);
+      unlisten = null;
     };
   }, []);
 

@@ -13,6 +13,7 @@ import { useCanvasStore } from '../stores/canvas';
 import type { Node } from '@xyflow/react';
 import type { CardData } from '../stores/canvas';
 import { useRoleProfiles } from './role-profiles-context';
+import { safeUnlisten } from './tauri-api';
 
 interface RecruitRequestPayload {
   teamId: string;
@@ -45,49 +46,31 @@ interface RecruitCancelledPayload {
 
 const NODE_W = 480;
 const NODE_H = 320;
-const RECRUIT_RADIUS = 540; // requester からの距離
+// チーム配置の標準セル寸法。findRecruitPosition と arrangeTeam (右クリック自動整理) で
+// 同じ計算式を使うため、stores/canvas.ts の autoArrangeTeam とも揃えること。
+const TEAM_COLS = 3;
+const TEAM_GAP_X = 32;
+const TEAM_GAP_Y = 60;
 
-/** requester の周囲で空いている角度を見つけて配置位置を返す。
- *  既存メンバーの方角をスキャンし、最も空いている角度をピック。 */
+/** requester (Leader) の真下に 3 列グリッドで配置する。
+ *  旧実装は "最も空いている角度" を radius 540 で探していたが、結果として
+ *  メンバーが requester の周囲にバラバラに出て収拾がつかなかった。
+ *  新方式: 既存メンバー数を index として、leader 直下の 3 列グリッドへ順に詰める。
+ *  既存メンバーの位置を "再配置" しないので、この関数を呼ぶたびに位置が動く事故も無い。 */
 function findRecruitPosition(
   requester: Node<CardData>,
   team: Node<CardData>[]
 ): { x: number; y: number } {
-  const cx = requester.position.x + NODE_W / 2;
-  const cy = requester.position.y + NODE_H / 2;
-  const others = team.filter((n) => n.id !== requester.id);
-  if (others.length === 0) {
-    // 真右に出す
-    return { x: requester.position.x + RECRUIT_RADIUS, y: requester.position.y };
-  }
-  // 既存メンバーの角度を集計
-  const usedAngles = others.map((n) => {
-    const ox = n.position.x + NODE_W / 2;
-    const oy = n.position.y + NODE_H / 2;
-    return Math.atan2(oy - cy, ox - cx);
-  });
-  // 12 等分のスロットを試して、最も近い既存メンバーから角度的に最も離れた slot を選ぶ
-  const SLOTS = 12;
-  let bestAngle = 0;
-  let bestDist = -1;
-  for (let i = 0; i < SLOTS; i++) {
-    const a = (i / SLOTS) * Math.PI * 2 - Math.PI / 2; // 上から時計回り
-    const minDistToUsed = usedAngles.reduce((min, u) => {
-      const d = Math.min(
-        Math.abs(a - u),
-        Math.abs(a - u + Math.PI * 2),
-        Math.abs(a - u - Math.PI * 2)
-      );
-      return Math.min(min, d);
-    }, Number.POSITIVE_INFINITY);
-    if (minDistToUsed > bestDist) {
-      bestDist = minDistToUsed;
-      bestAngle = a;
-    }
-  }
+  const existing = team.filter((n) => n.id !== requester.id).length;
+  const col = existing % TEAM_COLS;
+  const row = Math.floor(existing / TEAM_COLS);
+  // requester の中心を基準に 3 列を中央揃え。col 0 が左端、col 2 が右端になる。
+  const cellW = NODE_W + TEAM_GAP_X;
+  const startX = requester.position.x + NODE_W / 2 - (cellW * TEAM_COLS) / 2 + TEAM_GAP_X / 2;
+  const startY = requester.position.y + NODE_H + TEAM_GAP_Y;
   return {
-    x: cx + Math.cos(bestAngle) * RECRUIT_RADIUS - NODE_W / 2,
-    y: cy + Math.sin(bestAngle) * RECRUIT_RADIUS - NODE_H / 2
+    x: startX + col * cellW,
+    y: startY + row * (NODE_H + TEAM_GAP_Y)
   };
 }
 
@@ -146,13 +129,15 @@ export function useRecruitListener(): void {
           customInstructions: p.customInstructions || undefined
         }
       });
-    }).then((u) => {
-      if (cancelled) {
-        u();
-      } else {
-        unlistens.push(u);
-      }
-    });
+    })
+      .then((u) => {
+        if (cancelled) {
+          safeUnlisten(u);
+        } else {
+          unlistens.push(u);
+        }
+      })
+      .catch(() => undefined);
 
     void listen<DismissRequestPayload>('team:dismiss-request', (e) => {
       if (cancelled) return;
@@ -167,13 +152,15 @@ export function useRecruitListener(): void {
         // Leader や他メンバーが連鎖的に閉じないようにする。
         store.removeCard(target.id, { cascadeTeam: false });
       }
-    }).then((u) => {
-      if (cancelled) {
-        u();
-      } else {
-        unlistens.push(u);
-      }
-    });
+    })
+      .then((u) => {
+        if (cancelled) {
+          safeUnlisten(u);
+        } else {
+          unlistens.push(u);
+        }
+      })
+      .catch(() => undefined);
 
     void listen<RecruitCancelledPayload>('team:recruit-cancelled', (e) => {
       if (cancelled) return;
@@ -189,17 +176,20 @@ export function useRecruitListener(): void {
         // 既に立っている Leader / 他メンバーを巻き込まないようカスケード無効化。
         store.removeCard(target.id, { cascadeTeam: false });
       }
-    }).then((u) => {
-      if (cancelled) {
-        u();
-      } else {
-        unlistens.push(u);
-      }
-    });
+    })
+      .then((u) => {
+        if (cancelled) {
+          safeUnlisten(u);
+        } else {
+          unlistens.push(u);
+        }
+      })
+      .catch(() => undefined);
 
     return () => {
       cancelled = true;
-      for (const u of unlistens) u();
+      // unlisten 由来の race 例外 (handlerId undefined) を吸収する。
+      for (const u of unlistens) safeUnlisten(u);
     };
     // registerDynamicRole は useCallback 経由で stable なので再 listen は発生しない
     // eslint-disable-next-line react-hooks/exhaustive-deps

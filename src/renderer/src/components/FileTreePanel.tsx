@@ -1,9 +1,19 @@
-import { memo, useEffect, useMemo, useState, useCallback } from 'react';
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  type CSSProperties,
+  type MouseEvent
+} from 'react';
 import {
   ChevronDown,
   ChevronRight,
+  Copy,
   File as DefaultFileIcon,
   Folder,
+  FolderSearch,
   FolderOpen,
   FolderPlus,
   RefreshCw,
@@ -12,6 +22,8 @@ import {
 import type { FileNode } from '../../../types/shared';
 import { useT } from '../lib/i18n';
 import { fileIcon } from '../lib/file-icon-color';
+import { useToast } from '../lib/toast-context';
+import { ContextMenu, type ContextMenuItem } from './ContextMenu';
 
 interface FileTreePanelProps {
   /** メインのプロジェクトルート(ターミナル/Git 等はこちら基準で動作する) */
@@ -43,6 +55,22 @@ const shortName = (abs: string): string => {
   return parts[parts.length - 1] || abs;
 };
 
+const FILETREE_STATE_PREFIX = 'vibe-editor:filetree:v1:';
+
+const fileTreeStateKey = (primaryRoot: string): string | null =>
+  primaryRoot ? `${FILETREE_STATE_PREFIX}${primaryRoot}` : null;
+
+const joinAbsPath = (rootPath: string, relPath: string): string => {
+  if (!relPath) return rootPath;
+  const sep = rootPath.includes('\\') ? '\\' : '/';
+  return `${rootPath.replace(/[\\/]+$/, '')}${sep}${relPath.replace(/\//g, sep)}`;
+};
+
+interface PersistedFileTreeState {
+  expanded?: string[];
+  collapsedRoots?: string[];
+}
+
 export function FileTreePanel({
   primaryRoot,
   extraRoots,
@@ -52,6 +80,7 @@ export function FileTreePanel({
   onRemoveWorkspaceFolder
 }: FileTreePanelProps): JSX.Element {
   const t = useT();
+  const { showToast } = useToast();
   /**
    * 全ルート共通のディレクトリキャッシュ。
    * key = `${rootPath}\0${relPath}` ('' がそのルートの直下)
@@ -61,6 +90,12 @@ export function FileTreePanel({
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   /** 折り畳み状態のルート集合。primary は初期展開、extra はユーザー操作に委ねる */
   const [collapsedRoots, setCollapsedRoots] = useState<Set<string>>(new Set());
+  const [loadedStateKey, setLoadedStateKey] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    x: number;
+    y: number;
+    items: ContextMenuItem[];
+  } | null>(null);
 
   /** 現在サイドバーに表示するルート一覧(primary + extras から重複除去)。
    *  Issue #129: 配列リテラルを毎レンダー作ると useEffect deps や子供 props が
@@ -73,6 +108,7 @@ export function FileTreePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [primaryRoot, extraRoots.join('')]
   );
+  const storageKey = useMemo(() => fileTreeStateKey(primaryRoot), [primaryRoot]);
 
   const loadDir = useCallback(
     async (rootPath: string, relPath: string): Promise<void> => {
@@ -125,6 +161,42 @@ export function FileTreePanel({
     []
   );
 
+  useEffect(() => {
+    if (!storageKey) {
+      setExpanded(new Set());
+      setCollapsedRoots(new Set());
+      setLoadedStateKey(null);
+      return;
+    }
+    let restored: PersistedFileTreeState | null = null;
+    try {
+      const raw = window.localStorage.getItem(storageKey);
+      restored = raw ? (JSON.parse(raw) as PersistedFileTreeState) : null;
+    } catch {
+      restored = null;
+    }
+    setExpanded(new Set(restored?.expanded ?? []));
+    setCollapsedRoots(new Set(restored?.collapsedRoots ?? []));
+    setLoadedStateKey(storageKey);
+  }, [storageKey]);
+
+  useEffect(() => {
+    if (!storageKey || loadedStateKey !== storageKey) return;
+    const validPrefixes = roots.map((root) => `${root}\0`);
+    const validRoots = new Set(roots);
+    const payload: PersistedFileTreeState = {
+      expanded: Array.from(expanded).filter((key) =>
+        validPrefixes.some((prefix) => key.startsWith(prefix))
+      ),
+      collapsedRoots: Array.from(collapsedRoots).filter((root) => validRoots.has(root))
+    };
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(payload));
+    } catch {
+      // 保存に失敗してもファイルツリー操作自体は続ける。
+    }
+  }, [collapsedRoots, expanded, loadedStateKey, roots, storageKey]);
+
   // ルート構成が変わったら、まだロードしていないルートの直下を自動ロード。
   // 既にキャッシュ済みのルートは触らず(折り畳みや展開状態を保持)。
   useEffect(() => {
@@ -151,6 +223,17 @@ export function FileTreePanel({
     // roots は毎回新しい配列なので primaryRoot + extraRoots 依存にする
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [primaryRoot, extraRoots.join('\u0001'), loadDir]);
+
+  useEffect(() => {
+    if (!storageKey || loadedStateKey !== storageKey) return;
+    for (const key of expanded) {
+      if (dirs.has(key)) continue;
+      const [rootPath, relPath] = key.split('\0');
+      if (rootPath && roots.includes(rootPath)) {
+        void loadDir(rootPath, relPath ?? '');
+      }
+    }
+  }, [dirs, expanded, loadDir, loadedStateKey, roots, storageKey]);
 
   const toggleDir = useCallback(
     (rootPath: string, node: FileNode) => {
@@ -198,6 +281,59 @@ export function FileTreePanel({
     });
   }, []);
 
+  const revealPath = useCallback(async (absPath: string): Promise<void> => {
+    try {
+      const res = await window.api.app.revealPath(absPath);
+      if (res.ok) {
+        showToast(t('toast.revealedInFileManager'), { tone: 'info' });
+      } else {
+        console.warn('[filetree] reveal failed:', res.error);
+        showToast(t('toast.revealFailed', { error: res.error ?? 'error' }), { tone: 'error' });
+      }
+    } catch (err) {
+      console.warn('[filetree] reveal failed:', err);
+      showToast(t('toast.revealFailed', { error: String(err) }), { tone: 'error' });
+    }
+  }, [showToast, t]);
+
+  const copyToClipboard = useCallback(async (text: string): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(t('toast.pathCopied'), { tone: 'info' });
+    } catch (err) {
+      console.warn('[filetree] copy failed:', err);
+      showToast(t('toast.copyFailed', { error: String(err) }), { tone: 'error' });
+    }
+  }, [showToast, t]);
+
+  const openContextMenu = useCallback(
+    (e: MouseEvent, rootPath: string, relPath: string, isRoot = false) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const absPath = joinAbsPath(rootPath, relPath);
+      const items: ContextMenuItem[] = [
+        {
+          label: t('ctxMenu.copyPath'),
+          icon: <Copy size={14} strokeWidth={1.8} />,
+          action: () => void copyToClipboard(absPath)
+        },
+        {
+          label: t('ctxMenu.copyRelativePath'),
+          icon: <Copy size={14} strokeWidth={1.8} />,
+          disabled: isRoot,
+          action: () => void copyToClipboard(relPath)
+        },
+        {
+          label: t('ctxMenu.revealInFileManager'),
+          icon: <FolderSearch size={14} strokeWidth={1.8} />,
+          action: () => void revealPath(absPath)
+        }
+      ];
+      setContextMenu({ x: e.clientX, y: e.clientY, items });
+    },
+    [copyToClipboard, revealPath, t]
+  );
+
   const renderChildren = (
     rootPath: string,
     relPath: string,
@@ -244,6 +380,7 @@ export function FileTreePanel({
               childState={childState}
               onToggle={toggleDir}
               onOpenFile={onOpenFile}
+              onContextMenu={openContextMenu}
               renderChildren={renderChildren}
             />
           );
@@ -289,6 +426,7 @@ export function FileTreePanel({
               <div
                 className={`filetree__root-header${isPrimary ? ' is-primary' : ''}`}
                 title={root}
+                onContextMenu={(e) => openContextMenu(e, root, '', true)}
               >
                 <button
                   type="button"
@@ -321,6 +459,14 @@ export function FileTreePanel({
           );
         })}
       </div>
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }
@@ -335,6 +481,7 @@ interface FileTreeNodeProps {
   childState: DirState | null;
   onToggle: (rootPath: string, node: FileNode) => void;
   onOpenFile: (rootPath: string, relPath: string) => void;
+  onContextMenu: (e: MouseEvent, rootPath: string, relPath: string) => void;
   renderChildren: (
     rootPath: string,
     relPath: string,
@@ -350,6 +497,7 @@ function FileTreeNodeImpl({
   isActive,
   onToggle,
   onOpenFile,
+  onContextMenu,
   renderChildren
 }: FileTreeNodeProps): JSX.Element {
   const fileIconDef = node.isDir ? undefined : fileIcon(node.name);
@@ -363,7 +511,7 @@ function FileTreeNodeImpl({
 
   // Issue #18: 階層ごとのインデントガイドを background-image で描く。
   // 1px の縦線を 12px 間隔で depth 本だけ。深い階層でも視線が迷子にならない。
-  const guideStyle: React.CSSProperties =
+  const guideStyle: CSSProperties =
     depth > 0
       ? {
           paddingLeft: 4 + depth * 12,
@@ -382,6 +530,7 @@ function FileTreeNodeImpl({
         className={`filetree__row${isActive ? ' is-active' : ''}`}
         style={guideStyle}
         onClick={handleClick}
+        onContextMenu={(e) => onContextMenu(e, rootPath, node.path)}
       >
         {node.isDir ? (
           <>
@@ -445,7 +594,8 @@ const FileTreeNode = memo(FileTreeNodeImpl, (prev, next) => {
     prev.isActive === next.isActive &&
     prev.childState === next.childState &&
     prev.onToggle === next.onToggle &&
-    prev.onOpenFile === next.onOpenFile
+    prev.onOpenFile === next.onOpenFile &&
+    prev.onContextMenu === next.onContextMenu
     // renderChildren は意図的に比較しない (毎レンダー新参照になるが、
     // 開いているディレクトリは isOpen + childState の変化で再レンダーが
     // 既に走るので問題なし。閉じているノード/葉は早期 return できる)。

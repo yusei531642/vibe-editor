@@ -42,6 +42,9 @@ export function Topbar({
   onClickUpdate
 }: TopbarProps): JSX.Element {
   const t = useT();
+  const isApplePlatform =
+    typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/i.test(navigator.platform);
+  const searchShortcut = isApplePlatform ? '⌘K' : 'Ctrl+K';
   const segments = projectRoot.split(/[\\/]/).filter(Boolean);
   const projectName = segments[segments.length - 1] ?? '';
   const parentSlice = segments.slice(Math.max(segments.length - 2, 0), -1).join(' / ');
@@ -94,7 +97,7 @@ export function Topbar({
       >
         <Search size={13} strokeWidth={1.9} className="topbar__search-icon" />
         <span className="topbar__search-hint">{t('topbar.searchHint')}</span>
-        <span className="topbar__search-kbd">⌘K</span>
+        <span className="topbar__search-kbd">{searchShortcut}</span>
       </button>
 
       {status ? (

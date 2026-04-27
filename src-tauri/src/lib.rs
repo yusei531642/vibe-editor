@@ -11,17 +11,119 @@ mod state;
 mod team_hub;
 mod util;
 
+use std::fs::OpenOptions;
+use std::io::{self, Write};
+use std::sync::{Arc, Mutex as StdMutex};
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::Manager;
 #[allow(unused_imports)]
 use tracing::info;
+use tracing_subscriber::fmt::writer::MakeWriter;
+use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+
+#[derive(Clone)]
+struct FileLogWriter {
+    file: Arc<StdMutex<Option<std::fs::File>>>,
+}
+
+struct FileLogGuard {
+    file: Arc<StdMutex<Option<std::fs::File>>>,
+}
+
+impl<'a> MakeWriter<'a> for FileLogWriter {
+    type Writer = FileLogGuard;
+
+    fn make_writer(&'a self) -> Self::Writer {
+        FileLogGuard {
+            file: self.file.clone(),
+        }
+    }
+}
+
+impl Write for FileLogGuard {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        if let Ok(mut guard) = self.file.lock() {
+            if let Some(file) = guard.as_mut() {
+                file.write_all(buf)?;
+            }
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if let Ok(mut guard) = self.file.lock() {
+            if let Some(file) = guard.as_mut() {
+                file.flush()?;
+            }
+        }
+        Ok(())
+    }
+}
+
+fn init_logging() {
+    let filter = EnvFilter::try_new(
+        std::env::var("RUST_LOG").unwrap_or_else(|_| "vibe_editor_lib=debug,info".into()),
+    )
+    .unwrap_or_else(|_| EnvFilter::new("info"));
+    let log_path = util::app_log::log_path();
+    if let Some(parent) = log_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let log_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .ok();
+
+    let console_layer = fmt::layer();
+    let file_layer = fmt::layer()
+        .with_ansi(false)
+        .with_writer(FileLogWriter {
+            file: Arc::new(StdMutex::new(log_file)),
+        });
+
+    tracing_subscriber::registry()
+        .with(filter)
+        .with(console_layer)
+        .with(file_layer)
+        .init();
+
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |panic_info| {
+        tracing::error!("[panic] {panic_info}");
+        default_hook(panic_info);
+    }));
+}
+
+/// Issue: × で閉じたときの挙動を settings.json から sync に読む。
+/// CloseRequested ハンドラは sync コンテキストなので tokio::fs を使う非同期版
+/// settings_load を待てない。close behavior は close 時に都度読めば足りる
+/// (頻度が低いので blocking I/O の影響は無視できる)。
+/// 値は "tray" (デフォルト) または "quit"。
+fn read_close_behavior() -> String {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return "tray".to_string(),
+    };
+    let path = home.join(".vibe-editor").join("settings.json");
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(_) => return "tray".to_string(),
+    };
+    let v: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(_) => return "tray".to_string(),
+    };
+    v.get("closeBehavior")
+        .and_then(|x| x.as_str())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "tray".to_string())
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "vibe_editor_lib=debug,info".into()),
-        )
-        .init();
+    init_logging();
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
@@ -45,6 +147,7 @@ pub fn run() {
             commands::app::app_get_project_root,
             commands::app::app_set_project_root,
             commands::app::app_restart,
+            commands::app::app_quit,
             commands::app::app_set_window_title,
             commands::app::app_check_claude,
             commands::app::app_set_zoom_level,
@@ -57,6 +160,10 @@ pub fn run() {
             commands::app::app_cancel_recruit,
             commands::app::app_get_user_info,
             commands::app::app_open_external,
+            commands::app::app_reveal_path,
+            commands::app::app_get_log_info,
+            commands::app::app_clear_log,
+            commands::app::app_append_renderer_log,
             // ---- git ----
             commands::git::git_status,
             commands::git::git_diff,
@@ -66,6 +173,7 @@ pub fn run() {
             commands::files::files_write,
             // ---- sessions ----
             commands::sessions::sessions_list,
+            commands::sessions::session_exists,
             // ---- team_history ----
             commands::team_history::team_history_list,
             commands::team_history::team_history_save,
@@ -112,7 +220,9 @@ pub fn run() {
                                 .downcast_ref::<String>()
                                 .cloned()
                                 .or_else(|| {
-                                    payload.downcast_ref::<&'static str>().map(|s| s.to_string())
+                                    payload
+                                        .downcast_ref::<&'static str>()
+                                        .map(|s| s.to_string())
                                 })
                                 .unwrap_or_else(|| "(unknown)".to_string());
                             tracing::error!("[setup] {name} task panicked: {msg}");
@@ -166,20 +276,81 @@ pub fn run() {
                 }
             }
 
-            // Issue #55: メイン window の CloseRequested で PTY と TeamHub を明示 cleanup する。
-            // portable-pty (Windows ConPTY) は親が落ちても子が残る場合があるので、
-            // 明示的に kill_all を呼んで Claude / Codex プロセスが孤立しないようにする。
+            // Issue: × で閉じても Team の PTY を生かしたまま「トレイに常駐」する。
+            //   - settings.closeBehavior == "tray" (デフォルト): prevent_close + window.hide()
+            //   - settings.closeBehavior == "quit"            : 旧挙動 (kill_all して exit)
+            // Issue #55: portable-pty (Windows ConPTY) は親が落ちても子が残る場合があるので、
+            //   "quit" 経路で明示的に kill_all を呼んで Claude / Codex プロセスが孤立しないようにする。
+            //   "tray" 経路では PTY をそのまま走らせ続けることが目的なので kill しない。
             if let Some(main_window) = app.get_webview_window("main") {
-                let app_handle = app.handle().clone();
+                let app_handle_close = app.handle().clone();
                 main_window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { .. } = event {
-                        tracing::info!("[lifecycle] window close — running cleanup");
-                        let state = app_handle.state::<state::AppState>();
-                        state.pty_registry.kill_all();
-                        // MCP エントリは残しておく (次回起動時に reclaim されるので副作用なし)
-                        // team-bridge.js は ~/.vibe-editor/ に置いたまま (再利用のため)
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        let behavior = read_close_behavior();
+                        if behavior == "quit" {
+                            tracing::info!("[lifecycle] window close (quit) — kill_all + exit");
+                            let state = app_handle_close.state::<state::AppState>();
+                            state.pty_registry.kill_all();
+                            // close を許可 (api.prevent_close を呼ばない) → 続けて app exit
+                        } else {
+                            tracing::info!("[lifecycle] window close — minimize to tray");
+                            api.prevent_close();
+                            if let Some(w) = app_handle_close.get_webview_window("main") {
+                                let _ = w.hide();
+                            }
+                        }
                     }
                 });
+            }
+
+            // Issue: システムトレイ (Show / Quit メニュー + 左クリックでウィンドウ復元)。
+            // tauri.conf.json の trayIcon は最小設定 (icon + tooltip) のみ。メニュー / イベントは
+            // ここで構築する。default_window_icon を流用してアイコンの二重バンドルを避ける。
+            let show_item = MenuItemBuilder::with_id("show", "Show vibe-editor").build(app)?;
+            let quit_item = MenuItemBuilder::with_id("quit", "Quit vibe-editor").build(app)?;
+            let tray_menu = MenuBuilder::new(app)
+                .items(&[&show_item, &quit_item])
+                .build()?;
+            let mut tray_builder = TrayIconBuilder::with_id("main")
+                .tooltip("vibe-editor")
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "show" => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.unminimize();
+                            let _ = w.set_focus();
+                        }
+                    }
+                    "quit" => {
+                        tracing::info!("[lifecycle] tray quit — kill_all + exit");
+                        let state = app.state::<state::AppState>();
+                        state.pty_registry.kill_all();
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(w) = app.get_webview_window("main") {
+                            let _ = w.show();
+                            let _ = w.unminimize();
+                            let _ = w.set_focus();
+                        }
+                    }
+                });
+            if let Some(icon) = app.default_window_icon().cloned() {
+                tray_builder = tray_builder.icon(icon);
+            }
+            if let Err(e) = tray_builder.build(app) {
+                tracing::warn!("[tray] failed to build tray icon: {e:#}");
             }
             Ok(())
         });

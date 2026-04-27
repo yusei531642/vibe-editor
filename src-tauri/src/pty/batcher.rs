@@ -27,11 +27,7 @@ pub const PTY_CHANNEL_CAPACITY: usize = 256;
 
 /// PTY reader が送ってくる生バイト → 集約 → emit。
 /// `data_event_name` には "terminal:data:{id}" 形式を渡す。
-pub fn spawn_batcher(
-    app: AppHandle,
-    data_event_name: String,
-    mut rx: mpsc::Receiver<Vec<u8>>,
-) {
+pub fn spawn_batcher(app: AppHandle, data_event_name: String, mut rx: mpsc::Receiver<Vec<u8>>) {
     tokio::spawn(async move {
         // listener 登録完了までのグレースタイム。詳細は STARTUP_DELAY_MS コメント参照。
         tokio::time::sleep(Duration::from_millis(STARTUP_DELAY_MS)).await;
@@ -85,8 +81,21 @@ fn flush(app: &AppHandle, event: &str, buf: &mut BytesMut) {
     if !remainder.is_empty() {
         buf.extend_from_slice(&remainder);
     }
+    // 通常のターミナル出力は量が多く、ログファイルへ逐次書くと Team 起動時の負荷になる。
+    // 必要なときだけ RUST_LOG=...trace で追えるよう trace に落としておく。
+    let preview = if len <= 256 {
+        text.replace('\n', "\\n").replace('\r', "\\r")
+    } else {
+        String::new()
+    };
     match app.emit(event, text) {
-        Ok(_) => tracing::debug!("[batcher] emit {event} {len}B ok"),
+        Ok(_) => {
+            if !preview.is_empty() {
+                tracing::trace!("[batcher] emit {event} {len}B body=<{preview}>");
+            } else {
+                tracing::trace!("[batcher] emit {event} {len}B ok");
+            }
+        }
         Err(e) => tracing::warn!("emit {event} failed: {e}"),
     }
 }

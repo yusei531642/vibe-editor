@@ -135,7 +135,10 @@ export function RoleProfilesSection(): JSX.Element {
               BUILTIN_BY_ID[p.id]
                 ? undefined
                 : async () => {
-                    if (window.confirm(isJa ? `"${p.id}" を削除しますか?` : `Delete "${p.id}"?`)) {
+                    const { confirmAsync } = await import('../../lib/tauri-api');
+                    if (
+                      await confirmAsync(isJa ? `"${p.id}" を削除しますか?` : `Delete "${p.id}"?`)
+                    ) {
                       await removeCustom(p.id);
                     }
                   }

@@ -135,6 +135,25 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
     sessions
 }
 
+/// 指定 session_id (= jsonl basename) のファイルが ~/.claude/projects 配下に
+/// 存在するかを確認する。Canvas restore で `--resume <sid>` を付ける前の事前検証用。
+///
+/// 使われ方: AgentNodeCard が mount 時に呼び、false なら resumeSessionId を破棄して
+/// 新規セッションとして spawn し直す。これがないと Claude CLI が
+/// `<anonymous> cli.js:9273:5663` 系のスタックをターミナルに吐いて即死する。
+#[tauri::command]
+pub async fn session_exists(project_root: String, session_id: String) -> bool {
+    if session_id.trim().is_empty() {
+        return false;
+    }
+    // 想定外の path traversal を予防する基本サニタイズ。
+    if session_id.contains('/') || session_id.contains('\\') || session_id.contains("..") {
+        return false;
+    }
+    let path = projects_dir(&project_root).join(format!("{}.jsonl", session_id));
+    tokio::fs::metadata(&path).await.is_ok()
+}
+
 /// jsonl から (title, count, cwd) を抽出。cwd は最初に見つかった `cwd` フィールド。
 ///
 /// Issue #43: 大きなセッション (数百 MB) の jsonl を毎回全行読みすると list API が

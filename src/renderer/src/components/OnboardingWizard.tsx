@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowRight, Check, ChevronLeft, Folder, FolderOpen } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ArrowRight, Check, ChevronLeft, FolderOpen } from 'lucide-react';
 import type { AppSettings, Language, ThemeName } from '../../../types/shared';
 import { translate } from '../lib/i18n';
 import { useSettings } from '../lib/settings-context';
@@ -8,7 +8,6 @@ import { THEMES, applyTheme } from '../lib/themes';
 
 type Step = 'welcome' | 'appearance' | 'workspace' | 'done';
 const STEP_ORDER: Step[] = ['welcome', 'appearance', 'workspace', 'done'];
-const PROGRESS_STEPS: Step[] = ['welcome', 'appearance', 'workspace'];
 
 interface OnboardingWizardProps {
   onComplete: (patch: Partial<AppSettings>) => void | Promise<void>;
@@ -121,10 +120,10 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
 
   const finish = useCallback(() => {
     completedRef.current = true; // unmount cleanup でロールバックしない
+    // lastOnboardedVersion は呼び出し側 (App.tsx) で現在の app version を上乗せする。
     const patch: Partial<AppSettings> = {
       language: draftLanguage,
-      theme: draftTheme,
-      hasCompletedOnboarding: true
+      theme: draftTheme
     };
     if (draftFolder) patch.lastOpenedRoot = draftFolder;
     void onComplete(patch);
@@ -136,10 +135,30 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
   //   - WCAG 2.2.1 (Timing Adjustable) 違反
   // 「完了」CTA はすでに画面下部にあるので、自動 finish を撤去してユーザー操作のみで閉じる仕様にする。
 
-  const progressIndex = useMemo(() => {
-    if (step === 'done') return PROGRESS_STEPS.length;
-    return PROGRESS_STEPS.indexOf(step);
-  }, [step]);
+  const totalSteps = STEP_ORDER.length;
+  const currentStepNumber = STEP_ORDER.indexOf(step) + 1;
+  const stepLabelKey = `onboarding.stepLabel.${step}` as const;
+
+  // workspace ステップはフォルダ選択を強制する (skip 不可)。
+  // 未選択のまま Next できないようにし、Enter ショートカットも無効化する。
+  const canAdvance = !(step === 'workspace' && !draftFolder);
+
+  // Enter キーで「次へ」を進めるショートカット (welcome / appearance / workspace).
+  // done では finish を発火、入力中 (textarea/input) では無効化する。
+  // workspace でフォルダ未選択のときも素通りさせない。
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Enter' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) return;
+      if (!canAdvance) return;
+      e.preventDefault();
+      if (step === 'done') finish();
+      else goNext();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [step, goNext, finish, canAdvance]);
 
   if (!mounted) return null;
 
@@ -153,11 +172,15 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
     >
       <div className="onboarding__card" data-state={dataState}>
         <div className="onboarding__progress" aria-hidden>
-          {PROGRESS_STEPS.map((s, i) => {
-            const state =
-              i < progressIndex ? 'done' : i === progressIndex ? 'active' : 'upcoming';
-            return <span key={s} className="onboarding__progress-pill" data-state={state} />;
-          })}
+          <span className="onboarding__progress-counter">
+            <strong>
+              {String(currentStepNumber).padStart(2, '0')}
+            </strong>
+            {' '}/{' '}
+            {String(totalSteps).padStart(2, '0')}
+          </span>
+          <span className="onboarding__progress-rule" />
+          <span className="onboarding__progress-label">{t(stepLabelKey)}</span>
         </div>
 
         <div
@@ -209,19 +232,12 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
               <span>{t('onboarding.back')}</span>
             </button>
             <div className="onboarding__nav-right">
-              {step === 'workspace' && !draftFolder && (
-                <button
-                  type="button"
-                  className="onboarding__btn onboarding__btn--ghost"
-                  onClick={goNext}
-                >
-                  {t('onboarding.skip')}
-                </button>
-              )}
               <button
                 type="button"
                 className="onboarding__btn onboarding__btn--primary"
                 onClick={goNext}
+                disabled={!canAdvance}
+                aria-disabled={!canAdvance}
               >
                 <span>{t('onboarding.next')}</span>
                 <ArrowRight size={15} strokeWidth={2} />
@@ -242,6 +258,11 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
             </button>
           </div>
         )}
+
+        <div className="onboarding__nav-hint" aria-hidden>
+          <span className="onboarding__nav-kbd">↵</span>
+          <span>{t('onboarding.continueHint')}</span>
+        </div>
       </div>
     </div>
   );
@@ -332,6 +353,7 @@ function AppearanceStep({
                 className="onboarding__theme-card"
                 data-active={draftTheme === name}
                 onClick={() => onThemeChange(name)}
+                aria-pressed={draftTheme === name}
               >
                 <div
                   className="onboarding__theme-preview"
@@ -345,19 +367,14 @@ function AppearanceStep({
                     style={{ background: v.bgPanel }}
                   />
                   <div
-                    className="onboarding__theme-preview-line"
-                    style={{ background: v.text, opacity: 0.82 }}
-                  />
-                  <div
-                    className="onboarding__theme-preview-line"
-                    style={{ background: v.textDim, width: '52%' }}
-                  />
-                  <div
                     className="onboarding__theme-preview-dot"
                     style={{ background: v.accent }}
                   />
                 </div>
                 <span className="onboarding__theme-name">{THEME_LABEL[name][draftLanguage]}</span>
+                <span className="onboarding__theme-check" aria-hidden>
+                  <Check size={11} strokeWidth={3} />
+                </span>
               </button>
             );
           })}
@@ -408,11 +425,7 @@ function WorkspaceStep({
               ×
             </button>
           </div>
-        ) : (
-          <div className="onboarding__folder-empty" aria-hidden>
-            <Folder size={28} strokeWidth={1.5} />
-          </div>
-        )}
+        ) : null}
         <button
           type="button"
           className="onboarding__btn onboarding__btn--ghost onboarding__btn--wide"

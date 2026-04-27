@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   Clock,
   Command as CommandIcon,
@@ -43,6 +44,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { CommandPalette } from './components/CommandPalette';
 import { WelcomePane } from './components/WelcomePane';
 import { OnboardingWizard } from './components/OnboardingWizard';
+import { getVersion } from '@tauri-apps/api/app';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { MenuBar, MenuItem, MenuDivider, MenuSection } from './components/shell/MenuBar';
 import { useRecruitListener } from './lib/use-recruit-listener';
@@ -230,6 +232,13 @@ function generateTeamAction(_tab: TerminalTab): string | undefined {
   return undefined;
 }
 
+function spawnDelayForTeamAgent(agentId: string): number {
+  const match = agentId.match(/-(\d+)-team-/);
+  const index = match ? Number(match[1]) : 0;
+  if (!Number.isFinite(index) || index <= 0) return 0;
+  return Math.min(index * 700, 7000);
+}
+
 export function App(): JSX.Element {
   const settingsLoading = useSettingsLoading();
   const { update: updateSettings, reset: resetSettings } = useSettingsActions();
@@ -247,7 +256,7 @@ export function App(): JSX.Element {
     language: useSettingsValue('language'),
     theme: useSettingsValue('theme'),
     density: useSettingsValue('density'),
-    hasCompletedOnboarding: useSettingsValue('hasCompletedOnboarding'),
+    lastOnboardedVersion: useSettingsValue('lastOnboardedVersion'),
     mcpAutoSetup: useSettingsValue('mcpAutoSetup')
   };
   const { showToast, dismissToast } = useToast();
@@ -259,6 +268,34 @@ export function App(): JSX.Element {
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
   const [status, setStatus] = useState<string>('');
+  // 現在のアプリバージョン (tauri.conf.json から取得)。
+  // settings.lastOnboardedVersion と比較してアップデート直後の wizard 再表示を判定する。
+  const [appVersion, setAppVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getVersion()
+      .then((v) => {
+        if (!cancelled) setAppVersion(v);
+      })
+      .catch((err) => {
+        console.warn('[onboarding] getVersion failed:', err);
+        // 取得失敗時は wizard 表示判定が永続停止するため、空文字を入れて
+        // 「version 不明 → 既存ユーザーの最後の判定を尊重」のフォールバックにする。
+        if (!cancelled) setAppVersion('');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  // wizard を出さなくて良い条件:
+  //   - app version の取得が完了している
+  //   - settings.lastOnboardedVersion が現在の version と一致する
+  // 取得失敗 (appVersion === '') の場合は lastOnboardedVersion が non-null なら done 扱い。
+  const onboardingDone =
+    appVersion !== null &&
+    (appVersion === ''
+      ? settings.lastOnboardedVersion != null
+      : settings.lastOnboardedVersion === appVersion);
 
   // sidebar
   const [sidebarView, setSidebarView] = useState<SidebarView>('changes');
@@ -298,8 +335,10 @@ export function App(): JSX.Element {
     }
     const entries = Array.from(teamHistoryPending.current.values());
     teamHistoryPending.current.clear();
-    for (const e of entries) {
-      void window.api.teamHistory.save(e);
+    if (entries.length > 0) {
+      void window.api.teamHistory.saveBatch(entries).catch((err) => {
+        console.warn('[teamHistory] saveBatch flush failed:', err);
+      });
     }
   }, []);
   const saveTeamHistory = useCallback((entry: TeamHistoryEntry) => {
@@ -310,8 +349,10 @@ export function App(): JSX.Element {
       teamHistoryFlushTimer.current = null;
       const entries = Array.from(teamHistoryPending.current.values());
       teamHistoryPending.current.clear();
-      for (const e of entries) {
-        void window.api.teamHistory.save(e);
+      if (entries.length > 0) {
+        void window.api.teamHistory.saveBatch(entries).catch((err) => {
+          console.warn('[teamHistory] saveBatch failed:', err);
+        });
       }
     }, 500);
   }, []);
@@ -676,16 +717,17 @@ export function App(): JSX.Element {
   );
 
   const confirmDiscardEditorTabs = useCallback(
-    (tabIds?: string[]): boolean => {
+    async (tabIds?: string[]): Promise<boolean> => {
       const targets =
         tabIds && tabIds.length > 0
           ? dirtyEditorTabs.filter((tab) => tabIds.includes(tab.id))
           : dirtyEditorTabs;
       if (targets.length === 0) return true;
+      const { confirmAsync } = await import('./lib/tauri-api');
       if (targets.length === 1) {
-        return window.confirm(t('editor.discardSingle', { path: targets[0].relPath }));
+        return confirmAsync(t('editor.discardSingle', { path: targets[0].relPath }));
       }
-      return window.confirm(t('editor.discardMultiple', { count: targets.length }));
+      return confirmAsync(t('editor.discardMultiple', { count: targets.length }));
     },
     [dirtyEditorTabs, t]
   );
@@ -693,7 +735,7 @@ export function App(): JSX.Element {
   /** 指定ルートでプロジェクトを読み込み直す */
   const loadProject = useCallback(
     async (root: string, options: { addToRecent?: boolean } = { addToRecent: true }) => {
-      if (projectRoot && projectRoot !== root && !confirmDiscardEditorTabs()) {
+      if (projectRoot && projectRoot !== root && !(await confirmDiscardEditorTabs())) {
         return false;
       }
       setProjectRoot(root);
@@ -775,7 +817,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (settingsLoading) return;
     if (didInitRef.current) return;
-    if (!settings.hasCompletedOnboarding) return;
+    if (!onboardingDone) return;
     didInitRef.current = true;
     let cancelled = false;
     (async () => {
@@ -827,7 +869,7 @@ export function App(): JSX.Element {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsLoading, settings.hasCompletedOnboarding]);
+  }, [settingsLoading, onboardingDone]);
 
   // タイトルバー
   useEffect(() => {
@@ -1085,7 +1127,8 @@ export function App(): JSX.Element {
         );
         if (res.conflict) {
           // ユーザーに確認 → OK なら再度 mtime/size/hash チェック無しで書き込む
-          const overwrite = window.confirm(
+          const { confirmAsync } = await import('./lib/tauri-api');
+          const overwrite = await confirmAsync(
             t('editor.externalChangeConfirm', { path: tab.relPath })
           );
           if (!overwrite) {
@@ -1196,21 +1239,22 @@ export function App(): JSX.Element {
   // ---------- タブ操作 ----------
 
   const closeTab = useCallback(
-    (id: string) => {
+    async (id: string) => {
       if (id.startsWith('edit:')) {
+        // confirm() は非同期なので setEditorTabs callback の中では呼べない。
+        // 先に対象 tab を読み出して dirty なら confirm 表示、その後 setEditorTabs を呼ぶ。
+        const target = editorTabs.find((t) => t.id === id);
+        if (!target || target.pinned) return;
+        if (
+          !target.isBinary &&
+          target.content !== target.originalContent &&
+          !(await confirmDiscardEditorTabs([id]))
+        ) {
+          return;
+        }
         setEditorTabs((prev) => {
-          const target = prev.find((t) => t.id === id);
-          if (!target || target.pinned) return prev;
-          if (
-            !target.isBinary &&
-            target.content !== target.originalContent &&
-            !confirmDiscardEditorTabs([id])
-          ) {
-            return prev;
-          }
           const next = prev.filter((t) => t.id !== id);
           if (activeTabId === id) {
-            // 残ったエディタ or 差分タブのうち末尾を選択
             const fallback =
               next.length > 0 ? next[next.length - 1].id : diffTabs[diffTabs.length - 1]?.id ?? null;
             setActiveTabId(fallback);
@@ -1234,7 +1278,7 @@ export function App(): JSX.Element {
         return next;
       });
     },
-    [activeTabId, confirmDiscardEditorTabs, diffTabs, editorTabs]
+    [activeTabId, confirmDiscardEditorTabs, diffTabs, editorTabs, setActiveTabId]
   );
 
   const togglePin = useCallback((id: string) => {
@@ -1342,7 +1386,7 @@ export function App(): JSX.Element {
   }, [settings.workspaceFolders, projectRoot, updateSettings, showToast, t]);
 
   const handleRemoveWorkspaceFolder = useCallback(
-    (path: string) => {
+    async (path: string) => {
       const current = settings.workspaceFolders ?? [];
       if (!current.includes(path)) return;
       const name = path.split(/[\\/]/).pop() ?? path;
@@ -1353,7 +1397,7 @@ export function App(): JSX.Element {
       const dirty = closingTabs.filter(
         (t) => !t.isBinary && t.content !== t.originalContent
       );
-      if (dirty.length > 0 && !confirmDiscardEditorTabs(closingTabs.map((t) => t.id))) {
+      if (dirty.length > 0 && !(await confirmDiscardEditorTabs(closingTabs.map((t) => t.id)))) {
         // 破棄キャンセル → 何も変更しない
         return;
       }
@@ -2243,6 +2287,130 @@ export function App(): JSX.Element {
     return () => window.removeEventListener('keydown', onKey);
   }, [toggleSidebar]);
 
+  // Canvas モード時に MenuBar を canvas-header 内 slot に portal するための DOM 参照。
+  // CanvasLayout が mount/unmount で setCanvasMenuBarSlot を更新する。
+  const canvasMenuBarSlot = useUiStore((s) => s.canvasMenuBarSlot);
+  const useCanvasMenuPortal = viewMode === 'canvas' && canvasMenuBarSlot != null;
+
+  // MenuBar JSX は IDE モードでは Topbar の menuBar prop、Canvas モードでは
+  // canvas-header の slot に createPortal で送る。同じ JSX を 2 箇所で参照するため
+  // const に抽出。両モードでハンドラ・recentProjects 等の closure を維持する。
+  const menuBarNode = (
+    <MenuBar
+      items={[
+        {
+          label: t('menubar.file'),
+          children: (
+            <>
+              <MenuItem
+                icon={<FolderPlus size={14} strokeWidth={1.8} />}
+                label={t('appMenu.new')}
+                onClick={() => void handleNewProject()}
+              />
+              <MenuItem
+                icon={<FolderIcon size={14} strokeWidth={1.8} />}
+                label={t('appMenu.openFolder')}
+                onClick={() => void handleOpenFolder()}
+              />
+              <MenuItem
+                icon={<FileIcon size={14} strokeWidth={1.8} />}
+                label={t('appMenu.openFile')}
+                onClick={() => void handleOpenFile()}
+              />
+              <MenuItem
+                icon={<FolderPlus size={14} strokeWidth={1.8} />}
+                label={t('appMenu.addToWorkspace')}
+                onClick={() => void handleAddWorkspaceFolder()}
+              />
+              {(settings.recentProjects ?? []).length > 0 && (
+                <>
+                  <MenuDivider />
+                  <MenuSection label={t('appMenu.recent')} />
+                  {(settings.recentProjects ?? []).slice(0, 6).map((p) => (
+                    <MenuItem
+                      key={p}
+                      icon={<Clock size={13} strokeWidth={1.8} />}
+                      label={p.split(/[\\/]/).filter(Boolean).pop() ?? p}
+                      onClick={() => handleOpenRecent(p)}
+                    />
+                  ))}
+                </>
+              )}
+              <MenuDivider />
+              <MenuItem
+                icon={<RotateCw size={14} strokeWidth={1.8} />}
+                label={t('menubar.restart')}
+                onClick={() => void handleRestart()}
+              />
+            </>
+          )
+        },
+        {
+          label: t('menubar.view'),
+          children: (
+            <>
+              <MenuItem
+                icon={<PanelLeft size={14} strokeWidth={1.8} />}
+                label={t('menubar.toggleSidebar')}
+                shortcut="Ctrl+B"
+                onClick={() => toggleSidebar()}
+              />
+              <MenuItem
+                icon={<LayoutGrid size={14} strokeWidth={1.8} />}
+                label={t('menubar.toggleCanvas')}
+                shortcut="Ctrl+Shift+M"
+                onClick={() => useUiStore.getState().toggleViewMode()}
+              />
+              <MenuDivider />
+              <MenuItem
+                icon={<CommandIcon size={14} strokeWidth={1.8} />}
+                label={t('menubar.openPalette')}
+                shortcut="Ctrl+Shift+P"
+                onClick={() => setPaletteOpen(true)}
+              />
+            </>
+          )
+        },
+        {
+          label: t('menubar.help'),
+          children: (
+            <>
+              <MenuItem
+                icon={<RefreshCw size={14} strokeWidth={1.8} />}
+                label={t('updater.checkNow')}
+                onClick={() => {
+                  void import('./lib/updater-check').then((m) =>
+                    m.checkForUpdates({
+                      language: settings.language,
+                      showToast,
+                      dismissToast,
+                      manual: true,
+                      runningTaskCount: terminalTabs.length
+                    })
+                  );
+                }}
+              />
+              <MenuItem
+                icon={<ExternalLink size={14} strokeWidth={1.8} />}
+                label={t('menubar.openGithub')}
+                onClick={() => {
+                  void window.api.app.openExternal('https://github.com/yusei531642/vibe-editor');
+                }}
+              />
+              <MenuDivider />
+              <MenuItem
+                icon={<SettingsIcon size={14} strokeWidth={1.8} />}
+                label={t('menubar.openSettings')}
+                shortcut="Ctrl+,"
+                onClick={() => setSettingsOpen(true)}
+              />
+            </>
+          )
+        }
+      ]}
+    />
+  );
+
   return (
     <div
       className={
@@ -2259,122 +2427,9 @@ export function App(): JSX.Element {
         userInitial={userInitial}
         availableUpdate={availableUpdate}
         onClickUpdate={handleClickUpdate}
-        menuBar={
-          <MenuBar
-            items={[
-              {
-                label: t('menubar.file'),
-                children: (
-                  <>
-                    <MenuItem
-                      icon={<FolderPlus size={14} strokeWidth={1.8} />}
-                      label={t('appMenu.new')}
-                      onClick={() => void handleNewProject()}
-                    />
-                    <MenuItem
-                      icon={<FolderIcon size={14} strokeWidth={1.8} />}
-                      label={t('appMenu.openFolder')}
-                      onClick={() => void handleOpenFolder()}
-                    />
-                    <MenuItem
-                      icon={<FileIcon size={14} strokeWidth={1.8} />}
-                      label={t('appMenu.openFile')}
-                      onClick={() => void handleOpenFile()}
-                    />
-                    <MenuItem
-                      icon={<FolderPlus size={14} strokeWidth={1.8} />}
-                      label={t('appMenu.addToWorkspace')}
-                      onClick={() => void handleAddWorkspaceFolder()}
-                    />
-                    {(settings.recentProjects ?? []).length > 0 && (
-                      <>
-                        <MenuDivider />
-                        <MenuSection label={t('appMenu.recent')} />
-                        {(settings.recentProjects ?? []).slice(0, 6).map((p) => (
-                          <MenuItem
-                            key={p}
-                            icon={<Clock size={13} strokeWidth={1.8} />}
-                            label={p.split(/[\\/]/).filter(Boolean).pop() ?? p}
-                            onClick={() => handleOpenRecent(p)}
-                          />
-                        ))}
-                      </>
-                    )}
-                    <MenuDivider />
-                    <MenuItem
-                      icon={<RotateCw size={14} strokeWidth={1.8} />}
-                      label={t('menubar.restart')}
-                      onClick={() => void handleRestart()}
-                    />
-                  </>
-                )
-              },
-              {
-                label: t('menubar.view'),
-                children: (
-                  <>
-                    <MenuItem
-                      icon={<PanelLeft size={14} strokeWidth={1.8} />}
-                      label={t('menubar.toggleSidebar')}
-                      shortcut="Ctrl+B"
-                      onClick={() => toggleSidebar()}
-                    />
-                    <MenuItem
-                      icon={<LayoutGrid size={14} strokeWidth={1.8} />}
-                      label={t('menubar.toggleCanvas')}
-                      shortcut="Ctrl+Shift+M"
-                      onClick={() => useUiStore.getState().toggleViewMode()}
-                    />
-                    <MenuDivider />
-                    <MenuItem
-                      icon={<CommandIcon size={14} strokeWidth={1.8} />}
-                      label={t('menubar.openPalette')}
-                      shortcut="Ctrl+Shift+P"
-                      onClick={() => setPaletteOpen(true)}
-                    />
-                  </>
-                )
-              },
-              {
-                label: t('menubar.help'),
-                children: (
-                  <>
-                    <MenuItem
-                      icon={<RefreshCw size={14} strokeWidth={1.8} />}
-                      label={t('updater.checkNow')}
-                      onClick={() => {
-                        void import('./lib/updater-check').then((m) =>
-                          m.checkForUpdates({
-                            language: settings.language,
-                            showToast,
-                            dismissToast,
-                            manual: true,
-                            runningTaskCount: terminalTabs.length
-                          })
-                        );
-                      }}
-                    />
-                    <MenuItem
-                      icon={<ExternalLink size={14} strokeWidth={1.8} />}
-                      label={t('menubar.openGithub')}
-                      onClick={() => {
-                        void window.api.app.openExternal('https://github.com/yusei531642/vibe-editor');
-                      }}
-                    />
-                    <MenuDivider />
-                    <MenuItem
-                      icon={<SettingsIcon size={14} strokeWidth={1.8} />}
-                      label={t('menubar.openSettings')}
-                      shortcut="Ctrl+,"
-                      onClick={() => setSettingsOpen(true)}
-                    />
-                  </>
-                )
-              }
-            ]}
-          />
-        }
+        menuBar={useCanvasMenuPortal ? null : menuBarNode}
       />
+      {useCanvasMenuPortal && createPortal(menuBarNode, canvasMenuBarSlot)}
       <Rail
         sidebarView={sidebarView}
         onSidebarViewChange={setSidebarView}
@@ -2724,6 +2779,7 @@ export function App(): JSX.Element {
                   teamId={tab.teamId ?? undefined}
                   visible={true}
                   initialMessage={getRolePrompt(tab)}
+                  spawnDelayMs={tab.teamId ? spawnDelayForTeamAgent(tab.agentId) : 0}
                   agentId={tab.agentId}
                   role={tab.role ?? undefined}
                   onStatus={(s) =>
@@ -2774,7 +2830,7 @@ export function App(): JSX.Element {
           void resetSettings();
         }}
         onReplayOnboarding={() => {
-          void updateSettings({ hasCompletedOnboarding: false });
+          void updateSettings({ lastOnboardedVersion: null });
         }}
       />
 
@@ -2821,10 +2877,12 @@ export function App(): JSX.Element {
 
       <TweaksPanel />
 
-      {!settingsLoading && !settings.hasCompletedOnboarding && (
+      {!settingsLoading && appVersion !== null && !onboardingDone && (
         <OnboardingWizard
           onComplete={async (patch) => {
-            await updateSettings({ ...patch, hasCompletedOnboarding: true });
+            // appVersion が空文字 (取得失敗) の場合でも sentinel として保存しておき、
+            // 次回起動時に再度 wizard を出さない。次回 getVersion 成功時に正しい値で上書きされる。
+            await updateSettings({ ...patch, lastOnboardedVersion: appVersion || 'unknown' });
           }}
         />
       )}

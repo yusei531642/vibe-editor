@@ -103,7 +103,17 @@
   padding: 0 14px;
   background: var(--bg-toolbar, var(--bg-panel));
   border-bottom: 1px solid var(--border);
-  z-index: 5;
+  /* position: relative がないと z-index が効かない。
+     かつ canvas-body (auto) より高くしておかないと、内部に portal される MenuBar
+     dropdown (ファイル / 表示 / ヘルプ) が canvas サイドバーの裏に隠れる。 */
+  position: relative;
+  z-index: 50;
+}
+
+/* portal された MenuBar の dropdown が canvas-body / sidebar の上に確実に乗るよう、
+   canvas-header 内部の dropdown だけ z-index をブースト。 */
+.canvas-header .menubar__dropdown {
+  z-index: 60;
 }
 
 .canvas-header__brand {
@@ -123,6 +133,20 @@
 
 .canvas-header__spacer {
   flex: 1;
+}
+
+/* App.tsx の MenuBar (ファイル / 表示 / ヘルプ) を canvas-header に portal するための slot。
+   IDE モードでは empty (DOM だけ存在)、Canvas モードでは <nav class="menubar"> が中に入る。
+   Topbar 内 .menubar とほぼ同じスタイルで動くよう、横並び / 高さ自然のままで配置する。 */
+.canvas-header__menubar-slot {
+  display: flex;
+  align-items: center;
+  /* Canvas brand と count の間に少し余白を取る */
+  margin-left: 4px;
+}
+
+.canvas-header__menubar-slot:empty {
+  display: none;
 }
 
 /* ---------- buttons ---------- */

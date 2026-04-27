@@ -8,7 +8,7 @@
  *
  * payload: TerminalPayload + role 必須
  */
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
 import { TerminalView, type TerminalViewHandle } from '../../TerminalView';
 import { useT } from '../../../lib/i18n';
@@ -82,9 +82,16 @@ function summarizeInput(text: string): string {
   return punct > 4 ? cut.slice(0, punct) : cut;
 }
 
+function spawnDelayForAgent(agentId?: string): number {
+  const match = agentId?.match(/-(\d+)-team-/);
+  const index = match ? Number(match[1]) : 0;
+  if (!Number.isFinite(index) || index <= 0) return 0;
+  return Math.min(index * 700, 7000);
+}
+
 function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const ref = useRef<TerminalViewHandle | null>(null);
-  const { settings } = useSettings();
+  const { settings, loading: settingsLoading } = useSettings();
   const t = useT();
   const confirmRemoveCard = useConfirmRemoveCard();
   const setCardTitle = useCanvasStore((s) => s.setCardTitle);
@@ -163,6 +170,85 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   // payload.command / payload.cwd が先に指定されていればそちらを優先 (legacy 互換)。
   const resolved = resolveAgentConfig(payload.agent ?? 'claude', settings);
   const cwd = settings.lastOpenedRoot || resolved.cwd || payload.cwd || '';
+
+  // Canvas restore で残った payload.resumeSessionId が、既に削除/移動された jsonl を
+  // 指している場合、Claude CLI は `--resume <invalid-id>` で起動して
+  // `<anonymous> cli.js:9273:5663` 系のスタックを吐いて即死する。
+  // mount 時にスナップショットを取って 1 回だけ検証する。
+  //
+  // 重要: resumeSessionId は spawn 後 onSessionId コールバックでも書き戻される
+  // (TerminalView → setCardPayload(resumeSessionId: <new>))。それを依存配列に入れると、
+  // ユーザーがメッセージを送るたびに useEffect が再走 → setResumeChecked(false) →
+  // TerminalView が unmount → ターミナルが「リセット」される事故になる。
+  // 初回 mount 時の値だけ ref にスナップして以後は触らない。
+  const initialResumeIdRef = useRef<string | null | undefined>(payload.resumeSessionId);
+  const initialCwdRef = useRef<string>(cwd);
+  const [resumeChecked, setResumeChecked] = useState<boolean>(
+    () => !initialResumeIdRef.current || !initialCwdRef.current
+  );
+  useEffect(() => {
+    const initialResumeId = initialResumeIdRef.current;
+    const initialCwd = initialCwdRef.current;
+    if (!initialResumeId || !initialCwd) {
+      setResumeChecked(true);
+      return;
+    }
+    let cancelled = false;
+    void window.api.sessions
+      .exists(initialCwd, initialResumeId)
+      .then((exists) => {
+        if (cancelled) return;
+        if (!exists) {
+          // セッション jsonl が消えている → resumeSessionId を破棄して新規 spawn させる
+          setCardPayload(id, { resumeSessionId: null });
+        }
+        setResumeChecked(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCardPayload(id, { resumeSessionId: null });
+        setResumeChecked(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // 初回 mount 時 1 回だけ走らせる。後続の payload.resumeSessionId 書き換え
+    // (Claude が新規 sessionId を出力したとき) でこの effect を再走させない。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 早期 exit watchdog —
+  // session_exists() で jsonl は見つかっても、Claude CLI 内部で処理に失敗して
+  // 即座に exit_code=1 になるケースがある (バージョン不整合 / 破損履歴 等)。
+  // `--resume` 付きで spawn → 5 秒以内に exit が走った場合は resumeSessionId を破棄して
+  // TerminalView を remount し、resume なしで再起動する。
+  // 1 回だけ自動リトライし、それでも死ぬならユーザー操作に委ねる (永久ループを防ぐ)。
+  const [respawnAttempt, setRespawnAttempt] = useState(0);
+  const spawnAtRef = useRef<number>(0);
+  const lastResumeIdRef = useRef<string | null>(null);
+  // payload.resumeSessionId を ref で trail させる (依存配列に入れない: メッセージ送信で
+  // sessionId が更新されたびに spawnAtRef が更新されるとこの useEffect が watchdog の
+  // 開始時刻を再計算してしまう)。
+  const payloadResumeIdRef = useRef<string | null | undefined>(payload.resumeSessionId);
+  payloadResumeIdRef.current = payload.resumeSessionId;
+  useEffect(() => {
+    if (settingsLoading || !resumeChecked) return;
+    // この effect は spawn のトリガー (settings ロード完了 / resume 検証完了 / respawn) でだけ
+    // 走らせ、その瞬間の resumeSessionId スナップを記録する。
+    spawnAtRef.current = Date.now();
+    lastResumeIdRef.current = payloadResumeIdRef.current ?? null;
+  }, [settingsLoading, resumeChecked, respawnAttempt]);
+  const handlePtyExit = useCallback((): void => {
+    const elapsed = Date.now() - spawnAtRef.current;
+    const usedResume = lastResumeIdRef.current != null;
+    if (usedResume && elapsed < 5000 && respawnAttempt === 0) {
+      console.warn(
+        `[agent ${id}] Claude CLI exited within ${elapsed}ms with --resume; clearing resumeSessionId and respawning fresh`
+      );
+      setCardPayload(id, { resumeSessionId: null });
+      setRespawnAttempt(1);
+    }
+  }, [id, respawnAttempt, setCardPayload]);
   const command = payload.command ?? resolved.command;
 
   // ----- チームのシステムプロンプトを構築 -----
@@ -319,8 +405,17 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
             )}
             <button
               type="button"
-              className="nodrag canvas-agent-card__close"
-              onClick={() => confirmRemoveCard(id)}
+              className="nodrag nopan canvas-agent-card__close"
+              // React Flow は未選択ノード上の最初の click を「ノード選択」として消費するため、
+              // 内部の × ボタンを 2 回押さないと閉じない事故が起きる。
+              // pointerdown / mousedown でも propagation を止めて、以後の click が
+              // 確実に handler に届くようにする。
+              onPointerDown={(e) => e.stopPropagation()}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation();
+                confirmRemoveCard(id);
+              }}
               title={t('agentCard.close')}
               aria-label={t('agentCard.close')}
             >
@@ -329,27 +424,62 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
           </span>
         </header>
         <div className="nodrag nowheel canvas-agent-card__term">
-          <TerminalView
-            ref={ref}
-            cwd={cwd}
-            fallbackCwd={cwd}
-            command={command}
-            args={payload.args ?? args}
-            codexInstructions={codexInstructions}
-            visible={true}
-            teamId={payload.teamId}
-            agentId={payload.agentId}
-            role={roleProfileId}
-            onStatus={setStatus}
-            onActivity={handleActivity}
-            onUserInput={handleUserInput}
-            onSessionId={(sid) => {
-              if (sid) setCardPayload(id, { resumeSessionId: sid });
-            }}
-            // Canvas zoom で xterm canvas が滲むのを避けるため WebGL を切る (DOM renderer 固定)。
-            // text は実 DOM になるので Chromium が親 transform に応じて再ラスタライズしシャープに描く。
-            disableWebgl
-          />
+          {/* ★ settings ロード前に TerminalView を mount すると、usePtySession が初回 spawn 時の
+                snapRef を DEFAULT_SETTINGS (claudeArgs="" 等) で固めてしまい、
+                `--dangerously-skip-permissions` も `--append-system-prompt` も渡らない壊れた
+                args で claude が起動 → claude 即終了 → watcher も即 exit → sessionId 永久未検出。
+                特に zustand persist で前回 canvas が auto-restore された直後に発生しやすい
+                (settings ロードより先に AgentNodeCard が mount するため)。
+                settings.loading=true のうちは TerminalView を mount しない。 */}
+          {settingsLoading || !resumeChecked ? (
+            <div
+              style={{
+                width: '100%',
+                height: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--text-muted)',
+                fontSize: '0.85em'
+              }}
+            >
+              {settingsLoading
+                ? settings.language === 'ja'
+                  ? '設定ロード中…'
+                  : 'Loading settings…'
+                : settings.language === 'ja'
+                  ? 'セッション確認中…'
+                  : 'Checking session…'}
+            </div>
+          ) : (
+            <TerminalView
+              // respawnAttempt を key に含めて、--resume 失敗時の自動再 spawn を引き起こす。
+              // (TerminalView は snapRef で初回 spawn 引数を凍結する不変式があるため、
+              //  args の再計算だけでは再 spawn されず、key 変更で remount する必要がある)
+              key={`pty-${id}-${respawnAttempt}`}
+              ref={ref}
+              cwd={cwd}
+              fallbackCwd={cwd}
+              command={command}
+              args={payload.args ?? args}
+              codexInstructions={codexInstructions}
+              visible={true}
+              spawnDelayMs={spawnDelayForAgent(payload.agentId)}
+              teamId={payload.teamId}
+              agentId={payload.agentId}
+              role={roleProfileId}
+              onStatus={setStatus}
+              onActivity={handleActivity}
+              onExit={handlePtyExit}
+              onUserInput={handleUserInput}
+              onSessionId={(sid) => {
+                if (sid) setCardPayload(id, { resumeSessionId: sid });
+              }}
+              // Canvas zoom で xterm canvas が滲むのを避けるため WebGL を切る (DOM renderer 固定)。
+              // text は実 DOM になるので Chromium が親 transform に応じて再ラスタライズしシャープに描く。
+              disableWebgl
+            />
+          )}
         </div>
       </div>
       <Handle
