@@ -66,6 +66,15 @@ export const EDITOR_FONT_PRESETS: { label: string; value: string }[] = [
  */
 export const TERMINAL_FONT_PRESETS: { label: string; value: string }[] = [
   {
+    label: 'Cascadia Mono',
+    value:
+      "'Cascadia Mono', 'Cascadia Code', Consolas, 'Lucida Console', 'Segoe UI Symbol', monospace"
+  },
+  {
+    label: 'Consolas',
+    value: "Consolas, 'Cascadia Mono', 'Courier New', 'Lucida Console', 'Segoe UI Symbol', monospace"
+  },
+  {
     label: 'JetBrains Mono ★',
     value:
       "'JetBrains Mono Variable', 'Cascadia Mono', 'Cascadia Code', Consolas, 'Lucida Console', 'Segoe UI Symbol', monospace"
@@ -84,10 +93,6 @@ export const TERMINAL_FONT_PRESETS: { label: string; value: string }[] = [
     label: 'Fira Code',
     value:
       "'Fira Code', 'Cascadia Mono', Consolas, 'Lucida Console', 'Segoe UI Symbol', monospace"
-  },
-  {
-    label: 'Consolas',
-    value: "Consolas, 'Cascadia Mono', 'Courier New', 'Lucida Console', 'Segoe UI Symbol', monospace"
   }
 ];
 

@@ -13,7 +13,7 @@ export type Density = 'compact' | 'normal' | 'comfortable';
 export type Language = 'ja' | 'en';
 
 /** Issue #75: AppSettings の現在スキーマ。破壊変更時に上げる。 */
-export const APP_SETTINGS_SCHEMA_VERSION = 4;
+export const APP_SETTINGS_SCHEMA_VERSION = 5;
 
 /**
  * ユーザーが自由に追加できるエージェントの設定。
@@ -44,7 +44,7 @@ export interface AppSettings {
   editorFontSize: number;
   /**
    * ターミナル (xterm) のフォントファミリ。
-   * 未設定なら editorFontFamily にフォールバック。バンドル済み JetBrains Mono が既定。
+   * 未設定なら editorFontFamily にフォールバック。既定は素直で崩れにくい OS mono。
    */
   terminalFontFamily?: string;
   terminalFontSize: number;
@@ -138,12 +138,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   editorFontFamily:
     "'JetBrains Mono Variable', 'Geist Mono Variable', 'Cascadia Code', 'Consolas', monospace",
   editorFontSize: 13,
-  // ターミナル fallback chain には Block Elements / Box Drawing を確実に持つ
-  // Windows OS フォントを末尾近くに含める。Canvas モードは DOM renderer 固定で
-  // customGlyphs が効かないので、bundled webfont が罫線/濃淡 glyph を持たない
-  // → Chromium が monospace に降格 → MS Gothic 等で ▓ / □ になる経路を塞ぐ。
+  // ターミナルはセル幅の安定が最優先。Canvas モードは DOM renderer 固定で
+  // customGlyphs が効かないため、罫線/濃淡 glyph を OS mono から素直に取る。
   terminalFontFamily:
-    "'JetBrains Mono Variable', 'Geist Mono Variable', 'Cascadia Mono', 'Cascadia Code', Consolas, 'Lucida Console', 'Segoe UI Symbol', monospace",
+    "'Cascadia Mono', 'Cascadia Code', Consolas, 'Lucida Console', 'Segoe UI Symbol', monospace",
   terminalFontSize: 13,
   density: 'normal',
   claudeCommand: 'claude',

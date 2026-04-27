@@ -63,6 +63,20 @@ export type StageView = 'stage' | 'list' | 'focus';
 
 const NODE_W = 480;
 const NODE_H = 320;
+const CARD_TYPES: CardType[] = ['terminal', 'agent', 'editor', 'diff', 'fileTree', 'changes'];
+const STAGE_VIEWS: StageView[] = ['stage', 'list', 'focus'];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isCardType(value: unknown): value is CardType {
+  return typeof value === 'string' && CARD_TYPES.includes(value as CardType);
+}
+
+function finiteOr(value: unknown, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
 
 /**
  * Issue #157: 旧 `Date.now() + counter` 方式は zustand persist 復元 + リロード後の
@@ -219,11 +233,20 @@ export const useCanvasStore = create<CanvasState>()(
       name: 'vibe-editor:canvas',
       version: 2,
       migrate: (persisted, fromVersion) => {
+        if (!isRecord(persisted)) {
+          return {
+            nodes: [],
+            viewport: { x: 0, y: 0, zoom: 1 },
+            stageView: 'stage',
+            teamLocks: {}
+          } as Partial<CanvasState>;
+        }
         // v1 → v2: payload.role を payload.roleProfileId にリネーム
         // (role と roleProfileId 双方で参照される過渡期があるので、両方残す)
-        if (fromVersion < 2 && persisted && typeof persisted === 'object' && 'nodes' in persisted) {
-          const p = persisted as { nodes?: Array<Record<string, unknown>> };
-          p.nodes = (p.nodes ?? []).map((n) => {
+        const p = { ...persisted } as Record<string, unknown>;
+        if (fromVersion < 2 && Array.isArray(p.nodes)) {
+          p.nodes = p.nodes.map((n) => {
+            if (!isRecord(n)) return n;
             const data = (n.data ?? {}) as Record<string, unknown>;
             const payload = (data.payload ?? {}) as Record<string, unknown>;
             if (typeof payload.role === 'string' && !payload.roleProfileId) {
@@ -232,7 +255,62 @@ export const useCanvasStore = create<CanvasState>()(
             return { ...n, data: { ...data, payload } };
           });
         }
-        return persisted as CanvasState;
+
+        // 壊れた localStorage で ReactFlow が render 例外を出すと黒画面になるため、
+        // 永続化データはバージョンに関係なく最低限の形へ正規化してから復元する。
+        const nodes = Array.isArray(p.nodes)
+          ? p.nodes
+              .map((raw, index): Node<CardData> | null => {
+                if (!isRecord(raw)) return null;
+                const data = isRecord(raw.data) ? raw.data : {};
+                const type = isCardType(raw.type)
+                  ? raw.type
+                  : isCardType(data.cardType)
+                    ? data.cardType
+                    : null;
+                if (!type) return null;
+                const positionRaw = isRecord(raw.position) ? raw.position : {};
+                const styleRaw = isRecord(raw.style) ? raw.style : {};
+                const title = typeof data.title === 'string' && data.title.trim()
+                  ? data.title
+                  : 'Card';
+                return {
+                  ...(raw as Partial<Node<CardData>>),
+                  id: typeof raw.id === 'string' && raw.id ? raw.id : newId(type),
+                  type,
+                  position: {
+                    x: finiteOr(positionRaw.x, (index % 6) * (NODE_W + 32)),
+                    y: finiteOr(positionRaw.y, Math.floor(index / 6) * (NODE_H + 32))
+                  },
+                  data: {
+                    ...data,
+                    cardType: type,
+                    title,
+                    payload: data.payload
+                  },
+                  style: {
+                    ...styleRaw,
+                    width: finiteOr(styleRaw.width, NODE_W),
+                    height: finiteOr(styleRaw.height, NODE_H)
+                  }
+                };
+              })
+              .filter((n): n is Node<CardData> => n !== null)
+          : [];
+        const viewportRaw = isRecord(p.viewport) ? p.viewport : {};
+        return {
+          ...p,
+          nodes,
+          viewport: {
+            x: finiteOr(viewportRaw.x, 0),
+            y: finiteOr(viewportRaw.y, 0),
+            zoom: finiteOr(viewportRaw.zoom, 1)
+          },
+          stageView: STAGE_VIEWS.includes(p.stageView as StageView)
+            ? (p.stageView as StageView)
+            : 'stage',
+          teamLocks: isRecord(p.teamLocks) ? p.teamLocks : {}
+        } as Partial<CanvasState>;
       },
       // 永続化: nodes / viewport / stageView / teamLocks。
       // edges は一時的な hand-off アニメに使うので含めない。

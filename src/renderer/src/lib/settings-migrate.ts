@@ -102,6 +102,18 @@ export function migrateSettings(raw: unknown): AppSettings {
     }
   }
 
+  // --- Version 4 → 5: terminalFontFamily を安定優先の OS mono 既定へ ---
+  // 環境依存で Canvas 内 xterm の折り返し・罫線幅が崩れるケースを避けるため、
+  // 旧既定の JetBrains/Geist 優先チェーンをそのまま使っているユーザーだけ
+  // Cascadia Mono / Consolas 優先に移す。手動で選んだ値は維持する。
+  if (version < 5) {
+    const OLD_TERMINAL_FONT_DEFAULT_V4 =
+      "'JetBrains Mono Variable', 'Geist Mono Variable', 'Cascadia Mono', 'Cascadia Code', Consolas, 'Lucida Console', 'Segoe UI Symbol', monospace";
+    if (data.terminalFontFamily === OLD_TERMINAL_FONT_DEFAULT_V4) {
+      data.terminalFontFamily = DEFAULT_SETTINGS.terminalFontFamily;
+    }
+  }
+
   data.schemaVersion = APP_SETTINGS_SCHEMA_VERSION;
   // 最終マージで欠損フィールドを DEFAULT_SETTINGS で埋める
   return { ...DEFAULT_SETTINGS, ...data } as AppSettings;

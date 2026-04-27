@@ -1651,6 +1651,25 @@ body.is-resizing * {
   left: 0;
 }
 
+/* xterm は自前で列幅・折り返しを管理するため、アプリ全体の日本語向け
+   word-break/line-break を内部 DOM に継承させると、環境によって Codex の罫線や
+   既存行がブラウザ側で再折り返しされて崩れる。ターミナル内だけは通常の
+   monospace グリッド挙動へ戻す。 */
+.terminal-view .xterm,
+.terminal-view .xterm * {
+  word-break: normal;
+  overflow-wrap: normal;
+  line-break: auto;
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "kern" 0, "liga" 0, "calt" 0, "tnum", "zero";
+}
+
+.terminal-view .xterm-rows,
+.terminal-view .xterm-rows > div {
+  white-space: pre;
+}
+
 .terminal-view .xterm-viewport {
   background-color: var(--bg) !important;
 }

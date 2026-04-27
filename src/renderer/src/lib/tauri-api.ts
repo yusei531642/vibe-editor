@@ -39,7 +39,6 @@ function subscribeEvent<T>(event: string, cb: (payload: T) => void): () => void 
   };
 }
 import {
-  DEFAULT_SETTINGS,
   type AppSettings,
   type AppUserInfo,
   type ClaudeCheckResult,
@@ -227,12 +226,10 @@ export const api = {
   },
 
   settings: {
-    load: async (): Promise<AppSettings> => {
-      // Rust 側は未保存の場合 null を返す。null は React 側で扱えないため
-      // DEFAULT_SETTINGS にフォールバック + 部分マージで欠損キーを補完。
-      const raw = await invoke<Partial<AppSettings> | null>('settings_load');
-      return { ...DEFAULT_SETTINGS, ...(raw ?? {}) };
-    },
+    // 既定値とのマージや schemaVersion 判定は settings-migrate.ts に集約する。
+    // ここで先に DEFAULT_SETTINGS を混ぜると、旧設定に現在の schemaVersion が
+    // 入ってしまい、必要なマイグレーションがスキップされる。
+    load: (): Promise<unknown> => invoke('settings_load'),
     save: (settings: AppSettings): Promise<void> => invoke('settings_save', { settings })
   },
 

@@ -48,7 +48,7 @@ export function TerminalSection({ draft, update }: Props): JSX.Element {
         </label>
       </div>
       <p className="modal__note">
-        ★ 印 (JetBrains Mono) はアプリ内蔵フォント。OS にインストール済みでなくても綺麗に表示されます。
+        既定は Cascadia Mono / Consolas です。罫線や折り返しが崩れにくい、素直なターミナル向けフォントです。
       </p>
     </section>
   );

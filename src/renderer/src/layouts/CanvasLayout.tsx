@@ -21,7 +21,8 @@ import {
   Layout,
   MonitorSmartphone,
   Plus,
-  Sparkles
+  Sparkles,
+  History
 } from 'lucide-react';
 import type { CardData, CardType } from '../stores/canvas';
 import type {
@@ -39,6 +40,7 @@ import { useT } from '../lib/i18n';
 import { useUiStore } from '../stores/ui';
 import { useCanvasStore } from '../stores/canvas';
 import {
+  BUILTIN_PRESETS,
   DEFAULT_SPAWN_PRESET,
   presetPosition,
   type WorkspacePreset
@@ -47,7 +49,7 @@ import { ROLE_META, roleMetaFor } from '../lib/team-roles';
 import { useSettings } from '../lib/settings-context';
 import { useToast } from '../lib/toast-context';
 
-const MAX_CANVAS_AGENTS = 30;
+type Tab = 'preset' | 'recent';
 
 function localeOf(language: Language): string {
   return language === 'ja' ? 'ja-JP' : 'en-US';
@@ -368,13 +370,14 @@ export function CanvasLayout(): JSX.Element {
   const applyPreset = async (preset: WorkspacePreset): Promise<void> => {
     const teamId = `team-${Date.now().toString(36)}`;
     const cwd = projectRoot;
+    const presetName = t(preset.i18nKey);
     // Issue #72: setupTeamMcp を addCards より前に完了させる
     if (settings.mcpAutoSetup !== false) {
       try {
         await window.api.app.setupTeamMcp(
           cwd,
           teamId,
-          preset.name,
+          presetName,
           preset.members.map((m, i) => ({
             agentId: `${m.role}-${i}-${teamId}`,
             role: m.role,
@@ -597,21 +600,49 @@ export function CanvasLayout(): JSX.Element {
           </div>
           {spawnOpen && (
             <div className="canvas-popover canvas-popover--wide">
-              {closeRecent.length === 0 && (
-                <div className="canvas-popover__empty">{t('canvas.noRecentTeams')}</div>
+              <div className="canvas-popover__tabs">
+                <TabBtn active={tab === 'preset'} onClick={() => setTab('preset')}>
+                  <Sparkles size={11} /> {t('canvas.preset')}
+                </TabBtn>
+                <TabBtn active={tab === 'recent'} onClick={() => setTab('recent')}>
+                  <History size={11} /> {t('canvas.recent')}
+                  {closeRecent.length > 0 && (
+                    <span className="canvas-popover__tab-badge">{closeRecent.length}</span>
+                  )}
+                </TabBtn>
+              </div>
+              {tab === 'preset' && (
+                <>
+                  {BUILTIN_PRESETS.map((preset) => (
+                    <BuiltinPresetItem
+                      key={preset.id}
+                      preset={preset}
+                      label={t(preset.i18nKey)}
+                      agentCountLabel={formatAgentCount(preset.members.length, settings.language)}
+                      onClick={() => void applyPreset(preset)}
+                    />
+                  ))}
+                </>
               )}
-              {closeRecent.map((entry) => (
-                <RecentItem
-                  key={entry.id}
-                  entry={entry}
-                  fallbackName={t('team.defaultName')}
-                  agentCountLabel={formatAgentCount(entry.members.length, settings.language)}
-                  lastUsedLabel={t('canvas.lastUsed', {
-                    value: dateTimeFormatter.format(new Date(entry.lastUsedAt))
-                  })}
-                  onClick={() => void restoreRecent(entry)}
-                />
-              ))}
+              {tab === 'recent' && (
+                <>
+                  {closeRecent.length === 0 && (
+                    <div className="canvas-popover__empty">{t('canvas.noRecentTeams')}</div>
+                  )}
+                  {closeRecent.map((entry) => (
+                    <RecentItem
+                      key={entry.id}
+                      entry={entry}
+                      fallbackName={t('team.defaultName')}
+                      agentCountLabel={formatAgentCount(entry.members.length, settings.language)}
+                      lastUsedLabel={t('canvas.lastUsed', {
+                        value: dateTimeFormatter.format(new Date(entry.lastUsedAt))
+                      })}
+                      onClick={() => void restoreRecent(entry)}
+                    />
+                  ))}
+                </>
+              )}
             </div>
           )}
         </div>
@@ -716,6 +747,32 @@ function RoleDot({
     >
       {meta.glyph}
     </span>
+  );
+}
+
+function BuiltinPresetItem({
+  preset,
+  label,
+  agentCountLabel,
+  onClick
+}: {
+  preset: WorkspacePreset;
+  label: string;
+  agentCountLabel: string;
+  onClick: () => void;
+}): JSX.Element {
+  return (
+    <button type="button" onClick={onClick} className="canvas-popover__preset">
+      <span className="canvas-popover__preset-title-row">
+        <span className="canvas-popover__preset-title">{label}</span>
+        <span className="canvas-popover__preset-sub">{agentCountLabel}</span>
+      </span>
+      <span className="canvas-popover__preset-roles">
+        {preset.members.map((m, i) => (
+          <RoleDot key={i} role={m.role} agent={m.agent} />
+        ))}
+      </span>
+    </button>
   );
 }
 
