@@ -46,7 +46,7 @@ dirs = "6"
 which = "8"
 whoami = "2"
 base64 = "0.22"
-rand = "0.8"
+rand = "0.10"
 # Issue #120: CP932 / Shift_JIS のテキスト decode/encode 用 (Windows 日本語環境互換)
 encoding_rs = "0.8"
 # Issue #119: open 時のコンテンツハッシュで「同サイズ・1秒以内」の外部変更を検出する用
