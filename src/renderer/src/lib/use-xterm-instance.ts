@@ -80,6 +80,17 @@ export function useXtermInstance(
       // glass テーマで xterm キャンバスを透過させるために必要 (Issue #89)。
       // 他テーマでも不透明色を渡しているので挙動は変わらない。
       allowTransparency: true,
+      // Block Elements (U+2580-U+259F) と Box Drawing (U+2500-U+257F) を
+      // フォントから取らず WebGL/Canvas renderer 内蔵のベクター描画でラスタライズする。
+      // Claude Code 起動時の Anthropic ロゴ ASCII art (▀▄█▌▐ 等) が、JetBrains Mono
+      // Variable webfont の bundled subset にこれらを含まないことに起因して fallback
+      // フォント次第で ▓ や □ (tofu) に化ける問題を防ぐ。xterm v6 default は true だが
+      // 将来意図せず無効化されないよう明示する。DOM renderer では効かないので、
+      // Canvas モード (disableWebgl=true) では font fallback 経由になる点に注意。
+      customGlyphs: true,
+      // CJK や全角記号など、セル幅を超える glyph をセル内に縮小して描画する。
+      // ASCII art に CJK が混じった場合の桁ズレを防ぐ。
+      rescaleOverlappingGlyphs: true,
       theme: buildXtermTheme(initial.theme),
       scrollback: SCROLLBACK_LINES,
       convertEol: false

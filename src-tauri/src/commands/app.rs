@@ -399,7 +399,9 @@ pub async fn app_cancel_recruit(
 #[tauri::command]
 pub fn app_get_user_info(app: tauri::AppHandle) -> AppUserInfo {
     tracing::info!("[IPC] app_get_user_info called");
-    let username = whoami::username();
+    // whoami v2 で `username()` の戻り値が `Result<String, whoami::Error>` に変わったので、
+    // 取得失敗時 (権限なし / OS API 失敗) は "unknown" にフォールバックして UI を壊さない。
+    let username = whoami::username().unwrap_or_else(|_| "unknown".to_string());
     let webview_version = tauri::webview_version().unwrap_or_default();
     AppUserInfo {
         username,
