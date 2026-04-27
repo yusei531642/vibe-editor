@@ -21,17 +21,12 @@ import {
   Layout,
   MonitorSmartphone,
   Plus,
-  Sparkles,
-  Users,
-  History
+  Sparkles
 } from 'lucide-react';
 import type { CardData, CardType } from '../stores/canvas';
 import type {
   Language,
-  Team,
   TeamHistoryEntry,
-  TeamMember,
-  TeamPreset,
   TeamRole,
   TerminalAgent
 } from '../../../types/shared';
@@ -40,7 +35,6 @@ import { CanvasSidebar } from '../components/canvas/CanvasSidebar';
 import { Rail } from '../components/shell/Rail';
 import type { SidebarView } from '../components/Sidebar';
 import { SettingsModal } from '../components/SettingsModal';
-import { TeamCreateModal } from '../components/TeamCreateModal';
 import { useT } from '../lib/i18n';
 import { useUiStore } from '../stores/ui';
 import { useCanvasStore } from '../stores/canvas';
@@ -53,7 +47,6 @@ import { ROLE_META, roleMetaFor } from '../lib/team-roles';
 import { useSettings } from '../lib/settings-context';
 import { useToast } from '../lib/toast-context';
 
-type Tab = 'preset' | 'recent';
 const MAX_CANVAS_AGENTS = 30;
 
 function localeOf(language: Language): string {
@@ -156,9 +149,7 @@ export function CanvasLayout(): JSX.Element {
   const { showToast, dismissToast } = useToast();
   const [spawnOpen, setSpawnOpen] = useState(false);
   const [addCardOpen, setAddCardOpen] = useState(false);
-  const [tab, setTab] = useState<Tab>('preset');
   const [recent, setRecent] = useState<TeamHistoryEntry[]>([]);
-  const [teamModalOpen, setTeamModalOpen] = useState(false);
   const [sidebarView, setSidebarView] = useState<SidebarView>('files');
   const [railChangeCount, setRailChangeCount] = useState(0);
   const [railHistoryCount, setRailHistoryCount] = useState(0);
@@ -373,73 +364,6 @@ export function CanvasLayout(): JSX.Element {
     return () => window.clearTimeout(handle);
     // Issue #167: recent を deps から除外。recentRef 経由で読むことで debounce flush を保証する。
   }, [autoSavePayload, projectRoot]);
-
-  // ----- カスタムチーム作成 (TeamCreateModal からのコールバック) -----
-  const handleCreateCustomTeam = async (
-    teamName: string,
-    leader: { agent: TerminalAgent },
-    members: TeamMember[]
-  ): Promise<void> => {
-    const teamId = `team-${Date.now().toString(36)}`;
-    const cwd = projectRoot;
-    // leader を含む全メンバー
-    const all: { role: TeamRole; agent: TerminalAgent }[] = [
-      { role: 'leader', agent: leader.agent },
-      ...members.map((m) => ({ role: m.role, agent: m.agent }))
-    ];
-    // Issue #72: spawn する前に MCP 設定を反映させる。agent の PTY 起動前に
-    //            ~/.claude.json が更新されていないと team tool が 1 回目認識されない。
-    // mcpAutoSetup === false なら自動書換を完全スキップ (MCP タブで OFF 時)。
-    if (settings.mcpAutoSetup !== false) {
-      try {
-        await window.api.app.setupTeamMcp(
-          cwd,
-          teamId,
-          teamName,
-          all.map((m, i) => ({
-            agentId: `${m.role}-${i}-${teamId}`,
-            role: m.role,
-            agent: m.agent
-          }))
-        );
-      } catch (err) {
-        console.warn('[custom-team] setupTeamMcp failed:', err);
-      }
-    }
-    const cards = all.map((m, i) => {
-      const agentId = `${m.role}-${i}-${teamId}`;
-      const col = i % 3;
-      const row = Math.floor(i / 3);
-      // Issue #69: 旧バージョンの team-history や手編集で未知 role が来ても落ちないように
-      //            optional chain + fallback。
-      const label = ROLE_META[m.role]?.label ?? m.role ?? 'Agent';
-      return {
-        type: 'agent' as const,
-        title: label,
-        position: presetPosition(col, row),
-        payload: { agent: m.agent, role: m.role, teamId, agentId, cwd }
-      };
-    });
-    addCards(cards);
-    void loadRecent();
-  };
-
-  const handleSaveTeamPreset = (preset: TeamPreset): void => {
-    const prev = settings.teamPresets ?? [];
-    const idx = prev.findIndex((p) => p.id === preset.id);
-    if (idx >= 0) {
-      const updated = [...prev];
-      updated[idx] = preset;
-      void updateSettings({ teamPresets: updated });
-    } else {
-      void updateSettings({ teamPresets: [...prev, preset] });
-    }
-  };
-
-  const handleDeleteTeamPreset = (id: string): void => {
-    const prev = settings.teamPresets ?? [];
-    void updateSettings({ teamPresets: prev.filter((p) => p.id !== id) });
-  };
 
   const applyPreset = async (preset: WorkspacePreset): Promise<void> => {
     const teamId = `team-${Date.now().toString(36)}`;
@@ -673,81 +597,21 @@ export function CanvasLayout(): JSX.Element {
           </div>
           {spawnOpen && (
             <div className="canvas-popover canvas-popover--wide">
-              <div className="canvas-popover__tabs">
-                <TabBtn active={tab === 'preset'} onClick={() => setTab('preset')}>
-                  <Sparkles size={11} /> {t('canvas.preset')}
-                </TabBtn>
-                <TabBtn active={tab === 'recent'} onClick={() => setTab('recent')}>
-                  <History size={11} /> {t('canvas.recent')}
-                  {closeRecent.length > 0 && (
-                    <span className="canvas-popover__tab-badge">{closeRecent.length}</span>
-                  )}
-                </TabBtn>
-              </div>
-              {tab === 'preset' && (
-                <>
-                  <button
-                    type="button"
-                    className="canvas-popover__item canvas-popover__item--emph"
-                    onClick={() => {
-                      setSpawnOpen(false);
-                      setTeamModalOpen(true);
-                    }}
-                  >
-                    <Plus size={13} />
-                    {t('canvas.customTeam')}
-                  </button>
-                  {(settings.teamPresets ?? []).length > 0 && (
-                    <div className="canvas-popover__section">{t('canvas.savedPresets')}</div>
-                  )}
-                  {(settings.teamPresets ?? []).map((sp) => (
-                    <SavedPresetItem
-                      key={sp.id}
-                      preset={sp}
-                      agentCountLabel={formatAgentCount(sp.members.length, settings.language)}
-                      deleteLabel={t('canvas.deletePreset')}
-                      onClick={() => {
-                        const leaderM = sp.members.find((m) => m.role === 'leader');
-                        const others = sp.members.filter((m) => m.role !== 'leader');
-                        void handleCreateCustomTeam(
-                          sp.name,
-                          { agent: leaderM?.agent ?? 'claude' },
-                          others
-                        );
-                        setSpawnOpen(false);
-                      }}
-                      onDelete={() => {
-                        if (
-                          window.confirm(
-                            t('canvas.deletePresetConfirm', { name: sp.name })
-                          )
-                        ) {
-                          handleDeleteTeamPreset(sp.id);
-                        }
-                      }}
-                    />
-                  ))}
-                </>
+              {closeRecent.length === 0 && (
+                <div className="canvas-popover__empty">{t('canvas.noRecentTeams')}</div>
               )}
-              {tab === 'recent' && (
-                <>
-                  {closeRecent.length === 0 && (
-                    <div className="canvas-popover__empty">{t('canvas.noRecentTeams')}</div>
-                  )}
-                  {closeRecent.map((entry) => (
-                    <RecentItem
-                      key={entry.id}
-                      entry={entry}
-                      fallbackName={t('team.defaultName')}
-                      agentCountLabel={formatAgentCount(entry.members.length, settings.language)}
-                      lastUsedLabel={t('canvas.lastUsed', {
-                        value: dateTimeFormatter.format(new Date(entry.lastUsedAt))
-                      })}
-                      onClick={() => void restoreRecent(entry)}
-                    />
-                  ))}
-                </>
-              )}
+              {closeRecent.map((entry) => (
+                <RecentItem
+                  key={entry.id}
+                  entry={entry}
+                  fallbackName={t('team.defaultName')}
+                  agentCountLabel={formatAgentCount(entry.members.length, settings.language)}
+                  lastUsedLabel={t('canvas.lastUsed', {
+                    value: dateTimeFormatter.format(new Date(entry.lastUsedAt))
+                  })}
+                  onClick={() => void restoreRecent(entry)}
+                />
+              ))}
             </div>
           )}
         </div>
@@ -829,18 +693,6 @@ export function CanvasLayout(): JSX.Element {
           void resetSettings();
         }}
       />
-
-      <TeamCreateModal
-        open={teamModalOpen}
-        onClose={() => setTeamModalOpen(false)}
-        onCreate={handleCreateCustomTeam}
-        savedPresets={settings.teamPresets ?? []}
-        onSavePreset={handleSaveTeamPreset}
-        onDeletePreset={handleDeleteTeamPreset}
-        maxTerminals={MAX_CANVAS_AGENTS}
-        currentTabCount={nodes.filter((n) => n.type === 'agent').length}
-        existingTeams={[] as Team[]}
-      />
     </div>
   );
 }
@@ -864,50 +716,6 @@ function RoleDot({
     >
       {meta.glyph}
     </span>
-  );
-}
-
-function SavedPresetItem({
-  preset,
-  agentCountLabel,
-  deleteLabel,
-  onClick,
-  onDelete
-}: {
-  preset: TeamPreset;
-  agentCountLabel: string;
-  deleteLabel: string;
-  onClick: () => void;
-  onDelete: () => void;
-}): JSX.Element {
-  return (
-    <div className="canvas-popover__saved">
-      <button type="button" onClick={onClick} className="canvas-popover__saved-btn">
-        <Users size={13} />
-        <span style={{ fontSize: 12, fontWeight: 600 }}>{preset.name}</span>
-        <span style={{ fontSize: 10, color: 'var(--fg-subtle)' }}>{agentCountLabel}</span>
-        <span
-          className="canvas-popover__preset-roles"
-          style={{ marginLeft: 'auto', marginTop: 0 }}
-        >
-          {preset.members.map((m, i) => (
-            <RoleDot key={i} role={m.role} agent={m.agent} />
-          ))}
-        </span>
-      </button>
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          onDelete();
-        }}
-        title={deleteLabel}
-        aria-label={deleteLabel}
-        className="canvas-popover__saved-delete"
-      >
-        ×
-      </button>
-    </div>
   );
 }
 
@@ -944,26 +752,6 @@ function AddItem({
     <button type="button" onClick={onClick} className="canvas-popover__item">
       {icon}
       {label}
-    </button>
-  );
-}
-
-function TabBtn({
-  active,
-  onClick,
-  children
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`canvas-popover__tab${active ? ' is-active' : ''}`}
-    >
-      {children}
     </button>
   );
 }

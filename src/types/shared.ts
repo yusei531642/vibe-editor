@@ -76,8 +76,6 @@ export interface AppSettings {
   // ---------- Codex ----------
   codexCommand: string;
   codexArgs: string;
-  // ---------- チームプリセット ----------
-  teamPresets: TeamPreset[];
   /**
    * Issue #17: ターミナル間の受け渡し用メモ。
    * 入力中も自動保存し、再起動しても残る。
@@ -157,7 +155,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   claudeCodePanelWidth: 460,
   codexCommand: 'codex',
   codexArgs: '',
-  teamPresets: [],
   notepad: '',
   hasCompletedOnboarding: false,
   customAgents: [],
@@ -277,12 +274,6 @@ export interface Team {
 export interface TeamMember {
   agent: TerminalAgent;
   role: TeamRole;
-}
-
-export interface TeamPreset {
-  id: string;
-  name: string;
-  members: TeamMember[];
 }
 
 /** 保存されるチーム履歴メンバー。sessionId は Claude Code の --resume に渡す */

@@ -30,6 +30,54 @@ const MAX_ACTIVE_WEBGL = 8;
 let activeWebglCount = 0;
 
 /**
+ * Box Drawing (U+2500-U+257F) / Block Elements (U+2580-U+259F) を確実に持つ
+ * Windows OS フォント。ユーザー設定 fontFamily の末尾 (generic `monospace` の直前) に
+ * 注入することで、Canvas モードの DOM renderer (customGlyphs が効かない経路) でも
+ * 罫線/濃淡 glyph が必ずどれかから拾える状態を保証する。
+ */
+const BOX_DRAWING_FALLBACKS = [
+  "'Cascadia Mono'",
+  'Consolas',
+  "'Lucida Console'",
+  "'Segoe UI Symbol'"
+] as const;
+
+/**
+ * ユーザー設定の fontFamily に、罫線/濃淡 glyph を確実に持つ Windows OS フォントを
+ * fallback として注入する。
+ *
+ * 背景:
+ *   Canvas モードの DOM renderer (TerminalCard / AgentNodeCard が disableWebgl=true)
+ *   では xterm の customGlyphs が効かず、罫線/濃淡 glyph はフォントから取られる。
+ *   bundled webfont (JetBrains Mono Variable / Geist Mono Variable) は @fontsource の
+ *   subset 設計上 latin/cyrillic/greek 系のみで、Box Drawing (U+2500-U+257F) と Block
+ *   Elements (U+2580-U+259F) を含まない。ユーザーの fallback chain にこれら glyph を持つ
+ *   フォントが無い (古い preset を使ったまま等) と、Codex / Claude Code の box border が
+ *   `|` `_` の混在で崩れて見える (Chromium の monospace 降格が MS Gothic 等を選ぶため)。
+ *
+ *   ここでユーザー設定の末尾に safety fallback を注入することで、設定値に依らず常に
+ *   罫線が描けることを保証する。primary font は preserve するので、ユーザーが指定した
+ *   見た目は変わらない (足りない glyph だけ fallback が拾う)。
+ *   既に chain に含まれているフォントは重複追加しない (case-insensitive)。
+ */
+function ensureBoxDrawingFallbacks(family: string): string {
+  const trimmed = family.trim().replace(/,\s*$/, '');
+  if (!trimmed) return trimmed;
+  const lower = trimmed.toLowerCase();
+  const missing = BOX_DRAWING_FALLBACKS.filter((fb) => {
+    const name = fb.replace(/['"]/g, '').toLowerCase();
+    return !lower.includes(name);
+  });
+  if (missing.length === 0) return family;
+  // 末尾の generic `monospace` を見つけたらその直前に挿入。無ければ末尾追加 + monospace を補う。
+  const m = trimmed.match(/^(.*?)(\s*,\s*monospace\s*)$/i);
+  if (m) {
+    return `${m[1]}, ${missing.join(', ')}${m[2]}`;
+  }
+  return `${trimmed}, ${missing.join(', ')}, monospace`;
+}
+
+/**
  * xterm.js `Terminal` インスタンスと `FitAddon` をマウント中 1 回だけ生成し、
  * フォント/テーマの変更を反映させるフック。
  *
@@ -66,8 +114,10 @@ export function useXtermInstance(
 
     const initial = initialSettingsRef.current;
     const term = new Terminal({
-      // ターミナル専用フォントを優先、未設定なら editor フォントに fallback
-      fontFamily: initial.terminalFontFamily || initial.editorFontFamily,
+      // ターミナル専用フォントを優先、未設定なら editor フォントに fallback。
+      // ensureBoxDrawingFallbacks: Canvas モードの DOM renderer で罫線/濃淡が崩れないよう
+      // 設定値に Cascadia Mono / Consolas / Lucida Console / Segoe UI Symbol を必ず含める。
+      fontFamily: ensureBoxDrawingFallbacks(initial.terminalFontFamily || initial.editorFontFamily),
       fontSize: initial.terminalFontSize,
       // 選択座標ズレ対策: lineHeight=1.2 × fontSize=13 → cellHeight=15.6 (非整数) だと
       // xterm v6 の selection 矩形計算で行方向にサブピクセル誤差が積もり、ドラッグ選択
@@ -150,7 +200,9 @@ export function useXtermInstance(
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
-    term.options.fontFamily = settings.terminalFontFamily || settings.editorFontFamily;
+    term.options.fontFamily = ensureBoxDrawingFallbacks(
+      settings.terminalFontFamily || settings.editorFontFamily
+    );
     term.options.fontSize = settings.terminalFontSize;
     term.options.theme = buildXtermTheme(settings.theme);
     // Issue #123: WebGL renderer はグリフをテクスチャアトラスにキャッシュするため、
