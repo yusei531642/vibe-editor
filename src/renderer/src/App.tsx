@@ -12,8 +12,7 @@ import {
   PanelLeft,
   RefreshCw,
   RotateCw,
-  Settings as SettingsIcon,
-  Users
+  Settings as SettingsIcon
 } from 'lucide-react';
 import type {
   GitDiffResult,
@@ -22,8 +21,6 @@ import type {
   SessionInfo,
   Team,
   TeamHistoryEntry,
-  TeamMember,
-  TeamPreset,
   TeamRole,
   TerminalAgent,
   ThemeName
@@ -47,7 +44,6 @@ import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { MenuBar, MenuItem, MenuDivider, MenuSection } from './components/shell/MenuBar';
 import { useRecruitListener } from './lib/use-recruit-listener';
 import { ClaudeNotFound } from './components/ClaudeNotFound';
-import { TeamCreateModal } from './components/TeamCreateModal';
 import { useT } from './lib/i18n';
 import {
   useSettingsActions,
@@ -243,7 +239,6 @@ export function App(): JSX.Element {
     claudeCodePanelWidth: useSettingsValue('claudeCodePanelWidth'),
     codexCommand: useSettingsValue('codexCommand'),
     codexArgs: useSettingsValue('codexArgs'),
-    teamPresets: useSettingsValue('teamPresets'),
     language: useSettingsValue('language'),
     theme: useSettingsValue('theme'),
     density: useSettingsValue('density'),
@@ -335,7 +330,6 @@ export function App(): JSX.Element {
   const nextTerminalIdRef = useRef(1);
   const terminalRefs = useRef(new Map<number, TerminalViewHandle>());
   const [tabCreateMenuOpen, setTabCreateMenuOpen] = useState(false);
-  const [teamModalOpen, setTeamModalOpen] = useState(false);
   const [teams, setTeams] = useState<Team[]>([]);
   const [pendingTeamClose, setPendingTeamClose] = useState<{
     tabId: number;
@@ -1500,13 +1494,6 @@ export function App(): JSX.Element {
         run: () => { addTerminalTab({ agent: 'codex' }); }
       },
       {
-        id: 'terminal.createTeam',
-        title: t('cmd.terminal.createTeam'),
-        category: CAT.terminal,
-        when: () => terminalTabs.length < MAX_TERMINALS,
-        run: () => setTeamModalOpen(true)
-      },
-      {
         id: 'terminal.closeTab',
         title: t('cmd.terminal.closeTab'),
         category: CAT.terminal,
@@ -1776,139 +1763,6 @@ export function App(): JSX.Element {
     }
   }, [claudeCheck.state, projectRoot, terminalTabs.length, addTerminalTab, viewMode]);
 
-  // ---------- チーム作成 ----------
-
-  const handleCreateTeam = useCallback(
-    async (teamName: string, leader: { agent: TerminalAgent }, members: TeamMember[]) => {
-      const totalNeeded = 1 + members.length;
-      if (terminalTabs.length + totalNeeded > MAX_TERMINALS) {
-        showToast(`チームは上限 ${MAX_TERMINALS} を超えます`, { tone: 'warning' });
-        return;
-      }
-
-      const teamId = `team-${Date.now()}`;
-      // 同時作成レース対策: これ以前の staggered spawn 予約は全て中断する
-      clearSpawnTimers();
-
-      setTeams((prev) => [...prev, { id: teamId, name: teamName }]);
-
-      // MCP 用のメンバー一覧を事前構築
-      const allMembers = [
-        { agentId: `${teamId}-leader`, role: 'leader', agent: leader.agent },
-        ...members.map((m, i) => ({
-          agentId: `${teamId}-${m.role}-${i}`,
-          role: m.role,
-          agent: m.agent
-        }))
-      ];
-
-      // MCP サーバーをセットアップ（Claude Code / Codex MCP 設定）
-      // mcpAutoSetup === false なら自動書換を一切行わない (設定 → MCP タブで OFF 時)。
-      let mcpChanged = false;
-      if (projectRoot && settings.mcpAutoSetup !== false) {
-        try {
-          const res = await window.api.app.setupTeamMcp(
-            projectRoot,
-            teamId,
-            teamName,
-            allMembers
-          );
-          if (!res?.ok) {
-            throw new Error(res?.error || 'setupTeamMcp failed');
-          }
-          mcpChanged = res.changed === true;
-        } catch (err) {
-          // 失敗時は予約した状態を全部ロールバックする。
-          // ここで続行すると TeamHub 無しでタブだけ生えて "ゾンビチーム" になる。
-          console.warn('[team] setupTeamMcp failed:', err);
-          setTeams((prev) => prev.filter((t) => t.id !== teamId));
-          showToast(
-            `チーム作成に失敗しました: ${err instanceof Error ? err.message : String(err)}`,
-            { tone: 'error' }
-          );
-          return;
-        }
-      }
-
-      // claude.json が更新された場合、既存の Claude タブは古い MCP 情報で起動しているので
-      // サイレントに再起動して新しいポート/トークンを読み直させる
-      if (mcpChanged) {
-        setTerminalTabs((prev) =>
-          prev.map((tab) =>
-            tab.agent === 'claude' && !tab.exited
-              ? { ...tab, version: tab.version + 1, status: '', hasActivity: false }
-              : tab
-          )
-        );
-      }
-
-      // チーム履歴エントリを先に作って保存。teamId とレコード ID を一致させ、
-      // あとで sessionId が取れたら差分更新する。
-      if (projectRoot) {
-        const now = new Date().toISOString();
-        const entry: TeamHistoryEntry = {
-          id: teamId,
-          name: teamName,
-          projectRoot,
-          createdAt: now,
-          lastUsedAt: now,
-          members: [
-            { role: 'leader' as TeamRole, agent: leader.agent, sessionId: null },
-            ...members.map((m) => ({
-              role: m.role,
-              agent: m.agent,
-              sessionId: null as string | null
-            }))
-          ]
-        };
-        setTeamHistoryEntries((prev) => [
-          entry,
-          ...prev.filter((e) => e.id !== entry.id)
-        ]);
-        saveTeamHistory(entry);
-      }
-
-      // Leader を先に生成（teamHistoryMemberIdx=0）
-      addTerminalTab({
-        agent: leader.agent,
-        role: 'leader' as TeamRole,
-        teamId,
-        agentId: allMembers[0].agentId,
-        teamHistoryMemberIdx: 0
-      });
-      // メンバーは少しずつ間隔を空けて生成する（レイアウト確定前に N 個一気に
-      // マウントすると、ResizeObserver と fit.fit() の衝突で謎のスペースや
-      // 位置ズレが起きることがある。80ms 間隔だとほぼ問題なく落ち着く）
-      const SPAWN_STAGGER_MS = 80;
-      for (let i = 0; i < members.length; i++) {
-        const memberIdx = i + 1;
-        const m = members[i];
-        const timer = setTimeout(() => {
-          addTerminalTab({
-            agent: m.agent,
-            role: m.role,
-            teamId,
-            agentId: allMembers[memberIdx].agentId,
-            teamHistoryMemberIdx: memberIdx
-          });
-          // 自分自身を spawnStaggerTimers からも落とす
-          spawnStaggerTimers.current = spawnStaggerTimers.current.filter(
-            (t) => t !== timer
-          );
-        }, (i + 1) * SPAWN_STAGGER_MS);
-        spawnStaggerTimers.current.push(timer);
-      }
-    },
-    [
-      addTerminalTab,
-      terminalTabs.length,
-      projectRoot,
-      saveTeamHistory,
-      clearSpawnTimers,
-      showToast
-    ]
-  );
-
   // ---------- チーム履歴の resume / 削除 ----------
 
   const handleResumeTeam = useCallback(
@@ -2102,30 +1956,6 @@ export function App(): JSX.Element {
       });
     },
     [saveTeamHistory]
-  );
-
-  const handleSavePreset = useCallback(
-    (preset: TeamPreset) => {
-      const prev = settings.teamPresets ?? [];
-      const idx = prev.findIndex((p) => p.id === preset.id);
-      if (idx >= 0) {
-        // 既存プリセットを更新
-        const updated = [...prev];
-        updated[idx] = preset;
-        void updateSettings({ teamPresets: updated });
-      } else {
-        void updateSettings({ teamPresets: [...prev, preset] });
-      }
-    },
-    [settings.teamPresets, updateSettings]
-  );
-
-  const handleDeletePreset = useCallback(
-    (id: string) => {
-      const prev = settings.teamPresets ?? [];
-      void updateSettings({ teamPresets: prev.filter((p) => p.id !== id) });
-    },
-    [settings.teamPresets, updateSettings]
   );
 
   // ---------- ターミナルタブのグループ化 ----------
@@ -2522,14 +2352,6 @@ export function App(): JSX.Element {
                       <span className="terminal-tab__agent terminal-tab__agent--codex">X</span>
                       {t('claudePanel.addCodex')}
                     </button>
-                    <div className="tab-create-menu__divider" />
-                    <button
-                      className="tab-create-menu__item"
-                      onClick={() => { setTeamModalOpen(true); setTabCreateMenuOpen(false); }}
-                    >
-                      <Users size={14} />
-                      {t('claudePanel.createTeam')}
-                    </button>
                   </div>
                 </>
               )}
@@ -2792,18 +2614,6 @@ export function App(): JSX.Element {
           onClose={() => setContextMenu(null)}
         />
       )}
-
-      <TeamCreateModal
-        open={teamModalOpen}
-        onClose={() => setTeamModalOpen(false)}
-        onCreate={handleCreateTeam}
-        savedPresets={settings.teamPresets ?? []}
-        onSavePreset={handleSavePreset}
-        onDeletePreset={handleDeletePreset}
-        maxTerminals={MAX_TERMINALS}
-        currentTabCount={terminalTabs.length}
-        existingTeams={teams}
-      />
 
       <StatusBar
         gitStatus={gitStatus}

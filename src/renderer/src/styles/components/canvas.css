@@ -230,38 +230,6 @@
 .canvas-popover--wide {
   width: 340px;
 }
-.canvas-popover__tabs {
-  display: flex;
-  border-bottom: 1px solid var(--border);
-}
-.canvas-popover__tab {
-  flex: 1;
-  height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  font-size: 11px;
-  color: var(--fg-subtle);
-  background: transparent;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease;
-}
-.canvas-popover__tab:hover {
-  color: var(--fg-muted);
-}
-.canvas-popover__tab.is-active {
-  color: var(--fg);
-  border-bottom-color: var(--claude-brand, var(--accent));
-}
-.canvas-popover__tab-badge {
-  font-size: 9px;
-  margin-left: 2px;
-  color: var(--fg-subtle);
-  font-variant-numeric: tabular-nums;
-}
 
 .canvas-popover__item {
   width: 100%;
@@ -283,13 +251,6 @@
 }
 .canvas-popover__item:hover {
   background: var(--bg-hover);
-}
-.canvas-popover__item--emph {
-  font-weight: 600;
-  color: var(--claude-brand, var(--accent));
-}
-.canvas-popover__item--emph:hover {
-  background: var(--claude-brand-glow, var(--accent-tint));
 }
 .canvas-popover__section {
   padding: 6px 12px;
@@ -362,41 +323,6 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-}
-
-.canvas-popover__saved {
-  display: flex;
-  align-items: stretch;
-  border-bottom: 1px solid var(--border);
-}
-.canvas-popover__saved-btn {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  background: transparent;
-  color: var(--fg);
-  border: 0;
-  text-align: left;
-  cursor: pointer;
-  transition: background-color 100ms ease;
-}
-.canvas-popover__saved-btn:hover {
-  background: var(--bg-hover);
-}
-.canvas-popover__saved-delete {
-  width: 30px;
-  background: transparent;
-  color: var(--fg-subtle);
-  border: 0;
-  cursor: pointer;
-  font-size: 15px;
-  line-height: 1;
-  transition: color 100ms ease;
-}
-.canvas-popover__saved-delete:hover {
-  color: var(--fg);
 }
 
 /* ----------
