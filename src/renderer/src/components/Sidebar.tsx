@@ -1,3 +1,4 @@
+import { useCallback, useMemo } from 'react';
 import type {
   GitFileChange,
   GitStatus,
@@ -9,6 +10,10 @@ import { SessionsPanel } from './SessionsPanel';
 import { FileTreePanel } from './FileTreePanel';
 import { NotesPanel } from './NotesPanel';
 import { UserMenu } from './UserMenu';
+import { useSettings } from '../lib/settings-context';
+
+/** Issue #250: FileTreePanel と同じ NUL 区切りキー (`<rootPath>\0<relPath>`) */
+const KEY_SEP = '\0';
 
 export type SidebarView = 'files' | 'changes' | 'sessions' | 'notes';
 
@@ -40,6 +45,45 @@ interface SidebarProps {
 }
 
 export function Sidebar(props: SidebarProps): JSX.Element {
+  const { settings, update } = useSettings();
+
+  // Issue #250: 永続化された展開状態を Set<NULキー> に展開して FileTreePanel に渡す。
+  // useMemo は settings の参照変動 (200ms debounce save 後の context 更新) で再計算される。
+  const initialExpanded = useMemo(() => {
+    const set = new Set<string>();
+    const map = settings.fileTreeExpanded ?? {};
+    for (const [root, rels] of Object.entries(map)) {
+      for (const rel of rels) {
+        set.add(`${root}${KEY_SEP}${rel}`);
+      }
+    }
+    return set;
+  }, [settings.fileTreeExpanded]);
+
+  const initialCollapsedRoots = useMemo(
+    () => new Set(settings.fileTreeCollapsedRoots ?? []),
+    [settings.fileTreeCollapsedRoots]
+  );
+
+  const handlePersistFileTreeState = useCallback(
+    ({ expanded, collapsedRoots }: { expanded: Set<string>; collapsedRoots: Set<string> }) => {
+      const map: Record<string, string[]> = {};
+      for (const key of expanded) {
+        const sep = key.indexOf(KEY_SEP);
+        if (sep <= 0) continue;
+        const root = key.slice(0, sep);
+        const rel = key.slice(sep + 1);
+        (map[root] ??= []).push(rel);
+      }
+      // settings-context 内で 200ms debounce → atomic_write されるので二重 debounce 不要。
+      void update({
+        fileTreeExpanded: map,
+        fileTreeCollapsedRoots: Array.from(collapsedRoots)
+      });
+    },
+    [update]
+  );
+
   return (
     <aside className="sidebar">
       <div className="sidebar__body" key={props.view}>
@@ -51,6 +95,9 @@ export function Sidebar(props: SidebarProps): JSX.Element {
             onOpenFile={props.onOpenFile}
             onAddWorkspaceFolder={props.onAddWorkspaceFolder}
             onRemoveWorkspaceFolder={props.onRemoveWorkspaceFolder}
+            initialExpanded={initialExpanded}
+            initialCollapsedRoots={initialCollapsedRoots}
+            onPersistState={handlePersistFileTreeState}
           />
         ) : props.view === 'changes' ? (
           <ChangesPanel
