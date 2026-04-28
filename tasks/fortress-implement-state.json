@@ -206,7 +206,7 @@
       "name": "可観測性ログ + 実機 Tauri 手動チェックリスト",
       "status": "COMPLETED",
       "safe_point": {
-        "commit_hash": "TBD-on-commit",
+        "commit_hash": "ed4618ca85bc2df4e1efb748e0590525843cbaa8",
         "tests_passed": [
           "全 41 tests 維持 (regression なし)",
           "typecheck 0 error"
