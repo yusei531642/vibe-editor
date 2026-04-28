@@ -90,3 +90,49 @@ if let Some(window) = app.get_webview_window("main") {
 - 旧 Electron: `settings.load()` は未保存時 `DEFAULT_SETTINGS` を返していた
 - 新 Tauri: 素直に `Value::Null` を返すと React 側で `null.theme` で TypeError → 全画面崩壊
 - `tauri-api.ts` 側で `{ ...DEFAULT_SETTINGS, ...(raw ?? {}) }` で部分マージするのが安全
+
+## Codex CLI Bash 経由起動の安定化
+
+### 症状
+- `codex exec ... "$(cat /tmp/prompt.txt)"` を Git Bash 経由で起動した際、1 回目は完走するが 2 回目以降が `Reading additional input from stdin...` の 1 行で止まり exit 127 で死亡。
+- 出力末尾に `ERROR codex_core::session: failed to record rollout items: thread <id> not found` が残ることがある。
+- 1 回目の出力でも、稀に同じ最終回答が 2 回連続で出る（rollout 失敗 → 内部 retry の副作用）。
+
+### 根本原因（最有力仮説）
+1. **Codex の stdin 二重読み仕様** — `codex exec --help` に明記:
+   > "If stdin is piped and a prompt is also provided, stdin is appended as a `<stdin>` block."
+   引数で prompt を渡しても、stdin がパイプ判定されると EOF まで追加読み込みする。Bash の `"$(cat ...)"` はコマンド置換で「引数」になる一方、Claude Code ハーネス側から起動された Bash 子プロセスは stdin が tty ではなく **未 close の pipe** になっているため、Codex が「stdin もある」と誤判定 → EOF を待ち続けて hang。
+2. **PowerShell ConstrainedLanguage 干渉** — Codex は内部で `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8` を発行する。組織ポリシー (AppLocker / WDAC) で ConstrainedLanguage が効いていると `PropertySetterNotSupportedInConstrainedLanguage` で拒否され、Codex が stdin fallback 経路に落ちる原因にもなる。
+3. **rollout thread 不整合** — `~/.codex/state_5.sqlite-wal` が肥大 (約 2.5MB) しており、セッション終了処理で rollout の thread が見つからず ERROR。これ自体はクラッシュ要因ではないが、**1 回目の最終回答が 2 重出力される副作用**を起こす。
+
+### How to apply（今後 Codex を Bash から呼ぶときの厳守ルール）
+- [ ] **prompt は stdin で渡し、引数を空にする** — `cat /tmp/prompt.txt | codex exec [opts]`。これで「引数あり + stdin」の二重読み判定を完全に避けられる。
+- [ ] **どうしても引数で渡したい場合は stdin を明示クローズ** — `codex exec [opts] "$(cat /tmp/prompt.txt)" < /dev/null`。`< /dev/null` を付けて即 EOF を保証する。
+- [ ] **`--color never` を付ける** — Bash 経由で ANSI エスケープが混じってログ解析を壊さないため。
+- [ ] **`-c tools.shell.enabled=false` の時は PowerShell 系コマンドが拒否される** — Codex 側が `rg` / `git` への自動切替を試みるが、その前に prompt で「PowerShell コマンドを発行しないこと、`rg --files` のみ許可」と明示する。
+- [ ] **`~/.codex/state_5.sqlite*` が 5MB を超えたら pre-clean** — 古い rollout を整理。`codex` を完全終了 (`taskkill` 含む) してから `state_5.sqlite-wal` を削除。
+- [ ] **長時間 hung を検知するためタイムアウト必須** — `timeout 600 codex exec ...` で 10 分を超えたら強制終了。
+- [ ] **同一プロンプトで連続呼び出ししない** — 1 回目で残った rollout state が 2 回目に干渉する。呼び出しの間に最低 2 秒空けるか、`--ephemeral` フラグを使う。
+
+### 即効回避策（今すぐ使える）
+```bash
+# 推奨: stdin から渡し、ANSI を抑止し、stdin を明示閉じる必要なし
+cat /tmp/codex_review_prompt.txt | timeout 600 codex exec \
+  --sandbox read-only \
+  --color never \
+  --ephemeral \
+  -c approval_policy='"never"' \
+  -c tools.shell.enabled=false \
+  --cd "C:/Users/zooyo/Documents/GitHub/vibe-editor"
+
+# やむを得ず引数で渡す場合（stdin を明示クローズ）
+codex exec --sandbox read-only --color never --ephemeral \
+  -c approval_policy='"never"' \
+  --cd "C:/Users/zooyo/Documents/GitHub/vibe-editor" \
+  "$(cat /tmp/codex_review_prompt.txt)" < /dev/null
+```
+
+### 不確定要素
+- exit 127 が「Bash の command not found 規約」由来か Codex 自身の戻り値か未確定。Claude Code ハーネスのプロセス kill 後の表示の可能性が高い (codex 自体は通常 0 / 1 を返す)。
+- ConstrainedLanguage の影響度。1 回目は完走したことから「常に致命的」ではなく、「内部 fallback の停止点」と推定。
+- 2 回目失敗時のセッションファイルが `~/.codex/sessions/2026/04/28/` に**作られていない**ことから、Codex CLI 起動初期のプロンプト読み込み段階で詰まっており、rollout 機構には到達していない。

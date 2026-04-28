@@ -53,8 +53,10 @@ jobs:
         # `npm ci` の strict lockfile check を通過できない (npm CLI の OS-specific
         # optional deps バグ: https://github.com/npm/cli/issues/4828)。
         # `npm install --no-audit --no-fund` に切り替え、欠落 deps を CI ランナー上で
-        # resolve させる。Docker / Linux 環境で完全な lockfile を再生成できる体制が
-        # 整ったら `npm ci` に戻す予定。
+        # resolve させる。
+        # ★ TODO: Linux 環境 (Docker / Codespaces / WSL Ubuntu) で lockfile を
+        # 完全再生成して main にコミットする体制が整ったら `npm ci` に戻す。
+        # 進捗は Issue #258 で追跡 (担当者・期限は同 Issue 参照)。
         run: npm install --no-audit --no-fund
 
       - name: TypeScript typecheck

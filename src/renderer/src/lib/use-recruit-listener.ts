@@ -44,11 +44,17 @@ interface RecruitCancelledPayload {
 }
 
 // NODE_W / NODE_H は stores/canvas.ts の共有定数を import (Issue #253 で 640x400 に拡張)
-// Issue #253 review (#6): NODE_W=640 のまま `NODE_W + 80 = 720` にすると、Leader 中心に
-// 同心円で 6 人配置したとき論理幅 2080 px 超を要求し、1080p (1920x1080) では端のメンバーが
-// 初期 viewport から外れる UX 退行が起きる。`Math.max(540, NODE_W * 0.85)` で
-// (a) 旧 540 を下限として保ち、 (b) 新サイズの 85% (= 544 px) で重なり防止マージンを確保する。
-// 1080p でも Leader+5 名が概ね viewport 内に収まる距離。
+//
+// `RECRUIT_RADIUS` は requester (Leader) を中心とする同心円配置の半径 (要素中心 → 要素中心)。
+// 厳密には NODE_W=640 に対して 544 < 640 なので、0° (真水平) の単独メンバー配置では
+// 約 96 px の重なりが理論上発生する。これを許容する根拠:
+//   - `findRecruitPosition` は既存メンバーが居る方角を避けて 12 スロットの中で最も空いた
+//     角度をピックする。Leader+1 で 0° を選ばざるを得ないケースは少数派。
+//   - Leader+1 は実運用では HR や planner で稀。多くは Leader 単独 / Leader+2 名以上。
+//   - NODE_W + 80 = 720 まで広げると 6 名同心円配置で論理幅 2080 px 超を要求し、
+//     1080p (1920x1080) で端メンバーが初期 viewport から外れる方が UX 退行として大きい。
+// → 角度分散ロジック (`findRecruitPosition`) との組合せで実質的に重なりを回避する近似値
+//   として 544 を採用する。0° 水平配置で重なりが観測されたら別 Issue で fitView 連動を検討。
 const RECRUIT_RADIUS = Math.max(540, Math.round(NODE_W * 0.85));
 
 /** requester の周囲で空いている角度を見つけて配置位置を返す。

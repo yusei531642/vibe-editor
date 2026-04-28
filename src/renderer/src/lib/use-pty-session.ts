@@ -138,14 +138,21 @@ export function usePtySession(options: UsePtySessionOptions): void {
 
     (async () => {
       try {
-        // Issue #253 review (W#1): web font (JetBrains Mono Variable 等) ロード前に
+        // Issue #253 review (W#1 + #3): web font (JetBrains Mono Variable 等) ロード前に
         // measureCellSize が走ると system monospace のメトリクスを返し、誤った cellW で
         // PTY が立つ。Canvas モードでは fonts.ready を待ってから測ることで、Codex の
         // banner も初回描画から正しい寸法で描画される。IDE モードでは fit.fit() が DOM
         // メトリクスベースなので待つ必要なし。
+        // タイムアウト 500ms: コールドキャッシュ / 低速 I/O 環境で fonts.ready が秒オーダー
+        // で resolve しないとき spawn が体感遅延する問題を回避。500ms 経過時は fallback
+        // メトリクスで spawn し、後続の useFitToContainer の fonts.ready effect が ready 後
+        // 1 回だけ refit を発火して補正するので、一瞬だけずれた表示も自動回復する。
         if (unscaledFitRef.current && typeof document !== 'undefined' && document.fonts) {
           try {
-            await document.fonts.ready;
+            await Promise.race([
+              document.fonts.ready,
+              new Promise((resolve) => window.setTimeout(resolve, 500))
+            ]);
           } catch {
             /* fonts.ready は通常 reject しないが、念のため握りつぶす */
           }
