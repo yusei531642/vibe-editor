@@ -81,7 +81,10 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
   const internalLastScheduledRef = useRef<{ cols: number; rows: number } | null>(null);
   const lastScheduledRef = externalLastScheduledRef ?? internalLastScheduledRef;
 
-  const schedulePtyResize = (cols: number, rows: number): void => {
+  // Issue #253 review (#6): refit と整合させるため useCallback でラップして identity を
+  // 安定化。内部で参照する lastScheduledRef / ptyResizeTimerRef / ptyIdRef / lastSizeRef は
+  // 全て ref なので deps は空で stale closure なし。
+  const schedulePtyResize = useCallback((cols: number, rows: number): void => {
     if (
       lastScheduledRef.current &&
       lastScheduledRef.current.cols === cols &&
@@ -100,7 +103,8 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
       lastSizeRef.current = { cols, rows };
       void window.api.terminal.resize(id, cols, rows);
     }, 120);
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Issue #253 review (W#4): refit を useCallback でラップして identity を安定化させる。
   // すべての可変値は ref 経由 (unscaledFitRef / getCellSizeRef / getZoomRef / lastScheduledRef

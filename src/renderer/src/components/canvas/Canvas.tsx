@@ -291,23 +291,26 @@ function FlowApp(): JSX.Element {
 
   const stageView = useCanvasStore((s) => s.stageView);
 
-  // Issue #253 review (#2): recruit 後に fitView({ padding, duration }) を発火させて、
+  // Issue #253 review (#2 + #7): recruit 後に fitView({ padding, duration }) を発火させて、
   // RECRUIT_RADIUS=NODE_W+80 で 6 名同心円配置時に端メンバーが viewport から外れる
   // UX 退行を吸収する。lastRecruitAt は use-recruit-listener が card 追加直後に
-  // notifyRecruit() で書き、本 effect が変化を検知して 1 frame 遅延 (新ノードのレンダー
-  // 完了を待つ) してから fitView を呼ぶ。
+  // notifyRecruit() で書き、本 effect が変化を検知する。
+  // 200ms debounce: team_recruit が短時間に複数名 (Leader+5 等) を追加するケースで、
+  // fitView アニメーションが連続発火してカクつく問題を回避。最後の更新から 200ms 経過後に
+  // 1 回だけ fitView を呼ぶ。debounce 時間は新ノードのレンダー完了 (~16ms) より十分長く、
+  // ユーザーの体感遅延 (300ms 程度の許容) より短い実用値。
   const lastRecruitAt = useCanvasStore((s) => s.lastRecruitAt);
   const reactFlow = useReactFlow();
   useEffect(() => {
     if (!lastRecruitAt) return;
-    const id = requestAnimationFrame(() => {
+    const timer = window.setTimeout(() => {
       try {
         reactFlow.fitView({ padding: 0.15, duration: 300 });
       } catch {
         /* viewport 計算に失敗するレアケースは無視 */
       }
-    });
-    return () => cancelAnimationFrame(id);
+    }, 200);
+    return () => window.clearTimeout(timer);
   }, [lastRecruitAt, reactFlow]);
 
   return (

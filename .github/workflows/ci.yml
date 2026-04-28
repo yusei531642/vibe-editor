@@ -57,7 +57,9 @@ jobs:
         # ★ TODO: Linux 環境 (Docker / Codespaces / WSL Ubuntu) で lockfile を
         # 完全再生成して main にコミットする体制が整ったら `npm ci` に戻す。
         # 進捗は Issue #258 で追跡 (担当者・期限は同 Issue 参照)。
-        run: npm install --no-audit --no-fund
+        # --no-save: CI 上で package-lock.json が書き換わらないことを保証
+        # (lockfile drift によるビルド非決定性をさらに抑制)
+        run: npm install --no-audit --no-fund --no-save
 
       - name: TypeScript typecheck
         run: npm run typecheck

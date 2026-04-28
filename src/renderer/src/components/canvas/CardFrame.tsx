@@ -7,16 +7,33 @@
 import type { ReactNode } from 'react';
 import { NodeResizer } from '@xyflow/react';
 import { useConfirmRemoveCard } from '../../lib/use-confirm-remove-card';
-import { NODE_MIN_W, NODE_MIN_H } from '../../stores/canvas';
+
+// Issue #253 review (#5): カード種別ごとに最小サイズを変えられるよう props で受け取る。
+// デフォルトは旧 240x160 (Editor / Diff / FileTree / Changes 等の汎用カードの下限)。
+// TerminalCard / AgentNodeCard は明示的に NODE_MIN_W/H (480/280) を渡してターミナル UI
+// の見やすさを担保する (それ未満だと Codex/Claude TUI のヘッダーが折り返す)。
+const DEFAULT_MIN_W = 240;
+const DEFAULT_MIN_H = 160;
 
 interface CardFrameProps {
   id: string;
   title: string;
   accent?: string;
   children: ReactNode;
+  /** NodeResizer の最小幅 (default 240) */
+  minWidth?: number;
+  /** NodeResizer の最小高さ (default 160) */
+  minHeight?: number;
 }
 
-export function CardFrame({ id, title, accent, children }: CardFrameProps): JSX.Element {
+export function CardFrame({
+  id,
+  title,
+  accent,
+  children,
+  minWidth = DEFAULT_MIN_W,
+  minHeight = DEFAULT_MIN_H
+}: CardFrameProps): JSX.Element {
   const confirmRemoveCard = useConfirmRemoveCard();
   return (
     <div
@@ -37,8 +54,8 @@ export function CardFrame({ id, title, accent, children }: CardFrameProps): JSX.
       }}
     >
       <NodeResizer
-        minWidth={NODE_MIN_W}
-        minHeight={NODE_MIN_H}
+        minWidth={minWidth}
+        minHeight={minHeight}
         color={accent ?? '#5c5cff'}
         handleStyle={{ width: 8, height: 8, borderRadius: 2 }}
         lineStyle={{ borderWidth: 1 }}

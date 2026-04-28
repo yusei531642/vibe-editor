@@ -10,7 +10,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { CardFrame } from '../CardFrame';
 import { TerminalView, type TerminalViewHandle } from '../../TerminalView';
 import { useSettings } from '../../../lib/settings-context';
-import { useCanvasStore } from '../../../stores/canvas';
+import { useCanvasStore, NODE_MIN_W, NODE_MIN_H } from '../../../stores/canvas';
 import { useCanvasTerminalFit } from '../../../lib/use-canvas-terminal-fit';
 
 interface TerminalPayload {
@@ -69,7 +69,7 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
   return (
     <>
       <Handle type="target" position={Position.Left} style={{ background: '#7a7afd' }} />
-      <CardFrame id={id} title={title}>
+      <CardFrame id={id} title={title} minWidth={NODE_MIN_W} minHeight={NODE_MIN_H}>
         <TerminalView
           ref={ref}
           cwd={cwd}
