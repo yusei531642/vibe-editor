@@ -1,6 +1,6 @@
 [package]
 name = "vibe-editor"
-version = "1.4.4"
+version = "1.4.5"
 description = "Electron→Tauri 移行版 vibe-editor (Claude Code / Codex 専用エディタ)"
 authors = ["yusei <yusei@yuseilab.com>"]
 edition = "2021"
@@ -31,7 +31,7 @@ serde_json = "1"
 # --- PTY / TeamHub ---
 portable-pty = "0.9"
 bytes = "1"
-notify = "6"
+notify = "8"
 
 # --- error / logging ---
 anyhow = "1"

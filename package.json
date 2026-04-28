@@ -1,6 +1,6 @@
 {
   "name": "vibe-editor",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "private": true,
   "description": "Tauri ベースの Claude Code / Codex 専用エディタ",
   "engines": {
@@ -38,22 +38,22 @@
     "lucide-react": "^1.11.0",
     "marked": "^18.0.2",
     "monaco-editor": "^0.55.1",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
     "@types/node": "^20.14.0",
-    "@types/react": "^18.3.3",
-    "@types/react-dom": "^18.3.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "esbuild": "^0.28.0",
     "jsdom": "^26.0.0",
     "png-to-ico": "^3.0.1",
     "sharp": "^0.34.5",
-    "typescript": "^5.6.0",
+    "typescript": "^6.0.3",
     "vite": "^8.0.10",
     "vitest": "^3.0.0"
   },
