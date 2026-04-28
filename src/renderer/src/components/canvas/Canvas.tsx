@@ -34,7 +34,7 @@ import HandoffEdge from './HandoffEdge';
 import { QuickNav } from './QuickNav';
 import { LeaderGlow } from './LeaderGlow';
 import { StageHud } from './StageHud';
-import { useCanvasStore, NODE_W, NODE_H, type CardData } from '../../stores/canvas';
+import { useCanvasStore, type CardData } from '../../stores/canvas';
 import { colorOf } from '../../lib/team-roles';
 import { KEYS, useKeybinding } from '../../lib/keybindings';
 import { useUiStore } from '../../stores/ui';
@@ -299,31 +299,13 @@ function FlowApp(): JSX.Element {
   // fitView アニメーションが連続発火してカクつく問題を回避。最後の更新から 200ms 経過後に
   // 1 回だけ fitView を呼ぶ。debounce 時間は新ノードのレンダー完了 (~16ms) より十分長く、
   // ユーザーの体感遅延 (300ms 程度の許容) より短い実用値。
-  // Issue #259: fitView 後に zoom が極端に下がるとターミナル文字が判読困難になる UX 退行を防ぐ。
-  // 結果 zoom が MIN_RECRUIT_ZOOM を下回った場合は Leader (= recruit 直近の中心ノード) で
-  // setCenter のみ実行し zoom を確保する。一部メンバーは viewport 外になるが、ユーザーは pan で閲覧可能。
-  const MIN_RECRUIT_ZOOM = 0.7;
   const lastRecruitAt = useCanvasStore((s) => s.lastRecruitAt);
   const reactFlow = useReactFlow();
   useEffect(() => {
     if (!lastRecruitAt) return;
     const timer = window.setTimeout(() => {
       try {
-        // minZoom オプションで fitView 自体が極端に縮小しないようガード (@xyflow/react v12)
-        reactFlow.fitView({ padding: 0.15, duration: 300, minZoom: MIN_RECRUIT_ZOOM });
-        // 防衛的フォールバック: minZoom が反映されない paths があった場合に備えて、
-        // 結果 zoom を確認し閾値未満なら Leader を中心に setCenter で zoom を強制する。
-        const vp = reactFlow.getViewport();
-        if (vp.zoom < MIN_RECRUIT_ZOOM) {
-          const leader = reactFlow.getNodes()[0];
-          if (leader) {
-            reactFlow.setCenter(
-              leader.position.x + NODE_W / 2,
-              leader.position.y + NODE_H / 2,
-              { zoom: MIN_RECRUIT_ZOOM, duration: 300 }
-            );
-          }
-        }
+        reactFlow.fitView({ padding: 0.15, duration: 300 });
       } catch {
         /* viewport 計算に失敗するレアケースは無視 */
       }
