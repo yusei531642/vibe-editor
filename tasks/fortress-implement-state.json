@@ -47,7 +47,7 @@
       "name": "measureCellSize 純関数 (private API 排除)",
       "status": "COMPLETED",
       "safe_point": {
-        "commit_hash": "TBD-on-commit",
+        "commit_hash": "21b067b0f27d89868153ce512cc765d2c1db9ce2",
         "tests_passed": [
           "measureCellSize: cellH = fontSize * lineHeight (1.0/1.5)",
           "measureCellSize: lineHeight 省略時 1.0",
