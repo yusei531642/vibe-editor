@@ -82,6 +82,9 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
         <div className="canvas-terminal-card__term" ref={termContainerRef}>
           <TerminalView
             ref={ref}
+            // Issue #271: HMR remount で同じ PTY へ再 bind するための論理キー。
+            // Canvas のノード id は永続化された安定識別子なので、HMR 復帰経路の鍵に使える。
+            sessionKey={`canvas-term:${id}`}
             cwd={cwd}
             fallbackCwd={cwd}
             command={command}

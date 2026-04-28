@@ -36,6 +36,13 @@ pub struct TerminalCreateOptions {
     pub agent_id: Option<String>,
     #[serde(default)]
     pub role: Option<String>,
+    /// Issue #271: HMR 経路で同じ React mount identity を共有する論理キー。
+    #[serde(default)]
+    pub session_key: Option<String>,
+    /// Issue #271: true の場合、同じ session_key / agent_id の生存 PTY があれば
+    /// spawn せず既存 id を返す。デフォルトは false (従来通り常に新規 spawn)。
+    #[serde(default)]
+    pub attach_if_exists: bool,
     #[serde(default)]
     pub codex_instructions: Option<String>,
 }
@@ -48,6 +55,8 @@ pub struct TerminalCreateResult {
     pub error: Option<String>,
     pub command: Option<String>,
     pub warning: Option<String>,
+    /// Issue #271: attachIfExists により既存 PTY に接続した場合 true。新規 spawn 時は None。
+    pub attached: Option<bool>,
 }
 
 #[derive(Serialize, Default)]
@@ -323,6 +332,37 @@ pub async fn terminal_create(
             ..Default::default()
         });
     }
+
+    // Issue #271: HMR remount 経路では renderer 側 hook が `attachIfExists: true` を立て、
+    // 既存 PTY に bind し直したいシグナルを送る。allowlist / immediate-exec チェックを通った
+    // 後・コマンドラインを組み立てる前 (codex 一時ファイル作成より前) に preflight して、
+    // 同じ session_key / agent_id の生存 PTY があれば spawn せず既存 id をそのまま返す。
+    if opts.attach_if_exists {
+        if let Some(existing_id) = state
+            .pty_registry
+            .find_attach_target(opts.session_key.as_deref(), opts.agent_id.as_deref())
+        {
+            tracing::info!(
+                "[terminal] attach_if_exists hit — reusing existing pty {} (session_key={:?}, agent_id={:?})",
+                existing_id,
+                opts.session_key,
+                opts.agent_id
+            );
+            // 表示用のコマンドラインも復元しておく (renderer の status ライン用)。
+            let cmdline = std::iter::once(command.clone())
+                .chain(args.iter().cloned())
+                .collect::<Vec<_>>()
+                .join(" ");
+            return Ok(TerminalCreateResult {
+                ok: true,
+                id: Some(existing_id),
+                command: Some(cmdline),
+                attached: Some(true),
+                ..Default::default()
+            });
+        }
+    }
+
     let (cwd, warning) =
         crate::pty::session::resolve_valid_cwd(&opts.cwd, opts.fallback_cwd.as_deref());
 
@@ -399,6 +439,9 @@ pub async fn terminal_create(
         rows: opts.rows.min(u32::from(u16::MAX)) as u16,
         env,
         agent_id: opts.agent_id,
+        // Issue #271: session_key を SpawnOptions / SessionHandle 経由で
+        // SessionRegistry::insert に届け、by_session_key index を更新できるようにする。
+        session_key: opts.session_key,
         team_id: opts.team_id,
         role: opts.role,
     };
@@ -454,6 +497,9 @@ pub async fn terminal_create(
                 command: Some(cmdline),
                 warning,
                 error: None,
+                // Issue #271: 新規 spawn は明示的に Some(false)。renderer 側で
+                // 「attach 復帰経路かどうか」を毎回判別するときの不確実性をなくす。
+                attached: Some(false),
             })
         }
         Err(e) => Ok(TerminalCreateResult {

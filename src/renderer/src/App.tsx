@@ -2529,6 +2529,11 @@ export function App(): JSX.Element {
                 )}
                 <TerminalView
                   key={`term-${tab.id}-v${tab.version}`}
+                  // Issue #271: HMR remount 時に同じ PTY へ再 bind するための論理キー。
+                  // tab.id は閉じるまで安定なので、HMR を跨いで一意に PTY を識別できる。
+                  // restartTerminalTab は version を上げて key を変える別経路なので、
+                  // 旧マウントの cleanup で kill が走り PTY は適切に殺される。
+                  sessionKey={`term:${tab.id}`}
                   ref={(el) => {
                     if (el) terminalRefs.current.set(tab.id, el);
                     else terminalRefs.current.delete(tab.id);

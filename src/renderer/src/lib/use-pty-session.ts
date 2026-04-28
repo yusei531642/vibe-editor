@@ -30,6 +30,14 @@ export interface UsePtySessionOptions {
   /** `cwd` が無効だったときに main 側でフォールバックに使うパス */
   fallbackCwd?: string;
   command: string;
+  /**
+   * Issue #271: HMR remount 時に同じ PTY へ再 bind するための論理キー。
+   * 親が `term:${tab.id}` / `canvas-term:${node.id}` 等の安定した文字列を
+   * 渡すと、Vite HMR で本フックが unmount → remount しても terminal.kill を
+   * 飛ばさず、`import.meta.hot.data` 経由で旧 ptyId を引き継いで bind だけ
+   * やり直す。値が undefined のときは従来通り unmount で kill する。
+   */
+  sessionKey?: string;
   termRef: MutableRefObject<Terminal | null>;
   fitRef: MutableRefObject<FitAddon | null>;
   /** 初回 spawn 時にスナップショットとして読むので ref 経由 (不変式 #2) */
@@ -57,12 +65,71 @@ export interface UsePtySessionOptions {
 }
 
 /**
+ * Issue #271: HMR dispose 経路で「kill しない」フラグの記録先。
+ *   - Vite HMR は `import.meta.hot.dispose(cb)` の cb を「remount 直前」に呼ぶ。
+ *   - cb 内で `inProgress = true` にしておくと、その直後にレンダーツリーが
+ *     unmount され本フックの cleanup が走る。cleanup は `inProgress` を見て
+ *     `terminal.kill` を skip し、ptyId を `import.meta.hot.data` に退避する。
+ *   - 直後の re-mount で hook は再度起動 → `import.meta.hot.data` に残った
+ *     ptyId を見て、`attachIfExists: true` で bind だけやり直す。
+ *
+ * 通常のタブ close / restart / コンポーネント mount/unmount では `inProgress`
+ * は false のままなので、従来通り kill が走る。HMR を持たない本番ビルドでは
+ * `import.meta.hot` が undefined なので分岐自体が無効化される。
+ */
+const hmrDisposeInProgress: { current: boolean } = { current: false };
+
+interface HmrPtyCacheEntry {
+  ptyId: string;
+  generation: number;
+}
+
+/** `import.meta.hot.data.ptyBySessionKey` を sessionKey → ptyId の Map として参照する。 */
+function getHmrPtyCache(): Record<string, HmrPtyCacheEntry> | null {
+  // dev mode 限定。本番ビルドでは import.meta.hot が undefined なので null を返す。
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const hot = (import.meta as any).hot as
+    | { data?: Record<string, unknown> }
+    | undefined;
+  if (!hot) return null;
+  if (!hot.data) return null;
+  if (!hot.data.ptyBySessionKey) {
+    hot.data.ptyBySessionKey = {} as Record<string, HmrPtyCacheEntry>;
+  }
+  return hot.data.ptyBySessionKey as Record<string, HmrPtyCacheEntry>;
+}
+
+// dev のみ: HMR dispose hook を 1 回だけ登録する。
+// この cb が走った後に各 useEffect の cleanup が呼ばれるので、cleanup 側は
+// `hmrDisposeInProgress.current` を見て kill skip を判断できる。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const __hot = (import.meta as any).hot as
+  | {
+      dispose: (cb: () => void) => void;
+      data?: Record<string, unknown>;
+    }
+  | undefined;
+if (__hot && !(__hot as { __vibePtyHookInstalled?: boolean }).__vibePtyHookInstalled) {
+  (__hot as { __vibePtyHookInstalled?: boolean }).__vibePtyHookInstalled = true;
+  __hot.dispose(() => {
+    hmrDisposeInProgress.current = true;
+    // 次の module 評価 (= remount 後) でフラグを下ろす。微小な setTimeout で
+    // 「cleanup → remount → effect 走り出し」を跨ぐ。
+    setTimeout(() => {
+      hmrDisposeInProgress.current = false;
+    }, 0);
+  });
+}
+
+/**
  * pty の spawn / データ購読 / 終了通知 / kill を一手に引き受けるフック。
  *
  * 不変式 #1: effect deps は `[cwd, command]` のみ。
- *   他の props (args / env / initialMessage / teamId / agentId / role) や
+ *   他の props (args / env / initialMessage / teamId / agentId / role / sessionKey) や
  *   callbacks は ref 経由で読むので deps に入れなくてよい。
  *   これにより並び替えや親コンポーネントの再レンダーで pty が巻き添え kill されない。
+ *   sessionKey は「mount identity」として扱うので、親側で同じカード/タブの間は
+ *   変えない前提。変わると effect が再 run して新規 PTY 起動になる。
  *
  * 不変式 #2: 初回 spawn 時点の `args` / `env` / `initialMessage` を `snapRef` に
  *   退避してから `terminal.create` に渡す。以後 props が変化してもこの spawn には影響しない。
@@ -72,6 +139,7 @@ export function usePtySession(options: UsePtySessionOptions): void {
     cwd,
     fallbackCwd,
     command,
+    sessionKey,
     termRef,
     fitRef,
     snapRef,
@@ -84,6 +152,10 @@ export function usePtySession(options: UsePtySessionOptions): void {
     containerRef,
     lastScheduledRef
   } = options;
+  // sessionKey は HMR cleanup / preflight 判定のために effect 内で参照したいので
+  // ref に退避しておく (deps から外しても stale にならないため)。
+  const sessionKeyRef = useRef(sessionKey);
+  sessionKeyRef.current = sessionKey;
 
   const observeChunkRef = useRef(observeChunk);
   observeChunkRef.current = observeChunk;
@@ -135,6 +207,21 @@ export function usePtySession(options: UsePtySessionOptions): void {
     let offData: (() => void) | null = null;
     let offExit: (() => void) | null = null;
     let offSessionId: (() => void) | null = null;
+
+    // Issue #271: bind 世代番号。listener コールバックは「自分が登録された世代と同じ」
+    // なら処理し、古い世代なら無視する。これにより HMR remount で 2 重登録された
+    // 古い callback が xterm に二重出力するのを防ぐ。
+    const myGeneration = (() => {
+      const cache = getHmrPtyCache();
+      const skey = sessionKeyRef.current;
+      if (cache && skey) {
+        const entry = cache[skey];
+        const next = (entry?.generation ?? 0) + 1;
+        cache[skey] = { ptyId: entry?.ptyId ?? '', generation: next };
+        return next;
+      }
+      return 1;
+    })();
 
     (async () => {
       try {
@@ -219,6 +306,12 @@ export function usePtySession(options: UsePtySessionOptions): void {
         callbacksRef.current.onStatus?.(`${command} を起動中…`);
         // 不変式 #2: 初回 spawn 時点のスナップショットを使う (以後の prop 変化は無視)
         const snap = snapRef.current;
+        // Issue #271: HMR remount 経路では `import.meta.hot.data.ptyBySessionKey`
+        // に前世代の ptyId が残っている。Rust 側 preflight は `find_attach_target` で
+        // session_key / agent_id を引いて生存 PTY を返してくるので、こちらから
+        // sessionKey と attachIfExists を載せて呼ぶだけで attach 経路に乗る。
+        // sessionKey が無い場合は従来通り常に新規 spawn。
+        const skey = sessionKeyRef.current;
         const res = await window.api.terminal.create({
           cwd,
           fallbackCwd,
@@ -230,6 +323,8 @@ export function usePtySession(options: UsePtySessionOptions): void {
           teamId: snap.teamId,
           agentId: snap.agentId,
           role: snap.role,
+          sessionKey: skey,
+          attachIfExists: Boolean(skey),
           codexInstructions: snap.codexInstructions
         });
 
@@ -248,14 +343,34 @@ export function usePtySession(options: UsePtySessionOptions): void {
         }
 
         ptyIdRef.current = res.id;
+        // Issue #271: HMR remount で再 attach できるよう ptyId と世代番号を退避。
+        if (skey) {
+          const cache = getHmrPtyCache();
+          if (cache) {
+            cache[skey] = { ptyId: res.id, generation: myGeneration };
+          }
+        }
         if (res.warning) {
           term.writeln(`\x1b[33m[警告] ${res.warning}\x1b[0m`);
         }
-        callbacksRef.current.onStatus?.(`実行中: ${res.command ?? command}`);
+        callbacksRef.current.onStatus?.(
+          res.attached
+            ? `再接続: ${res.command ?? command}`
+            : `実行中: ${res.command ?? command}`
+        );
+
+        const isCurrentGeneration = (): boolean => {
+          if (!skey) return true;
+          const cache = getHmrPtyCache();
+          if (!cache) return true;
+          // 自分が登録した世代と一致するか確認 (古い世代の listener なら無視)
+          return cache[skey]?.generation === myGeneration;
+        };
 
         // セッション id は main プロセスが `~/.claude/projects/.../*.jsonl` の
         // 差分から検出し、`terminal:sessionId:<id>` で通知してくる。
         offSessionId = window.api.terminal.onSessionId(res.id, (sessionId) => {
+          if (!isCurrentGeneration()) return;
           try {
             callbacksRef.current.onSessionId?.(sessionId);
           } catch {
@@ -264,6 +379,7 @@ export function usePtySession(options: UsePtySessionOptions): void {
         });
 
         offData = window.api.terminal.onData(res.id, (data) => {
+          if (!isCurrentGeneration()) return;
           term.write(data);
           if (data.includes('\n') || data.includes('\r') || data.length >= 4096) {
             scheduleRenderRepair();
@@ -273,11 +389,17 @@ export function usePtySession(options: UsePtySessionOptions): void {
         });
 
         offExit = window.api.terminal.onExit(res.id, (info) => {
+          if (!isCurrentGeneration()) return;
           term.writeln(
             `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m`
           );
           callbacksRef.current.onStatus?.(`終了 (exitCode=${info.exitCode})`);
           ptyIdRef.current = null;
+          // Issue #271: 終了した PTY は HMR cache からも消す (以後 attach 不可)。
+          if (skey) {
+            const cache = getHmrPtyCache();
+            if (cache) delete cache[skey];
+          }
           callbacksRef.current.onExit?.();
         });
       } catch (err) {
@@ -313,6 +435,10 @@ export function usePtySession(options: UsePtySessionOptions): void {
       dataSub.dispose();
       textarea?.removeEventListener('compositionstart', onCompStart);
       textarea?.removeEventListener('compositionend', onCompEnd);
+      // Issue #271: HMR dispose 中は kill を skip する (PTY は生かしたまま remount 後に再 bind)。
+      // 通常 unmount (タブ close / カード削除 / restart) では kill する。
+      const skeyAtCleanup = sessionKeyRef.current;
+      const isHmrDispose = hmrDisposeInProgress.current;
       offData?.();
       offExit?.();
       offSessionId?.();
@@ -321,8 +447,22 @@ export function usePtySession(options: UsePtySessionOptions): void {
         repairFrame = null;
       }
       if (ptyIdRef.current) {
-        void window.api.terminal.kill(ptyIdRef.current);
-        ptyIdRef.current = null;
+        if (isHmrDispose && skeyAtCleanup) {
+          // HMR cleanup: kill せず HMR cache に id を残し、remount 側で attach させる。
+          // ptyBySessionKey のエントリは初回 spawn 直後に既に保存済み。
+          // ここでは「ptyIdRef を null にしないこと」で、次の remount まで参照を保持する
+          // 必要はない (remount 時の preflight で再取得するため)。
+          // 旧 listener は世代番号で無視されるので、ptyIdRef は今 null にしてよい。
+          ptyIdRef.current = null;
+        } else {
+          // 通常 cleanup: kill して HMR cache からも消す。
+          void window.api.terminal.kill(ptyIdRef.current);
+          ptyIdRef.current = null;
+          if (skeyAtCleanup) {
+            const cache = getHmrPtyCache();
+            if (cache) delete cache[skeyAtCleanup];
+          }
+        }
       }
     };
     // 不変式 #1: deps は [cwd, command] のみ。

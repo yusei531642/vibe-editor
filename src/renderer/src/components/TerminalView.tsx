@@ -27,6 +27,14 @@ interface TerminalViewProps {
   /** `cwd` が無効な場合のフォールバック(通常はプロジェクトルートを渡す) */
   fallbackCwd?: string;
   command: string;
+  /**
+   * Issue #271: HMR remount 時に同じ PTY へ再 bind するための論理キー。
+   * IDE: `term:${tab.id}`、Canvas TerminalCard: `canvas-term:${node.id}`、
+   * Canvas AgentNodeCard: `canvas-agent:${node.id}` のような安定文字列を渡す。
+   * 値があると Vite HMR で React Refresh が unmount/remount してもターミナルが
+   * 一斉終了せず、既存の PTY に再接続する。本番ビルドでは何の影響もない。
+   */
+  sessionKey?: string;
   args?: string[];
   /** pty に渡す追加の環境変数 */
   env?: Record<string, string>;
@@ -88,6 +96,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       cwd,
       fallbackCwd,
       command,
+      sessionKey,
       args,
       env,
       teamId,
@@ -177,6 +186,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       cwd,
       fallbackCwd,
       command,
+      // Issue #271: HMR remount 時に同じ PTY へ再 bind するための論理キー。
+      sessionKey,
       termRef,
       fitRef,
       snapRef,
