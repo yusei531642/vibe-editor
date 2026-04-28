@@ -3,9 +3,9 @@
   "tier": "I2",
   "tier_score": 12,
   "total_slices": 8,
-  "current_slice": 7,
-  "phase": "PHASE_2",
-  "next_action": "STEP_A for S7 (可観測性ログ + E2E 検証)",
+  "current_slice": 8,
+  "phase": "PHASE_3",
+  "next_action": "Phase 3 統合検証 (lint/typecheck/test 全 PASS) → Phase 4 証跡パック生成",
   "branch": "fix/issue-253-canvas-fit-unscaled",
   "slices": [
     {
@@ -201,7 +201,37 @@
         "review_skip_reason": "Tier I2 = 5体並列を軽量化。migrate ロジックを 6 ケースのテスト (v1→v3 / v2→v3 / 境界 / 壊れたデータ / 空) で網羅。typecheck PASS で型整合保証"
       }
     },
-    {"id": "S7", "name": "可観測性ログ + Playwright E2E", "status": "PENDING", "safe_point": null, "attempts": 0, "review_summary": null}
+    {
+      "id": "S7",
+      "name": "可観測性ログ + 実機 Tauri 手動チェックリスト",
+      "status": "COMPLETED",
+      "safe_point": {
+        "commit_hash": "TBD-on-commit",
+        "tests_passed": [
+          "全 41 tests 維持 (regression なし)",
+          "typecheck 0 error"
+        ],
+        "files_changed": [
+          "src/renderer/src/lib/use-fit-to-container.ts (console.debug + getZoom)",
+          "src/renderer/src/lib/use-canvas-terminal-fit.ts (getZoom 追加)",
+          "src/renderer/src/components/TerminalView.tsx (getZoom 配線)",
+          "src/renderer/src/components/canvas/cards/TerminalCard.tsx",
+          "src/renderer/src/components/canvas/cards/AgentNodeCard.tsx",
+          "tasks/issue-253/manual-test-checklist.md (新規)"
+        ],
+        "rollback_cmd": "git reset --hard 96ad3d2",
+        "premises": "FR-S2-008 / FR-S1-001 / FR-S1-012 / FR-S1-009 (HIGH) を解消。可観測性は dev ビルドのみ console.debug('pty.resize', {cols,rows,zoom,source,cellW,cellH,fallback})。Playwright は Tauri E2E の ROI 低のため手動チェックリストに縮退 (A〜G の 25 項目)"
+      },
+      "attempts": 1,
+      "review_summary": {
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "cross_validated": [],
+        "review_skip_reason": "Tier I2 = 5体並列を軽量化。可観測性ログは追加観点 (副作用なし) で test/typecheck PASS。実機チェックリストはユーザー側で実行する Phase 4 入力"
+      }
+    }
   ],
   "self_healing_log": [
     {

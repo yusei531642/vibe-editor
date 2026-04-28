@@ -352,10 +352,11 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
             // Canvas zoom で xterm canvas が滲むのを避けるため WebGL を切る (DOM renderer 固定)。
             // text は実 DOM になるので Chromium が親 transform に応じて再ラスタライズしシャープに描く。
             disableWebgl
-            // Issue #253: 論理 px ベース fit + zoom 購読
+            // Issue #253: 論理 px ベース fit + zoom 購読 + 可観測性
             unscaledFit={fit.unscaledFit}
             getCellSize={fit.getCellSize}
             zoomSubscribe={fit.zoomSubscribe}
+            getZoom={fit.getZoom}
           />
         </div>
       </div>

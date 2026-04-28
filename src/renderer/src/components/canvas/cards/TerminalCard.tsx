@@ -86,10 +86,11 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
           onSessionId={handleSessionId}
           // Canvas zoom で滲まないよう WebGL を切る (DOM renderer 固定)
           disableWebgl
-          // Issue #253: 論理 px ベース fit + zoom 購読
+          // Issue #253: 論理 px ベース fit + zoom 購読 + 可観測性
           unscaledFit={fit.unscaledFit}
           getCellSize={fit.getCellSize}
           zoomSubscribe={fit.zoomSubscribe}
+          getZoom={fit.getZoom}
         />
       </CardFrame>
       <Handle type="source" position={Position.Right} style={{ background: '#7a7afd' }} />

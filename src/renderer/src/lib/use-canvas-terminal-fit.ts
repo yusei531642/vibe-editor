@@ -18,6 +18,7 @@ export function useCanvasTerminalFit(settings: AppSettings): {
   unscaledFit: true;
   getCellSize: () => CellSize | null;
   zoomSubscribe: (cb: () => void) => () => void;
+  getZoom: () => number;
 } {
   const fontSize = settings.terminalFontSize;
   const fontFamily = settings.terminalFontFamily || settings.editorFontFamily || 'monospace';
@@ -39,5 +40,10 @@ export function useCanvasTerminalFit(settings: AppSettings): {
     });
   }, []);
 
-  return { unscaledFit: true, getCellSize, zoomSubscribe };
+  const getZoom = useCallback(
+    (): number => useCanvasStore.getState().viewport.zoom,
+    []
+  );
+
+  return { unscaledFit: true, getCellSize, zoomSubscribe, getZoom };
 }

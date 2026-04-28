@@ -37,6 +37,8 @@ export interface UseFitToContainerOptions {
   getCellSize?: () => CellSize | null;
   /** Canvas zoom の購読関数。返値は unsubscribe。zoom 変化で refit を発火 */
   zoomSubscribe?: (cb: () => void) => () => void;
+  /** 可観測性ログ用に現在の zoom を取得 (`console.debug('pty.resize', ...)` に乗る) */
+  getZoom?: () => number;
 }
 
 export function useFitToContainer(options: UseFitToContainerOptions): void {
@@ -49,7 +51,8 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
     refitTriggers,
     unscaledFit = false,
     getCellSize,
-    zoomSubscribe
+    zoomSubscribe,
+    getZoom
   } = options;
 
   // visible / unscaledFit / getCellSize の最新値を ref で見る (RO 再マウント不要)
@@ -59,6 +62,8 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
   unscaledFitRef.current = unscaledFit;
   const getCellSizeRef = useRef(getCellSize);
   getCellSizeRef.current = getCellSize;
+  const getZoomRef = useRef(getZoom);
+  getZoomRef.current = getZoom;
 
   // PTY resize IPC を debounce (リサイズ中の毎フレーム IPC 抑制)
   const ptyResizeTimerRef = useRef<number | null>(null);
@@ -108,6 +113,19 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
         if (ptyIdRef.current) {
           schedulePtyResize(grid.cols, grid.rows);
         }
+        // Issue #253: 可観測性ログ。dev ビルドのみ。zoom/cellW/cellH/fallback まで含めて
+        // 「PTY が今どの寸法で走っているか」を DevTools コンソールから即追える。
+        if (import.meta.env.DEV) {
+          console.debug('pty.resize', {
+            cols: grid.cols,
+            rows: grid.rows,
+            zoom: getZoomRef.current?.() ?? null,
+            source: 'unscaled',
+            cellW: cell.cellW,
+            cellH: cell.cellH,
+            fallback: cell.fallback
+          });
+        }
       } catch {
         /* dispose 直後 / 非可視などの失敗は無視 */
       }
@@ -122,6 +140,14 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
       term.refresh(0, Math.max(0, term.rows - 1));
       if (ptyIdRef.current) {
         schedulePtyResize(term.cols, term.rows);
+      }
+      if (import.meta.env.DEV) {
+        console.debug('pty.resize', {
+          cols: term.cols,
+          rows: term.rows,
+          zoom: null,
+          source: 'fit'
+        });
       }
     } catch {
       /* 非表示状態などでの失敗は無視 */

@@ -68,6 +68,8 @@ interface TerminalViewProps {
   getCellSize?: () => CellSize | null;
   /** Canvas zoom の購読関数 (量子化 + cb 発火)。返値は unsubscribe */
   zoomSubscribe?: (cb: () => void) => () => void;
+  /** 可観測性ログ用の zoom 取得 */
+  getZoom?: () => number;
 }
 
 /**
@@ -102,7 +104,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       disableWebgl,
       unscaledFit,
       getCellSize,
-      zoomSubscribe
+      zoomSubscribe,
+      getZoom
     },
     ref
   ): JSX.Element {
@@ -207,7 +210,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       ],
       unscaledFit,
       getCellSize,
-      zoomSubscribe
+      zoomSubscribe,
+      getZoom
     });
 
     // --- 外部操作用ハンドル (public API は不変) ---
