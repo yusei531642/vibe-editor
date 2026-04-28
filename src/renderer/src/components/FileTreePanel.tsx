@@ -26,6 +26,15 @@ interface FileTreePanelProps {
   onOpenFile: (rootPath: string, relPath: string) => void;
   onAddWorkspaceFolder: () => void;
   onRemoveWorkspaceFolder: (path: string) => void;
+  /**
+   * Issue #250: 永続化された展開状態の初期値。
+   * lazy 初期化のためマウント時の値だけが使われる (再レンダーでは無視される)。
+   */
+  initialExpanded?: Set<string>;
+  /** Issue #250: 永続化された折り畳み済みルートの初期値 */
+  initialCollapsedRoots?: Set<string>;
+  /** Issue #250: 状態変化時の永続化コールバック (親で settings に保存) */
+  onPersistState?: (state: { expanded: Set<string>; collapsedRoots: Set<string> }) => void;
 }
 
 interface DirState {
@@ -34,9 +43,13 @@ interface DirState {
   entries: FileNode[];
 }
 
-/** (rootPath, relPath) を一意キーに変換。Map のキーにする */
+/**
+ * (rootPath, relPath) を一意キーに変換。Map のキーにする。
+ * 区切りには NUL 文字を使う (パス内に出現しないため衝突しない)。
+ */
+const KEY_SEP = '\0';
 const dirKey = (rootPath: string, relPath: string): string =>
-  `${rootPath}\0${relPath}`;
+  `${rootPath}${KEY_SEP}${relPath}`;
 
 const shortName = (abs: string): string => {
   const parts = abs.split(/[\\/]/).filter(Boolean);
@@ -49,7 +62,10 @@ export function FileTreePanel({
   activeFilePath,
   onOpenFile,
   onAddWorkspaceFolder,
-  onRemoveWorkspaceFolder
+  onRemoveWorkspaceFolder,
+  initialExpanded,
+  initialCollapsedRoots,
+  onPersistState
 }: FileTreePanelProps): JSX.Element {
   const t = useT();
   /**
@@ -58,9 +74,11 @@ export function FileTreePanel({
    */
   const [dirs, setDirs] = useState<Map<string, DirState>>(new Map());
   /** 展開済みディレクトリ集合(同じ key 形式) */
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(() => initialExpanded ?? new Set());
   /** 折り畳み状態のルート集合。primary は初期展開、extra はユーザー操作に委ねる */
-  const [collapsedRoots, setCollapsedRoots] = useState<Set<string>>(new Set());
+  const [collapsedRoots, setCollapsedRoots] = useState<Set<string>>(
+    () => initialCollapsedRoots ?? new Set()
+  );
 
   /** 現在サイドバーに表示するルート一覧(primary + extras から重複除去)。
    *  Issue #129: 配列リテラルを毎レンダー作ると useEffect deps や子供 props が
@@ -152,29 +170,46 @@ export function FileTreePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [primaryRoot, extraRoots.join('\u0001'), loadDir]);
 
+  // Issue #250: 永続化された expanded から (initialExpanded として) 復元した
+  // ディレクトリを dirs キャッシュに非同期で読み込む。toggleDir 経由でない展開
+  // 状態 = 復元時のみ意味があり、通常の操作では toggleDir 内で loadDir が呼ばれる。
+  // expanded を deps に入れると毎トグル再走するので、roots と loadDir のみ依存にする
+  // (mount + ルート切替時に 1 回だけ走る)。
+  useEffect(() => {
+    for (const key of expanded) {
+      if (dirs.has(key)) continue;
+      const sep = key.indexOf(KEY_SEP);
+      if (sep <= 0) continue;
+      const rootPath = key.slice(0, sep);
+      const relPath = key.slice(sep + 1);
+      // 永続化値に他プロジェクトの root が混在することを防ぐため、現在の roots に
+      // 含まれているもののみ load する。relPath が '' のものはルート直下なので
+      // 上の useEffect が読み込むためここでは無視。
+      if (relPath !== '' && roots.includes(rootPath)) {
+        void loadDir(rootPath, relPath);
+      }
+    }
+    // expanded を意図的に deps から除外 (mount + roots 変動時のみ走る)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [primaryRoot, extraRoots.join(KEY_SEP), loadDir]);
+
   const toggleDir = useCallback(
     (rootPath: string, node: FileNode) => {
       if (!node.isDir) return;
       const key = dirKey(rootPath, node.path);
-      const isOpen = expanded.has(key);
-      if (isOpen) {
-        setExpanded((prev) => {
-          const next = new Set(prev);
-          next.delete(key);
-          return next;
-        });
-        return;
-      }
+      const wasOpen = expanded.has(key);
       setExpanded((prev) => {
         const next = new Set(prev);
-        next.add(key);
+        if (next.has(key)) next.delete(key);
+        else next.add(key);
+        onPersistState?.({ expanded: next, collapsedRoots });
         return next;
       });
-      if (!dirs.has(key)) {
+      if (!wasOpen && !dirs.has(key)) {
         void loadDir(rootPath, node.path);
       }
     },
-    [expanded, dirs, loadDir]
+    [expanded, collapsedRoots, dirs, loadDir, onPersistState]
   );
 
   const refreshAll = useCallback(() => {
@@ -189,14 +224,18 @@ export function FileTreePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expanded, loadDir, primaryRoot, extraRoots.join('\u0001')]);
 
-  const toggleRoot = useCallback((rootPath: string) => {
-    setCollapsedRoots((prev) => {
-      const next = new Set(prev);
-      if (next.has(rootPath)) next.delete(rootPath);
-      else next.add(rootPath);
-      return next;
-    });
-  }, []);
+  const toggleRoot = useCallback(
+    (rootPath: string) => {
+      setCollapsedRoots((prev) => {
+        const next = new Set(prev);
+        if (next.has(rootPath)) next.delete(rootPath);
+        else next.add(rootPath);
+        onPersistState?.({ expanded, collapsedRoots: next });
+        return next;
+      });
+    },
+    [expanded, onPersistState]
+  );
 
   const renderChildren = (
     rootPath: string,

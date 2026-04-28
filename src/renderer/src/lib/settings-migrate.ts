@@ -114,6 +114,32 @@ export function migrateSettings(raw: unknown): AppSettings {
     }
   }
 
+  // --- Version 5 → 6: ファイルツリー展開状態の永続化 (Issue #250) ---
+  if (version < 6) {
+    if (!isObject(data.fileTreeExpanded)) {
+      data.fileTreeExpanded = {};
+    } else {
+      const sanitized: Record<string, string[]> = {};
+      for (const [k, v] of Object.entries(data.fileTreeExpanded as Raw)) {
+        if (
+          typeof k === 'string' &&
+          Array.isArray(v) &&
+          v.every((x) => typeof x === 'string')
+        ) {
+          sanitized[k] = v as string[];
+        }
+      }
+      data.fileTreeExpanded = sanitized;
+    }
+    if (!Array.isArray(data.fileTreeCollapsedRoots)) {
+      data.fileTreeCollapsedRoots = [];
+    } else {
+      data.fileTreeCollapsedRoots = (data.fileTreeCollapsedRoots as unknown[]).filter(
+        (x): x is string => typeof x === 'string'
+      );
+    }
+  }
+
   data.schemaVersion = APP_SETTINGS_SCHEMA_VERSION;
   // 最終マージで欠損フィールドを DEFAULT_SETTINGS で埋める
   return { ...DEFAULT_SETTINGS, ...data } as AppSettings;

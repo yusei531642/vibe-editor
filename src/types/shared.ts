@@ -13,7 +13,7 @@ export type Density = 'compact' | 'normal' | 'comfortable';
 export type Language = 'ja' | 'en';
 
 /** Issue #75: AppSettings の現在スキーマ。破壊変更時に上げる。 */
-export const APP_SETTINGS_SCHEMA_VERSION = 5;
+export const APP_SETTINGS_SCHEMA_VERSION = 6;
 
 /**
  * ユーザーが自由に追加できるエージェントの設定。
@@ -104,6 +104,17 @@ export interface AppSettings {
    * 食い違って Ctrl+= で逆に縮む現象が起きていた。
    */
   webviewZoom?: number;
+  /**
+   * Issue #250: ファイルツリーの展開状態をワークスペースルート毎に永続化する。
+   *   key   = ルート絶対パス
+   *   value = 展開済みディレクトリの相対パス配列 (POSIX 区切り、'' は含めない)
+   */
+  fileTreeExpanded?: Record<string, string[]>;
+  /**
+   * Issue #250: 折り畳み済みワークスペースルート (絶対パス) の配列。
+   * primary は通常展開、ユーザーが手動で折り畳んだものだけここに残る。
+   */
+  fileTreeCollapsedRoots?: string[];
 }
 
 export interface ClaudeCheckResult {
@@ -156,7 +167,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   notepad: '',
   hasCompletedOnboarding: false,
   customAgents: [],
-  mcpAutoSetup: true
+  mcpAutoSetup: true,
+  fileTreeExpanded: {},
+  fileTreeCollapsedRoots: []
 };
 
 /** git status --porcelain のエントリ */
