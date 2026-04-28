@@ -114,7 +114,7 @@
       "name": "useFitToContainer unscaled + 初回spawn統合 + zoom debounce",
       "status": "COMPLETED",
       "safe_point": {
-        "commit_hash": "TBD-on-commit",
+        "commit_hash": "ad4ad1a4c154bb7577b6729dbc5e7b0ea1df7695",
         "tests_passed": [
           "unscaled fit invariant: zoom 0.3/1.0/1.5 で同一論理サイズ → 同一 cols/rows",
           "アンチパターン検証: getBoundingClientRect (scale 後) を渡すと zoom 依存になる",
