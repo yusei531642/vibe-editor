@@ -3,14 +3,60 @@ import { computeUnscaledGrid } from '../compute-unscaled-grid';
 
 describe('computeUnscaledGrid', () => {
   describe('通常値', () => {
-    it('800x600 / cellW=8 / cellH=16 → cols=100 rows=37', () => {
+    it('800x600 / cellW=8 / cellH=16 → cols=100 rows=38', () => {
+      // Issue #261: rows は Math.round 化したため、600 / 16 = 37.5 → 38 (upper round)。
+      // cols は折り返し回避のため依然 floor で 800 / 8 = 100。
       const r = computeUnscaledGrid(800, 600, 8, 16);
-      expect(r).toEqual({ cols: 100, rows: 37 });
+      expect(r).toEqual({ cols: 100, rows: 38 });
     });
 
-    it('Math.floor で端数を切り捨てる (800.7 / 8 = 100.0875 → 100)', () => {
+    it('cols は Math.floor で切り捨てる (800.7 / 8 = 100.0875 → 100)', () => {
+      // Issue #261: rows は round 化したが、cols は折り返し回避のため floor のまま。
+      // 600.5 / 16 = 37.53125 → round で 38 行になる。
       const r = computeUnscaledGrid(800.7, 600.5, 8, 16);
-      expect(r).toEqual({ cols: 100, rows: 37 });
+      expect(r).toEqual({ cols: 100, rows: 38 });
+    });
+  });
+
+  describe('Issue #261: rows は Math.round で端数行を救済する', () => {
+    // lineHeight=1.0 + terminalFontSize=13 を想定 (cellH=13)。
+    // 旧実装は floor だったため、端数 1〜12px が常に下端の透明スペースとして残り、
+    // Canvas モードで「最後の行が見えない」体感に繋がっていた。
+    it('端数 < 0.5 行 → 切り捨て (height=275 / cellH=13 → 21.15 → 21)', () => {
+      const r = computeUnscaledGrid(800, 275, 8, 13);
+      expect(r?.rows).toBe(21);
+    });
+
+    it('端数 = 0.5 行ジャスト → 繰り上げ (height=286 / cellH=13 → 22.0 → 22, height=279.5/13≈21.5 → 22)', () => {
+      // 286 / 13 = 22.0 (端数なし)
+      const r1 = computeUnscaledGrid(800, 286, 8, 13);
+      expect(r1?.rows).toBe(22);
+      // 279.5 / 13 = 21.5 (ちょうど 0.5)
+      const r2 = computeUnscaledGrid(800, 279.5, 8, 13);
+      expect(r2?.rows).toBe(22);
+    });
+
+    it('端数 >= 0.5 行 → 繰り上げ (height=287 / cellH=13 → 22.08 → 22)', () => {
+      const r = computeUnscaledGrid(800, 287, 8, 13);
+      expect(r?.rows).toBe(22);
+    });
+
+    it('小数 cellH でも整数 rows を返す (height=280 / cellH=13.5 → 20.74 → 21)', () => {
+      const r = computeUnscaledGrid(800, 280, 8, 13.5);
+      expect(r?.rows).toBe(21);
+      expect(Number.isInteger(r?.rows)).toBe(true);
+    });
+
+    it('round 後も clamp は効く: 端数で minRows 未満になっても下限保証', () => {
+      // 60 / 13 = 4.61 → round = 5 (デフォルト minRows=5 と同値)
+      const r = computeUnscaledGrid(800, 60, 8, 13);
+      expect(r?.rows).toBe(5);
+    });
+
+    it('round 後も maxRows clamp が効く', () => {
+      // 100000 / 13 = 7692 → maxRows=200 にクランプ
+      const r = computeUnscaledGrid(800, 100000, 8, 13);
+      expect(r?.rows).toBe(200);
     });
   });
 
