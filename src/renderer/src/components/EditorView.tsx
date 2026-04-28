@@ -37,6 +37,10 @@ export function EditorView({
   const { settings } = useSettings();
   const theme = useMonacoTheme();
   const t = useT();
+  // .md ファイルは既定でプレビュー表示。トグルでコード編集に切替。
+  // 早期 return より後で useState すると Rules of Hooks 違反になるので、
+  // フックは全て先頭で呼ぶ。
+  const [previewMode, setPreviewMode] = useState<boolean>(true);
 
   if (loading) {
     return (
@@ -68,8 +72,6 @@ export function EditorView({
 
   const language = detectLanguage(path);
   const isMarkdown = language === 'markdown';
-  // .md ファイルは既定でプレビュー表示。トグルでコード編集に切替。
-  const [previewMode, setPreviewMode] = useState<boolean>(true);
   const showPreview = isMarkdown && previewMode;
 
   return (
