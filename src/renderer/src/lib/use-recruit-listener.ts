@@ -46,16 +46,11 @@ interface RecruitCancelledPayload {
 // NODE_W / NODE_H は stores/canvas.ts の共有定数を import (Issue #253 で 640x400 に拡張)
 //
 // `RECRUIT_RADIUS` は requester (Leader) を中心とする同心円配置の半径 (要素中心 → 要素中心)。
-// 厳密には NODE_W=640 に対して 544 < 640 なので、0° (真水平) の単独メンバー配置では
-// 約 96 px の重なりが理論上発生する。これを許容する根拠:
-//   - `findRecruitPosition` は既存メンバーが居る方角を避けて 12 スロットの中で最も空いた
-//     角度をピックする。Leader+1 で 0° を選ばざるを得ないケースは少数派。
-//   - Leader+1 は実運用では HR や planner で稀。多くは Leader 単独 / Leader+2 名以上。
-//   - NODE_W + 80 = 720 まで広げると 6 名同心円配置で論理幅 2080 px 超を要求し、
-//     1080p (1920x1080) で端メンバーが初期 viewport から外れる方が UX 退行として大きい。
-// → 角度分散ロジック (`findRecruitPosition`) との組合せで実質的に重なりを回避する近似値
-//   として 544 を採用する。0° 水平配置で重なりが観測されたら別 Issue で fitView 連動を検討。
-const RECRUIT_RADIUS = Math.max(540, Math.round(NODE_W * 0.85));
+// `NODE_W + 80 = 720` で隣接メンバーとの 80 px の余白を確実に確保する。
+// 1080p (1920x1080) 等の小さい画面で 6 名同心円配置時に端メンバーが viewport から外れる
+// UX 退行は、Canvas component 側で `notifyRecruit()` が書く `lastRecruitAt` を監視して
+// `useReactFlow().fitView({ padding: 0.15, duration: 300 })` を発火させる経路で吸収する。
+const RECRUIT_RADIUS = NODE_W + 80;
 
 /** requester の周囲で空いている角度を見つけて配置位置を返す。
  *  既存メンバーの方角をスキャンし、最も空いている角度をピック。 */
@@ -156,6 +151,9 @@ export function useRecruitListener(): void {
           customInstructions: p.customInstructions || undefined
         }
       });
+      // Issue #253: 新メンバー配置後に Canvas 側で fitView を発火させる。
+      // RECRUIT_RADIUS=NODE_W+80 で 6 名同心円配置時に端が viewport 外になる UX 退行を吸収。
+      store.notifyRecruit();
     }).then((u) => {
       if (cancelled) {
         u();

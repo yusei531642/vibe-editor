@@ -57,6 +57,15 @@ interface CanvasState {
   teamLocks: Record<string, boolean>;
   setTeamLock: (teamId: string, locked: boolean) => void;
   isTeamLocked: (teamId: string) => boolean;
+  /**
+   * Issue #253: recruit イベント (新規メンバー追加) で fitView を発火させるためのトリガー。
+   * use-recruit-listener が card 追加後に Date.now() を書き、Canvas component が
+   * useEffect で監視して `useReactFlow().fitView({ padding: 0.15, duration: 300 })` を呼ぶ。
+   * RECRUIT_RADIUS = NODE_W + 80 により論理幅 2080 px 超を要求する 6 名同心円配置でも、
+   * fitView で全員が viewport に収まるよう自動調整する。
+   */
+  lastRecruitAt: number | null;
+  notifyRecruit: () => void;
 }
 
 export type StageView = 'stage' | 'list' | 'focus';
@@ -261,7 +270,10 @@ export const useCanvasStore = create<CanvasState>()(
       isTeamLocked: (teamId) => {
         const v = get().teamLocks[teamId];
         return v === undefined ? true : v;
-      }
+      },
+      // Issue #253: recruit 後の fitView トリガー (use-recruit-listener が書き、Canvas が監視)
+      lastRecruitAt: null,
+      notifyRecruit: () => set({ lastRecruitAt: Date.now() })
     }),
     {
       name: 'vibe-editor:canvas',

@@ -15,6 +15,7 @@ import {
   applyNodeChanges,
   applyEdgeChanges,
   addEdge,
+  useReactFlow,
   type Node,
   type Edge,
   type Connection,
@@ -289,6 +290,25 @@ function FlowApp(): JSX.Element {
   useKeybinding(KEYS.newTerminal, handleAddClaudeAgent);
 
   const stageView = useCanvasStore((s) => s.stageView);
+
+  // Issue #253 review (#2): recruit 後に fitView({ padding, duration }) を発火させて、
+  // RECRUIT_RADIUS=NODE_W+80 で 6 名同心円配置時に端メンバーが viewport から外れる
+  // UX 退行を吸収する。lastRecruitAt は use-recruit-listener が card 追加直後に
+  // notifyRecruit() で書き、本 effect が変化を検知して 1 frame 遅延 (新ノードのレンダー
+  // 完了を待つ) してから fitView を呼ぶ。
+  const lastRecruitAt = useCanvasStore((s) => s.lastRecruitAt);
+  const reactFlow = useReactFlow();
+  useEffect(() => {
+    if (!lastRecruitAt) return;
+    const id = requestAnimationFrame(() => {
+      try {
+        reactFlow.fitView({ padding: 0.15, duration: 300 });
+      } catch {
+        /* viewport 計算に失敗するレアケースは無視 */
+      }
+    });
+    return () => cancelAnimationFrame(id);
+  }, [lastRecruitAt, reactFlow]);
 
   return (
     <div
