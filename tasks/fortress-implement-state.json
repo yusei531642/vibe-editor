@@ -143,7 +143,7 @@
       "name": "TerminalView/Card配線 + NodeResizer連動 + fitViewレース対応",
       "status": "COMPLETED",
       "safe_point": {
-        "commit_hash": "TBD-on-commit",
+        "commit_hash": "20f9a1c85851e45fa43d55824598189bfd0fe9b5",
         "tests_passed": [
           "全 35 tests 維持 (regression なし)",
           "typecheck 0 error (新規 props/import すべて型整合)"
