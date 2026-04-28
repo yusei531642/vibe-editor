@@ -15,6 +15,7 @@ import {
   applyNodeChanges,
   applyEdgeChanges,
   addEdge,
+  useReactFlow,
   type Node,
   type Edge,
   type Connection,
@@ -290,6 +291,28 @@ function FlowApp(): JSX.Element {
 
   const stageView = useCanvasStore((s) => s.stageView);
 
+  // Issue #253 review (#2 + #7): recruit 後に fitView({ padding, duration }) を発火させて、
+  // RECRUIT_RADIUS=NODE_W+80 で 6 名同心円配置時に端メンバーが viewport から外れる
+  // UX 退行を吸収する。lastRecruitAt は use-recruit-listener が card 追加直後に
+  // notifyRecruit() で書き、本 effect が変化を検知する。
+  // 200ms debounce: team_recruit が短時間に複数名 (Leader+5 等) を追加するケースで、
+  // fitView アニメーションが連続発火してカクつく問題を回避。最後の更新から 200ms 経過後に
+  // 1 回だけ fitView を呼ぶ。debounce 時間は新ノードのレンダー完了 (~16ms) より十分長く、
+  // ユーザーの体感遅延 (300ms 程度の許容) より短い実用値。
+  const lastRecruitAt = useCanvasStore((s) => s.lastRecruitAt);
+  const reactFlow = useReactFlow();
+  useEffect(() => {
+    if (!lastRecruitAt) return;
+    const timer = window.setTimeout(() => {
+      try {
+        reactFlow.fitView({ padding: 0.15, duration: 300 });
+      } catch {
+        /* viewport 計算に失敗するレアケースは無視 */
+      }
+    }, 200);
+    return () => window.clearTimeout(timer);
+  }, [lastRecruitAt, reactFlow]);
+
   return (
     <div
       className="tc-stage-root"
@@ -321,7 +344,12 @@ function FlowApp(): JSX.Element {
         // font-smoothing / text-rendering の CSS ヒント (canvas.css) で最小化済み。
         minZoom={0.3}
         maxZoom={1.5}
-        fitView={nodes.length > 0}
+        // Issue #253: fitView は初回マウント直後に viewport を再計算するため、
+        // TerminalCard の初回 spawn (useFitToContainer / usePtySession) が同時に走ると
+        // container.clientWidth がまだ確定していない瞬間を読んで cols/rows が崩れる
+        // レースが起きる。defaultViewport (persist された前回 viewport / 新規は 0,0,zoom=1)
+        // で初期表示し、全体俯瞰したいときはキー操作 (KEYS.fitView) で明示発動する方針に変更。
+        fitView={false}
         zoomOnScroll
         zoomOnPinch
         zoomOnDoubleClick={false}

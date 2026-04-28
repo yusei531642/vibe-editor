@@ -9,6 +9,7 @@ import {
 import { useTerminalClipboard } from '../lib/use-terminal-clipboard';
 import { useAutoInitialMessage } from '../lib/use-auto-initial-message';
 import { useFitToContainer } from '../lib/use-fit-to-container';
+import type { CellSize } from '../lib/measure-cell-size';
 
 /**
  * TerminalView を外から操作するためのハンドル。
@@ -57,6 +58,18 @@ interface TerminalViewProps {
    * で xterm が滲む問題を回避する。
    */
   disableWebgl?: boolean;
+  /**
+   * Issue #253: Canvas モード (transform: scale(zoom) 配下) で論理 px ベース fit を有効化。
+   * true にすると getBoundingClientRect 経由ではなく container.clientWidth/clientHeight と
+   * `getCellSize()` から cols/rows を直接計算するので、zoom が変わっても PTY サイズが安定する。
+   */
+  unscaledFit?: boolean;
+  /** unscaled fit で使うセルメトリクス取得関数 (フォント変更を毎回拾うため関数で渡す) */
+  getCellSize?: () => CellSize | null;
+  /** Canvas zoom の購読関数 (量子化 + cb 発火)。返値は unsubscribe */
+  zoomSubscribe?: (cb: () => void) => () => void;
+  /** 可観測性ログ用の zoom 取得 */
+  getZoom?: () => number;
 }
 
 /**
@@ -88,7 +101,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       onExit,
       onSessionId,
       onUserInput,
-      disableWebgl
+      disableWebgl,
+      unscaledFit,
+      getCellSize,
+      zoomSubscribe,
+      getZoom
     },
     ref
   ): JSX.Element {
@@ -100,6 +117,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     // --- ref で state を hook 間共有 ---
     const ptyIdRef = useRef<string | null>(null);
     const disposedRef = useRef(false);
+    // Issue #253 sub (H1): usePtySession の初回 spawn で seed されると、useFitToContainer の
+    // 30ms 後 visible-effect refit が同じ cols/rows を計算したとき dedupe で IPC を skip する。
+    // これにより SIGWINCH の二重発火を防ぐ。
+    const lastScheduledRef = useRef<{ cols: number; rows: number } | null>(null);
 
     // 不変式 #2: args / env / teamId / agentId / role / initialMessage は
     // spawn 時に一度だけ使う値。ref 経由で usePtySession 内部に渡す。
@@ -162,7 +183,12 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       callbacksRef,
       ptyIdRef,
       disposedRef,
-      observeChunk
+      observeChunk,
+      // Issue #253: Canvas モードでは初回 spawn 時から unscaled な cols/rows を使う
+      unscaledFit,
+      getCellSize,
+      containerRef,
+      lastScheduledRef
     });
 
     // --- Ctrl+C / Ctrl+V / 画像ペースト (不変式 #4) ---
@@ -186,7 +212,12 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         settings.terminalFontFamily,
         settings.editorFontFamily,
         settings.terminalFontSize
-      ]
+      ],
+      unscaledFit,
+      getCellSize,
+      zoomSubscribe,
+      getZoom,
+      lastScheduledRef
     });
 
     // --- 外部操作用ハンドル (public API は不変) ---

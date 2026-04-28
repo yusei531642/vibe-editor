@@ -13,7 +13,8 @@ import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
 import { TerminalView, type TerminalViewHandle } from '../../TerminalView';
 import { useT } from '../../../lib/i18n';
 import { useSettings } from '../../../lib/settings-context';
-import { useCanvasStore } from '../../../stores/canvas';
+import { useCanvasStore, NODE_MIN_W, NODE_MIN_H } from '../../../stores/canvas';
+import { useCanvasTerminalFit } from '../../../lib/use-canvas-terminal-fit';
 import { useConfirmRemoveCard } from '../../../lib/use-confirm-remove-card';
 import { fallbackProfile, profileText, renderSystemPrompt, useRoleProfiles } from '../../../lib/role-profiles-context';
 import { parseShellArgs } from '../../../lib/parse-args';
@@ -89,6 +90,8 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const confirmRemoveCard = useConfirmRemoveCard();
   const setCardTitle = useCanvasStore((s) => s.setCardTitle);
   const setCardPayload = useCanvasStore((s) => s.setCardPayload);
+  // Issue #253: Canvas zoom 下でも論理 px ベースで cols/rows を確定させる
+  const fit = useCanvasTerminalFit(settings);
   const payload = (data?.payload ?? {}) as AgentPayload;
   // 新スキーマ roleProfileId を優先、無ければ legacy role を読む
   const roleProfileId = payload.roleProfileId ?? payload.role ?? 'leader';
@@ -290,8 +293,8 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   return (
     <>
       <NodeResizer
-        minWidth={280}
-        minHeight={180}
+        minWidth={NODE_MIN_W}
+        minHeight={NODE_MIN_H}
         color={accent}
         handleStyle={{ width: 8, height: 8, borderRadius: 2 }}
         lineStyle={{ borderWidth: 1 }}
@@ -349,6 +352,11 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
             // Canvas zoom で xterm canvas が滲むのを避けるため WebGL を切る (DOM renderer 固定)。
             // text は実 DOM になるので Chromium が親 transform に応じて再ラスタライズしシャープに描く。
             disableWebgl
+            // Issue #253: 論理 px ベース fit + zoom 購読 + 可観測性
+            unscaledFit={fit.unscaledFit}
+            getCellSize={fit.getCellSize}
+            zoomSubscribe={fit.zoomSubscribe}
+            getZoom={fit.getZoom}
           />
         </div>
       </div>

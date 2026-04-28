@@ -5,7 +5,7 @@
  * Phase 3 以降で agent ノード / hand-off エッジを正規化していく。
  */
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, subscribeWithSelector } from 'zustand/middleware';
 import type { Edge, Node, Viewport } from '@xyflow/react';
 
 export type CardType = 'terminal' | 'agent' | 'editor' | 'diff' | 'fileTree' | 'changes';
@@ -57,12 +57,37 @@ interface CanvasState {
   teamLocks: Record<string, boolean>;
   setTeamLock: (teamId: string, locked: boolean) => void;
   isTeamLocked: (teamId: string) => boolean;
+  /**
+   * Issue #253: recruit イベント (新規メンバー追加) で fitView を発火させるためのトリガー。
+   * use-recruit-listener が card 追加後に Date.now() を書き、Canvas component が
+   * useEffect で監視して `useReactFlow().fitView({ padding: 0.15, duration: 300 })` を呼ぶ。
+   * RECRUIT_RADIUS = NODE_W + 80 により論理幅 2080 px 超を要求する 6 名同心円配置でも、
+   * fitView で全員が viewport に収まるよう自動調整する。
+   */
+  lastRecruitAt: number | null;
+  notifyRecruit: () => void;
 }
 
 export type StageView = 'stage' | 'list' | 'focus';
 
-const NODE_W = 480;
-const NODE_H = 320;
+/**
+ * カード初期幅/高さ (新規 addCard 時に適用)。
+ * Issue #253: 旧 480x320 では Codex/Claude TUI のヘッダーが折り返しで崩れがちだったため
+ * 640x400 に引き上げ。永続化された旧サイズ (<=480 / <=320) のノードは persist v3 migration
+ * で同じ値に拡大される。ユーザーが手動でそれより大きくリサイズした値は尊重。
+ */
+export const NODE_W = 640;
+export const NODE_H = 400;
+/**
+ * NodeResizer の最小幅/高さ (ユーザーが手動縮小したときの下限)。
+ * Issue #253: ターミナル UI が崩れず Codex/Claude TUI が読める下限として 480x280。
+ * これ以下だとヘッダーボタン + ターミナル本体が窮屈になりすぎる。
+ */
+export const NODE_MIN_W = 480;
+export const NODE_MIN_H = 280;
+/** persist v3 で既存ユーザーのカードを引き上げる閾値 (これ以下のサイズなら NODE_W/H に拡大) */
+const LEGACY_NODE_W_THRESHOLD = 480;
+const LEGACY_NODE_H_THRESHOLD = 320;
 const CARD_TYPES: CardType[] = ['terminal', 'agent', 'editor', 'diff', 'fileTree', 'changes'];
 const STAGE_VIEWS: StageView[] = ['stage', 'list', 'focus'];
 
@@ -101,7 +126,25 @@ function newId(prefix: string): string {
 const pulseTimers = new Map<string, number>();
 
 export const useCanvasStore = create<CanvasState>()(
-  persist(
+  /**
+   * Issue #253 sub: subscribeWithSelector で `subscribe(selector, listener)` API を有効化。
+   * useCanvasTerminalFit の zoom 購読が selector subscribe に切り替えられ、量子化判定が
+   * zustand 内部で行われるので毎フレーム数百回の callback ホットパスが消える。
+   *
+   * ★ MIDDLEWARE 順序の警告 (Issue #253 review W#2 / #7):
+   *   `subscribeWithSelector` は **必ず persist の outer に置くこと**。逆順
+   *   (`persist(subscribeWithSelector(...))`) にすると、persist が subscribe API をラップし
+   *   直して `selector` 引数版 (selector subscribe) を吸収しないため、selector が listener
+   *   として解釈されて毎フレーム発火する潜在的バグになる。型レベルでは検出されない (TS は
+   *   subscribe の overload を判別できない)。
+   *
+   *   依存箇所:
+   *   - `src/renderer/src/lib/use-canvas-terminal-fit.ts` の `zoomSubscribe` が
+   *     `useCanvasStore.subscribe((s) => quantize(s.viewport.zoom), cb)` で selector subscribe
+   *     を使う。middleware を外す/順序を変える前に必ず影響を確認すること。
+   */
+  subscribeWithSelector(
+    persist(
     (set, get) => ({
       nodes: [],
       edges: [],
@@ -227,11 +270,14 @@ export const useCanvasStore = create<CanvasState>()(
       isTeamLocked: (teamId) => {
         const v = get().teamLocks[teamId];
         return v === undefined ? true : v;
-      }
+      },
+      // Issue #253: recruit 後の fitView トリガー (use-recruit-listener が書き、Canvas が監視)
+      lastRecruitAt: null,
+      notifyRecruit: () => set({ lastRecruitAt: Date.now() })
     }),
     {
       name: 'vibe-editor:canvas',
-      version: 2,
+      version: 3,
       migrate: (persisted, fromVersion) => {
         if (!isRecord(persisted)) {
           return {
@@ -253,6 +299,30 @@ export const useCanvasStore = create<CanvasState>()(
               payload.roleProfileId = payload.role;
             }
             return { ...n, data: { ...data, payload } };
+          });
+        }
+
+        // v2 → v3 (Issue #253): 旧 NODE_W/H (480x320) で永続化された小さいカードを
+        // NODE_W/H (640x400) に拡大する。ユーザーが手動でそれより大きくリサイズした
+        // 値は尊重するため、`<= LEGACY_*_THRESHOLD` のときだけ引き上げる。
+        // width/height は style に乗っているため style を直接書き換える。
+        if (fromVersion < 3 && Array.isArray(p.nodes)) {
+          p.nodes = p.nodes.map((n) => {
+            if (!isRecord(n)) return n;
+            const styleRaw = isRecord(n.style) ? n.style : {};
+            const w = typeof styleRaw.width === 'number' ? styleRaw.width : undefined;
+            const h = typeof styleRaw.height === 'number' ? styleRaw.height : undefined;
+            const nextW = w !== undefined && w <= LEGACY_NODE_W_THRESHOLD ? NODE_W : w;
+            const nextH = h !== undefined && h <= LEGACY_NODE_H_THRESHOLD ? NODE_H : h;
+            if (nextW === w && nextH === h) return n;
+            return {
+              ...n,
+              style: {
+                ...styleRaw,
+                ...(nextW !== undefined ? { width: nextW } : {}),
+                ...(nextH !== undefined ? { height: nextH } : {})
+              }
+            };
           });
         }
 
@@ -321,5 +391,6 @@ export const useCanvasStore = create<CanvasState>()(
         teamLocks: s.teamLocks
       })
     }
+    )
   )
 );

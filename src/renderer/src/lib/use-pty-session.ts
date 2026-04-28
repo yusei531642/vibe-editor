@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react';
-import type { MutableRefObject } from 'react';
+import type { MutableRefObject, RefObject } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
+import { computeUnscaledGrid } from './compute-unscaled-grid';
+import type { CellSize } from './measure-cell-size';
 
 export interface PtySpawnSnapshot {
   args?: string[];
@@ -40,6 +42,18 @@ export interface UsePtySessionOptions {
   disposedRef: MutableRefObject<boolean>;
   /** onData 到着時に呼ばれる観察コールバック (auto-initial-message 用) */
   observeChunk: (data: string) => void;
+  /** Canvas モード: transform: scale(zoom) 配下で論理 px ベースで初回 cols/rows を決める */
+  unscaledFit?: boolean;
+  /** unscaled fit 用のセルメトリクス取得 */
+  getCellSize?: () => CellSize | null;
+  /** unscaled fit 用のコンテナ参照 (clientWidth/clientHeight 取得) */
+  containerRef?: RefObject<HTMLDivElement>;
+  /**
+   * useFitToContainer と共有する「最後にスケジュールしたサイズ」ref。
+   * 初回 spawn 時の `term.resize(cols, rows)` 後に seed しておくと、その直後に走る
+   * useFitToContainer の visible-effect refit が IPC を二重発火させずに済む。
+   */
+  lastScheduledRef?: MutableRefObject<{ cols: number; rows: number } | null>;
 }
 
 /**
@@ -64,11 +78,26 @@ export function usePtySession(options: UsePtySessionOptions): void {
     callbacksRef,
     ptyIdRef,
     disposedRef,
-    observeChunk
+    observeChunk,
+    unscaledFit = false,
+    getCellSize,
+    containerRef,
+    lastScheduledRef
   } = options;
 
   const observeChunkRef = useRef(observeChunk);
   observeChunkRef.current = observeChunk;
+  // Issue #253 sub (H2'): closure 直読 → ref 化。font 変更直後に cwd/command も
+  // 切り替わって effect が re-run するレアケースで、古い getCellSize/unscaledFit を
+  // 拾ってしまう stale closure リスクを排除する。
+  const unscaledFitRef = useRef(unscaledFit);
+  unscaledFitRef.current = unscaledFit;
+  const getCellSizeRef = useRef(getCellSize);
+  getCellSizeRef.current = getCellSize;
+  const containerRefRef = useRef(containerRef);
+  containerRefRef.current = containerRef;
+  const lastScheduledRefRef = useRef(lastScheduledRef);
+  lastScheduledRefRef.current = lastScheduledRef;
 
   useEffect(() => {
     const term = termRef.current;
@@ -99,16 +128,9 @@ export function usePtySession(options: UsePtySessionOptions): void {
       });
     };
 
-    // 初期サイズ調整
+    // 初期サイズ調整は async IIFE 内に移動 (Review #1: document.fonts.ready 待ちのため)
     let initialCols = 80;
     let initialRows = 24;
-    try {
-      fit?.fit();
-      initialCols = term.cols;
-      initialRows = term.rows;
-    } catch {
-      /* 非表示マウント時は失敗してもOK */
-    }
 
     let offData: (() => void) | null = null;
     let offExit: (() => void) | null = null;
@@ -116,6 +138,84 @@ export function usePtySession(options: UsePtySessionOptions): void {
 
     (async () => {
       try {
+        // Issue #253 review (W#1 + #3 + #4): web font (JetBrains Mono Variable 等) ロード前に
+        // measureCellSize が走ると system monospace のメトリクスを返し、誤った cellW で
+        // PTY が立つ。Canvas モードでは fonts.ready を待ってから測ることで、Codex の
+        // banner も初回描画から正しい寸法で描画される。IDE モードでは fit.fit() が DOM
+        // メトリクスベースなので待つ必要なし。
+        // タイムアウト 300ms: コールドキャッシュ / 低速 I/O 環境で fonts.ready が秒オーダー
+        // で resolve しないとき spawn が体感遅延する問題を回避。300ms 経過時は fallback
+        // メトリクスで spawn し、後続の useFitToContainer の fonts.ready effect が ready 後
+        // 1 回だけ refit を発火して補正するので、一瞬だけずれた表示も自動回復する。
+        // 旧 500ms から短縮 (review #4): 体感遅延を抑え、fallback 経路は dev console.warn で
+        // 観測可能にして頻発するなら別 PR で fonts.load(specific) 等への切替を検討する。
+        if (unscaledFitRef.current && typeof document !== 'undefined' && document.fonts) {
+          let timedOut = false;
+          try {
+            await Promise.race([
+              document.fonts.ready.then(() => undefined),
+              new Promise<void>((resolve) =>
+                window.setTimeout(() => {
+                  timedOut = true;
+                  resolve();
+                }, 300)
+              )
+            ]);
+          } catch {
+            /* fonts.ready は通常 reject しないが、念のため握りつぶす */
+          }
+          if (timedOut && import.meta.env.DEV) {
+            console.warn(
+              'pty.spawn.font-fallback',
+              '[usePtySession] document.fonts.ready が 300ms で resolve しなかったため fallback metrics で spawn しました。useFitToContainer の fonts.ready effect が後追い refit します。'
+            );
+          }
+          if (localDisposed || disposedRef.current) return;
+        }
+
+        // 初期サイズ算出。
+        // Canvas モード (unscaledFit=true) では、`transform: scale(zoom)` 下で
+        // FitAddon.fit() が getBoundingClientRect 経由で scale 後の視覚矩形を読んでしまうため、
+        // 論理 px (clientWidth/clientHeight) と zoom 非依存のセルメトリクスから cols/rows を
+        // 算出して term.resize() する。Issue #253 P6 の主因対策。
+        // Review #4 + #5: unscaled モードでは IDE 経路 (fit.fit()) に**絶対に**フォールバック
+        // しない。fit.fit() を呼ぶと transform 後矩形を読んでしまい主因 P6 が一瞬だけ再発する
+        // ため、grid 算出失敗時は xterm デフォルトの 80x24 のまま続行する (後続の
+        // useFitToContainer.refit が論理 px 経路で 30ms 以内に補正するので実害なし)。
+        try {
+          if (unscaledFitRef.current) {
+            const container = containerRefRef.current?.current;
+            const cell = getCellSizeRef.current?.();
+            if (container && cell) {
+              const grid = computeUnscaledGrid(
+                container.clientWidth,
+                container.clientHeight,
+                cell.cellW,
+                cell.cellH
+              );
+              if (grid) {
+                term.resize(grid.cols, grid.rows);
+                initialCols = grid.cols;
+                initialRows = grid.rows;
+                // useFitToContainer の lastScheduledRef を seed して、30ms 後 visible-effect
+                // の二重 IPC 発火を抑止する。
+                const sharedRef = lastScheduledRefRef.current;
+                if (sharedRef) {
+                  sharedRef.current = { cols: grid.cols, rows: grid.rows };
+                }
+              }
+              // grid 算出失敗 → 80x24 のまま続行 (Review #5)
+            }
+            // container/cell 不在も同様 80x24 のまま続行 (Review #4)
+          } else {
+            fit?.fit();
+            initialCols = term.cols;
+            initialRows = term.rows;
+          }
+        } catch {
+          /* 非表示マウント時は失敗してもOK */
+        }
+
         callbacksRef.current.onStatus?.(`${command} を起動中…`);
         // 不変式 #2: 初回 spawn 時点のスナップショットを使う (以後の prop 変化は無視)
         const snap = snapRef.current;

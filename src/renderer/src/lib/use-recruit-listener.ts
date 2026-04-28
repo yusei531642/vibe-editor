@@ -9,7 +9,7 @@
  */
 import { useEffect } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { useCanvasStore } from '../stores/canvas';
+import { useCanvasStore, NODE_W, NODE_H } from '../stores/canvas';
 import type { Node } from '@xyflow/react';
 import type { CardData } from '../stores/canvas';
 import { useRoleProfiles } from './role-profiles-context';
@@ -43,9 +43,14 @@ interface RecruitCancelledPayload {
   reason: string;
 }
 
-const NODE_W = 480;
-const NODE_H = 320;
-const RECRUIT_RADIUS = 540; // requester からの距離
+// NODE_W / NODE_H は stores/canvas.ts の共有定数を import (Issue #253 で 640x400 に拡張)
+//
+// `RECRUIT_RADIUS` は requester (Leader) を中心とする同心円配置の半径 (要素中心 → 要素中心)。
+// `NODE_W + 80 = 720` で隣接メンバーとの 80 px の余白を確実に確保する。
+// 1080p (1920x1080) 等の小さい画面で 6 名同心円配置時に端メンバーが viewport から外れる
+// UX 退行は、Canvas component 側で `notifyRecruit()` が書く `lastRecruitAt` を監視して
+// `useReactFlow().fitView({ padding: 0.15, duration: 300 })` を発火させる経路で吸収する。
+const RECRUIT_RADIUS = NODE_W + 80;
 
 /** requester の周囲で空いている角度を見つけて配置位置を返す。
  *  既存メンバーの方角をスキャンし、最も空いている角度をピック。 */
@@ -146,6 +151,9 @@ export function useRecruitListener(): void {
           customInstructions: p.customInstructions || undefined
         }
       });
+      // Issue #253: 新メンバー配置後に Canvas 側で fitView を発火させる。
+      // RECRUIT_RADIUS=NODE_W+80 で 6 名同心円配置時に端が viewport 外になる UX 退行を吸収。
+      store.notifyRecruit();
     }).then((u) => {
       if (cancelled) {
         u();

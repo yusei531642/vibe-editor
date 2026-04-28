@@ -28,6 +28,10 @@ Thumbs.db
 # Claude Code のローカル作業ディレクトリ (worktree / design bundle 等)
 .claude/worktrees/
 .claude/design-bundle/
+# fortress-implement / 各種 skill の一時的な state ファイル
+# (作業中の進捗追跡で生成され、merge 後は雑音になる)
+tasks/*-state.json
+tasks/fortress-implement-state.json
 # 実験用 POC / スクラッチ (ADR 本体は tasks/ に置いてある)
 experiments/
 # Tauri のビルド中間生成物
