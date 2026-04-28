@@ -12,6 +12,9 @@ import {
 import type { FileNode } from '../../../types/shared';
 import { useT } from '../lib/i18n';
 import { fileIcon } from '../lib/file-icon-color';
+import { ContextMenu, type ContextMenuItem } from './ContextMenu';
+import { useToast } from '../lib/toast-context';
+import { api } from '../lib/tauri-api';
 
 interface FileTreePanelProps {
   /** メインのプロジェクトルート(ターミナル/Git 等はこちら基準で動作する) */
@@ -79,6 +82,11 @@ export function FileTreePanel({
   const [collapsedRoots, setCollapsedRoots] = useState<Set<string>>(
     () => initialCollapsedRoots ?? new Set()
   );
+  /** Issue #251: ファイル右クリックで開く ContextMenu の表示状態 */
+  const [contextMenu, setContextMenu] = useState<
+    { x: number; y: number; items: ContextMenuItem[] } | null
+  >(null);
+  const showToast = useToast();
 
   /** 現在サイドバーに表示するルート一覧(primary + extras から重複除去)。
    *  Issue #129: 配列リテラルを毎レンダー作ると useEffect deps や子供 props が
@@ -237,6 +245,57 @@ export function FileTreePanel({
     [expanded, onPersistState]
   );
 
+  // Issue #251: ファイル/ディレクトリ右クリックでパスコピー / エクスプローラ表示の
+  // ContextMenu を開く。renderer 側のみで完結 (絶対パスは rootPath + relPath を結合)。
+  const handleContextMenu = useCallback(
+    (e: React.MouseEvent, rootPath: string, node: FileNode) => {
+      e.preventDefault();
+      e.stopPropagation();
+      // node.path は POSIX 区切り。Windows の絶対パスを作る場合のみ \ に置換する。
+      const sep = rootPath.includes('\\') ? '\\' : '/';
+      const absPath =
+        node.path === ''
+          ? rootPath
+          : `${rootPath}${sep}${node.path.split('/').join(sep)}`;
+      const relPath = node.path; // POSIX 区切りのまま
+      const copy = (text: string): void => {
+        navigator.clipboard
+          .writeText(text)
+          .then(() => showToast(t('toast.pathCopied'), { tone: 'info' }))
+          .catch(() => showToast(t('toast.copyFailed'), { tone: 'error' }));
+      };
+      const items: ContextMenuItem[] = [
+        {
+          label: t('ctxMenu.copyAbsolutePath'),
+          action: () => copy(absPath)
+        },
+        {
+          label: t('ctxMenu.copyRelativePath'),
+          action: () => copy(relPath || node.name),
+          disabled: relPath === '',
+          divider: true
+        },
+        {
+          label: t('ctxMenu.copyFileName'),
+          action: () => copy(node.name),
+          divider: true
+        },
+        {
+          label: t('ctxMenu.revealInFolder'),
+          action: () => {
+            void api.app.revealInFileManager(absPath).then((res) => {
+              if (!res.ok) {
+                showToast(t('toast.revealFailed'), { tone: 'error' });
+              }
+            });
+          }
+        }
+      ];
+      setContextMenu({ x: e.clientX, y: e.clientY, items });
+    },
+    [showToast, t]
+  );
+
   const renderChildren = (
     rootPath: string,
     relPath: string,
@@ -283,6 +342,7 @@ export function FileTreePanel({
               childState={childState}
               onToggle={toggleDir}
               onOpenFile={onOpenFile}
+              onContextMenu={handleContextMenu}
               renderChildren={renderChildren}
             />
           );
@@ -360,6 +420,14 @@ export function FileTreePanel({
           );
         })}
       </div>
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={contextMenu.items}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }
@@ -374,6 +442,8 @@ interface FileTreeNodeProps {
   childState: DirState | null;
   onToggle: (rootPath: string, node: FileNode) => void;
   onOpenFile: (rootPath: string, relPath: string) => void;
+  /** Issue #251: 右クリックメニュー要求 */
+  onContextMenu: (e: React.MouseEvent, rootPath: string, node: FileNode) => void;
   renderChildren: (
     rootPath: string,
     relPath: string,
@@ -389,6 +459,7 @@ function FileTreeNodeImpl({
   isActive,
   onToggle,
   onOpenFile,
+  onContextMenu,
   renderChildren
 }: FileTreeNodeProps): JSX.Element {
   const fileIconDef = node.isDir ? undefined : fileIcon(node.name);
@@ -421,6 +492,7 @@ function FileTreeNodeImpl({
         className={`filetree__row${isActive ? ' is-active' : ''}`}
         style={guideStyle}
         onClick={handleClick}
+        onContextMenu={(e) => onContextMenu(e, rootPath, node)}
       >
         {node.isDir ? (
           <>
@@ -484,7 +556,8 @@ const FileTreeNode = memo(FileTreeNodeImpl, (prev, next) => {
     prev.isActive === next.isActive &&
     prev.childState === next.childState &&
     prev.onToggle === next.onToggle &&
-    prev.onOpenFile === next.onOpenFile
+    prev.onOpenFile === next.onOpenFile &&
+    prev.onContextMenu === next.onContextMenu
     // renderChildren は意図的に比較しない (毎レンダー新参照になるが、
     // 開いているディレクトリは isOpen + childState の変化で再レンダーが
     // 既に走るので問題なし。閉じているノード/葉は早期 return できる)。

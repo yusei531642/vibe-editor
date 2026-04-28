@@ -155,7 +155,10 @@ export const api = {
     }> =>
       invoke('app_install_vibe_team_skill', { projectRoot, forceOverwrite: !!forceOverwrite }),
     getUserInfo: (): Promise<AppUserInfo> => invoke('app_get_user_info'),
-    openExternal: (url: string): Promise<OpenExternalResult> => invoke('app_open_external', { url })
+    openExternal: (url: string): Promise<OpenExternalResult> => invoke('app_open_external', { url }),
+    /** Issue #251: OS のファイルマネージャで親フォルダを開き該当ファイルをハイライト */
+    revealInFileManager: (path: string): Promise<OpenExternalResult> =>
+      invoke('app_reveal_in_file_manager', { path })
   },
 
   git: {

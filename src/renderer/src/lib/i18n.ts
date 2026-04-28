@@ -165,6 +165,11 @@ const ja: Dict = {
   'ctxMenu.openDiff': '差分を開く',
   'ctxMenu.reviewDiff': '差分レビューを Claude Code に依頼',
   'ctxMenu.copyPath': 'パスをコピー',
+  // Issue #251: ファイルツリー右クリックメニュー
+  'ctxMenu.copyAbsolutePath': '絶対パスをコピー',
+  'ctxMenu.copyRelativePath': '相対パスをコピー',
+  'ctxMenu.copyFileName': 'ファイル名をコピー',
+  'ctxMenu.revealInFolder': 'エクスプローラーで開く',
   'canvasMenu.lockTeam': 'チームで一緒に動かす',
   'canvasMenu.unlockTeam': 'チーム固定を解除',
   'canvasMenu.deleteCard': 'カードを削除',
@@ -295,6 +300,8 @@ const ja: Dict = {
   // ---------- Toast ----------
   'toast.reviewRequested': '差分レビューを依頼: {path}',
   'toast.pathCopied': 'パスをクリップボードにコピー',
+  'toast.copyFailed': 'クリップボードへのコピーに失敗しました',
+  'toast.revealFailed': 'ファイルマネージャでの表示に失敗しました',
   'toast.sessionResumed': 'セッションに復帰: {title}',
   'toast.recentCleared': '最近のプロジェクト履歴をクリアしました',
   'toast.newProject': '新規プロジェクトを作成',
@@ -610,6 +617,11 @@ const en: Dict = {
   'ctxMenu.openDiff': 'Open diff',
   'ctxMenu.reviewDiff': 'Ask Claude Code to review this diff',
   'ctxMenu.copyPath': 'Copy path',
+  // Issue #251: file tree right-click menu
+  'ctxMenu.copyAbsolutePath': 'Copy absolute path',
+  'ctxMenu.copyRelativePath': 'Copy relative path',
+  'ctxMenu.copyFileName': 'Copy file name',
+  'ctxMenu.revealInFolder': 'Reveal in File Explorer',
   'canvasMenu.lockTeam': 'Move team together',
   'canvasMenu.unlockTeam': 'Unlock team movement',
   'canvasMenu.deleteCard': 'Delete card',
@@ -741,6 +753,8 @@ const en: Dict = {
   // ---------- Toast ----------
   'toast.reviewRequested': 'Review requested: {path}',
   'toast.pathCopied': 'Path copied to clipboard',
+  'toast.copyFailed': 'Failed to copy to clipboard',
+  'toast.revealFailed': 'Failed to reveal in file manager',
   'toast.sessionResumed': 'Resumed session: {title}',
   'toast.recentCleared': 'Recent projects cleared',
   'toast.newProject': 'New project created',

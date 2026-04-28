@@ -469,6 +469,57 @@ pub async fn app_open_external(
     }
 }
 
+/// Issue #251: OS のファイルマネージャ (Explorer / Finder / Nautilus) を開いて
+/// 該当ファイルをハイライトする。renderer から `api.app.revealInFileManager(absPath)` 経由で呼ぶ。
+///
+/// セキュリティ:
+///   - 絶対パスのみ許可 (PATH lookup や CWD 相対は拒否)
+///   - パストラバーサル (`..`) を拒否
+///   - 4096 文字超は拒否 (OS によっては DoS 抑止)
+#[tauri::command]
+pub async fn app_reveal_in_file_manager(
+    app: tauri::AppHandle,
+    path: String,
+) -> OpenExternalResult {
+    use tauri_plugin_opener::OpenerExt;
+
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed.len() > 4096 {
+        return OpenExternalResult {
+            ok: false,
+            error: Some("invalid path length".into()),
+        };
+    }
+    let p = std::path::Path::new(trimmed);
+    if !p.is_absolute() {
+        return OpenExternalResult {
+            ok: false,
+            error: Some("only absolute path is allowed".into()),
+        };
+    }
+    if p.components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return OpenExternalResult {
+            ok: false,
+            error: Some("path traversal (..) is not allowed".into()),
+        };
+    }
+    match app.opener().reveal_item_in_dir(p) {
+        Ok(_) => OpenExternalResult {
+            ok: true,
+            error: None,
+        },
+        Err(e) => {
+            tracing::warn!("[app_reveal_in_file_manager] failed: {e}");
+            OpenExternalResult {
+                ok: false,
+                error: Some(e.to_string()),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod open_external_tests {
     use super::is_safe_external_url;
