@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react';
-import type { MutableRefObject } from 'react';
+import type { MutableRefObject, RefObject } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
+import { computeUnscaledGrid } from './compute-unscaled-grid';
+import type { CellSize } from './measure-cell-size';
 
 export interface PtySpawnSnapshot {
   args?: string[];
@@ -40,6 +42,12 @@ export interface UsePtySessionOptions {
   disposedRef: MutableRefObject<boolean>;
   /** onData 到着時に呼ばれる観察コールバック (auto-initial-message 用) */
   observeChunk: (data: string) => void;
+  /** Canvas モード: transform: scale(zoom) 配下で論理 px ベースで初回 cols/rows を決める */
+  unscaledFit?: boolean;
+  /** unscaled fit 用のセルメトリクス取得 */
+  getCellSize?: () => CellSize | null;
+  /** unscaled fit 用のコンテナ参照 (clientWidth/clientHeight 取得) */
+  containerRef?: RefObject<HTMLDivElement>;
 }
 
 /**
@@ -64,7 +72,10 @@ export function usePtySession(options: UsePtySessionOptions): void {
     callbacksRef,
     ptyIdRef,
     disposedRef,
-    observeChunk
+    observeChunk,
+    unscaledFit = false,
+    getCellSize,
+    containerRef
   } = options;
 
   const observeChunkRef = useRef(observeChunk);
@@ -99,13 +110,38 @@ export function usePtySession(options: UsePtySessionOptions): void {
       });
     };
 
-    // 初期サイズ調整
+    // 初期サイズ調整。
+    // Canvas モード (unscaledFit=true) では、`transform: scale(zoom)` 下で
+    // FitAddon.fit() が getBoundingClientRect 経由で scale 後の視覚矩形を読んでしまうため、
+    // 論理 px (clientWidth/clientHeight) と zoom 非依存のセルメトリクスから直接 cols/rows
+    // を算出して term.resize() する。Issue #253 P6 の主因対策。
     let initialCols = 80;
     let initialRows = 24;
     try {
-      fit?.fit();
-      initialCols = term.cols;
-      initialRows = term.rows;
+      const container = containerRef?.current;
+      const cell = getCellSize?.();
+      if (unscaledFit && container && cell) {
+        const grid = computeUnscaledGrid(
+          container.clientWidth,
+          container.clientHeight,
+          cell.cellW,
+          cell.cellH
+        );
+        if (grid) {
+          term.resize(grid.cols, grid.rows);
+          initialCols = grid.cols;
+          initialRows = grid.rows;
+        } else {
+          // grid 算出失敗 (container clientWidth=0 等) → 従来 fit にフォールバック
+          fit?.fit();
+          initialCols = term.cols;
+          initialRows = term.rows;
+        }
+      } else {
+        fit?.fit();
+        initialCols = term.cols;
+        initialRows = term.rows;
+      }
     } catch {
       /* 非表示マウント時は失敗してもOK */
     }

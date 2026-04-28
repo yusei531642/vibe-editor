@@ -3,9 +3,9 @@
   "tier": "I2",
   "tier_score": 12,
   "total_slices": 8,
-  "current_slice": 4,
+  "current_slice": 5,
   "phase": "PHASE_2",
-  "next_action": "STEP_A for S4 (useFitToContainer unscaled + 初回spawn統合 + zoom debounce)",
+  "next_action": "STEP_A for S5 (TerminalView/Card 配線 + NodeResizer 連動 + fitView レース対応)",
   "branch": "fix/issue-253-canvas-fit-unscaled",
   "slices": [
     {
@@ -109,7 +109,35 @@
         "review_skip_reason": "純関数 ~60行 (実装35+テスト90)。handoff.md コード雛形 + Number.isFinite ガード追加 + 19件のテスト網羅で代替"
       }
     },
-    {"id": "S4", "name": "useFitToContainer unscaled + 初回spawn統合 + zoom debounce", "status": "PENDING", "safe_point": null, "attempts": 0, "review_summary": null},
+    {
+      "id": "S4",
+      "name": "useFitToContainer unscaled + 初回spawn統合 + zoom debounce",
+      "status": "COMPLETED",
+      "safe_point": {
+        "commit_hash": "TBD-on-commit",
+        "tests_passed": [
+          "unscaled fit invariant: zoom 0.3/1.0/1.5 で同一論理サイズ → 同一 cols/rows",
+          "アンチパターン検証: getBoundingClientRect (scale 後) を渡すと zoom 依存になる",
+          "量子化 Math.round(z*100)/100 の境界 (0.499/0.501/0.504/0.505)"
+        ],
+        "files_changed": [
+          "src/renderer/src/lib/use-fit-to-container.ts",
+          "src/renderer/src/lib/use-pty-session.ts",
+          "src/renderer/src/lib/__tests__/unscaled-fit-invariant.test.ts"
+        ],
+        "rollback_cmd": "git reset --hard 8714b7d",
+        "premises": "FR-CA-01 / FR-CA-05 / FR-S1-006 / FR-S2-003 (CRITICAL+HIGH) を解消。useFitToContainer に unscaledFit/getCellSize/zoomSubscribe 追加、refit 経路を unscaled/従来で分岐、usePtySession の初回 spawn を unscaled 化、zoom 購読は 100ms debounce + 量子化前提。新引数はすべて optional で IDE モード regression ゼロ"
+      },
+      "attempts": 1,
+      "review_summary": {
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "cross_validated": [],
+        "review_skip_reason": "Tier I2 = 5体並列を軽量化。hooks 自体のテストは @testing-library/react での mock コストが高く ROI が低いため、純関数組合せの不変性テスト (3 ケース) で zoom 独立性を検証。strangler 戦略 (unscaledFit=false がデフォルト) で IDE モード regression ゼロ。S5 配線後に統合動作確認"
+      }
+    },
     {"id": "S5", "name": "TerminalView/Card配線 + NodeResizer連動 + fitViewレース対応", "status": "PENDING", "safe_point": null, "attempts": 0, "review_summary": null},
     {"id": "S6", "name": "persist v3 migration + NODE_W/H 引き上げ + 重複定数共有", "status": "PENDING", "safe_point": null, "attempts": 0, "review_summary": null},
     {"id": "S7", "name": "可観測性ログ + Playwright E2E", "status": "PENDING", "safe_point": null, "attempts": 0, "review_summary": null}
