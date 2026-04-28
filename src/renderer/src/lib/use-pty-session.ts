@@ -65,21 +65,20 @@ export interface UsePtySessionOptions {
 }
 
 /**
- * Issue #271: HMR remount 経路の判定を「HMR cache 経由」だけで行う。
+ * Issue #271: HMR remount 判定の二段構え。
  *
- * 旧設計（タイマーで dispose フラグを on/off）は React Refresh の effect cleanup が
- * 非同期に遅れて走るケースで誤判定するため廃止。代わりに
- *   - cleanup 時: `import.meta.hot` が存在すれば HMR 中とみなし、cache に ptyId を
- *     書いて kill を skip する。
- *   - mount 時: cache に有効な ptyId が残っていれば `attachIfExists: true` を載せ、
- *     Rust preflight で既存 PTY に attach する。
- * という cache 駆動に統一する。これで `setTimeout` の race を排除できる。
+ * 1. `hmrDisposeArmed` フラグ
+ *    `import.meta.hot.dispose(cb)` で「HMR が今この module を捨てる」シグナルを
+ *    受けたら true にする。次のタブ close / restart / card 削除 etc. のような
+ *    通常 unmount 経路では `dispose` cb は呼ばれないので false のまま。
+ *    フラグは「次に hook が mount された effect の冒頭」で false に戻す。
+ *    これにより React Refresh の effect cleanup が遅れても、タイマーに依存せず
+ *    HMR cleanup と通常 unmount を区別できる。
  *
- * 通常のタブ close / カード削除 / restart は本フックを跨いで `terminal.kill` を呼び、
- * 同時に cache も削除するので、cache に古い id は残らない（restart の場合は version が
- * 上がって remount されるため、新 effect の attach preflight は cache miss になる）。
- *
- * 本番ビルドでは `import.meta.hot` が undefined なので関数全体が dead code 同然になる。
+ * 2. `import.meta.hot.data.ptyBySessionKey`
+ *    HMR cleanup で kill を skip した PTY id を sessionKey ごとに保存する。
+ *    次の mount で `attachIfExists: true` を載せて Rust preflight に渡し、
+ *    既存 PTY に bind し直す。production では `import.meta.hot` 自体が undefined。
  */
 
 interface HmrPtyCacheEntry {
@@ -87,10 +86,26 @@ interface HmrPtyCacheEntry {
   generation: number;
 }
 
-/** dev かつ HMR が有効か */
-function hmrEnabled(): boolean {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return Boolean((import.meta as any).hot);
+/** HMR dispose 中フラグ。useEffect cleanup から見える module-scoped 状態。 */
+const hmrDisposeArmed = { current: false };
+
+// dev のみ: HMR dispose hook を 1 回だけ登録する。
+// 「タイマーで戻す」のではなく、次の hook mount の effect 冒頭で戻すので、
+// React Refresh の cleanup が遅れて走っても判定が壊れない。
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const __hot = (import.meta as any).hot as
+  | {
+      dispose: (cb: () => void) => void;
+      data?: Record<string, unknown>;
+    }
+  | undefined;
+if (__hot && !(__hot as { __vibePtyHookInstalled?: boolean }).__vibePtyHookInstalled) {
+  (__hot as { __vibePtyHookInstalled?: boolean }).__vibePtyHookInstalled = true;
+  __hot.dispose(() => {
+    // この cb が呼ばれた = HMR が module を捨てる。直後に effect cleanup が
+    // 全 hook で走るので、cleanup 側はこのフラグを見て kill skip を判定する。
+    hmrDisposeArmed.current = true;
+  });
 }
 
 /** `import.meta.hot.data.ptyBySessionKey` を sessionKey → ptyId の Map として参照する。 */
@@ -162,6 +177,12 @@ export function usePtySession(options: UsePtySessionOptions): void {
     const term = termRef.current;
     const fit = fitRef.current;
     if (!term) return;
+
+    // Issue #271: HMR dispose フラグを mount のたびに下ろす。
+    // 直前の cleanup が dispose 中のものだったとしても、新しい mount では「次の
+    // unmount は通常」とみなしたいため、ここで明示的にリセットする。
+    // hot.dispose の cb が再度呼ばれるまで `hmrDisposeArmed.current` は false。
+    hmrDisposeArmed.current = false;
 
     disposedRef.current = false;
     // 注意: disposedRef は外部共有 (options.disposedRef) なので、cwd/command 変化で
@@ -322,9 +343,10 @@ export function usePtySession(options: UsePtySessionOptions): void {
         if (localDisposed || disposedRef.current) {
           // 古い effect の戻り値だった場合の race 処理。
           // - 通常 cleanup (タブ close / restart): kill する
-          // - HMR cleanup: kill せず cache に id を残し、次の remount で attach できるようにする
+          // - HMR cleanup (hmrDisposeArmed.current = true 中): kill せず cache に id を残し、
+          //   次の remount で attach できるようにする
           if (res.ok && res.id) {
-            if (hmrEnabled() && skey) {
+            if (hmrDisposeArmed.current && skey) {
               const c = getHmrPtyCache();
               if (c) c[skey] = { ptyId: res.id, generation: myGeneration };
             } else {
@@ -443,16 +465,16 @@ export function usePtySession(options: UsePtySessionOptions): void {
       dataSub.dispose();
       textarea?.removeEventListener('compositionstart', onCompStart);
       textarea?.removeEventListener('compositionend', onCompEnd);
-      // Issue #271: dev (HMR 有効) かつ sessionKey が立っている場合だけ「HMR cleanup」
-      // とみなし kill を skip する。本番ビルドや sessionKey 無しの通常経路では
-      // 従来通り kill する。
-      // 「タイマー」で HMR フラグ on/off するのではなく cache の有無で判定するので、
-      // React Refresh の effect cleanup が遅れて走っても判定がぶれない。
-      // restart 経路では本フックの cleanup は通常通り走るが、restart は親側で
-      // 改めて HMR cache を消す責務がない代わりに、この cleanup の終わりで
-      // cache を delete する (= 次の remount は cache miss で新規 spawn)。
+      // Issue #271: HMR cleanup と通常 unmount を厳密に区別する。
+      //   - `hmrDisposeArmed.current === true` のとき: Vite が hot.dispose() の cb を
+      //     呼んだ直後 (= HMR が module を捨てる経路) なので、kill せず cache に残す。
+      //   - false のとき: 通常 unmount (タブ close / restart の version 変更 / カード削除
+      //     等) なので、従来通り kill して cache も掃除する。
+      //   このフラグは本ファイルの module-scope で hot.dispose() cb が立てる。次の
+      //   mount 時の effect 冒頭で false に戻す。タイマーは使わないので React Refresh
+      //   の cleanup がいつ走っても判定がブレない。
       const skeyAtCleanup = sessionKeyRef.current;
-      const hmrCleanup = hmrEnabled() && Boolean(skeyAtCleanup);
+      const hmrCleanup = hmrDisposeArmed.current && Boolean(skeyAtCleanup);
       offData?.();
       offExit?.();
       offSessionId?.();
