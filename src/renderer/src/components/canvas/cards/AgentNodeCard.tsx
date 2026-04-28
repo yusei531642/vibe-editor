@@ -85,12 +85,6 @@ function summarizeInput(text: string): string {
 
 function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const ref = useRef<TerminalViewHandle | null>(null);
-  // Issue #261: NodeResizer でカードを縮めたあと再度広げたとき、内部 `.xterm-viewport`
-  // の scrollTop が中途半端な位置で残って「末尾が見えない」状態になることがある。
-  // `.canvas-agent-card__term` 自体のサイズ変化を ResizeObserver で監視し、
-  // 子の `.xterm-viewport` を末尾までスクロールし直す。`.xterm-viewport` 自体は
-  // xterm.js が動的に生成するので querySelector で都度引く (mount/remount に追従)。
-  const termContainerRef = useRef<HTMLDivElement | null>(null);
   const { settings } = useSettings();
   const t = useT();
   const confirmRemoveCard = useConfirmRemoveCard();
@@ -296,37 +290,6 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     [accent]
   );
 
-  // Issue #261: termContainer のサイズが変化したら .xterm-viewport を末尾までスクロール。
-  //   - NodeResizer でカードを広げたとき → 末尾行が新たに見えるべき領域に出る
-  //   - 縮めたとき → scrollTop が古い位置で残ると「下端が空白」になるので末尾に詰める
-  //   - 初回 mount 時 (xterm-viewport が生まれた直後) → こちらも末尾合わせ
-  // xterm.js は内部の Buffer に scrollback があり、自動末尾追従しているが、
-  // ResizeObserver の発火タイミングと xterm 側 fit の合流がずれると
-  // viewport.scrollTop だけ古い値で残ることがある。明示的に補正する。
-  useEffect(() => {
-    const node = termContainerRef.current;
-    if (!node) return;
-    const scrollViewportToBottom = (): void => {
-      const viewport = node.querySelector<HTMLElement>('.xterm-viewport');
-      if (!viewport) return;
-      // scrollHeight は xterm の rows 数 * cellH に追従する。
-      // requestAnimationFrame で xterm の reflow を待ってから scroll する。
-      window.requestAnimationFrame(() => {
-        viewport.scrollTop = viewport.scrollHeight;
-      });
-    };
-    const ro = new ResizeObserver(() => {
-      scrollViewportToBottom();
-    });
-    ro.observe(node);
-    // 初回 mount で .xterm-viewport が後から生成されるケース用に少し遅らせて 1 回試す
-    const initialTimer = window.setTimeout(scrollViewportToBottom, 100);
-    return () => {
-      ro.disconnect();
-      window.clearTimeout(initialTimer);
-    };
-  }, []);
-
   return (
     <>
       <NodeResizer
@@ -368,10 +331,7 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
             </button>
           </span>
         </header>
-        <div
-          className="nodrag nowheel canvas-agent-card__term"
-          ref={termContainerRef}
-        >
+        <div className="nodrag nowheel canvas-agent-card__term">
           <TerminalView
             ref={ref}
             cwd={cwd}

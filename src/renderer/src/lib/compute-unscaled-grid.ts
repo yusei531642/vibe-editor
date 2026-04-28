@@ -51,17 +51,8 @@ export function computeUnscaledGrid(
     maxRows = DEFAULT_MAX_ROWS
   } = options;
 
-  // Issue #261: rows は Math.round で端数行を救済する。
-  //
-  // 旧実装は `Math.floor(height / cellH)` で常に余り (height - rows*cellH) が下端に
-  // 透明スペースとして残り、Canvas モードでは「最後の行が見えない」体感に直結していた
-  // (lineHeight=1.0 + cellH=13 で最大 12px、ほぼ 1 行ぶん欠ける)。round に変えると
-  // 端数が 0.5 行以上のときに +1 行され、xterm 内部 viewport が容器より僅かに高く
-  // なってもキャンバスモード側 CSS で `.xterm-viewport { overflow-y: auto }` を許可
-  // しているため scrollbar で確実に末尾まで到達できる。
-  // cols は折り返し挙動への影響を避けるため従来どおり floor。
   const rawCols = Math.floor(width / cellW);
-  const rawRows = Math.round(height / cellH);
+  const rawRows = Math.floor(height / cellH);
 
   return {
     cols: Math.min(maxCols, Math.max(minCols, rawCols)),
