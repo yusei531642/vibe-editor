@@ -1670,8 +1670,37 @@ body.is-resizing * {
   white-space: pre;
 }
 
+/* Issue #252: IDE mode terminal scrollbar restore - L1668-1685 (このブロックから下)
+   xterm v6 + WebGL renderer 利用時、`.xterm-viewport` の上に WebGL canvas が
+   `position: absolute` で被さってネイティブスクロールバーが隠れる問題を回避するため
+   z-index を上げる。背景色は維持（!important で下層 canvas の透過を防ぐ）。
+   pointer-events も保持して通常のスクロールが効く。 */
 .terminal-view .xterm-viewport {
   background-color: var(--bg) !important;
+  z-index: 1;
+}
+
+/* Issue #252: ターミナル内 scrollbar の視認性向上。
+   グローバル `::-webkit-scrollbar-thumb`（index.css L138-159）は
+   `background-clip: content-box` で実質 4px 幅 + var(--border) のため
+   暗いテーマでは目視困難。ターミナル内では tone-up した thumb 色を当てる。
+   全 6 テーマで `--text-mute` / `--fg` の CSS 変数経由で thumb / track を
+   視認可能にする（claude-dark / claude-light / dark / light / midnight / glass）。 */
+.terminal-view .xterm-viewport::-webkit-scrollbar {
+  width: 10px;
+}
+.terminal-view .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+.terminal-view .xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--text-mute);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 5px;
+}
+.terminal-view .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: var(--fg);
+  background-clip: content-box;
 }
 
 /* Glass テーマ時は xterm を透過させて親の backdrop-filter を活かす (Issue #89)。
