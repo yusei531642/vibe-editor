@@ -107,6 +107,16 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
   // など) で読むため deps は空でよく、stale closure にはならない。これにより effect が
   // 再実行されない設計が型レベルでも明示され、後続保守者が deps に直接 props を渡す
   // 変更を入れて無限ループを引き起こすリスクを下げる。
+  //
+  // ★ 不変条件 (review #3 強化):
+  //   refit と schedulePtyResize は **外部 props や毎レンダー作られる closure 値を直接参照
+  //   しないこと**。可変値はすべて ref (unscaledFitRef / getCellSizeRef / getZoomRef /
+  //   lastScheduledRef / ptyResizeTimerRef / lastScheduledRef / lastSizeRef / lastScheduledRef
+  //   等) 経由で読む。これに違反すると refit が初回レンダーの古い値を読み続ける stale
+  //   closure バグになる (useCallback の deps が空のため)。
+  //   schedulePtyResize は本フック関数本体内で定義された closure だが、内部で参照する変数も
+  //   すべて ref か module-level なので OK。新規変数を closure で読みたい場合は必ず ref 化
+  //   してから参照すること。
   const refit = useCallback((): void => {
     const term = termRef.current;
     if (!term) return;
