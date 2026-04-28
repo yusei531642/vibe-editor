@@ -1716,6 +1716,26 @@ body.is-resizing * {
   background-clip: content-box;
 }
 
+/* Issue #272 follow-up: xterm v6 では実スクロール host が `.xterm-scrollable-element` 側のため、
+   `.xterm-viewport` と同等の scrollbar styling をこちらにも複製する。
+   両方適用しても styling は同一なので副作用なし。 */
+.terminal-view .xterm-scrollable-element::-webkit-scrollbar {
+  width: 10px;
+}
+.terminal-view .xterm-scrollable-element::-webkit-scrollbar-track {
+  background: transparent;
+}
+.terminal-view .xterm-scrollable-element::-webkit-scrollbar-thumb {
+  background: var(--text-mute);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 5px;
+}
+.terminal-view .xterm-scrollable-element::-webkit-scrollbar-thumb:hover {
+  background: var(--fg);
+  background-clip: content-box;
+}
+
 /* Glass テーマ時は xterm を透過させて親の backdrop-filter を活かす (Issue #89)。
    `.terminal-view` の solid 背景と `.xterm-viewport` の `!important` 背景を両方打ち消す。 */
 [data-theme="glass"] .terminal-view {
