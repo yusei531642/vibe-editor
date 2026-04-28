@@ -65,23 +65,32 @@ export interface UsePtySessionOptions {
 }
 
 /**
- * Issue #271: HMR dispose 経路で「kill しない」フラグの記録先。
- *   - Vite HMR は `import.meta.hot.dispose(cb)` の cb を「remount 直前」に呼ぶ。
- *   - cb 内で `inProgress = true` にしておくと、その直後にレンダーツリーが
- *     unmount され本フックの cleanup が走る。cleanup は `inProgress` を見て
- *     `terminal.kill` を skip し、ptyId を `import.meta.hot.data` に退避する。
- *   - 直後の re-mount で hook は再度起動 → `import.meta.hot.data` に残った
- *     ptyId を見て、`attachIfExists: true` で bind だけやり直す。
+ * Issue #271: HMR remount 経路の判定を「HMR cache 経由」だけで行う。
  *
- * 通常のタブ close / restart / コンポーネント mount/unmount では `inProgress`
- * は false のままなので、従来通り kill が走る。HMR を持たない本番ビルドでは
- * `import.meta.hot` が undefined なので分岐自体が無効化される。
+ * 旧設計（タイマーで dispose フラグを on/off）は React Refresh の effect cleanup が
+ * 非同期に遅れて走るケースで誤判定するため廃止。代わりに
+ *   - cleanup 時: `import.meta.hot` が存在すれば HMR 中とみなし、cache に ptyId を
+ *     書いて kill を skip する。
+ *   - mount 時: cache に有効な ptyId が残っていれば `attachIfExists: true` を載せ、
+ *     Rust preflight で既存 PTY に attach する。
+ * という cache 駆動に統一する。これで `setTimeout` の race を排除できる。
+ *
+ * 通常のタブ close / カード削除 / restart は本フックを跨いで `terminal.kill` を呼び、
+ * 同時に cache も削除するので、cache に古い id は残らない（restart の場合は version が
+ * 上がって remount されるため、新 effect の attach preflight は cache miss になる）。
+ *
+ * 本番ビルドでは `import.meta.hot` が undefined なので関数全体が dead code 同然になる。
  */
-const hmrDisposeInProgress: { current: boolean } = { current: false };
 
 interface HmrPtyCacheEntry {
   ptyId: string;
   generation: number;
+}
+
+/** dev かつ HMR が有効か */
+function hmrEnabled(): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return Boolean((import.meta as any).hot);
 }
 
 /** `import.meta.hot.data.ptyBySessionKey` を sessionKey → ptyId の Map として参照する。 */
@@ -97,28 +106,6 @@ function getHmrPtyCache(): Record<string, HmrPtyCacheEntry> | null {
     hot.data.ptyBySessionKey = {} as Record<string, HmrPtyCacheEntry>;
   }
   return hot.data.ptyBySessionKey as Record<string, HmrPtyCacheEntry>;
-}
-
-// dev のみ: HMR dispose hook を 1 回だけ登録する。
-// この cb が走った後に各 useEffect の cleanup が呼ばれるので、cleanup 側は
-// `hmrDisposeInProgress.current` を見て kill skip を判断できる。
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const __hot = (import.meta as any).hot as
-  | {
-      dispose: (cb: () => void) => void;
-      data?: Record<string, unknown>;
-    }
-  | undefined;
-if (__hot && !(__hot as { __vibePtyHookInstalled?: boolean }).__vibePtyHookInstalled) {
-  (__hot as { __vibePtyHookInstalled?: boolean }).__vibePtyHookInstalled = true;
-  __hot.dispose(() => {
-    hmrDisposeInProgress.current = true;
-    // 次の module 評価 (= remount 後) でフラグを下ろす。微小な setTimeout で
-    // 「cleanup → remount → effect 走り出し」を跨ぐ。
-    setTimeout(() => {
-      hmrDisposeInProgress.current = false;
-    }, 0);
-  });
 }
 
 /**
@@ -307,11 +294,15 @@ export function usePtySession(options: UsePtySessionOptions): void {
         // 不変式 #2: 初回 spawn 時点のスナップショットを使う (以後の prop 変化は無視)
         const snap = snapRef.current;
         // Issue #271: HMR remount 経路では `import.meta.hot.data.ptyBySessionKey`
-        // に前世代の ptyId が残っている。Rust 側 preflight は `find_attach_target` で
-        // session_key / agent_id を引いて生存 PTY を返してくるので、こちらから
-        // sessionKey と attachIfExists を載せて呼ぶだけで attach 経路に乗る。
-        // sessionKey が無い場合は従来通り常に新規 spawn。
+        // に前世代の ptyId が残っている。`attachIfExists` を真にするのは
+        // 「dev で HMR が動いていて、かつ cache に有効な ptyId が残っている場合」だけ。
+        // 通常 mount / restart (cleanup で cache を消す) では cache miss → 新規 spawn。
+        // これにより React StrictMode の effect 二重実行や restart 経路で
+        // 旧 PTY に誤 attach する race を排除する。
         const skey = sessionKeyRef.current;
+        const cache = getHmrPtyCache();
+        const cachedPtyId = cache && skey ? cache[skey]?.ptyId : undefined;
+        const wantAttach = Boolean(skey && cachedPtyId);
         const res = await window.api.terminal.create({
           cwd,
           fallbackCwd,
@@ -324,14 +315,21 @@ export function usePtySession(options: UsePtySessionOptions): void {
           agentId: snap.agentId,
           role: snap.role,
           sessionKey: skey,
-          attachIfExists: Boolean(skey),
+          attachIfExists: wantAttach,
           codexInstructions: snap.codexInstructions
         });
 
         if (localDisposed || disposedRef.current) {
-          // 古い effect の戻り値だった場合、spawn 済みの pty は責任を持って kill
+          // 古い effect の戻り値だった場合の race 処理。
+          // - 通常 cleanup (タブ close / restart): kill する
+          // - HMR cleanup: kill せず cache に id を残し、次の remount で attach できるようにする
           if (res.ok && res.id) {
-            void window.api.terminal.kill(res.id);
+            if (hmrEnabled() && skey) {
+              const c = getHmrPtyCache();
+              if (c) c[skey] = { ptyId: res.id, generation: myGeneration };
+            } else {
+              void window.api.terminal.kill(res.id);
+            }
           }
           return;
         }
@@ -378,6 +376,14 @@ export function usePtySession(options: UsePtySessionOptions): void {
           }
         });
 
+        // Issue #271: attach 復帰時は `observeChunkRef` (auto-initial-message のチャンク
+        // 観察) を起動しない。useAutoInitialMessage は spawnKey ごとに「ready 検出 →
+        // initialMessage 送信」を 1 回だけ行うが、HMR remount で観察フックは新しく作り
+        // 直されるため、再度 ready 検出 → 同じ initialMessage を既存セッションに重複
+        // 送信してしまう。`res.attached === true` のときは PTY が既に動いていて、
+        // ユーザーが入力済みかもしれないので initialMessage を再送する判断が UI 側に
+        // ないため、安全側に倒して観察を止める。
+        const attached = res.attached === true;
         offData = window.api.terminal.onData(res.id, (data) => {
           if (!isCurrentGeneration()) return;
           term.write(data);
@@ -385,7 +391,9 @@ export function usePtySession(options: UsePtySessionOptions): void {
             scheduleRenderRepair();
           }
           callbacksRef.current.onActivity?.();
-          observeChunkRef.current(data);
+          if (!attached) {
+            observeChunkRef.current(data);
+          }
         });
 
         offExit = window.api.terminal.onExit(res.id, (info) => {
@@ -435,10 +443,16 @@ export function usePtySession(options: UsePtySessionOptions): void {
       dataSub.dispose();
       textarea?.removeEventListener('compositionstart', onCompStart);
       textarea?.removeEventListener('compositionend', onCompEnd);
-      // Issue #271: HMR dispose 中は kill を skip する (PTY は生かしたまま remount 後に再 bind)。
-      // 通常 unmount (タブ close / カード削除 / restart) では kill する。
+      // Issue #271: dev (HMR 有効) かつ sessionKey が立っている場合だけ「HMR cleanup」
+      // とみなし kill を skip する。本番ビルドや sessionKey 無しの通常経路では
+      // 従来通り kill する。
+      // 「タイマー」で HMR フラグ on/off するのではなく cache の有無で判定するので、
+      // React Refresh の effect cleanup が遅れて走っても判定がぶれない。
+      // restart 経路では本フックの cleanup は通常通り走るが、restart は親側で
+      // 改めて HMR cache を消す責務がない代わりに、この cleanup の終わりで
+      // cache を delete する (= 次の remount は cache miss で新規 spawn)。
       const skeyAtCleanup = sessionKeyRef.current;
-      const isHmrDispose = hmrDisposeInProgress.current;
+      const hmrCleanup = hmrEnabled() && Boolean(skeyAtCleanup);
       offData?.();
       offExit?.();
       offSessionId?.();
@@ -447,20 +461,22 @@ export function usePtySession(options: UsePtySessionOptions): void {
         repairFrame = null;
       }
       if (ptyIdRef.current) {
-        if (isHmrDispose && skeyAtCleanup) {
-          // HMR cleanup: kill せず HMR cache に id を残し、remount 側で attach させる。
-          // ptyBySessionKey のエントリは初回 spawn 直後に既に保存済み。
-          // ここでは「ptyIdRef を null にしないこと」で、次の remount まで参照を保持する
-          // 必要はない (remount 時の preflight で再取得するため)。
-          // 旧 listener は世代番号で無視されるので、ptyIdRef は今 null にしてよい。
+        if (hmrCleanup) {
+          // HMR cleanup: kill せず HMR cache に最新 id を残しておく (mount 直後の
+          // 確定保存を上書き保存する形)。次の remount で `attachIfExists: true` で
+          // この id に attach される。
+          const c = getHmrPtyCache();
+          if (c && skeyAtCleanup) {
+            c[skeyAtCleanup] = { ptyId: ptyIdRef.current, generation: myGeneration };
+          }
           ptyIdRef.current = null;
         } else {
-          // 通常 cleanup: kill して HMR cache からも消す。
+          // 通常 cleanup (本番ビルド or sessionKey 無し): kill して cache も掃除。
           void window.api.terminal.kill(ptyIdRef.current);
           ptyIdRef.current = null;
           if (skeyAtCleanup) {
-            const cache = getHmrPtyCache();
-            if (cache) delete cache[skeyAtCleanup];
+            const c = getHmrPtyCache();
+            if (c) delete c[skeyAtCleanup];
           }
         }
       }
