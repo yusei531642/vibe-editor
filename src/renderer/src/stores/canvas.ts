@@ -61,15 +61,24 @@ interface CanvasState {
 
 export type StageView = 'stage' | 'list' | 'focus';
 
-const NODE_W = 480;
-const NODE_H = 320;
+/**
+ * カード初期幅/高さ (新規 addCard 時に適用)。
+ * Issue #253: 旧 480x320 では Codex/Claude TUI のヘッダーが折り返しで崩れがちだったため
+ * 640x400 に引き上げ。永続化された旧サイズ (<=480 / <=320) のノードは persist v3 migration
+ * で同じ値に拡大される。ユーザーが手動でそれより大きくリサイズした値は尊重。
+ */
+export const NODE_W = 640;
+export const NODE_H = 400;
 /**
  * NodeResizer の最小幅/高さ (ユーザーが手動縮小したときの下限)。
- * Issue #253: ヘッダー UI とターミナル最低限の表示を保証するため、
- * AgentNodeCard の hardcode 280/180 を共有定数化。これ以下だとヘッダーボタンが切れる。
+ * Issue #253: ターミナル UI が崩れず Codex/Claude TUI が読める下限として 480x280。
+ * これ以下だとヘッダーボタン + ターミナル本体が窮屈になりすぎる。
  */
-export const NODE_MIN_W = 280;
-export const NODE_MIN_H = 180;
+export const NODE_MIN_W = 480;
+export const NODE_MIN_H = 280;
+/** persist v3 で既存ユーザーのカードを引き上げる閾値 (これ以下のサイズなら NODE_W/H に拡大) */
+const LEGACY_NODE_W_THRESHOLD = 480;
+const LEGACY_NODE_H_THRESHOLD = 320;
 const CARD_TYPES: CardType[] = ['terminal', 'agent', 'editor', 'diff', 'fileTree', 'changes'];
 const STAGE_VIEWS: StageView[] = ['stage', 'list', 'focus'];
 
@@ -238,7 +247,7 @@ export const useCanvasStore = create<CanvasState>()(
     }),
     {
       name: 'vibe-editor:canvas',
-      version: 2,
+      version: 3,
       migrate: (persisted, fromVersion) => {
         if (!isRecord(persisted)) {
           return {
@@ -260,6 +269,30 @@ export const useCanvasStore = create<CanvasState>()(
               payload.roleProfileId = payload.role;
             }
             return { ...n, data: { ...data, payload } };
+          });
+        }
+
+        // v2 → v3 (Issue #253): 旧 NODE_W/H (480x320) で永続化された小さいカードを
+        // NODE_W/H (640x400) に拡大する。ユーザーが手動でそれより大きくリサイズした
+        // 値は尊重するため、`<= LEGACY_*_THRESHOLD` のときだけ引き上げる。
+        // width/height は style に乗っているため style を直接書き換える。
+        if (fromVersion < 3 && Array.isArray(p.nodes)) {
+          p.nodes = p.nodes.map((n) => {
+            if (!isRecord(n)) return n;
+            const styleRaw = isRecord(n.style) ? n.style : {};
+            const w = typeof styleRaw.width === 'number' ? styleRaw.width : undefined;
+            const h = typeof styleRaw.height === 'number' ? styleRaw.height : undefined;
+            const nextW = w !== undefined && w <= LEGACY_NODE_W_THRESHOLD ? NODE_W : w;
+            const nextH = h !== undefined && h <= LEGACY_NODE_H_THRESHOLD ? NODE_H : h;
+            if (nextW === w && nextH === h) return n;
+            return {
+              ...n,
+              style: {
+                ...styleRaw,
+                ...(nextW !== undefined ? { width: nextW } : {}),
+                ...(nextH !== undefined ? { height: nextH } : {})
+              }
+            };
           });
         }
 

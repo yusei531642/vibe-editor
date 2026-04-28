@@ -9,7 +9,7 @@
  */
 import { useEffect } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { useCanvasStore } from '../stores/canvas';
+import { useCanvasStore, NODE_W, NODE_H } from '../stores/canvas';
 import type { Node } from '@xyflow/react';
 import type { CardData } from '../stores/canvas';
 import { useRoleProfiles } from './role-profiles-context';
@@ -43,8 +43,7 @@ interface RecruitCancelledPayload {
   reason: string;
 }
 
-const NODE_W = 480;
-const NODE_H = 320;
+// NODE_W / NODE_H は stores/canvas.ts の共有定数を import (Issue #253 で 640x400 に拡張)
 const RECRUIT_RADIUS = 540; // requester からの距離
 
 /** requester の周囲で空いている角度を見つけて配置位置を返す。
