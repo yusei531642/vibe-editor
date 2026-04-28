@@ -1628,6 +1628,13 @@ body.is-resizing * {
 
 /* ---------- ターミナル ---------- */
 
+/* Issue #261: Canvas mode terminal scroll-to-bottom - L1631-1641
+   ベースは IDE モード向け (`.terminal-pane .terminal-view`) と共通。
+   Canvas モード (`.react-flow__node .terminal-view`) では Math.round で +1 行
+   される端数行ぶんが overflow:hidden で見切れていたので、Canvas モード限定の
+   上書きは canvas.css 側で行う (本ブロックは IDE モードの挙動を保つ)。
+   xterm-viewport の scrollbar は Issue #252 の z-index:1 と組み合わせて
+   IDE/Canvas どちらでも常時可視。 */
 .terminal-view {
   flex: 1;
   min-height: 0;
@@ -1639,6 +1646,12 @@ body.is-resizing * {
      contain: layout は親 .terminal-pane 側で設定済みのため、ここでは付けない
      （二重にすると IME 候補ウィンドウの位置計算が狂う）。 */
   position: relative;
+  /* xterm-viewport が末尾 (cellH ぶん) まで完全に表示されるよう、min-height を
+     0 のまま保ちつつ flex-basis を内部 .xterm 高さで決定させる。
+     Issue #261: 旧実装は親 flex の min-height auto と xterm-viewport の
+     "scrollHeight = rows * cellH" がジャストフィットしないとき、最終行が
+     overflow:hidden で隠れていた。round 化 (compute-unscaled-grid.ts) と
+     合わせて、overflow:auto を Canvas モード限定で許可する。 */
 }
 
 .terminal-view .xterm {
@@ -1670,8 +1683,37 @@ body.is-resizing * {
   white-space: pre;
 }
 
+/* Issue #252: IDE mode terminal scrollbar restore - L1668-1685 (このブロックから下)
+   xterm v6 + WebGL renderer 利用時、`.xterm-viewport` の上に WebGL canvas が
+   `position: absolute` で被さってネイティブスクロールバーが隠れる問題を回避するため
+   z-index を上げる。背景色は維持（!important で下層 canvas の透過を防ぐ）。
+   pointer-events も保持して通常のスクロールが効く。 */
 .terminal-view .xterm-viewport {
   background-color: var(--bg) !important;
+  z-index: 1;
+}
+
+/* Issue #252: ターミナル内 scrollbar の視認性向上。
+   グローバル `::-webkit-scrollbar-thumb`（index.css L138-159）は
+   `background-clip: content-box` で実質 4px 幅 + var(--border) のため
+   暗いテーマでは目視困難。ターミナル内では tone-up した thumb 色を当てる。
+   全 6 テーマで `--text-mute` / `--fg` の CSS 変数経由で thumb / track を
+   視認可能にする（claude-dark / claude-light / dark / light / midnight / glass）。 */
+.terminal-view .xterm-viewport::-webkit-scrollbar {
+  width: 10px;
+}
+.terminal-view .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+.terminal-view .xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--text-mute);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 5px;
+}
+.terminal-view .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: var(--fg);
+  background-clip: content-box;
 }
 
 /* Glass テーマ時は xterm を透過させて親の backdrop-filter を活かす (Issue #89)。

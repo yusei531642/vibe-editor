@@ -473,8 +473,37 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  /* Issue #261: 旧実装の `overflow: hidden` だと、内側の `.terminal-view` →
+     `.xterm-viewport` の scrollbar が下端でクリップされ、ターミナルの最終行
+     (xterm 内部スクロールでは到達しているが視覚的には隠れる) が見えなかった。
+     `overflow: clip` だと scrollbar 自体が隠れるので、`hidden` を `clip` に
+     変える代わりに `.xterm-viewport` 側で overflow:auto を明示する戦略を採用。
+     ここではクリッピングを維持しつつ、内部 viewport が容器より少しだけ高く
+     なる端数行ケース (compute-unscaled-grid.ts の Math.round 化) でも
+     scrollbar が出るよう min-height: 0 を維持する。 */
   overflow: hidden;
   position: relative;
+}
+
+/* Issue #261: Canvas モード限定で xterm-viewport を強制的にスクロール可能にする。
+   - IDE モード (`.terminal-pane .terminal-view`) は親が `min-height: 0` のフレックス
+     で完全フィットするため `overflow: hidden` のままで末尾が隠れない。
+   - Canvas モードは NodeResizer のリサイズ + zoom + Math.round で端数行が出るため、
+     scrollbar を有効化しないと最終行が容器下端で見切れることがある。
+   - `!important` は IDE モード用の `.terminal-view .xterm-viewport`
+     (index.css L1678 周辺) の z-index/background ルールと共存させるため必要。
+   - scrollbar の見た目は index.css L1689-1704 の `.terminal-view .xterm-viewport`
+     スタイルがそのまま適用される (10px 幅 + var(--text-mute) thumb)。 */
+.react-flow__node .xterm-viewport {
+  overflow-y: auto !important;
+}
+
+/* Issue #261: AgentNodeCard の min-height は内部 xterm-viewport の高さに引っ張られ
+   ないようにし、Canvas モードのリサイズで NodeResizer が小さくしたときも
+   scrollbar が出る (xterm 内部スクロールが活きる) ようにする。
+   親 `.canvas-agent-card__term { min-height: 0 }` と二重ガード。 */
+.react-flow__node .terminal-view {
+  min-height: 0;
 }
 
 /* ---------- status badge (idle / thinking / typing) ---------- */
