@@ -348,7 +348,11 @@ pub async fn terminal_create(
                 opts.session_key,
                 opts.agent_id
             );
-            // 表示用のコマンドラインも復元しておく (renderer の status ライン用)。
+            // attach 経路では既存 PTY の本物のコマンドラインを registry が保持していない
+            // ため、今回リクエストされた command/args から表示用文字列を再構成する。
+            // renderer の status ラインは "実行中: ..." を再現できれば充分で、PTY の実体
+            // コマンドと一致しなくても挙動には影響しない (HMR remount 時は親が同じ
+            // command/args を渡してくる前提)。
             let cmdline = std::iter::once(command.clone())
                 .chain(args.iter().cloned())
                 .collect::<Vec<_>>()
