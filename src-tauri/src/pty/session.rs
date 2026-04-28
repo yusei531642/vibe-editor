@@ -30,6 +30,9 @@ pub struct SpawnOptions {
     pub rows: u16,
     pub env: HashMap<String, String>,
     pub agent_id: Option<String>,
+    /// Issue #271: HMR 経路で同じ React mount identity を共有する論理キー。
+    /// renderer 側の `TerminalCreateOptions.sessionKey` と一致する。
+    pub session_key: Option<String>,
     pub team_id: Option<String>,
     pub role: Option<String>,
 }
@@ -43,6 +46,9 @@ pub struct SessionHandle {
     /// kill 用 (子プロセス側 — drop で殺せないことがあるため明示保持)
     killer: Mutex<Box<dyn portable_pty::ChildKiller + Send + Sync>>,
     pub agent_id: Option<String>,
+    /// Issue #271: HMR 経路で attach 先を引くための論理キー。
+    /// `SessionRegistry::by_session_key` の逆引き先になる。
+    pub session_key: Option<String>,
     pub team_id: Option<String>,
     pub role: Option<String>,
     /// Issue #153: prompt injection 中はユーザー入力を抑止する。
@@ -376,6 +382,7 @@ pub fn spawn_session(
         master: Mutex::new(pair.master),
         killer: Mutex::new(killer),
         agent_id: opts.agent_id,
+        session_key: opts.session_key,
         team_id: opts.team_id,
         role: opts.role,
         injecting: std::sync::atomic::AtomicBool::new(false),

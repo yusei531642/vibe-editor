@@ -349,6 +349,10 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
         >
           <TerminalView
             ref={ref}
+            // Issue #271: HMR remount で同じ PTY へ再 bind するための論理キー。
+            // ノード id は @xyflow/react canvas store で永続化されているので、
+            // HMR を跨いでも同一カードを一意に識別できる。
+            sessionKey={`canvas-agent:${id}`}
             cwd={cwd}
             fallbackCwd={cwd}
             command={command}

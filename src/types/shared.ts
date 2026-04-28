@@ -395,6 +395,18 @@ export interface TerminalCreateOptions {
   /** TeamHub が注入したメッセージを判別するためのロール */
   role?: string;
   /**
+   * Issue #271: React mount をまたいで同じ PTY を識別する論理キー。永続化はしない。
+   * IDE: `term:${tab.id}`、Canvas: `canvas-term:${node.id}` / `canvas-agent:${node.id}` 等。
+   * Vite HMR の React Refresh でコンポーネントが unmount/remount されたとき、
+   * 同じ sessionKey を持つ既存 PTY に attach して一斉初期化を防ぐために使う。
+   */
+  sessionKey?: string;
+  /**
+   * Issue #271: true の場合、Rust 側 preflight で同じ sessionKey / agentId の生存 PTY が
+   * あれば spawn せず既存 id を返す。HMR 復帰経路用。
+   */
+  attachIfExists?: boolean;
+  /**
    * Codex 用のシステム指示文。Claude の --append-system-prompt と同等の役割を
    * 果たし、main プロセス側で一時ファイルに書き出して
    * `-c model_instructions_file=<path>` を args に差し込む。
@@ -412,6 +424,12 @@ export interface TerminalCreateResult {
    * UI 側で status ライン / トースト / terminal に表示する用途。
    */
   warning?: string;
+  /**
+   * Issue #271: `attachIfExists` により既存 PTY に接続した場合 true。
+   * 新規 spawn の場合は false / undefined。renderer は新規 spawn 時にだけ
+   * initialMessage 自動送信や session id watcher のセットアップを行いたいケースで参照する。
+   */
+  attached?: boolean;
 }
 
 export interface TerminalExitInfo {
