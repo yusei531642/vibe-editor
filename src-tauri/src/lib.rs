@@ -57,6 +57,7 @@ pub fn run() {
             commands::app::app_cancel_recruit,
             commands::app::app_get_user_info,
             commands::app::app_open_external,
+            commands::app::app_reveal_in_file_manager,
             // ---- git ----
             commands::git::git_status,
             commands::git::git_diff,
