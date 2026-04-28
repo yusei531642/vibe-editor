@@ -485,6 +485,21 @@
   position: relative;
 }
 
+/* Issue #272: TerminalCard 用の scroll host wrapper。
+   AgentNodeCard と異なり TerminalCard は CardFrame 経由で TerminalView を
+   埋めているため、wrapper div を 1 段挟んで ResizeObserver の観測対象とする。
+   親 CardFrame body は既に `flex: 1; min-height: 0; display: flex` なので
+   この wrapper も同じ flex 設定にして高さが正しく伝わるようにする。 */
+.canvas-terminal-card__term {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
 /* Issue #261: Canvas モード限定で xterm-viewport を強制的にスクロール可能にする。
    - IDE モード (`.terminal-pane .terminal-view`) は親が `min-height: 0` のフレックス
      で完全フィットするため `overflow: hidden` のままで末尾が隠れない。
