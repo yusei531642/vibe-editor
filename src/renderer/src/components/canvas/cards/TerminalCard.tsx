@@ -11,6 +11,7 @@ import { CardFrame } from '../CardFrame';
 import { TerminalView, type TerminalViewHandle } from '../../TerminalView';
 import { useSettings } from '../../../lib/settings-context';
 import { useCanvasStore } from '../../../stores/canvas';
+import { useCanvasTerminalFit } from '../../../lib/use-canvas-terminal-fit';
 
 interface TerminalPayload {
   agent?: 'claude' | 'codex';
@@ -35,6 +36,8 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
   const title = (data?.title as string) ?? 'Terminal';
   const [, setStatus] = useState<string>('');
   const setCardPayload = useCanvasStore((s) => s.setCardPayload);
+  // Issue #253: Canvas zoom 下でも論理 px ベースで cols/rows を確定させる
+  const fit = useCanvasTerminalFit(settings);
 
   // Claude Code が新規セッションを作ったら、その session id を payload に書き戻す。
   // localStorage 永続化された payload に乗るので、アプリ再起動 / カード再マウント時に
@@ -83,6 +86,10 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
           onSessionId={handleSessionId}
           // Canvas zoom で滲まないよう WebGL を切る (DOM renderer 固定)
           disableWebgl
+          // Issue #253: 論理 px ベース fit + zoom 購読
+          unscaledFit={fit.unscaledFit}
+          getCellSize={fit.getCellSize}
+          zoomSubscribe={fit.zoomSubscribe}
         />
       </CardFrame>
       <Handle type="source" position={Position.Right} style={{ background: '#7a7afd' }} />

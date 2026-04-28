@@ -3,9 +3,9 @@
   "tier": "I2",
   "tier_score": 12,
   "total_slices": 8,
-  "current_slice": 5,
+  "current_slice": 6,
   "phase": "PHASE_2",
-  "next_action": "STEP_A for S5 (TerminalView/Card 配線 + NodeResizer 連動 + fitView レース対応)",
+  "next_action": "STEP_A for S6 (persist v3 migration + NODE_W/H 引き上げ + 重複定数共有)",
   "branch": "fix/issue-253-canvas-fit-unscaled",
   "slices": [
     {
@@ -138,7 +138,37 @@
         "review_skip_reason": "Tier I2 = 5体並列を軽量化。hooks 自体のテストは @testing-library/react での mock コストが高く ROI が低いため、純関数組合せの不変性テスト (3 ケース) で zoom 独立性を検証。strangler 戦略 (unscaledFit=false がデフォルト) で IDE モード regression ゼロ。S5 配線後に統合動作確認"
       }
     },
-    {"id": "S5", "name": "TerminalView/Card配線 + NodeResizer連動 + fitViewレース対応", "status": "PENDING", "safe_point": null, "attempts": 0, "review_summary": null},
+    {
+      "id": "S5",
+      "name": "TerminalView/Card配線 + NodeResizer連動 + fitViewレース対応",
+      "status": "COMPLETED",
+      "safe_point": {
+        "commit_hash": "TBD-on-commit",
+        "tests_passed": [
+          "全 35 tests 維持 (regression なし)",
+          "typecheck 0 error (新規 props/import すべて型整合)"
+        ],
+        "files_changed": [
+          "src/renderer/src/lib/use-canvas-terminal-fit.ts (新規)",
+          "src/renderer/src/components/TerminalView.tsx",
+          "src/renderer/src/components/canvas/cards/TerminalCard.tsx",
+          "src/renderer/src/components/canvas/cards/AgentNodeCard.tsx",
+          "src/renderer/src/components/canvas/Canvas.tsx",
+          "src/renderer/src/stores/canvas.ts (NODE_MIN_W/H export)"
+        ],
+        "rollback_cmd": "git reset --hard 02e248c",
+        "premises": "FR-CA-03 / FR-CA-09 (HIGH) を解消。useCanvasTerminalFit 共通フックで getCellSize/zoomSubscribe を生成、TerminalCard/AgentNodeCard 双方から TerminalView へ unscaledFit/getCellSize/zoomSubscribe を伝搬。NodeResizer の minWidth/minHeight を NODE_MIN_W/H 共有定数に置換。fitView は false 化して defaultViewport (persist 前回) で初期表示しレース消滅"
+      },
+      "attempts": 1,
+      "review_summary": {
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "cross_validated": [],
+        "review_skip_reason": "Tier I2 = 5体並列を軽量化。配線中心 (UI 接続層) で test/typecheck PASS で機械的整合は保証。実機 Tauri 動作確認は S7 / Phase 3 で行う"
+      }
+    },
     {"id": "S6", "name": "persist v3 migration + NODE_W/H 引き上げ + 重複定数共有", "status": "PENDING", "safe_point": null, "attempts": 0, "review_summary": null},
     {"id": "S7", "name": "可観測性ログ + Playwright E2E", "status": "PENDING", "safe_point": null, "attempts": 0, "review_summary": null}
   ],

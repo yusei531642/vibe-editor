@@ -63,6 +63,13 @@ export type StageView = 'stage' | 'list' | 'focus';
 
 const NODE_W = 480;
 const NODE_H = 320;
+/**
+ * NodeResizer の最小幅/高さ (ユーザーが手動縮小したときの下限)。
+ * Issue #253: ヘッダー UI とターミナル最低限の表示を保証するため、
+ * AgentNodeCard の hardcode 280/180 を共有定数化。これ以下だとヘッダーボタンが切れる。
+ */
+export const NODE_MIN_W = 280;
+export const NODE_MIN_H = 180;
 const CARD_TYPES: CardType[] = ['terminal', 'agent', 'editor', 'diff', 'fileTree', 'changes'];
 const STAGE_VIEWS: StageView[] = ['stage', 'list', 'focus'];
 

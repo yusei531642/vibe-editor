@@ -321,7 +321,12 @@ function FlowApp(): JSX.Element {
         // font-smoothing / text-rendering の CSS ヒント (canvas.css) で最小化済み。
         minZoom={0.3}
         maxZoom={1.5}
-        fitView={nodes.length > 0}
+        // Issue #253: fitView は初回マウント直後に viewport を再計算するため、
+        // TerminalCard の初回 spawn (useFitToContainer / usePtySession) が同時に走ると
+        // container.clientWidth がまだ確定していない瞬間を読んで cols/rows が崩れる
+        // レースが起きる。defaultViewport (persist された前回 viewport / 新規は 0,0,zoom=1)
+        // で初期表示し、全体俯瞰したいときはキー操作 (KEYS.fitView) で明示発動する方針に変更。
+        fitView={false}
         zoomOnScroll
         zoomOnPinch
         zoomOnDoubleClick={false}
