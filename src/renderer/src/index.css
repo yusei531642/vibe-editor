@@ -1670,8 +1670,34 @@ body.is-resizing * {
   white-space: pre;
 }
 
+/* Issue #252: xterm v6 + WebGL renderer 利用時、`.xterm-viewport` の上に
+   WebGL canvas が `position: absolute` で被さってネイティブ scrollbar が
+   隠れる問題を回避するため z-index を上げる。背景色の !important は下層
+   canvas の透過防止用に維持。 */
 .terminal-view .xterm-viewport {
   background-color: var(--bg) !important;
+  z-index: 1;
+}
+
+/* Issue #252: ターミナル内 scrollbar の視認性を向上。グローバル
+   ::-webkit-scrollbar-thumb は `background-clip: content-box` で実質 4px 幅
+   + var(--border) のため暗いテーマで目視困難。ターミナル内では tone-up した
+   thumb 色を当てて常時はっきり見えるようにする。 */
+.terminal-view .xterm-viewport::-webkit-scrollbar {
+  width: 10px;
+}
+.terminal-view .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+.terminal-view .xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--text-mute);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 5px;
+}
+.terminal-view .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: var(--fg);
+  background-clip: content-box;
 }
 
 /* Glass テーマ時は xterm を透過させて親の backdrop-filter を活かす (Issue #89)。
