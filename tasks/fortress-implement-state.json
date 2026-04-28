@@ -1,0 +1,27 @@
+{
+  "mission_brief": "Canvas モードの Terminal で transform: scale(zoom) 下でも論理 px ベースの cols/rows が PTY に渡る状態にし、Codex/Claude TUI が崩れず操作可能にする",
+  "tier": "I2",
+  "tier_score": 12,
+  "total_slices": 8,
+  "current_slice": 0,
+  "phase": "PHASE_2",
+  "next_action": "STEP_B for S0",
+  "branch": "fix/issue-253-canvas-fit-unscaled",
+  "slices": [
+    {"id": "S0", "name": "症状切り分け事前検証 (コード解析)", "status": "IN_PROGRESS", "safe_point": null, "attempts": 1, "review_summary": null},
+    {"id": "S1", "name": "テスト基盤導入 (vitest)", "status": "PENDING", "safe_point": null, "attempts": 0, "review_summary": null},
+    {"id": "S2", "name": "measureCellSize 純関数 (private API 排除)", "status": "PENDING", "safe_point": null, "attempts": 0, "review_summary": null},
+    {"id": "S3", "name": "computeUnscaledGrid 純関数 (境界値ガード)", "status": "PENDING", "safe_point": null, "attempts": 0, "review_summary": null},
+    {"id": "S4", "name": "useFitToContainer unscaled + 初回spawn統合 + zoom debounce", "status": "PENDING", "safe_point": null, "attempts": 0, "review_summary": null},
+    {"id": "S5", "name": "TerminalView/Card配線 + NodeResizer連動 + fitViewレース対応", "status": "PENDING", "safe_point": null, "attempts": 0, "review_summary": null},
+    {"id": "S6", "name": "persist v3 migration + NODE_W/H 引き上げ + 重複定数共有", "status": "PENDING", "safe_point": null, "attempts": 0, "review_summary": null},
+    {"id": "S7", "name": "可観測性ログ + Playwright E2E", "status": "PENDING", "safe_point": null, "attempts": 0, "review_summary": null}
+  ],
+  "self_healing_log": [],
+  "started_at": "2026-04-28T08:30:00Z",
+  "fortress_review_result": {
+    "round_1_at": "2026-04-28T08:25:00Z",
+    "verdict": "No-Go (CRITICAL=4, HIGH=16)",
+    "addressed_in_slices": "S0-S7 全 19 件指摘を反映"
+  }
+}
