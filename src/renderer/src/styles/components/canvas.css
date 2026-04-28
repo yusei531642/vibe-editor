@@ -513,11 +513,13 @@
    カード高さに追従させる。これがないと `.xterm-screen` の固定 px 高さがカード下端に届かず
    黒帯が残る／最終行が見切れる症状になる。`.react-flow__node` スコープなので IDE モードへの
    副作用なし。
-   Issue #272 follow-up: overflow-y を明示して scrollbar を確実に表示させる。 */
+   Issue #272 follow-up: overflow を明示して scrollbar を確実に表示させる。
+   `overflow: hidden auto` で X 軸を `hidden` に固定し、Y 軸のみ `auto` 表示にする
+   (`overflow-y: auto` 単独だと X 軸も `auto` に解決され横 scrollbar が出る恐れがある)。 */
 .react-flow__node .xterm-scrollable-element {
   width: 100%;
   height: 100%;
-  overflow-y: auto;
+  overflow: hidden auto;
 }
 
 .react-flow__node .xterm-viewport {
