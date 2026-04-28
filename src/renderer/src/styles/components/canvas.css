@@ -773,3 +773,33 @@
   border-radius: 999px;
   background: var(--role-color, var(--success));
 }
+
+/* ===========================================================================
+ * Issue #261: Canvas モード内ターミナルの下端スクロール
+ * ===========================================================================
+ * Canvas モードの AgentNodeCard / TerminalCard では `.canvas-agent-card` /
+ * `.canvas-agent-card__term` / `.terminal-view` が連鎖して overflow:hidden に
+ * なっており、xterm v6 が自前で持つ `.xterm-viewport` の scrollbar が外側に
+ * 隠れて scroll できないように見えていた。Canvas の `.react-flow__node` 配下に
+ * 限定して xterm-viewport の scrollbar を強制表示し、最終行までユーザーが
+ * 確実に到達できるようにする。 IDE モード (.terminal-pane 配下) は既存ルールが
+ * 別途扱うため不変。 */
+.react-flow__node .xterm-viewport {
+  overflow-y: auto !important;
+}
+.react-flow__node .xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+.react-flow__node .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+.react-flow__node .xterm-viewport::-webkit-scrollbar-thumb {
+  background: var(--text-mute);
+  border: 2px solid transparent;
+  background-clip: content-box;
+  border-radius: 4px;
+}
+.react-flow__node .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: var(--fg);
+  background-clip: content-box;
+}
