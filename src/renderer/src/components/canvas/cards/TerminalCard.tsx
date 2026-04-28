@@ -12,6 +12,7 @@ import { TerminalView, type TerminalViewHandle } from '../../TerminalView';
 import { useSettings } from '../../../lib/settings-context';
 import { useCanvasStore, NODE_MIN_W, NODE_MIN_H } from '../../../stores/canvas';
 import { useCanvasTerminalFit } from '../../../lib/use-canvas-terminal-fit';
+import { useXtermScrollToBottomOnResize } from '../../../lib/use-xterm-scroll-on-resize';
 
 interface TerminalPayload {
   agent?: 'claude' | 'codex';
@@ -31,6 +32,10 @@ interface TerminalPayload {
 
 function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
   const ref = useRef<TerminalViewHandle | null>(null);
+  // Issue #272: NodeResizer でカードをリサイズしたとき、内部 `.xterm-viewport`
+  // の scrollTop が古い値で残り最終行が下端で見切れるのを防ぐため、
+  // wrapper div の ref を ResizeObserver に渡して末尾追従させる。
+  const termContainerRef = useRef<HTMLDivElement | null>(null);
   const { settings } = useSettings();
   const payload = (data?.payload ?? {}) as TerminalPayload;
   const title = (data?.title as string) ?? 'Terminal';
@@ -66,32 +71,38 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
     return base.length > 0 ? base : undefined;
   }, [payload.args, payload.resumeSessionId, isCodex]);
 
+  // Issue #272: AgentNodeCard と同じ「リサイズ後に末尾までスクロール」補正を適用。
+  // TerminalView の props は変更せず、wrapper div の ref を hook に渡すだけ。
+  useXtermScrollToBottomOnResize(termContainerRef);
+
   return (
     <>
       <Handle type="target" position={Position.Left} style={{ background: '#7a7afd' }} />
       <CardFrame id={id} title={title} minWidth={NODE_MIN_W} minHeight={NODE_MIN_H}>
-        <TerminalView
-          ref={ref}
-          cwd={cwd}
-          fallbackCwd={cwd}
-          command={command}
-          args={args}
-          visible={true}
-          teamId={payload.teamId}
-          agentId={payload.agentId}
-          role={payload.role}
-          // Issue #63: payload.codexInstructions を TerminalView に伝播
-          codexInstructions={payload.codexInstructions}
-          onStatus={setStatus}
-          onSessionId={handleSessionId}
-          // Canvas zoom で滲まないよう WebGL を切る (DOM renderer 固定)
-          disableWebgl
-          // Issue #253: 論理 px ベース fit + zoom 購読 + 可観測性
-          unscaledFit={fit.unscaledFit}
-          getCellSize={fit.getCellSize}
-          zoomSubscribe={fit.zoomSubscribe}
-          getZoom={fit.getZoom}
-        />
+        <div className="canvas-terminal-card__term" ref={termContainerRef}>
+          <TerminalView
+            ref={ref}
+            cwd={cwd}
+            fallbackCwd={cwd}
+            command={command}
+            args={args}
+            visible={true}
+            teamId={payload.teamId}
+            agentId={payload.agentId}
+            role={payload.role}
+            // Issue #63: payload.codexInstructions を TerminalView に伝播
+            codexInstructions={payload.codexInstructions}
+            onStatus={setStatus}
+            onSessionId={handleSessionId}
+            // Canvas zoom で滲まないよう WebGL を切る (DOM renderer 固定)
+            disableWebgl
+            // Issue #253: 論理 px ベース fit + zoom 購読 + 可観測性
+            unscaledFit={fit.unscaledFit}
+            getCellSize={fit.getCellSize}
+            zoomSubscribe={fit.zoomSubscribe}
+            getZoom={fit.getZoom}
+          />
+        </div>
       </CardFrame>
       <Handle type="source" position={Position.Right} style={{ background: '#7a7afd' }} />
     </>

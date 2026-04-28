@@ -16,6 +16,7 @@ import { useSettings } from '../../../lib/settings-context';
 import { useCanvasStore, NODE_MIN_W, NODE_MIN_H } from '../../../stores/canvas';
 import { useCanvasTerminalFit } from '../../../lib/use-canvas-terminal-fit';
 import { useConfirmRemoveCard } from '../../../lib/use-confirm-remove-card';
+import { useXtermScrollToBottomOnResize } from '../../../lib/use-xterm-scroll-on-resize';
 import { fallbackProfile, profileText, renderSystemPrompt, useRoleProfiles } from '../../../lib/role-profiles-context';
 import { parseShellArgs } from '../../../lib/parse-args';
 import { resolveAgentConfig } from '../../../lib/agent-resolver';
@@ -296,36 +297,10 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     [accent]
   );
 
-  // Issue #261: termContainer のサイズが変化したら .xterm-viewport を末尾までスクロール。
-  //   - NodeResizer でカードを広げたとき → 末尾行が新たに見えるべき領域に出る
-  //   - 縮めたとき → scrollTop が古い位置で残ると「下端が空白」になるので末尾に詰める
-  //   - 初回 mount 時 (xterm-viewport が生まれた直後) → こちらも末尾合わせ
-  // xterm.js は内部の Buffer に scrollback があり、自動末尾追従しているが、
-  // ResizeObserver の発火タイミングと xterm 側 fit の合流がずれると
-  // viewport.scrollTop だけ古い値で残ることがある。明示的に補正する。
-  useEffect(() => {
-    const node = termContainerRef.current;
-    if (!node) return;
-    const scrollViewportToBottom = (): void => {
-      const viewport = node.querySelector<HTMLElement>('.xterm-viewport');
-      if (!viewport) return;
-      // scrollHeight は xterm の rows 数 * cellH に追従する。
-      // requestAnimationFrame で xterm の reflow を待ってから scroll する。
-      window.requestAnimationFrame(() => {
-        viewport.scrollTop = viewport.scrollHeight;
-      });
-    };
-    const ro = new ResizeObserver(() => {
-      scrollViewportToBottom();
-    });
-    ro.observe(node);
-    // 初回 mount で .xterm-viewport が後から生成されるケース用に少し遅らせて 1 回試す
-    const initialTimer = window.setTimeout(scrollViewportToBottom, 100);
-    return () => {
-      ro.disconnect();
-      window.clearTimeout(initialTimer);
-    };
-  }, []);
+  // Issue #261 / #272: termContainer のサイズ変化時に .xterm-viewport を末尾まで
+  // スクロールし直す共通 hook。NodeResizer の縮小→拡大で scrollTop が古い値で
+  // 残り、最終行が下端で見切れるのを防ぐ。詳細は `use-xterm-scroll-on-resize.ts`。
+  useXtermScrollToBottomOnResize(termContainerRef);
 
   return (
     <>
