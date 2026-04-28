@@ -109,23 +109,19 @@ impl SessionRegistry {
                 }
             }
         }
-        // Issue #271: session_key index を更新。同 key の旧 entry は preflight で attach されて
-        // いるはずだが、安全側に倒して既存 entry を上書きしておく (孤立しない限り旧 PTY は別経路で kill 済み)。
+        // Issue #271: session_key index を更新。
+        // 旧設計では同 key の旧 entry を kill していたが、これは renderer から信頼でき
+        // ない sessionKey が来た場合の DoS 経路 (他カードの key を送るだけで PTY を殺せる)
+        // になりうる。preflight (find_attach_target) で attach 経路が完結する前提なので、
+        // ここで insert に到達する = preflight が miss した = 通常 spawn 経路。
+        // 旧 entry が by_id に残っていれば warn ログを出すだけにして kill しない。
+        // 旧 entry はライフサイクルの自然な経路 (terminal_kill / exit watcher) で消える。
         if let Some(skey) = handle.session_key.clone() {
-            if let Some(prev_sid) = g.by_session_key.insert(skey, id.clone()) {
-                if prev_sid != id {
-                    if let Some(old) = g.by_id.remove(&prev_sid) {
-                        if let Some(aid) = &old.agent_id {
-                            if g.by_agent.get(aid).map(String::as_str) == Some(prev_sid.as_str())
-                            {
-                                g.by_agent.remove(aid);
-                            }
-                        }
-                        tracing::info!(
-                            "[registry] replacing session_key entry {prev_sid} with {id} — killing old PTY"
-                        );
-                        let _ = old.kill();
-                    }
+            if let Some(prev_sid) = g.by_session_key.insert(skey.clone(), id.clone()) {
+                if prev_sid != id && g.by_id.contains_key(&prev_sid) {
+                    tracing::warn!(
+                        "[registry] session_key {skey} collision detected — index now points to new {id}, prior {prev_sid} left intact (caller must kill explicitly)"
+                    );
                 }
             }
         }
