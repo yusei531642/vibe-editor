@@ -48,7 +48,14 @@ jobs:
             libssl-dev
 
       - name: Install npm dependencies
-        run: npm ci
+        # Issue #253: Windows ローカルで `npm install` した lockfile から
+        # @emnapi/runtime@1.10.0 等の Linux 専用 transitive deps が drop され、
+        # `npm ci` の strict lockfile check を通過できない (npm CLI の OS-specific
+        # optional deps バグ: https://github.com/npm/cli/issues/4828)。
+        # `npm install --no-audit --no-fund` に切り替え、欠落 deps を CI ランナー上で
+        # resolve させる。Docker / Linux 環境で完全な lockfile を再生成できる体制が
+        # 整ったら `npm ci` に戻す予定。
+        run: npm install --no-audit --no-fund
 
       - name: TypeScript typecheck
         run: npm run typecheck
