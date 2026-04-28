@@ -80,7 +80,7 @@
       "name": "computeUnscaledGrid 純関数 (境界値ガード)",
       "status": "COMPLETED",
       "safe_point": {
-        "commit_hash": "TBD-on-commit",
+        "commit_hash": "3c2aa6ba472e7631730238d8fb4377287c9c3207",
         "tests_passed": [
           "通常値: 800x600/8/16 → 100x37",
           "Math.floor 端数切り捨て",
