@@ -44,9 +44,12 @@ interface RecruitCancelledPayload {
 }
 
 // NODE_W / NODE_H は stores/canvas.ts の共有定数を import (Issue #253 で 640x400 に拡張)
-// Issue #253 sub: NODE_W=640 化に伴い、隣接配置で約 100px 食い込んでカードが重なる
-// regression を回避するため、NODE_W + 80 に揃える (旧 540 → 720)。
-const RECRUIT_RADIUS = NODE_W + 80; // requester からの距離 (重なり防止マージン込み)
+// Issue #253 review (#6): NODE_W=640 のまま `NODE_W + 80 = 720` にすると、Leader 中心に
+// 同心円で 6 人配置したとき論理幅 2080 px 超を要求し、1080p (1920x1080) では端のメンバーが
+// 初期 viewport から外れる UX 退行が起きる。`Math.max(540, NODE_W * 0.85)` で
+// (a) 旧 540 を下限として保ち、 (b) 新サイズの 85% (= 544 px) で重なり防止マージンを確保する。
+// 1080p でも Leader+5 名が概ね viewport 内に収まる距離。
+const RECRUIT_RADIUS = Math.max(540, Math.round(NODE_W * 0.85));
 
 /** requester の周囲で空いている角度を見つけて配置位置を返す。
  *  既存メンバーの方角をスキャンし、最も空いている角度をピック。 */

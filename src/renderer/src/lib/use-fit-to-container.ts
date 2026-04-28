@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
@@ -102,12 +102,24 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
     }, 120);
   };
 
-  const refit = (): void => {
+  // Issue #253 review (W#4): refit を useCallback でラップして identity を安定化させる。
+  // すべての可変値は ref 経由 (unscaledFitRef / getCellSizeRef / getZoomRef / lastScheduledRef
+  // など) で読むため deps は空でよく、stale closure にはならない。これにより effect が
+  // 再実行されない設計が型レベルでも明示され、後続保守者が deps に直接 props を渡す
+  // 変更を入れて無限ループを引き起こすリスクを下げる。
+  const refit = useCallback((): void => {
     const term = termRef.current;
     if (!term) return;
     const container = containerRef.current;
 
-    if (unscaledFitRef.current && container) {
+    // Issue #253 review (#4): unscaled モード優先のガード。
+    // Canvas モードがオンなら、container 不在 / cell 未取得 / grid 算出失敗のいずれでも
+    // IDE 経路の fit.fit() に**フォールバックしない**。fit.fit() は getBoundingClientRect
+    // 経由で transform 後の視覚矩形を読んでしまうため、Canvas モード中に呼ぶと主因 P6 が
+    // 一瞬だけ再発する。unscaled モードでは黙って return し、後続の ResizeObserver / zoom
+    // 購読 / fonts.ready 経路で再 refit を待つ方が安全。
+    if (unscaledFitRef.current) {
+      if (!container) return;
       const getCell = getCellSizeRef.current;
       const cell = getCell?.();
       if (!cell) return;
@@ -124,8 +136,6 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
         if (ptyIdRef.current) {
           schedulePtyResize(grid.cols, grid.rows);
         }
-        // Issue #253: 可観測性ログ。dev ビルドのみ。zoom/cellW/cellH/fallback まで含めて
-        // 「PTY が今どの寸法で走っているか」を DevTools コンソールから即追える。
         if (import.meta.env.DEV) {
           console.debug('pty.resize', {
             cols: grid.cols,
@@ -163,7 +173,8 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
     } catch {
       /* 非表示状態などでの失敗は無視 */
     }
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ResizeObserver は一度だけ作る
   useEffect(() => {

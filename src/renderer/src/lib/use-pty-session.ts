@@ -128,47 +128,9 @@ export function usePtySession(options: UsePtySessionOptions): void {
       });
     };
 
-    // 初期サイズ調整。
-    // Canvas モード (unscaledFit=true) では、`transform: scale(zoom)` 下で
-    // FitAddon.fit() が getBoundingClientRect 経由で scale 後の視覚矩形を読んでしまうため、
-    // 論理 px (clientWidth/clientHeight) と zoom 非依存のセルメトリクスから直接 cols/rows
-    // を算出して term.resize() する。Issue #253 P6 の主因対策。
+    // 初期サイズ調整は async IIFE 内に移動 (Review #1: document.fonts.ready 待ちのため)
     let initialCols = 80;
     let initialRows = 24;
-    try {
-      const container = containerRefRef.current?.current;
-      const cell = getCellSizeRef.current?.();
-      if (unscaledFitRef.current && container && cell) {
-        const grid = computeUnscaledGrid(
-          container.clientWidth,
-          container.clientHeight,
-          cell.cellW,
-          cell.cellH
-        );
-        if (grid) {
-          term.resize(grid.cols, grid.rows);
-          initialCols = grid.cols;
-          initialRows = grid.rows;
-          // useFitToContainer 側の lastScheduledRef を seed して、30ms 後 visible-effect の
-          // 二重 IPC 発火を抑止する (H1 解消)。
-          const sharedRef = lastScheduledRefRef.current;
-          if (sharedRef) {
-            sharedRef.current = { cols: grid.cols, rows: grid.rows };
-          }
-        } else {
-          // grid 算出失敗 (container clientWidth=0 等) → 従来 fit にフォールバック
-          fit?.fit();
-          initialCols = term.cols;
-          initialRows = term.rows;
-        }
-      } else {
-        fit?.fit();
-        initialCols = term.cols;
-        initialRows = term.rows;
-      }
-    } catch {
-      /* 非表示マウント時は失敗してもOK */
-    }
 
     let offData: (() => void) | null = null;
     let offExit: (() => void) | null = null;
@@ -176,6 +138,63 @@ export function usePtySession(options: UsePtySessionOptions): void {
 
     (async () => {
       try {
+        // Issue #253 review (W#1): web font (JetBrains Mono Variable 等) ロード前に
+        // measureCellSize が走ると system monospace のメトリクスを返し、誤った cellW で
+        // PTY が立つ。Canvas モードでは fonts.ready を待ってから測ることで、Codex の
+        // banner も初回描画から正しい寸法で描画される。IDE モードでは fit.fit() が DOM
+        // メトリクスベースなので待つ必要なし。
+        if (unscaledFitRef.current && typeof document !== 'undefined' && document.fonts) {
+          try {
+            await document.fonts.ready;
+          } catch {
+            /* fonts.ready は通常 reject しないが、念のため握りつぶす */
+          }
+          if (localDisposed || disposedRef.current) return;
+        }
+
+        // 初期サイズ算出。
+        // Canvas モード (unscaledFit=true) では、`transform: scale(zoom)` 下で
+        // FitAddon.fit() が getBoundingClientRect 経由で scale 後の視覚矩形を読んでしまうため、
+        // 論理 px (clientWidth/clientHeight) と zoom 非依存のセルメトリクスから cols/rows を
+        // 算出して term.resize() する。Issue #253 P6 の主因対策。
+        // Review #4 + #5: unscaled モードでは IDE 経路 (fit.fit()) に**絶対に**フォールバック
+        // しない。fit.fit() を呼ぶと transform 後矩形を読んでしまい主因 P6 が一瞬だけ再発する
+        // ため、grid 算出失敗時は xterm デフォルトの 80x24 のまま続行する (後続の
+        // useFitToContainer.refit が論理 px 経路で 30ms 以内に補正するので実害なし)。
+        try {
+          if (unscaledFitRef.current) {
+            const container = containerRefRef.current?.current;
+            const cell = getCellSizeRef.current?.();
+            if (container && cell) {
+              const grid = computeUnscaledGrid(
+                container.clientWidth,
+                container.clientHeight,
+                cell.cellW,
+                cell.cellH
+              );
+              if (grid) {
+                term.resize(grid.cols, grid.rows);
+                initialCols = grid.cols;
+                initialRows = grid.rows;
+                // useFitToContainer の lastScheduledRef を seed して、30ms 後 visible-effect
+                // の二重 IPC 発火を抑止する。
+                const sharedRef = lastScheduledRefRef.current;
+                if (sharedRef) {
+                  sharedRef.current = { cols: grid.cols, rows: grid.rows };
+                }
+              }
+              // grid 算出失敗 → 80x24 のまま続行 (Review #5)
+            }
+            // container/cell 不在も同様 80x24 のまま続行 (Review #4)
+          } else {
+            fit?.fit();
+            initialCols = term.cols;
+            initialRows = term.rows;
+          }
+        } catch {
+          /* 非表示マウント時は失敗してもOK */
+        }
+
         callbacksRef.current.onStatus?.(`${command} を起動中…`);
         // 不変式 #2: 初回 spawn 時点のスナップショットを使う (以後の prop 変化は無視)
         const snap = snapRef.current;

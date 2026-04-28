@@ -117,9 +117,23 @@ function newId(prefix: string): string {
 const pulseTimers = new Map<string, number>();
 
 export const useCanvasStore = create<CanvasState>()(
-  // Issue #253 sub: subscribeWithSelector で `subscribe(selector, listener)` API を有効化。
-  // useCanvasTerminalFit の zoom 購読が selector subscribe に切り替えられ、量子化判定が
-  // zustand 内部で行われるので毎フレーム数百回の callback ホットパスが消える。
+  /**
+   * Issue #253 sub: subscribeWithSelector で `subscribe(selector, listener)` API を有効化。
+   * useCanvasTerminalFit の zoom 購読が selector subscribe に切り替えられ、量子化判定が
+   * zustand 内部で行われるので毎フレーム数百回の callback ホットパスが消える。
+   *
+   * ★ MIDDLEWARE 順序の警告 (Issue #253 review W#2 / #7):
+   *   `subscribeWithSelector` は **必ず persist の outer に置くこと**。逆順
+   *   (`persist(subscribeWithSelector(...))`) にすると、persist が subscribe API をラップし
+   *   直して `selector` 引数版 (selector subscribe) を吸収しないため、selector が listener
+   *   として解釈されて毎フレーム発火する潜在的バグになる。型レベルでは検出されない (TS は
+   *   subscribe の overload を判別できない)。
+   *
+   *   依存箇所:
+   *   - `src/renderer/src/lib/use-canvas-terminal-fit.ts` の `zoomSubscribe` が
+   *     `useCanvasStore.subscribe((s) => quantize(s.viewport.zoom), cb)` で selector subscribe
+   *     を使う。middleware を外す/順序を変える前に必ず影響を確認すること。
+   */
   subscribeWithSelector(
     persist(
     (set, get) => ({

@@ -7,11 +7,13 @@
  */
 import { describe, it, expect, beforeEach } from 'vitest';
 
-// 動的 import: import 時のテンプレ展開を避け、毎テスト前に store をフレッシュ取得する
+// Issue #253 review (W#3): migrate を pure function として取得する。
+// store state には依存しない。Vitest の動的 import は通常モジュールキャッシュを使う
+// (vi.resetModules() なしでは 2 回目以降同一インスタンスが返る) ので、本関数は
+// 「migrate 関数を引っ張り出すための薄いラッパー」として機能している。
+// テストは `useCanvasStore.persist.getOptions().migrate!` を pure function として呼ぶだけで、
+// store 内部の hydrated state には触れないため、キャッシュされていても動作に影響しない。
 async function loadStore() {
-  // canvas store は import 時に persist 初期化を走らせるため、毎回 vite-node の cache を
-  // クリアして fresh インスタンスを得る。jsdom 上では localStorage は毎テスト共有なので
-  // beforeEach で clear する。
   return await import('../canvas');
 }
 
