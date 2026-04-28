@@ -48,6 +48,12 @@ export interface UsePtySessionOptions {
   getCellSize?: () => CellSize | null;
   /** unscaled fit 用のコンテナ参照 (clientWidth/clientHeight 取得) */
   containerRef?: RefObject<HTMLDivElement>;
+  /**
+   * useFitToContainer と共有する「最後にスケジュールしたサイズ」ref。
+   * 初回 spawn 時の `term.resize(cols, rows)` 後に seed しておくと、その直後に走る
+   * useFitToContainer の visible-effect refit が IPC を二重発火させずに済む。
+   */
+  lastScheduledRef?: MutableRefObject<{ cols: number; rows: number } | null>;
 }
 
 /**
@@ -75,11 +81,23 @@ export function usePtySession(options: UsePtySessionOptions): void {
     observeChunk,
     unscaledFit = false,
     getCellSize,
-    containerRef
+    containerRef,
+    lastScheduledRef
   } = options;
 
   const observeChunkRef = useRef(observeChunk);
   observeChunkRef.current = observeChunk;
+  // Issue #253 sub (H2'): closure 直読 → ref 化。font 変更直後に cwd/command も
+  // 切り替わって effect が re-run するレアケースで、古い getCellSize/unscaledFit を
+  // 拾ってしまう stale closure リスクを排除する。
+  const unscaledFitRef = useRef(unscaledFit);
+  unscaledFitRef.current = unscaledFit;
+  const getCellSizeRef = useRef(getCellSize);
+  getCellSizeRef.current = getCellSize;
+  const containerRefRef = useRef(containerRef);
+  containerRefRef.current = containerRef;
+  const lastScheduledRefRef = useRef(lastScheduledRef);
+  lastScheduledRefRef.current = lastScheduledRef;
 
   useEffect(() => {
     const term = termRef.current;
@@ -118,9 +136,9 @@ export function usePtySession(options: UsePtySessionOptions): void {
     let initialCols = 80;
     let initialRows = 24;
     try {
-      const container = containerRef?.current;
-      const cell = getCellSize?.();
-      if (unscaledFit && container && cell) {
+      const container = containerRefRef.current?.current;
+      const cell = getCellSizeRef.current?.();
+      if (unscaledFitRef.current && container && cell) {
         const grid = computeUnscaledGrid(
           container.clientWidth,
           container.clientHeight,
@@ -131,6 +149,12 @@ export function usePtySession(options: UsePtySessionOptions): void {
           term.resize(grid.cols, grid.rows);
           initialCols = grid.cols;
           initialRows = grid.rows;
+          // useFitToContainer 側の lastScheduledRef を seed して、30ms 後 visible-effect の
+          // 二重 IPC 発火を抑止する (H1 解消)。
+          const sharedRef = lastScheduledRefRef.current;
+          if (sharedRef) {
+            sharedRef.current = { cols: grid.cols, rows: grid.rows };
+          }
         } else {
           // grid 算出失敗 (container clientWidth=0 等) → 従来 fit にフォールバック
           fit?.fit();

@@ -5,7 +5,7 @@
  * Phase 3 以降で agent ノード / hand-off エッジを正規化していく。
  */
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, subscribeWithSelector } from 'zustand/middleware';
 import type { Edge, Node, Viewport } from '@xyflow/react';
 
 export type CardType = 'terminal' | 'agent' | 'editor' | 'diff' | 'fileTree' | 'changes';
@@ -117,7 +117,11 @@ function newId(prefix: string): string {
 const pulseTimers = new Map<string, number>();
 
 export const useCanvasStore = create<CanvasState>()(
-  persist(
+  // Issue #253 sub: subscribeWithSelector で `subscribe(selector, listener)` API を有効化。
+  // useCanvasTerminalFit の zoom 購読が selector subscribe に切り替えられ、量子化判定が
+  // zustand 内部で行われるので毎フレーム数百回の callback ホットパスが消える。
+  subscribeWithSelector(
+    persist(
     (set, get) => ({
       nodes: [],
       edges: [],
@@ -361,5 +365,6 @@ export const useCanvasStore = create<CanvasState>()(
         teamLocks: s.teamLocks
       })
     }
+    )
   )
 );

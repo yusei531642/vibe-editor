@@ -39,6 +39,13 @@ export interface UseFitToContainerOptions {
   zoomSubscribe?: (cb: () => void) => () => void;
   /** 可観測性ログ用に現在の zoom を取得 (`console.debug('pty.resize', ...)` に乗る) */
   getZoom?: () => number;
+  /**
+   * 「最後にスケジュールした PTY サイズ」を usePtySession と共有する ref。
+   * spawn 時の `term.resize(cols, rows)` 後に seed しておくと、初回 30ms 後 refit の
+   * `schedulePtyResize` が dedupe で IPC を skip して二重 SIGWINCH を抑止できる。
+   * 渡されない場合は内部で生成 (IDE モード等で実害なし)。
+   */
+  lastScheduledRef?: MutableRefObject<{ cols: number; rows: number } | null>;
 }
 
 export function useFitToContainer(options: UseFitToContainerOptions): void {
@@ -52,7 +59,8 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
     unscaledFit = false,
     getCellSize,
     zoomSubscribe,
-    getZoom
+    getZoom,
+    lastScheduledRef: externalLastScheduledRef
   } = options;
 
   // visible / unscaledFit / getCellSize の最新値を ref で見る (RO 再マウント不要)
@@ -68,7 +76,10 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
   // PTY resize IPC を debounce (リサイズ中の毎フレーム IPC 抑制)
   const ptyResizeTimerRef = useRef<number | null>(null);
   const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null);
-  const lastScheduledRef = useRef<{ cols: number; rows: number } | null>(null);
+  // usePtySession と共有可能な「最後にスケジュールしたサイズ」ref。
+  // 外部から渡されたらそれを使い、初回 spawn 時の seed が dedupe を効かせる。
+  const internalLastScheduledRef = useRef<{ cols: number; rows: number } | null>(null);
+  const lastScheduledRef = externalLastScheduledRef ?? internalLastScheduledRef;
 
   const schedulePtyResize = (cols: number, rows: number): void => {
     if (
@@ -196,6 +207,28 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
     refit();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, refitTriggers);
+
+  // Issue #253 sub (M2): webfont (JetBrains Mono Variable 等) のロード前に
+  // measureCellSize が走ると system monospace のメトリクスを返すため、初回 spawn の
+  // cellW がずれた grid で PTY が立つ。document.fonts.ready で全 webfont ロード完了を
+  // 待ち、unscaled モードなら 1 回だけ refit を発火して正しい寸法に上書きする。
+  useEffect(() => {
+    if (!unscaledFit) return;
+    if (typeof document === 'undefined' || !document.fonts) return;
+    let cancelled = false;
+    document.fonts.ready
+      .then(() => {
+        if (cancelled) return;
+        refit();
+      })
+      .catch(() => {
+        /* fonts.ready は通常 reject しないが、念のため握りつぶす */
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unscaledFit]);
 
   // Canvas zoom 変化を購読して refit を debounce 発火させる
   useEffect(() => {

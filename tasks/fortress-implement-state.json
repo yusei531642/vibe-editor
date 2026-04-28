@@ -3,9 +3,9 @@
   "tier": "I2",
   "tier_score": 12,
   "total_slices": 8,
-  "current_slice": 8,
-  "phase": "PHASE_3",
-  "next_action": "Phase 3 統合検証 (lint/typecheck/test 全 PASS) → Phase 4 証跡パック生成",
+  "current_slice": 9,
+  "phase": "PHASE_3_REVIEW",
+  "next_action": "S8 (サブエージェントレビュー指摘 8 件全反映) 完了。実機 Tauri 手動チェック (cargo セットアップ後) で Phase 4 Go/No-Go 判定",
   "branch": "fix/issue-253-canvas-fit-unscaled",
   "slices": [
     {
@@ -250,6 +250,11 @@
       "slice_id": "S2",
       "attempt": 1,
       "scope_adjustment": "Tier I2 = 5体並列クロスチェックを軽量化。純関数 ~60行 (実装30+テスト40) で fortress-review Round1 / S0 クロスチェック由来の API 指摘 (private API 排除 / fallback / ゼロ除算ガード) は反映済み。test 10/10 PASS + typecheck PASS で代替。S4 の hooks 実装で本来強度を再開予定"
+    },
+    {
+      "slice_id": "S8",
+      "attempt": 1,
+      "scope_adjustment": "Phase 3 中に Claude Code の 3 体並列サブエージェントレビュー (general-purpose 設計/regression、general-purpose React) を実施。CRITICAL 2件 (NODE_MIN 不整合 / RECRUIT_RADIUS<NODE_W)、HIGH 4件 (二重 PTY IPC race / zoomSubscribe strict-mode / selector なし subscribe / usePtySession stale closure)、MEDIUM 2件 (useMemo / fonts.ready 待ち) を 1 commit でまとめて修正。subscribeWithSelector ミドルウェア導入で H1'+H2 を同時解消、lastScheduledRef 共有で H1 解消、ref 化で H2'、useMemo + 戻り値型明示で M1、document.fonts.ready で M2、CardFrame の NODE_MIN 統一で C-1、RECRUIT_RADIUS=NODE_W+80 で C-2"
     }
   ],
   "started_at": "2026-04-28T08:30:00Z",

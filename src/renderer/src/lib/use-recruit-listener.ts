@@ -44,7 +44,9 @@ interface RecruitCancelledPayload {
 }
 
 // NODE_W / NODE_H は stores/canvas.ts の共有定数を import (Issue #253 で 640x400 に拡張)
-const RECRUIT_RADIUS = 540; // requester からの距離
+// Issue #253 sub: NODE_W=640 化に伴い、隣接配置で約 100px 食い込んでカードが重なる
+// regression を回避するため、NODE_W + 80 に揃える (旧 540 → 720)。
+const RECRUIT_RADIUS = NODE_W + 80; // requester からの距離 (重なり防止マージン込み)
 
 /** requester の周囲で空いている角度を見つけて配置位置を返す。
  *  既存メンバーの方角をスキャンし、最も空いている角度をピック。 */

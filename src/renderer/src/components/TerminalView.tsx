@@ -117,6 +117,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     // --- ref で state を hook 間共有 ---
     const ptyIdRef = useRef<string | null>(null);
     const disposedRef = useRef(false);
+    // Issue #253 sub (H1): usePtySession の初回 spawn で seed されると、useFitToContainer の
+    // 30ms 後 visible-effect refit が同じ cols/rows を計算したとき dedupe で IPC を skip する。
+    // これにより SIGWINCH の二重発火を防ぐ。
+    const lastScheduledRef = useRef<{ cols: number; rows: number } | null>(null);
 
     // 不変式 #2: args / env / teamId / agentId / role / initialMessage は
     // spawn 時に一度だけ使う値。ref 経由で usePtySession 内部に渡す。
@@ -183,7 +187,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       // Issue #253: Canvas モードでは初回 spawn 時から unscaled な cols/rows を使う
       unscaledFit,
       getCellSize,
-      containerRef
+      containerRef,
+      lastScheduledRef
     });
 
     // --- Ctrl+C / Ctrl+V / 画像ペースト (不変式 #4) ---
@@ -211,7 +216,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       unscaledFit,
       getCellSize,
       zoomSubscribe,
-      getZoom
+      getZoom,
+      lastScheduledRef
     });
 
     // --- 外部操作用ハンドル (public API は不変) ---

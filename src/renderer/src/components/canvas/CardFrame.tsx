@@ -7,6 +7,7 @@
 import type { ReactNode } from 'react';
 import { NodeResizer } from '@xyflow/react';
 import { useConfirmRemoveCard } from '../../lib/use-confirm-remove-card';
+import { NODE_MIN_W, NODE_MIN_H } from '../../stores/canvas';
 
 interface CardFrameProps {
   id: string;
@@ -36,8 +37,8 @@ export function CardFrame({ id, title, accent, children }: CardFrameProps): JSX.
       }}
     >
       <NodeResizer
-        minWidth={240}
-        minHeight={160}
+        minWidth={NODE_MIN_W}
+        minHeight={NODE_MIN_H}
         color={accent ?? '#5c5cff'}
         handleStyle={{ width: 8, height: 8, borderRadius: 2 }}
         lineStyle={{ borderWidth: 1 }}
