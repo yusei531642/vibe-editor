@@ -31,7 +31,7 @@ serde_json = "1"
 # --- PTY / TeamHub ---
 portable-pty = "0.9"
 bytes = "1"
-notify = "6"
+notify = "8"
 
 # --- error / logging ---
 anyhow = "1"
