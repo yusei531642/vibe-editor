@@ -174,7 +174,7 @@
       "name": "persist v3 migration + NODE_W/H 引き上げ + 重複定数共有",
       "status": "COMPLETED",
       "safe_point": {
-        "commit_hash": "TBD-on-commit",
+        "commit_hash": "596ede4735a54f393c1792c43b0cbb9e7c1b5443",
         "tests_passed": [
           "v2 → v3: width<=480/height<=320 → 640/400 拡大",
           "v2 → v3: 手動拡大値 (1000x600) は尊重",
