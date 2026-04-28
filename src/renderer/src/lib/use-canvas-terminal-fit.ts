@@ -23,7 +23,11 @@ const quantizeZoom = (z: number): number => Math.round(z * 100) / 100;
 
 export interface CanvasTerminalFit {
   unscaledFit: true;
-  getCellSize: () => CellSize | null;
+  // Issue #253 review (W2): measureCellSize は fallback 含め常に CellSize を返すため、
+  // Canvas 専用ハーネスでは nullable にする理由がない。null チェックを呼出側に強制すると
+  // 型と実装が乖離する。TerminalView の汎用 prop (`getCellSize?: () => CellSize | null`) は
+  // 別文脈なのでそちらは nullable のまま (例: hooks 経路で undefined を吸収する用)。
+  getCellSize: () => CellSize;
   zoomSubscribe: (cb: () => void) => () => void;
   getZoom: () => number;
 }
@@ -33,7 +37,7 @@ export function useCanvasTerminalFit(settings: AppSettings): CanvasTerminalFit {
   const fontFamily = settings.terminalFontFamily || settings.editorFontFamily || 'monospace';
 
   const getCellSize = useCallback(
-    (): CellSize | null => measureCellSize(fontSize, fontFamily, 1.0),
+    (): CellSize => measureCellSize(fontSize, fontFamily, 1.0),
     [fontSize, fontFamily]
   );
 

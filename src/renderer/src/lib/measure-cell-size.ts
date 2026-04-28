@@ -17,6 +17,15 @@ const FALLBACK_CELL_W_RATIO = 0.6;
 const SAFE_DEFAULT_FONT_SIZE = 13;
 const SAFE_DEFAULT_LINE_HEIGHT = 1.0;
 
+/**
+ * Issue #253 review (I1): zoom 変化や ResizeObserver 経由で本関数が高頻度に呼ばれるため、
+ * 毎回 `document.createElement('canvas')` で HTMLCanvasElement を生成すると不要な
+ * allocation/GC が走る。モジュールスコープで 1 個だけキャッシュし、`getContext('2d')` を
+ * 同じ canvas に対して呼び続ける。canvas 自体は DOM に追加されない (offscreen) ので
+ * テスト環境でも副作用なし。
+ */
+let cachedMeasureCanvas: HTMLCanvasElement | null = null;
+
 export interface CellSize {
   /** セル 1 個の幅 (CSS px、論理単位) */
   cellW: number;
@@ -46,7 +55,7 @@ export function measureCellSize(
   if (typeof document === 'undefined') return fallback;
 
   try {
-    const canvas = document.createElement('canvas');
+    const canvas = cachedMeasureCanvas ?? (cachedMeasureCanvas = document.createElement('canvas'));
     const ctx = canvas.getContext('2d');
     if (!ctx) return fallback;
     const family = fontFamily.trim() || 'monospace';
