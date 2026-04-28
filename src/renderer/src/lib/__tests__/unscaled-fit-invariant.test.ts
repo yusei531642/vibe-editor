@@ -12,20 +12,23 @@ import { measureCellSize } from '../measure-cell-size';
 import { computeUnscaledGrid } from '../compute-unscaled-grid';
 
 describe('unscaled fit invariant (Issue #253 P6)', () => {
-  it('zoom 0.3/1.0/1.5 で同一の論理サイズなら cols/rows は同一', () => {
-    // container.clientWidth / clientHeight は transform 非適用の論理 px。
-    // zoom が 0.3/1.0/1.5 でも、論理サイズが 800x600 なら入力は同じになる。
+  it('zoom は入力に含まれず、同一の論理サイズなら cols/rows は不変 (3 回呼んでも同値)', () => {
+    // 設計上の不変性: container.clientWidth / clientHeight は transform: scale(zoom) の
+    // 影響を受けない論理 px なので、zoom がいくつでも同じ値が来る。本テストは
+    // 「同じ論理サイズを 3 回渡したら 3 回とも同じ結果」を保証する (= 純関数の冪等性)。
+    // 実機の zoom 0.3/1.0/1.5 は呼出側 (useFitToContainer) のホットパスで踏まれるが、
+    // computeUnscaledGrid に直接渡る zoom 値は無いので入力に含めない。
     const logicalWidth = 800;
     const logicalHeight = 600;
     const cell = measureCellSize(13, 'monospace', 1.0);
 
-    const gridZ03 = computeUnscaledGrid(logicalWidth, logicalHeight, cell.cellW, cell.cellH);
-    const gridZ10 = computeUnscaledGrid(logicalWidth, logicalHeight, cell.cellW, cell.cellH);
-    const gridZ15 = computeUnscaledGrid(logicalWidth, logicalHeight, cell.cellW, cell.cellH);
+    const gridFromLogicalSize1 = computeUnscaledGrid(logicalWidth, logicalHeight, cell.cellW, cell.cellH);
+    const gridFromLogicalSize2 = computeUnscaledGrid(logicalWidth, logicalHeight, cell.cellW, cell.cellH);
+    const gridFromLogicalSize3 = computeUnscaledGrid(logicalWidth, logicalHeight, cell.cellW, cell.cellH);
 
-    expect(gridZ03).not.toBeNull();
-    expect(gridZ03).toEqual(gridZ10);
-    expect(gridZ10).toEqual(gridZ15);
+    expect(gridFromLogicalSize1).not.toBeNull();
+    expect(gridFromLogicalSize1).toEqual(gridFromLogicalSize2);
+    expect(gridFromLogicalSize2).toEqual(gridFromLogicalSize3);
   });
 
   it('もし誤って getBoundingClientRect (scale 後の視覚矩形) を渡すと cols/rows が zoom に依存して崩れる (アンチパターン検証)', () => {
