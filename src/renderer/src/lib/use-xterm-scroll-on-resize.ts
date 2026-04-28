@@ -43,15 +43,20 @@ export function useXtermScrollToBottomOnResize(
 
     let rafId: number | null = null;
     const scrollViewportToBottom = (): void => {
-      const viewport = node.querySelector<HTMLElement>('.xterm-viewport');
-      if (!viewport) return;
+      // Issue #272: xterm v6 の実スクロール host は `.xterm-scrollable-element`。
+      // `.xterm-viewport` への scrollTop 変更は xterm の scroll model と同期しないため、
+      // scrollable-element を優先し、無ければ既存テスト互換のため `.xterm-viewport` に fallback。
+      const scrollHost =
+        node.querySelector<HTMLElement>('.xterm-scrollable-element') ??
+        node.querySelector<HTMLElement>('.xterm-viewport');
+      if (!scrollHost) return;
       // requestAnimationFrame で xterm の reflow を待ってから scroll する。
       if (rafId !== null) {
         window.cancelAnimationFrame(rafId);
       }
       rafId = window.requestAnimationFrame(() => {
         rafId = null;
-        viewport.scrollTop = viewport.scrollHeight;
+        scrollHost.scrollTop = scrollHost.scrollHeight;
       });
     };
 

@@ -3,6 +3,7 @@ import type { MutableRefObject, RefObject } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
 import { computeUnscaledGrid } from './compute-unscaled-grid';
+import { getXtermRuntimeCellSize } from './get-xterm-runtime-cell-size';
 import type { CellSize } from './measure-cell-size';
 
 const VISIBLE_FIT_DELAY_MS = 30;
@@ -134,9 +135,14 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
     // 購読 / fonts.ready 経路で再 refit を待つ方が安全。
     if (unscaledFitRef.current) {
       if (!container) return;
-      const getCell = getCellSizeRef.current;
-      const cell = getCell?.();
+      // Issue #272: xterm 自身が保持する実 cell サイズを優先。取れなければ Canvas 2D
+      // measureText ベースの getCellSize にフォールバック。これで rows fit が xterm
+      // 内部 rows と一致し、`.xterm-screen` の固定 px 高さがカード高さに揃う。
+      const runtimeCell = getXtermRuntimeCellSize(term);
+      const fallbackCell = getCellSizeRef.current?.() ?? null;
+      const cell = runtimeCell ?? fallbackCell;
       if (!cell) return;
+      const source = runtimeCell ? 'unscaled-runtime' : 'unscaled-fallback';
       const grid = computeUnscaledGrid(
         container.clientWidth,
         container.clientHeight,
@@ -155,10 +161,10 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
             cols: grid.cols,
             rows: grid.rows,
             zoom: getZoomRef.current?.() ?? null,
-            source: 'unscaled',
+            source,
             cellW: cell.cellW,
             cellH: cell.cellH,
-            fallback: cell.fallback
+            fallback: runtimeCell ? false : fallbackCell?.fallback
           });
         }
       } catch {
