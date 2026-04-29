@@ -159,6 +159,149 @@ pub fn app_set_zoom_level(window: tauri::WebviewWindow, level: f64) -> Result<()
     Ok(())
 }
 
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SetWindowEffectsResult {
+    pub ok: bool,
+    /// OS ネイティブ effect が実際に適用されたか。Linux 等の非対応プラットフォームや
+    /// 古い Windows ビルドでは false。renderer は CSS backdrop-filter フォールバックに
+    /// デグラデする判断材料として使う。
+    pub applied: bool,
+    pub error: Option<String>,
+}
+
+/// Issue #260 PR-1: テーマに応じて OS ネイティブの window effect を切り替える。
+/// - Windows: `glass` テーマで Acrylic (PowerShell の Windows Terminal 同等の動的ぼかし)
+/// - macOS: `glass` テーマで under-window vibrancy
+/// - Linux: 非対応 (no-op、ok=true / applied=false)
+/// 他テーマ (claude-dark / claude-light / dark / midnight / light) では effect を解除し、
+/// 通常の不透明背景に戻す。
+///
+/// 戻り値は `SetWindowEffectsResult` (Result でラップしない) — 自己レビュー D-3C。
+/// IPC 自体は失敗せず、OS 側の applied 状態は `applied` フィールドで返す方針。
+#[tauri::command]
+pub fn app_set_window_effects(
+    window: tauri::WebviewWindow,
+    theme: String,
+) -> SetWindowEffectsResult {
+    let is_glass = theme == "glass";
+    apply_window_effects(&window, is_glass)
+}
+
+/// 起動時の初期適用 (`lib.rs` の `setup` から呼ぶ)。`#[tauri::command]` 関数を internal で
+/// 直接呼ぶと State 引数を取り始めた瞬間に破綻するため、純関数として `pub(crate)` で公開。
+pub(crate) fn apply_window_effects_for_startup(
+    window: &tauri::WebviewWindow,
+    is_glass: bool,
+) -> SetWindowEffectsResult {
+    apply_window_effects(window, is_glass)
+}
+
+#[cfg(target_os = "windows")]
+fn apply_window_effects(
+    window: &tauri::WebviewWindow,
+    is_glass: bool,
+) -> SetWindowEffectsResult {
+    use tauri::window::{Effect, EffectState, EffectsBuilder};
+    if is_glass {
+        let cfg = EffectsBuilder::new()
+            .effect(Effect::Acrylic)
+            .state(EffectState::Active)
+            .build();
+        match window.set_effects(cfg) {
+            Ok(_) => SetWindowEffectsResult {
+                ok: true,
+                applied: true,
+                error: None,
+            },
+            Err(e) => {
+                tracing::warn!("[window-effects] set_effects(Acrylic) failed: {e}");
+                SetWindowEffectsResult {
+                    ok: true,
+                    applied: false,
+                    error: Some(e.to_string()),
+                }
+            }
+        }
+    } else {
+        // 非 Glass テーマ: None を渡して effect を解除。
+        // 自己レビュー D-3B: 解除失敗時も warn + error に詰める (Glass→他テーマ復帰失敗の可視化)。
+        match window.set_effects(None) {
+            Ok(_) => SetWindowEffectsResult {
+                ok: true,
+                applied: false,
+                error: None,
+            },
+            Err(e) => {
+                tracing::warn!("[window-effects] set_effects(None) failed: {e}");
+                SetWindowEffectsResult {
+                    ok: true,
+                    applied: false,
+                    error: Some(e.to_string()),
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn apply_window_effects(
+    window: &tauri::WebviewWindow,
+    is_glass: bool,
+) -> SetWindowEffectsResult {
+    use tauri::window::{Effect, EffectsBuilder};
+    if is_glass {
+        let cfg = EffectsBuilder::new()
+            .effect(Effect::UnderWindowBackground)
+            .build();
+        match window.set_effects(cfg) {
+            Ok(_) => SetWindowEffectsResult {
+                ok: true,
+                applied: true,
+                error: None,
+            },
+            Err(e) => {
+                tracing::warn!("[window-effects] set_effects(UnderWindowBackground) failed: {e}");
+                SetWindowEffectsResult {
+                    ok: true,
+                    applied: false,
+                    error: Some(e.to_string()),
+                }
+            }
+        }
+    } else {
+        match window.set_effects(None) {
+            Ok(_) => SetWindowEffectsResult {
+                ok: true,
+                applied: false,
+                error: None,
+            },
+            Err(e) => {
+                tracing::warn!("[window-effects] set_effects(None) failed: {e}");
+                SetWindowEffectsResult {
+                    ok: true,
+                    applied: false,
+                    error: Some(e.to_string()),
+                }
+            }
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
+fn apply_window_effects(
+    _window: &tauri::WebviewWindow,
+    _is_glass: bool,
+) -> SetWindowEffectsResult {
+    // Linux 等は windowEffects 非対応 (Tauri 2 docs: "Linux: Unsupported")。
+    // CSS backdrop-filter のみで擬似 Glass を維持する。
+    SetWindowEffectsResult {
+        ok: true,
+        applied: false,
+        error: None,
+    }
+}
+
 #[tauri::command]
 pub async fn app_setup_team_mcp(
     state: State<'_, AppState>,

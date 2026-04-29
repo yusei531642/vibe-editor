@@ -442,3 +442,22 @@ export interface TerminalExitInfo {
   exitCode: number;
   signal?: number;
 }
+
+// ---------- Window Effects (Issue #260) ----------
+
+/**
+ * Issue #260 PR-1: テーマ別の OS ネイティブ window effect 適用結果。
+ * - Windows: Acrylic (PowerShell 同等の動的ぼかし)
+ * - macOS: vibrancy (under-window)
+ * - Linux: 非対応 (no-op、`applied=false` で返る)
+ */
+export interface SetWindowEffectsResult {
+  ok: boolean;
+  /**
+   * OS ネイティブ effect が実際に適用されたか。Linux 等の非対応プラットフォームや
+   * Windows 10 21H2 以前では false。renderer 側はこれを見て CSS backdrop-filter
+   * フォールバックの有無を判断する余地を持つ (現時点では CSS 側で常に効いている)。
+   */
+  applied: boolean;
+  error?: string;
+}

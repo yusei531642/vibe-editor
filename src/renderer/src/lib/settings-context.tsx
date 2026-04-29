@@ -95,12 +95,22 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
   }, [commitState]);
 
   useEffect(() => {
+    // Issue #260 自己レビュー R-W1: settings load 完了前 (loadingState=true) は
+    // `DEFAULT_SETTINGS.theme = 'claude-dark'` で applyTheme が走ってしまい、Rust 側
+    // setup の `theme=='glass'` 初期適用と競合する。load 完了後の effect で「実際の
+    // ユーザー設定」が反映されるので、loading 中は CSS 変数の更新も IPC 発火も skip する。
+    if (loadingState) return;
     applyTheme(
       settingsState.theme,
       settingsState.uiFontFamily,
       settingsState.uiFontSize
     );
-  }, [settingsState.theme, settingsState.uiFontFamily, settingsState.uiFontSize]);
+  }, [
+    loadingState,
+    settingsState.theme,
+    settingsState.uiFontFamily,
+    settingsState.uiFontSize
+  ]);
 
   useEffect(() => {
     if (loadingState) return;
