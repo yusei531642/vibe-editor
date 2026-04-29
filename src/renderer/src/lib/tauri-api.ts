@@ -20,6 +20,7 @@ import {
   type GitStatus,
   type RoleProfilesFile,
   type SessionInfo,
+  type SetWindowEffectsResult,
   type TeamHistoryEntry,
   type TerminalCreateOptions,
   type TerminalCreateResult,
@@ -152,6 +153,12 @@ export const api = {
     checkClaude: (command: string): Promise<ClaudeCheckResult> =>
       invoke('app_check_claude', { command }),
     setZoomLevel: (level: number): Promise<void> => invoke('app_set_zoom_level', { level }),
+    /**
+     * Issue #260 PR-1: テーマに応じて OS ネイティブの window effect (Windows: Acrylic /
+     * macOS: vibrancy) を切り替える。Linux 等は no-op (applied=false で返る)。
+     */
+    setWindowEffects: (theme: string): Promise<SetWindowEffectsResult> =>
+      invoke('app_set_window_effects', { theme }),
     setupTeamMcp: (
       projectRoot: string,
       teamId: string,

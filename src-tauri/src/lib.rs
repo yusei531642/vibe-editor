@@ -48,6 +48,7 @@ pub fn run() {
             commands::app::app_set_window_title,
             commands::app::app_check_claude,
             commands::app::app_set_zoom_level,
+            commands::app::app_set_window_effects,
             commands::app::app_setup_team_mcp,
             commands::app::app_cleanup_team_mcp,
             commands::app::app_get_team_file_path,
@@ -137,6 +138,9 @@ pub fn run() {
             });
 
             // Issue #29: settings.json の lastOpenedRoot から AppState.project_root を復元する。
+            // Issue #260 PR-1: 同じ settings 読み込みで `theme` も取り出し、glass テーマだったら
+            // 起動時に Acrylic / Vibrancy を初期適用する (renderer の applyTheme から再適用される
+            // までの空白で「透過 conf.json なのに effect 未適用 → 完全透明」になるのを防ぐ)。
             let app_handle_for_root = app.handle().clone();
             spawn_observed("settings_restore", async move {
                 let settings = commands::settings::settings_load().await;
@@ -158,6 +162,24 @@ pub fn run() {
                     let mut guard = state::lock_project_root_recover(&state.project_root);
                     *guard = Some(root.clone());
                     tracing::info!("[setup] project_root restored from settings: {root}");
+                }
+                // Issue #260: theme が glass なら初期 effect を適用。それ以外は何もしない
+                // (transparent: true の conf でも OS chrome の不透明背景は維持される)。
+                let theme = settings
+                    .get("theme")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if theme == "glass" {
+                    if let Some(win) = app_handle_for_root.get_webview_window("main") {
+                        match commands::app::app_set_window_effects(win, theme.to_string()) {
+                            Ok(res) => tracing::info!(
+                                "[setup] window_effects (glass) applied={} error={:?}",
+                                res.applied,
+                                res.error
+                            ),
+                            Err(e) => tracing::warn!("[setup] window_effects failed: {e}"),
+                        }
+                    }
                 }
             });
             #[cfg(debug_assertions)]

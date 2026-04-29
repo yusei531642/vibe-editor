@@ -273,6 +273,16 @@ export function applyTheme(name: ThemeName, uiFontFamily: string, uiFontSize: nu
   root.style.setProperty('--radius-lg', claudeTheme ? '16px' : '16px');
   root.style.setProperty('--radius-xl', claudeTheme ? '20px' : '20px');
   root.dataset.theme = name;
+
+  // Issue #260 PR-1: テーマ切替時に OS ネイティブの window effect (Windows: Acrylic /
+  // macOS: vibrancy) を切り替える。Linux や非対応環境では IPC が ok / applied=false を
+  // 返すだけで失敗扱いにはしない。失敗時もログだけで続行 (CSS backdrop-filter で擬似
+  // Glass を維持できる)。
+  if (typeof window !== 'undefined' && window.api?.app?.setWindowEffects) {
+    void window.api.app.setWindowEffects(name).catch((err) => {
+      console.warn('[theme] setWindowEffects failed:', err);
+    });
+  }
 }
 
 export function applyDensity(density: Density): void {
