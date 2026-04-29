@@ -390,6 +390,20 @@
 /* `decorations: false` でネイティブ chrome を外した代わりのカスタムボタン群。
    .topbar の右端に座り、`-webkit-app-region: drag` の親領域から自身は no-drag に
    抜けることでクリック可能を保つ。 */
+
+/* Issue #307: Tauri 2 公式推奨の `data-tauri-drag-region` 属性が付いた要素を
+   ドラッグ可能領域として宣言する。Windows WebView2 では `-webkit-app-region` が
+   ほぼ無効なため、新仕様の `app-region` を併用する。 */
+*[data-tauri-drag-region] {
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+.window-controls,
+.window-controls__btn {
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
 .window-controls {
   -webkit-app-region: no-drag;
   display: flex;
@@ -619,9 +633,10 @@
 /* Drawer モード: App ルートから直接 absolute で差し込む */
 .activity--drawer {
   position: fixed;
-  top: var(--shell-header);
-  right: 0;
-  bottom: var(--shell-status);
+  /* Issue #307: Windows 最大化時の不可視リサイズ境界補正 */
+  top: calc(var(--wf-top) + var(--shell-header));
+  right: var(--wf-x);
+  bottom: calc(var(--wf-bottom) + var(--shell-status));
   box-shadow: var(--shadow-lg);
   z-index: 600;
   animation: activityDrawerIn 280ms var(--ease-spring);

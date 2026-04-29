@@ -5,8 +5,9 @@
 
 .tweaks {
   position: fixed;
-  right: 18px;
-  bottom: calc(var(--shell-status) + 12px);
+  /* Issue #307: Windows 最大化時の不可視リサイズ境界補正 */
+  right: calc(var(--wf-x) + 18px);
+  bottom: calc(var(--wf-bottom) + var(--shell-status) + 12px);
   width: 300px;
   background: var(--bg-panel);
   border: 1px solid var(--border-strong);

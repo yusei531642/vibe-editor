@@ -43,6 +43,7 @@ import { OnboardingWizard } from './components/OnboardingWizard';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { MenuBar, MenuItem, MenuDivider, MenuSection } from './components/shell/MenuBar';
 import { useRecruitListener } from './lib/use-recruit-listener';
+import { useWindowFrameInsets } from './lib/use-window-frame-insets';
 import { ClaudeNotFound } from './components/ClaudeNotFound';
 import { useT } from './lib/i18n';
 import {
@@ -227,6 +228,8 @@ function generateTeamAction(_tab: TerminalTab): string | undefined {
 }
 
 export function App(): JSX.Element {
+  // Issue #307: Windows 11 フレームレス最大化時の不可視リサイズ境界を CSS 変数で補正
+  useWindowFrameInsets();
   const settingsLoading = useSettingsLoading();
   const { update: updateSettings, reset: resetSettings } = useSettingsActions();
   const settings = {
