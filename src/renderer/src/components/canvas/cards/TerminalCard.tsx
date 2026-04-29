@@ -71,9 +71,13 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
     return base.length > 0 ? base : undefined;
   }, [payload.args, payload.resumeSessionId, isCodex]);
 
-  // Issue #272: AgentNodeCard と同じ「リサイズ後に末尾までスクロール」補正を適用。
-  // TerminalView の props は変更せず、wrapper div の ref を hook に渡すだけ。
-  useXtermScrollToBottomOnResize(termContainerRef);
+  // Issue #272 / #272 v3: AgentNodeCard と同じ「リサイズ後に末尾までスクロール」補正を適用。
+  // xterm v6 の SmoothScrollableElement は内部 scroll model で scrollback を管理するため、
+  // DOM の scrollTop ではなく `Terminal.scrollToBottom()` を public API 経由で叩く。
+  const scrollToBottom = useCallback(() => {
+    ref.current?.scrollToBottom();
+  }, []);
+  useXtermScrollToBottomOnResize(termContainerRef, scrollToBottom);
 
   return (
     <>

@@ -8,7 +8,7 @@
  *
  * payload: TerminalPayload + role 必須
  */
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
 import { TerminalView, type TerminalViewHandle } from '../../TerminalView';
 import { useT } from '../../../lib/i18n';
@@ -297,10 +297,15 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     [accent]
   );
 
-  // Issue #261 / #272: termContainer のサイズ変化時に .xterm-viewport を末尾まで
-  // スクロールし直す共通 hook。NodeResizer の縮小→拡大で scrollTop が古い値で
-  // 残り、最終行が下端で見切れるのを防ぐ。詳細は `use-xterm-scroll-on-resize.ts`。
-  useXtermScrollToBottomOnResize(termContainerRef);
+  // Issue #261 / #272 / #272 v3: termContainer のサイズ変化時に xterm 自前の
+  // scroll model 経由で末尾までスクロールし直す。NodeResizer の縮小→拡大で
+  // scrollback 末尾が見切れるのを防ぐ。callback は xterm v6 の SmoothScrollableElement
+  // に正しく届くよう `Terminal.scrollToBottom()` を public API 経由で叩く
+  // (DOM の scrollTop 書換えは内部 scroll model と同期しないため使えない)。
+  const scrollToBottom = useCallback(() => {
+    ref.current?.scrollToBottom();
+  }, []);
+  useXtermScrollToBottomOnResize(termContainerRef, scrollToBottom);
 
   return (
     <>

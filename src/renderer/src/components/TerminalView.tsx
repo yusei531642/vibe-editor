@@ -20,6 +20,8 @@ export interface TerminalViewHandle {
   sendCommand(text: string, submit?: boolean): void;
   /** ターミナルへフォーカスを移す */
   focus(): void;
+  /** xterm の scroll model に基づき末尾までスクロールする (Issue #272 v3) */
+  scrollToBottom(): void;
 }
 
 interface TerminalViewProps {
@@ -243,6 +245,9 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         },
         focus(): void {
           termRef.current?.focus();
+        },
+        scrollToBottom(): void {
+          termRef.current?.scrollToBottom();
         }
       }),
       // ptyIdRef / termRef は stable な ref なので deps 不要

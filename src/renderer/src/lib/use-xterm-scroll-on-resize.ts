@@ -33,9 +33,15 @@ import { useEffect, type RefObject } from 'react';
 /**
  * @param containerRef xterm-viewport を内包する DOM ノード (例: `.canvas-agent-card__term`)
  *                     の ref。null のときは何もせず early return する。
+ * @param scrollToBottom xterm の public API (`Terminal.scrollToBottom`) を呼ぶ callback。
+ *                     渡された場合は `.xterm-scrollable-element` の DOM scrollTop を直接
+ *                     書き換える代わりに xterm 自前の scroll model 経由でスクロールする
+ *                     (Issue #272 v3)。未指定時は fallback として `.xterm-viewport` に
+ *                     `scrollTop = scrollHeight` を当てる (既存テスト互換)。
  */
 export function useXtermScrollToBottomOnResize(
-  containerRef: RefObject<HTMLElement | null>
+  containerRef: RefObject<HTMLElement | null>,
+  scrollToBottom?: () => void
 ): void {
   useEffect(() => {
     const node = containerRef.current;
@@ -43,20 +49,23 @@ export function useXtermScrollToBottomOnResize(
 
     let rafId: number | null = null;
     const scrollViewportToBottom = (): void => {
-      // Issue #272: xterm v6 の実スクロール host は `.xterm-scrollable-element`。
-      // `.xterm-viewport` への scrollTop 変更は xterm の scroll model と同期しないため、
-      // scrollable-element を優先し、無ければ既存テスト互換のため `.xterm-viewport` に fallback。
-      const scrollHost =
-        node.querySelector<HTMLElement>('.xterm-scrollable-element') ??
-        node.querySelector<HTMLElement>('.xterm-viewport');
-      if (!scrollHost) return;
       // requestAnimationFrame で xterm の reflow を待ってから scroll する。
       if (rafId !== null) {
         window.cancelAnimationFrame(rafId);
       }
       rafId = window.requestAnimationFrame(() => {
         rafId = null;
-        scrollHost.scrollTop = scrollHost.scrollHeight;
+        if (scrollToBottom) {
+          // Issue #272 v3: xterm v6 の SmoothScrollableElement は内部 scroll model で
+          // scrollback を管理しているため、DOM の scrollTop を直接書いても同期しない。
+          // 必ず xterm public API (Terminal.scrollToBottom) を経由する。
+          scrollToBottom();
+          return;
+        }
+        // scrollToBottom callback が無いとき (旧呼出し / 既存テスト互換) のみ
+        // fallback として `.xterm-viewport` に DOM scrollTop を書く。
+        const viewport = node.querySelector<HTMLElement>('.xterm-viewport');
+        if (viewport) viewport.scrollTop = viewport.scrollHeight;
       });
     };
 
@@ -77,7 +86,8 @@ export function useXtermScrollToBottomOnResize(
         rafId = null;
       }
     };
-    // ref オブジェクト自体は安定なので依存配列は空でよい
+    // ref オブジェクト自体は安定。scrollToBottom は呼出し側で useCallback により
+    // 安定化される想定なので、変更時は再 subscribe する。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [scrollToBottom]);
 }
