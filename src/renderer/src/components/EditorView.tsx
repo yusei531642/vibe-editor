@@ -6,9 +6,15 @@ import { detectLanguage } from '../lib/language';
 import { useMonacoTheme, useSettings } from '../lib/settings-context';
 import { useT } from '../lib/i18n';
 import { MarkdownPreview } from './MarkdownPreview';
+import { ImagePreview } from './ImagePreview';
 
 interface EditorViewProps {
   path: string;
+  /**
+   * Issue #325: ImagePreview に絶対パスを渡すために必要。
+   * 未指定なら画像ファイルでも従来どおり binary プレースホルダにフォールバックする。
+   */
+  projectRoot?: string;
   content: string;
   dirty: boolean;
   isBinary: boolean;
@@ -22,8 +28,20 @@ interface EditorViewProps {
   onSave: () => void;
 }
 
+/**
+ * Issue #325: relPath を projectRoot に結合して OS 絶対パスを作る。
+ * convertFileSrc は forward slash でも動作するため `/` で統一し、
+ * 重複区切りやバックスラッシュは正規化する。
+ */
+function joinAbsolutePath(projectRoot: string, relPath: string): string {
+  const root = projectRoot.replace(/[\\/]+$/, '');
+  const rel = relPath.replace(/^[\\/]+/, '').replace(/\\/g, '/');
+  return `${root}/${rel}`;
+}
+
 export function EditorView({
   path,
+  projectRoot,
   content,
   dirty,
   isBinary,
@@ -41,6 +59,27 @@ export function EditorView({
   // 早期 return より後で useState すると Rules of Hooks 違反になるので、
   // フックは全て先頭で呼ぶ。
   const [previewMode, setPreviewMode] = useState<boolean>(true);
+
+  // Issue #325: 画像言語にマップされる拡張子は loading / isBinary より優先して
+  // ImagePreview に流す。binary プレースホルダではなく実際の画像を表示する。
+  const language = detectLanguage(path);
+  const isImage = language === 'image';
+
+  if (isImage && projectRoot) {
+    return (
+      <div className="diffview">
+        <div className="diffview__header">
+          <span className="diffview__path">{path}</span>
+        </div>
+        <div className="diffview__editor">
+          <ImagePreview
+            absolutePath={joinAbsolutePath(projectRoot, path)}
+            relativePath={path}
+          />
+        </div>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -70,7 +109,6 @@ export function EditorView({
     );
   }
 
-  const language = detectLanguage(path);
   const isMarkdown = language === 'markdown';
   const showPreview = isMarkdown && previewMode;
 

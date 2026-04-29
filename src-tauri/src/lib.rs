@@ -15,13 +15,38 @@ use tauri::Manager;
 #[allow(unused_imports)]
 use tracing::info;
 
+/// Issue #326: tracing を stderr + ファイル両方に書き出す。
+/// ファイルは `~/.vibe-editor/logs/vibe-editor.log` (1 ファイル無回転、tracing-appender::never)。
+/// 設定モーダルからこのファイルを読み返してエラーログを GUI 上で確認できる。
+fn init_logging() {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::{fmt, EnvFilter};
+
+    let env_filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("vibe_editor_lib=debug,info"));
+
+    let log_dir = commands::logs::log_dir();
+    let _ = std::fs::create_dir_all(&log_dir); // best-effort
+    let file_appender = tracing_appender::rolling::never(log_dir, "vibe-editor.log");
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    // WorkerGuard はプロセス終了まで保持する必要があるため leak で 'static 化する。
+    // 1 度だけの起動コストで、メモリリークも 1 件のみ (許容)。
+    Box::leak(Box::new(guard));
+
+    let stderr_layer = fmt::layer().with_writer(std::io::stderr);
+    let file_layer = fmt::layer().with_writer(non_blocking).with_ansi(false);
+
+    tracing_subscriber::registry()
+        .with(env_filter)
+        .with(stderr_layer)
+        .with(file_layer)
+        .init();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "vibe_editor_lib=debug,info".into()),
-        )
-        .init();
+    init_logging();
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
@@ -83,6 +108,9 @@ pub fn run() {
             // ---- role profiles ----
             commands::role_profiles::role_profiles_load,
             commands::role_profiles::role_profiles_save,
+            // ---- logs (Issue #326) ----
+            commands::logs::logs_read_tail,
+            commands::logs::logs_open_dir,
             // ---- terminal ----
             commands::terminal::terminal_create,
             commands::terminal::terminal_write,

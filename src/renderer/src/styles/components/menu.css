@@ -22,6 +22,20 @@
   box-shadow: var(--shadow-popover);
 }
 
+/* Issue #324: ContextMenu は createPortal(document.body) されるため、親パネルの
+ * Glass 背景越しに浮くと「親 backdrop-filter の milky 状態の上に不透明色」と
+ * なってコントラストが落ちる。Glass テーマ時は半透明 + 自前 backdrop-filter で
+ * 独立レイヤとして立たせ、視認性を確保する。
+ * セレクタは :root[data-theme='glass'] でルート起点にすることで Portal 経由でも
+ * 確実にマッチする。 */
+:root[data-theme='glass'] .context-menu {
+  background: rgba(31, 31, 30, 0.92);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  backdrop-filter: blur(12px) saturate(140%);
+  border-color: var(--glass-border);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45), var(--glass-highlight);
+}
+
 .app-menu__dropdown,
 .user-menu__dropdown {
   opacity: 0;

@@ -11,7 +11,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # --- Tauri core ---
-tauri = { version = "2", features = ["tray-icon", "image-png", "image-ico"] }
+tauri = { version = "2", features = ["tray-icon", "image-png", "image-ico", "protocol-asset"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
@@ -37,6 +37,10 @@ notify = "8"
 anyhow = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+# Issue #326: 設定モーダルからログを閲覧できるように、stderr に加えて
+# ~/.vibe-editor/logs/vibe-editor.log にも書き出す。non_blocking で I/O を
+# 別スレッドへ逃がし、never 戦略 (1 ファイル無回転) でシンプルに保つ。
+tracing-appender = "0.2"
 
 # --- misc ---
 once_cell = "1"

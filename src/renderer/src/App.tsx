@@ -2256,6 +2256,9 @@ export function App(): JSX.Element {
             <div className="pane">
               <EditorView
                 path={activeEditorTab.relPath}
+                /* Issue #325: 画像ファイルを開いたとき ImagePreview で convertFileSrc を呼べるように
+                   projectRoot (= ワークスペース絶対パス) を渡す。 */
+                projectRoot={activeEditorTab.rootPath}
                 content={activeEditorTab.content}
                 dirty={activeEditorTab.content !== activeEditorTab.originalContent}
                 isBinary={activeEditorTab.isBinary}

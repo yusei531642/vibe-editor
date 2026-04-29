@@ -7,6 +7,7 @@ import {
   Palette,
   Plug,
   Plus,
+  ScrollText,
   Search,
   Settings as SettingsIcon,
   Sparkles,
@@ -30,6 +31,7 @@ import { DensitySection } from './settings/DensitySection';
 import { CommandOptionsSection } from './settings/CommandOptionsSection';
 import { CustomAgentEditor } from './settings/CustomAgentEditor';
 import { McpSection } from './settings/McpSection';
+import { LogsSection } from './settings/LogsSection';
 
 interface SettingsModalProps {
   open: boolean;
@@ -72,7 +74,8 @@ const SECTION_ICON_TYPES: Record<string, LucideIcon> = {
   claude: Bot,
   codex: Code2,
   roles: Users,
-  mcp: Plug
+  mcp: Plug,
+  logs: ScrollText
 };
 function iconFor(id: SectionId): JSX.Element {
   const Icon =
@@ -92,7 +95,8 @@ const FIXED_LABELS_JA: Record<string, FixedLabelEntry> = {
   claude: { label: 'Claude Code', title: 'Claude Code', desc: '起動コマンドと引数' },
   codex: { label: 'Codex', title: 'Codex', desc: '起動コマンドと引数' },
   roles: { label: 'ロール定義', title: 'ロール定義', desc: 'チームメンバーの役割テンプレ' },
-  mcp: { label: 'MCP', title: 'MCP', desc: 'vibe-team MCP の導入方法' }
+  mcp: { label: 'MCP', title: 'MCP', desc: 'vibe-team MCP の導入方法' },
+  logs: { label: 'ログ', title: 'ログ', desc: 'アプリの実行ログを表示' }
 };
 const FIXED_LABELS_EN: Record<string, FixedLabelEntry> = {
   general: { label: 'General', title: 'General', desc: 'Language and density' },
@@ -101,7 +105,8 @@ const FIXED_LABELS_EN: Record<string, FixedLabelEntry> = {
   claude: { label: 'Claude Code', title: 'Claude Code', desc: 'Launch command and args' },
   codex: { label: 'Codex', title: 'Codex', desc: 'Launch command and args' },
   roles: { label: 'Role profiles', title: 'Role profiles', desc: 'Team member role templates' },
-  mcp: { label: 'MCP', title: 'MCP', desc: 'How to install vibe-team MCP' }
+  mcp: { label: 'MCP', title: 'MCP', desc: 'How to install vibe-team MCP' },
+  logs: { label: 'Logs', title: 'Logs', desc: 'View runtime logs from the app' }
 };
 
 /** 名前未設定のカスタムエージェントに使う fallback 文字列。
@@ -310,7 +315,10 @@ export function SettingsModal({
         // vibe-team MCP のセットアップ手順は「チーム」機能の一部なので同グループに収める。
         // 旧構成では MCP を独立グループにしていたが、グループラベル "MCP" と唯一の項目 "MCP" が
         // 同名で並び、サイドバー上で MCP が 2 行重複しているように見える UI バグを生んでいた。
-        { label: isJa ? 'チーム' : 'Team', items: ['roles', 'mcp'] }
+        { label: isJa ? 'チーム' : 'Team', items: ['roles', 'mcp'] },
+        // Issue #326: 「その他」グループにログビューアを置く。リリース後の bug 報告で
+        // 開発者ツールを開かずにユーザー側でエラーログを確認できるようにする。
+        { label: isJa ? 'その他' : 'Other', items: ['logs'] }
       ];
     },
     // deps は customAgents と同じく draft の生プロパティを直接参照する形で統一する。
@@ -474,6 +482,8 @@ export function SettingsModal({
         return <RoleProfilesSection />;
       case 'mcp':
         return <McpSection draft={draft} update={update} />;
+      case 'logs':
+        return <LogsSection />;
       default:
         if (id.startsWith('custom:')) {
           const a = customAgents.find((x) => `custom:${x.id}` === id);

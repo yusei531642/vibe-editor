@@ -43,7 +43,18 @@ const EXT_MAP: Record<string, string> = {
   cc: 'cpp',
   lua: 'lua',
   sql: 'sql',
-  dockerfile: 'dockerfile'
+  dockerfile: 'dockerfile',
+  // Issue #325: 画像ファイルは Monaco のテキスト編集ではなく ImagePreview で表示する。
+  // svg は既存どおり 'xml' を維持してテキスト編集できるようにしておく (将来必要なら
+  // 切替トグルで両対応にする想定)。
+  png: 'image',
+  jpg: 'image',
+  jpeg: 'image',
+  gif: 'image',
+  webp: 'image',
+  avif: 'image',
+  bmp: 'image',
+  ico: 'image'
 };
 
 export function detectLanguage(path: string): string {

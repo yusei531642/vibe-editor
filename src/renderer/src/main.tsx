@@ -40,6 +40,7 @@ import './styles/components/canvas.css';
 import './styles/components/claude-patterns.css';
 import './styles/components/shell.css';
 import './styles/components/tweaks.css';
+import './styles/components/image-preview.css';
 
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('#root が見つかりません');
