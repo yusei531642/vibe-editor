@@ -4,10 +4,11 @@
  * payload: { projectRoot, relPath }
  * 自前で files.read/write を呼び、dirty 管理 + Ctrl+S 保存。
  */
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { CardFrame } from '../CardFrame';
 import { EditorView } from '../../EditorView';
+import { detectLanguage } from '../../../lib/language';
 
 interface EditorPayload {
   projectRoot: string;
@@ -18,6 +19,10 @@ function EditorCardImpl({ id, data }: NodeProps): JSX.Element {
   const payload = (data?.payload ?? {}) as EditorPayload;
   const { projectRoot, relPath } = payload;
   const title = (data?.title as string) ?? relPath ?? 'Editor';
+  const isImage = useMemo(
+    () => (relPath ? detectLanguage(relPath) === 'image' : false),
+    [relPath]
+  );
 
   const [content, setContent] = useState('');
   const [original, setOriginal] = useState('');
@@ -28,6 +33,12 @@ function EditorCardImpl({ id, data }: NodeProps): JSX.Element {
   useEffect(() => {
     let cancelled = false;
     if (!projectRoot || !relPath) {
+      setLoading(false);
+      return;
+    }
+    // Issue #325: 画像ファイルは files.read を呼ばず ImagePreview に委ねる。
+    // バイナリを丸ごと UTF-8 lossy で読むコストを避けるため早期 return する。
+    if (isImage) {
       setLoading(false);
       return;
     }
@@ -50,7 +61,7 @@ function EditorCardImpl({ id, data }: NodeProps): JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, [projectRoot, relPath]);
+  }, [projectRoot, relPath, isImage]);
 
   const dirty = content !== original;
 
@@ -67,9 +78,10 @@ function EditorCardImpl({ id, data }: NodeProps): JSX.Element {
   return (
     <>
       <Handle type="target" position={Position.Left} style={{ background: '#7a9eff' }} />
-      <CardFrame id={id} title={dirty ? `● ${title}` : title} accent="#7a9eff">
+      <CardFrame id={id} title={isImage ? title : dirty ? `● ${title}` : title} accent="#7a9eff">
         <EditorView
           path={relPath}
+          projectRoot={projectRoot}
           content={content}
           dirty={dirty}
           isBinary={isBinary}
