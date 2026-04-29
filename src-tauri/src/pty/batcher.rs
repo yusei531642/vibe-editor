@@ -13,11 +13,12 @@ const FLUSH_INTERVAL_MS: u64 = 16;
 const FLUSH_BYTES: usize = 32 * 1024;
 /// 起動直後の emit 抑止時間。
 ///
-/// renderer 側の `listen('terminal:data:{id}', ...)` は非同期登録で、
-/// `terminal_create` が返った直後〜数十 ms の間は未登録のため、
-/// その間に `emit` した分は Tauri によって drop される (= 画面が真っ白のまま残る)。
-/// そこで最初の flush は少し遅らせ、その間 PTY 出力は mpsc に蓄積する。
-const STARTUP_DELAY_MS: u64 = 250;
+/// 旧設計 (Issue #285 以前) は renderer が `terminal_create` の戻り値で id を受け取って
+/// から `listen()` を張る post-subscribe 方式で、cold start 時に 250ms でも取り逃がす
+/// ケースがあった。Issue #285 で renderer は client-generated id で pre-subscribe 後に
+/// create を呼ぶ方式に変更されたため、本 delay は補助的な安全網となった。
+/// pre-subscribe しない旧経路 (id を渡さない呼び出し) のフォールバック用に短い猶予を残す。
+const STARTUP_DELAY_MS: u64 = 50;
 
 /// Issue #53: bounded チャネル容量 (vec chunk 単位)。
 /// PTY reader は 8KB/chunk なので、256 枠 ≒ 2MB の backpressure buffer。
@@ -33,7 +34,7 @@ pub fn spawn_batcher(
     mut rx: mpsc::Receiver<Vec<u8>>,
 ) {
     tokio::spawn(async move {
-        // listener 登録完了までのグレースタイム。詳細は STARTUP_DELAY_MS コメント参照。
+        // 旧 post-subscribe 経路互換のための短い猶予 (詳細は STARTUP_DELAY_MS コメント)。
         tokio::time::sleep(Duration::from_millis(STARTUP_DELAY_MS)).await;
 
         let mut buf = BytesMut::with_capacity(FLUSH_BYTES * 2);

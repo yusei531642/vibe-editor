@@ -19,6 +19,10 @@ use uuid::Uuid;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalCreateOptions {
+    /// Issue #285: renderer が pre-subscribe 用に渡すクライアント側生成 id。
+    /// `[A-Za-z0-9_-]{1,64}` 以外や未指定の場合は Rust 側で UUID を生成する。
+    #[serde(default)]
+    pub id: Option<String>,
     pub cwd: String,
     #[serde(default)]
     pub fallback_cwd: Option<String>,
@@ -65,6 +69,15 @@ pub struct SavePastedImageResult {
     pub ok: bool,
     pub path: Option<String>,
     pub error: Option<String>,
+}
+
+/// Issue #285: renderer から渡される terminal id を検証。
+/// `terminal:data:{id}` 等のイベント名に乗るので、衝突や偽装防止のため
+/// `[A-Za-z0-9_-]{1,64}` のみ許可する (UUID v4 は 36 chars で収まる)。
+fn is_valid_terminal_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// 旧 resolveCommand 相当の最小実装。Phase 1 では「未指定なら 'claude'」だけ。
@@ -418,7 +431,15 @@ pub async fn terminal_create(
         tracing::warn!("[terminal] {w}");
     }
 
-    let id = Uuid::new_v4().to_string();
+    // Issue #285: renderer が指定した id があれば採用 (event 名 `terminal:data:{id}` に
+    // 安全な文字種だけ通す)。不正値・未指定・既存 PTY との衝突時は UUID v4 を生成する。
+    let id = opts
+        .id
+        .as_deref()
+        .filter(|s| is_valid_terminal_id(s))
+        .filter(|s| state.pty_registry.get(s).is_none())
+        .map(str::to_string)
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
 
     // チーム所属端末なら TeamHub の socket/token と team/agent/role を env に注入
     let mut env = opts.env.unwrap_or_default();

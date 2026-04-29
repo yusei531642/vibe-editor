@@ -50,3 +50,26 @@ describe('Issue #271: TerminalCreateOptions HMR fields', () => {
     expect(legacy.attachIfExists).toBeUndefined();
   });
 });
+
+describe('Issue #285: TerminalCreateOptions client-generated id', () => {
+  it('TerminalCreateOptions に id を載せられる (pre-subscribe 経路)', () => {
+    const opts: TerminalCreateOptions = {
+      id: '550e8400-e29b-41d4-a716-446655440000',
+      cwd: '/tmp',
+      command: 'bash',
+      cols: 80,
+      rows: 24
+    };
+    expect(opts.id).toBe('550e8400-e29b-41d4-a716-446655440000');
+  });
+
+  it('id 未指定でも従来通り通る (後方互換)', () => {
+    const opts: TerminalCreateOptions = {
+      cwd: '/tmp',
+      command: 'bash',
+      cols: 80,
+      rows: 24
+    };
+    expect(opts.id).toBeUndefined();
+  });
+});

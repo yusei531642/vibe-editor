@@ -38,6 +38,26 @@ function subscribeEvent<T>(event: string, cb: (payload: T) => void): () => void 
     unlisten = null;
   };
 }
+
+/**
+ * Issue #285: `subscribeEvent` の async 版。`listen()` の解決を await することで
+ * 「listener が確実に登録された」状態を caller に保証する。`terminal_create` を
+ * 呼ぶ前に pre-subscribe して、PTY の初期出力 (CLI banner / prompt) が listener
+ * 未登録の数十 ms に drop されるレースを排除するために使う。
+ */
+async function subscribeEventReady<T>(
+  event: string,
+  cb: (payload: T) => void
+): Promise<() => void> {
+  let disposed = false;
+  const unlisten = await listen<T>(event, (e) => {
+    if (!disposed) cb(e.payload);
+  });
+  return () => {
+    disposed = true;
+    unlisten();
+  };
+}
 import {
   type AppSettings,
   type AppUserInfo,
@@ -259,7 +279,17 @@ export const api = {
       subscribeEvent<TerminalExitInfo>(`terminal:exit:${id}`, cb),
 
     onSessionId: (id: string, cb: (sessionId: string) => void): (() => void) =>
-      subscribeEvent<string>(`terminal:sessionId:${id}`, cb)
+      subscribeEvent<string>(`terminal:sessionId:${id}`, cb),
+
+    /** Issue #285: pre-subscribe 用。`terminal.create` 前に await して使う。 */
+    onDataReady: (id: string, cb: (data: string) => void): Promise<() => void> =>
+      subscribeEventReady<string>(`terminal:data:${id}`, cb),
+
+    onExitReady: (id: string, cb: (info: TerminalExitInfo) => void): Promise<() => void> =>
+      subscribeEventReady<TerminalExitInfo>(`terminal:exit:${id}`, cb),
+
+    onSessionIdReady: (id: string, cb: (sessionId: string) => void): Promise<() => void> =>
+      subscribeEventReady<string>(`terminal:sessionId:${id}`, cb)
   }
 };
 
