@@ -124,7 +124,8 @@ body,
 .layout::before {
   content: '';
   position: fixed;
-  inset: 0;
+  /* Issue #307: Windows 最大化時の不可視リサイズ境界補正 */
+  inset: var(--wf-top) var(--wf-x) var(--wf-bottom) var(--wf-x);
   z-index: var(--z-noise-overlay);
   pointer-events: none;
   opacity: var(--noise-opacity);
@@ -163,8 +164,16 @@ body,
 .layout {
   display: grid;
   grid-template-columns: 272px minmax(0, 1fr) 5px var(--claude-code-width, 460px);
-  height: 100vh;
-  width: 100vw;
+  /* Issue #307: Windows 最大化時の -8px 不可視リサイズ境界補正。
+     margin shorthand (4値) は値の取り違えリスクが高いので使わず、
+     margin-top / margin-left の個別指定で左上方向だけ押し戻す。
+     width/height は calc で内側に縮め、grid の minmax(0,1fr) も同量縮むため
+     リサイズハンドル位置・grid 列計算は破綻しない。
+     通常表示時は `--wf-* = 0px` なので副作用なし。 */
+  height: calc(100vh - var(--wf-top) - var(--wf-bottom));
+  width: calc(100vw - (var(--wf-x) * 2));
+  margin-top: var(--wf-top);
+  margin-left: var(--wf-x);
   gap: 0;
 }
 
@@ -2359,7 +2368,8 @@ body.is-resizing * {
 
 .modal-backdrop {
   position: fixed;
-  inset: 0;
+  /* Issue #307: Windows 最大化時の不可視リサイズ境界補正 */
+  inset: var(--wf-top) var(--wf-x) var(--wf-bottom) var(--wf-x);
   background: rgba(20, 20, 19, 0);
   display: flex;
   align-items: center;
@@ -2809,7 +2819,8 @@ body.is-resizing * {
 
 .cmdp-backdrop {
   position: fixed;
-  inset: 0;
+  /* Issue #307: Windows 最大化時の不可視リサイズ境界補正 */
+  inset: var(--wf-top) var(--wf-x) var(--wf-bottom) var(--wf-x);
   background: rgba(20, 20, 19, 0);
   display: flex;
   align-items: flex-start;

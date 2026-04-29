@@ -420,3 +420,20 @@ samp,
 :root[data-density] .status {
   gap: calc(var(--gap) + 6px);
 }
+
+/* ---- Window frame insets (Issue #307 / #306) ----
+ * Windows 11 のフレームレスウィンドウ (decorations: false) は最大化時に
+ * 約 8px の不可視リサイズ境界を画面外へ拡張する。`useWindowFrameInsets`
+ * フックが `<html>` の data-* 属性を切替えるので、それを CSS 変数として
+ * 受け取り、`.layout` や `position: fixed` の overlay を viewport 内に
+ * 押し込み直す。 */
+:root {
+  --wf-top: 0px;
+  --wf-bottom: 0px;
+  --wf-x: 0px;
+}
+:root[data-platform='windows'][data-window-maximized='true'] {
+  --wf-top: 8px;
+  --wf-bottom: 8px;
+  --wf-x: 8px;
+}

@@ -4,7 +4,8 @@
 
 .onboarding {
   position: fixed;
-  inset: 0;
+  /* Issue #307: Windows 最大化時の不可視リサイズ境界補正 */
+  inset: var(--wf-top) var(--wf-x) var(--wf-bottom) var(--wf-x);
   z-index: 9000;
   display: grid;
   place-items: center;

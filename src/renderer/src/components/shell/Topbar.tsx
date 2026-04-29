@@ -56,7 +56,7 @@ export function Topbar({
 
   return (
     <div className="topbar" role="banner">
-      <div className="topbar__brand" title="vibe-editor">
+      <div className="topbar__brand" data-tauri-drag-region title="vibe-editor">
         <img
           className="topbar__brand-logo"
           src="/vibe-editor.png"
@@ -85,7 +85,7 @@ export function Topbar({
         </button>
       ) : null}
 
-      <div className="topbar__spacer" />
+      <div className="topbar__spacer" data-tauri-drag-region />
 
       <button
         type="button"
