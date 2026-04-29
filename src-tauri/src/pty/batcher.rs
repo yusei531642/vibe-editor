@@ -3,6 +3,7 @@
 // 16ms or 32KB で flush し、ターミナル出力を tauri::Emitter で送る。
 // 大量出力時に renderer 側のレンダリングを 60fps 以下に保つため必須。
 
+use crate::pty::session::{append_scrollback, Scrollback};
 use bytes::BytesMut;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
@@ -28,10 +29,15 @@ pub const PTY_CHANNEL_CAPACITY: usize = 256;
 
 /// PTY reader が送ってくる生バイト → 集約 → emit。
 /// `data_event_name` には "terminal:data:{id}" 形式を渡す。
+///
+/// Issue #285 follow-up: `scrollback` は SessionHandle と共有されるリングバッファ。
+/// emit と同期して push し、attach 経路 (HMR remount / Canvas/IDE 切替) で
+/// `SessionHandle::scrollback_snapshot()` から replay されるための材料になる。
 pub fn spawn_batcher(
     app: AppHandle,
     data_event_name: String,
     mut rx: mpsc::Receiver<Vec<u8>>,
+    scrollback: Scrollback,
 ) {
     tokio::spawn(async move {
         // 旧 post-subscribe 経路互換のための短い猶予 (詳細は STARTUP_DELAY_MS コメント)。
@@ -46,19 +52,19 @@ pub fn spawn_batcher(
                         Some(chunk) => {
                             buf.extend_from_slice(&chunk);
                             if buf.len() >= FLUSH_BYTES {
-                                flush(&app, &data_event_name, &mut buf);
+                                flush(&app, &data_event_name, &mut buf, &scrollback);
                             }
                         }
                         None => {
                             // reader thread が exit。最後にまとめて flush。
-                            flush(&app, &data_event_name, &mut buf);
+                            flush(&app, &data_event_name, &mut buf, &scrollback);
                             break;
                         }
                     }
                 }
                 _ = tick.tick() => {
                     if !buf.is_empty() {
-                        flush(&app, &data_event_name, &mut buf);
+                        flush(&app, &data_event_name, &mut buf, &scrollback);
                     }
                 }
             }
@@ -66,7 +72,7 @@ pub fn spawn_batcher(
     });
 }
 
-fn flush(app: &AppHandle, event: &str, buf: &mut BytesMut) {
+fn flush(app: &AppHandle, event: &str, buf: &mut BytesMut, scrollback: &Scrollback) {
     if buf.is_empty() {
         return;
     }
@@ -81,6 +87,9 @@ fn flush(app: &AppHandle, event: &str, buf: &mut BytesMut) {
     let remainder: Vec<u8> = buf[safe_end..].to_vec();
     buf.truncate(safe_end);
     let len = buf.len();
+    // Issue #285 follow-up: emit する確定済みバイト列を scrollback にも反映する。
+    // 容量超過分は前から drop されるので、attach 経路では「最近 64 KiB」だけ replay される。
+    append_scrollback(scrollback, buf);
     let text = String::from_utf8_lossy(buf).into_owned();
     buf.clear();
     if !remainder.is_empty() {
@@ -95,7 +104,10 @@ fn flush(app: &AppHandle, event: &str, buf: &mut BytesMut) {
 /// Issue #48: buf のうち、完結した UTF-8 文字境界までのバイト長を返す。
 /// 末尾 1〜3 バイトがマルチバイトの途中 (0b10xxxxxx が続く / 先頭バイトが continuation を期待)
 /// なら、その分だけ削って返す。
-fn safe_utf8_boundary(buf: &[u8]) -> usize {
+///
+/// Issue #285 follow-up: scrollback snapshot 取得時にも同じロジックが必要なため pub 化。
+/// session.rs の `scrollback_snapshot()` から再利用する (重複定義を避ける)。
+pub fn safe_utf8_boundary(buf: &[u8]) -> usize {
     if buf.is_empty() {
         return 0;
     }
