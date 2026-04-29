@@ -8,7 +8,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { subscribeEvent, subscribeEventReady } from './subscribe-event';
 import {
   type AppSettings,
   type AppUserInfo,
@@ -28,67 +28,10 @@ import {
   type ThemeName
 } from '../../../types/shared';
 
-/**
- * `listen()` は Promise で unlisten を返すが、caller が cleanup を同期的に要求することが多い。
- * naive に `listen().then(u => unlisten = u)` すると Promise resolve 前に呼ばれた cleanup が no-op
- * になり、listener が orphan 化する。
- *
- * この helper は cleanup 要求を sentinel (`disposed`) で記録し、listen() 解決時に deferred
- * unlisten を行う。したがって:
- *   - 早期 cleanup: resolve 時に即 u() を呼び、永続 listener を残さない
- *   - 通常 cleanup: unlisten を保持し、呼び出し時に u() を実行
- *
- * 注: 同期 API のため「listener が登録された瞬間」を caller は知れない。Rust 側 emit が
- * 数十 ms 〜 数百 ms 早く走るとそのデータは drop される (Issue #285 の元症状)。確実な購読
- * 完了を待ちたい場合は `subscribeEventReady` (async 版) を使うこと。
- */
-function subscribeEvent<T>(event: string, cb: (payload: T) => void): () => void {
-  let unlisten: UnlistenFn | null = null;
-  let disposed = false;
-  void listen<T>(event, (e) => {
-    if (!disposed) cb(e.payload);
-  }).then((u) => {
-    if (disposed) {
-      u();
-    } else {
-      unlisten = u;
-    }
-  });
-  return () => {
-    disposed = true;
-    unlisten?.();
-    unlisten = null;
-  };
-}
-
-/**
- * Issue #285: `subscribeEvent` の async 版。`listen()` の解決を await することで
- * 「listener が確実に登録された」状態を caller に保証する。`terminal_create` を
- * 呼ぶ前に pre-subscribe して、PTY の初期出力 (CLI banner / prompt) が listener
- * 未登録の数十 ms に drop されるレースを排除するために使う。
- *
- * **Caller の責務**: await が pending の間に component が dispose される race を避けるため、
- * await 解決直後に caller 側で disposed flag を再判定し、必要なら戻り値の cleanup を即呼ぶ。
- * 本 helper の `disposed` sentinel は cleanup 関数を caller が受け取ってからしか立てられず、
- * await pending 中の listen() 完了を取り消せないため、caller 側ガードが必須。
- *
- * 参考実装: `use-pty-session.ts` の pre-subscribe ブロック
- *   `offData = await ...onDataReady(...);`
- *   `if (localDisposed || disposedRef.current) { unsubscribePtyListeners(); return; }`
- */
-async function subscribeEventReady<T>(
-  event: string,
-  cb: (payload: T) => void
-): Promise<() => void> {
-  let disposed = false;
-  const unlisten = await listen<T>(event, (e) => {
-    if (!disposed) cb(e.payload);
-  });
-  return () => {
-    disposed = true;
-    unlisten();
-  };
-}
+// Issue #294: `subscribeEvent` / `subscribeEventReady` は `./subscribe-event.ts` に
+// 切り出し、`subscribeEvent` は `subscribeEventReady` の sync ラッパとして再実装。
+// これにより「await 解決前後の disposed sentinel」のロジックが 1 箇所に集約され、
+// Issue #285 と同型の post-subscribe race を構造的に再生産しないことを保証する。
 
 /** Tauri 側 TeamHub に同期する role profile の要約形 */
 export interface RoleProfileSummary {
