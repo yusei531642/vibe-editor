@@ -270,6 +270,28 @@ samp,
   --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.03);
 }
 
+/*
+ * Issue #260 PR-3: `.glass-surface` ユーティリティクラス。
+ *
+ * 新規パネル / surface コンポーネントは ルート要素の className に `glass-surface` を
+ * 付与するだけで、Glass テーマ時に自動的に backdrop-filter (blur + saturate) が
+ * 適用される。Glass 以外のテーマでは何もしないので、付け得 (no-op)。
+ *
+ * 旧来の index.css 側 `[data-theme='glass'] .toolbar, .sidebar, ...` ホワイトリスト
+ * 方式は、既存パネル互換のため当面残す。新規追加分は本ユーティリティで完結させる。
+ *
+ * 使い方:
+ *   <div className="my-panel glass-surface">...</div>
+ *
+ * 注意: backdrop-filter は新しい stacking context を作るので、`position: relative`
+ * と組み合わせると z-index が新規にスコープされる。modal/popover の上に重ねる
+ * 場合は親側の overflow と z-index を要確認。
+ */
+[data-theme='glass'] .glass-surface {
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+}
+
 :root[data-theme='light'],
 :root[data-theme='claude-light'] {
   color-scheme: light;

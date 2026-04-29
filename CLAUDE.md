@@ -78,6 +78,7 @@ Tauri ベースの Claude Code / Codex 専用エディタ (v1.4.x)
 - コンポーネントは `src/renderer/src/components/` に配置
 - Rust の IPC コマンドは `src-tauri/src/commands/` にまとめる
 - 型定義は `src/types/` に集約 (Rust 側は serde で camelCase へマッピング)
+- **Glass テーマ対応**: 新規パネル / surface 系コンポーネントのルート要素には `glass-surface` クラスを付与する (Issue #260 PR-3)。Glass テーマ時のみ自動で `backdrop-filter` が当たり、他テーマでは no-op。`tokens.css` 側で完結するので index.css の `[data-theme='glass']` ホワイトリスト追記は不要。
 - スタイリング: `src/renderer/src/styles/components/` に機能別 CSS を配置 + CSS 変数でテーマ切替
 
 ## よく使うコマンド
