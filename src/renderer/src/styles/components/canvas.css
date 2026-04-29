@@ -106,6 +106,18 @@
   z-index: 5;
 }
 
+/* Canvas モードのボタン類はドラッグ領域から除外（#307 と同じパターンを #310 で適用）。
+   shell.css の *[data-tauri-drag-region] { app-region: drag; } と組み合わせて、
+   canvas-header__brand / __count / __spacer は drag、ボタン類は no-drag にする。 */
+.canvas-btn,
+.canvas-btn-split,
+.canvas-btn-split__main,
+.canvas-btn-split__caret,
+.canvas-popover__wrap,
+.canvas-popover {
+  app-region: no-drag;
+}
+
 .canvas-header__brand {
   display: inline-flex;
   align-items: center;
