@@ -4,7 +4,7 @@
  *
  * payload: { projectRoot, extraRoots? }
  */
-import { memo, useCallback, useMemo } from 'react';
+import { memo, useCallback } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { CardFrame } from '../CardFrame';
 import { FileTreePanel } from '../../FileTreePanel';
@@ -16,9 +16,6 @@ interface FileTreePayload {
   projectRoot?: string;
   extraRoots?: string[];
 }
-
-/** Issue #250: FileTreePanel と同じ NUL 区切りキー (`<rootPath>\0<relPath>`) */
-const KEY_SEP = '\0';
 
 function FileTreeCardImpl({ id, data, positionAbsoluteX, positionAbsoluteY }: NodeProps): JSX.Element {
   const { settings, update } = useSettings();
@@ -65,42 +62,8 @@ function FileTreeCardImpl({ id, data, positionAbsoluteX, positionAbsoluteY }: No
     [settings.workspaceFolders, update]
   );
 
-  // Issue #250: IDE モード (Sidebar) と同じ map を共有することで Canvas 上の
-  // FileTreeCard でも展開状態が永続化され、再起動後も保たれる。
-  const initialExpanded = useMemo(() => {
-    const set = new Set<string>();
-    const map = settings.fileTreeExpanded ?? {};
-    for (const [root, rels] of Object.entries(map)) {
-      for (const rel of rels) {
-        set.add(`${root}${KEY_SEP}${rel}`);
-      }
-    }
-    return set;
-  }, [settings.fileTreeExpanded]);
-
-  const initialCollapsedRoots = useMemo(
-    () => new Set(settings.fileTreeCollapsedRoots ?? []),
-    [settings.fileTreeCollapsedRoots]
-  );
-
-  const handlePersistFileTreeState = useCallback(
-    ({ expanded, collapsedRoots }: { expanded: Set<string>; collapsedRoots: Set<string> }) => {
-      const map: Record<string, string[]> = {};
-      for (const key of expanded) {
-        const sep = key.indexOf(KEY_SEP);
-        if (sep <= 0) continue;
-        const root = key.slice(0, sep);
-        const rel = key.slice(sep + 1);
-        (map[root] ??= []).push(rel);
-      }
-      void update({
-        fileTreeExpanded: map,
-        fileTreeCollapsedRoots: Array.from(collapsedRoots)
-      });
-    },
-    [update]
-  );
-
+  // Issue #273: 展開状態 / 永続化は FileTreeStateProvider に集約済み。FileTreeCard 自身は
+  // 永続化ロジックを持たない (Sidebar との last-writer-wins 排除)。
   return (
     <>
       <Handle type="target" position={Position.Left} style={{ background: '#a7c8ff' }} />
@@ -113,9 +76,6 @@ function FileTreeCardImpl({ id, data, positionAbsoluteX, positionAbsoluteY }: No
             onOpenFile={handleOpen}
             onAddWorkspaceFolder={() => void handleAddWorkspaceFolder()}
             onRemoveWorkspaceFolder={(p) => void handleRemoveWorkspaceFolder(p)}
-            initialExpanded={initialExpanded}
-            initialCollapsedRoots={initialCollapsedRoots}
-            onPersistState={handlePersistFileTreeState}
           />
         </div>
       </CardFrame>
