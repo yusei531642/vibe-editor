@@ -1,7 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(node -e ':*)"
+      "Bash(node -e ':*)",
+      "mcp__0be3e9f9-0267-430a-9972-c9c03d7f3600__search_files",
+      "mcp__0be3e9f9-0267-430a-9972-c9c03d7f3600__get_file_metadata"
     ]
   }
 }
