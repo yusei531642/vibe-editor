@@ -6,7 +6,7 @@
 #
 # 成果物: tauri-apps/tauri-action が GitHub Release を draft で作成し、
 #   - Windows: .exe (NSIS インストーラ)
-#   - macOS:   .dmg (universal: x86_64 + aarch64)
+#   - macOS:   .dmg (Apple Silicon, aarch64)
 #   - Linux:   .AppImage / .deb
 # を upload する。確認後、Releases ページで手動 publish する。
 name: release
@@ -30,10 +30,10 @@ jobs:
       matrix:
         include:
           - platform: macos-latest
-            args: '--target universal-apple-darwin'
-            bundle_dir: 'src-tauri/target/universal-apple-darwin/release/bundle'
-            attest_subjects: 'src-tauri/target/universal-apple-darwin/release/bundle/dmg/**/*.dmg'
-            sbom_file: 'sbom-macos-universal.cdx.json'
+            args: '--target aarch64-apple-darwin'
+            bundle_dir: 'src-tauri/target/aarch64-apple-darwin/release/bundle'
+            attest_subjects: 'src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/**/*.dmg'
+            sbom_file: 'sbom-macos-aarch64.cdx.json'
           - platform: ubuntu-22.04
             args: ''
             bundle_dir: 'src-tauri/target/release/bundle'
@@ -62,9 +62,9 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-04-26
         with:
-          # macOS universal は両方の target を必要とする
+          # macOS は Apple Silicon (aarch64) のみビルドする
           toolchain: stable
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin' || '' }}
 
       - name: Rust cache
         uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
@@ -100,7 +100,7 @@ jobs:
             自動ビルド成果物。
 
             - Windows: `.exe` (NSIS インストーラ)
-            - macOS:   `.dmg` (Intel + Apple Silicon universal)
+            - macOS:   `.dmg` (Apple Silicon, aarch64)
             - Linux:   `.AppImage` / `.deb`
 
             動作確認後にこの draft を publish してください。
