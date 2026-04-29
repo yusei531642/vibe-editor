@@ -244,85 +244,169 @@ export function usePtySession(options: UsePtySessionOptions): void {
       return 1;
     })();
 
+    // sessionKey は IIFE 進行中も値を変えない (mount identity)。helper / IIFE 双方が
+    // 参照するので effect 冒頭で 1 度だけ ref から退避し、以降は変数で扱う。
+    const skey = sessionKeyRef.current;
+
+    // Issue #271 と独立: HMR cache の世代比較。listener が登録された後に
+    // 別 mount で世代番号が更新された場合、古い callback は no-op に倒す。
+    // pre-subscribe 経路 / post-subscribe 経路の両方で参照する。
+    const isCurrentGeneration = (): boolean => {
+      if (!skey) return true;
+      const c = getHmrPtyCache();
+      if (!c) return true;
+      return c[skey]?.generation === myGeneration;
+    };
+
+    // === Helper 1: loadInitialMetrics ===
+    // Issue #253 review (W#1 + #3 + #4): web font (JetBrains Mono Variable 等) ロード前に
+    // measureCellSize が走ると system monospace のメトリクスを返し、誤った cellW で
+    // PTY が立つ。Canvas モードでは fonts.ready を待ってから測ることで、Codex の
+    // banner も初回描画から正しい寸法で描画される。IDE モードでは fit.fit() が DOM
+    // メトリクスベースなので待つ必要なし。
+    // タイムアウト 300ms: コールドキャッシュ / 低速 I/O 環境で fonts.ready が秒オーダー
+    // で resolve しないとき spawn が体感遅延する問題を回避。300ms 経過時は fallback
+    // メトリクスで spawn し、後続の useFitToContainer の fonts.ready effect が ready 後
+    // 1 回だけ refit を発火して補正するので、一瞬だけずれた表示も自動回復する。
+    const loadInitialMetrics = async (): Promise<void> => {
+      if (unscaledFitRef.current && typeof document !== 'undefined' && document.fonts) {
+        let timedOut = false;
+        try {
+          await Promise.race([
+            document.fonts.ready.then(() => undefined),
+            new Promise<void>((resolve) =>
+              window.setTimeout(() => {
+                timedOut = true;
+                resolve();
+              }, 300)
+            )
+          ]);
+        } catch {
+          /* fonts.ready は通常 reject しないが、念のため握りつぶす */
+        }
+        if (timedOut && import.meta.env.DEV) {
+          console.warn(
+            'pty.spawn.font-fallback',
+            '[usePtySession] document.fonts.ready が 300ms で resolve しなかったため fallback metrics で spawn しました。useFitToContainer の fonts.ready effect が後追い refit します。'
+          );
+        }
+        if (localDisposed || disposedRef.current) return;
+      }
+
+      // 初期サイズ算出。Canvas モード (unscaledFit=true) では `transform: scale(zoom)` 下で
+      // FitAddon.fit() が getBoundingClientRect 経由で scale 後の視覚矩形を読んでしまうため、
+      // 論理 px (clientWidth/clientHeight) と zoom 非依存のセルメトリクスから cols/rows を
+      // 算出して term.resize() する。Issue #253 P6 の主因対策。
+      // unscaled モードでは IDE 経路 (fit.fit()) に**絶対に**フォールバックしない
+      // (transform 後矩形を読んで主因が再発するため)。grid 算出失敗時は xterm デフォルトの
+      // 80x24 のまま続行 (後続の useFitToContainer.refit が補正)。
+      try {
+        if (unscaledFitRef.current) {
+          const container = containerRefRef.current?.current;
+          const cell = getCellSizeRef.current?.();
+          if (container && cell) {
+            const grid = computeUnscaledGrid(
+              container.clientWidth,
+              container.clientHeight,
+              cell.cellW,
+              cell.cellH
+            );
+            if (grid) {
+              term.resize(grid.cols, grid.rows);
+              initialCols = grid.cols;
+              initialRows = grid.rows;
+              // useFitToContainer の lastScheduledRef を seed して、30ms 後 visible-effect
+              // の二重 IPC 発火を抑止する。
+              const sharedRef = lastScheduledRefRef.current;
+              if (sharedRef) {
+                sharedRef.current = { cols: grid.cols, rows: grid.rows };
+              }
+            }
+          }
+        } else {
+          fit?.fit();
+          initialCols = term.cols;
+          initialRows = term.rows;
+        }
+      } catch {
+        /* 非表示マウント時は失敗してもOK */
+      }
+    };
+
+    // === Helper 2: attemptPreSubscribe ===
+    // Issue #285: 新規 spawn の race fix — `terminal_create` を呼ぶ前に
+    // `terminal:data:{id}` 等を listen() 完了まで待ってから create する。
+    // 戻り値: true = 購読成功 / false = 中断 (caller は早期 return)。
+    // 中断時は内部で unsubscribePtyListeners() を呼ぶ。
+    const attemptPreSubscribe = async (
+      targetId: string,
+      dataCb: (d: string) => void,
+      exitCb: (i: TerminalExitInfo) => void,
+      sidCb: (s: string) => void
+    ): Promise<boolean> => {
+      offData = await window.api.terminal.onDataReady(targetId, dataCb);
+      offExit = await window.api.terminal.onExitReady(targetId, exitCb);
+      offSessionId = await window.api.terminal.onSessionIdReady(targetId, sidCb);
+      if (localDisposed || disposedRef.current) {
+        unsubscribePtyListeners();
+        return false;
+      }
+      return true;
+    };
+
+    // === Helper 3: setupPostSubscribe ===
+    // attach 経路 (HMR remount): pre-subscribe を skip しているのでここで sync
+    // post-subscribe する。PTY は既に動作中で startup race は起きないため
+    // post-subscribe で十分。新規 spawn 経路では既に offData 等が埋まっているので
+    // 各 if ガードで no-op になる。
+    const setupPostSubscribe = (resId: string, attached: boolean): void => {
+      if (!offData) {
+        offData = window.api.terminal.onData(resId, (data) => {
+          if (!isCurrentGeneration()) return;
+          term.write(data);
+          if (data.includes('\n') || data.includes('\r') || data.length >= 4096) {
+            scheduleRenderRepair();
+          }
+          callbacksRef.current.onActivity?.();
+          // Issue #271: attach 復帰時は observeChunkRef を起動しない (initialMessage 二重送信防止)。
+          if (!attached) {
+            observeChunkRef.current(data);
+          }
+        });
+      }
+      if (!offExit) {
+        offExit = window.api.terminal.onExit(resId, (info) => {
+          if (!isCurrentGeneration()) return;
+          term.writeln(
+            `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m`
+          );
+          callbacksRef.current.onStatus?.(`終了 (exitCode=${info.exitCode})`);
+          ptyIdRef.current = null;
+          if (skey) {
+            const c = getHmrPtyCache();
+            if (c) delete c[skey];
+          }
+          callbacksRef.current.onExit?.();
+        });
+      }
+      if (!offSessionId) {
+        // セッション id は main プロセスが `~/.claude/projects/.../*.jsonl` の
+        // 差分から検出し、`terminal:sessionId:<id>` で通知してくる。
+        offSessionId = window.api.terminal.onSessionId(resId, (sessionId) => {
+          if (!isCurrentGeneration()) return;
+          try {
+            callbacksRef.current.onSessionId?.(sessionId);
+          } catch {
+            /* noop */
+          }
+        });
+      }
+    };
+
     (async () => {
       try {
-        // Issue #253 review (W#1 + #3 + #4): web font (JetBrains Mono Variable 等) ロード前に
-        // measureCellSize が走ると system monospace のメトリクスを返し、誤った cellW で
-        // PTY が立つ。Canvas モードでは fonts.ready を待ってから測ることで、Codex の
-        // banner も初回描画から正しい寸法で描画される。IDE モードでは fit.fit() が DOM
-        // メトリクスベースなので待つ必要なし。
-        // タイムアウト 300ms: コールドキャッシュ / 低速 I/O 環境で fonts.ready が秒オーダー
-        // で resolve しないとき spawn が体感遅延する問題を回避。300ms 経過時は fallback
-        // メトリクスで spawn し、後続の useFitToContainer の fonts.ready effect が ready 後
-        // 1 回だけ refit を発火して補正するので、一瞬だけずれた表示も自動回復する。
-        // 旧 500ms から短縮 (review #4): 体感遅延を抑え、fallback 経路は dev console.warn で
-        // 観測可能にして頻発するなら別 PR で fonts.load(specific) 等への切替を検討する。
-        if (unscaledFitRef.current && typeof document !== 'undefined' && document.fonts) {
-          let timedOut = false;
-          try {
-            await Promise.race([
-              document.fonts.ready.then(() => undefined),
-              new Promise<void>((resolve) =>
-                window.setTimeout(() => {
-                  timedOut = true;
-                  resolve();
-                }, 300)
-              )
-            ]);
-          } catch {
-            /* fonts.ready は通常 reject しないが、念のため握りつぶす */
-          }
-          if (timedOut && import.meta.env.DEV) {
-            console.warn(
-              'pty.spawn.font-fallback',
-              '[usePtySession] document.fonts.ready が 300ms で resolve しなかったため fallback metrics で spawn しました。useFitToContainer の fonts.ready effect が後追い refit します。'
-            );
-          }
-          if (localDisposed || disposedRef.current) return;
-        }
-
-        // 初期サイズ算出。
-        // Canvas モード (unscaledFit=true) では、`transform: scale(zoom)` 下で
-        // FitAddon.fit() が getBoundingClientRect 経由で scale 後の視覚矩形を読んでしまうため、
-        // 論理 px (clientWidth/clientHeight) と zoom 非依存のセルメトリクスから cols/rows を
-        // 算出して term.resize() する。Issue #253 P6 の主因対策。
-        // Review #4 + #5: unscaled モードでは IDE 経路 (fit.fit()) に**絶対に**フォールバック
-        // しない。fit.fit() を呼ぶと transform 後矩形を読んでしまい主因 P6 が一瞬だけ再発する
-        // ため、grid 算出失敗時は xterm デフォルトの 80x24 のまま続行する (後続の
-        // useFitToContainer.refit が論理 px 経路で 30ms 以内に補正するので実害なし)。
-        try {
-          if (unscaledFitRef.current) {
-            const container = containerRefRef.current?.current;
-            const cell = getCellSizeRef.current?.();
-            if (container && cell) {
-              const grid = computeUnscaledGrid(
-                container.clientWidth,
-                container.clientHeight,
-                cell.cellW,
-                cell.cellH
-              );
-              if (grid) {
-                term.resize(grid.cols, grid.rows);
-                initialCols = grid.cols;
-                initialRows = grid.rows;
-                // useFitToContainer の lastScheduledRef を seed して、30ms 後 visible-effect
-                // の二重 IPC 発火を抑止する。
-                const sharedRef = lastScheduledRefRef.current;
-                if (sharedRef) {
-                  sharedRef.current = { cols: grid.cols, rows: grid.rows };
-                }
-              }
-              // grid 算出失敗 → 80x24 のまま続行 (Review #5)
-            }
-            // container/cell 不在も同様 80x24 のまま続行 (Review #4)
-          } else {
-            fit?.fit();
-            initialCols = term.cols;
-            initialRows = term.rows;
-          }
-        } catch {
-          /* 非表示マウント時は失敗してもOK */
-        }
+        await loadInitialMetrics();
+        if (localDisposed || disposedRef.current) return;
 
         callbacksRef.current.onStatus?.(`${command} を起動中…`);
         // 不変式 #2: 初回 spawn 時点のスナップショットを使う (以後の prop 変化は無視)
@@ -330,23 +414,9 @@ export function usePtySession(options: UsePtySessionOptions): void {
         // Issue #271: HMR remount 経路では `import.meta.hot.data.ptyBySessionKey`
         // に前世代の ptyId が残っている。`attachIfExists` を真にするのは
         // 「dev で HMR が動いていて、かつ cache に有効な ptyId が残っている場合」だけ。
-        // 通常 mount / restart (cleanup で cache を消す) では cache miss → 新規 spawn。
-        // これにより React StrictMode の effect 二重実行や restart 経路で
-        // 旧 PTY に誤 attach する race を排除する。
-        const skey = sessionKeyRef.current;
         const cache = getHmrPtyCache();
         const cachedPtyId = cache && skey ? cache[skey]?.ptyId : undefined;
         const wantAttach = Boolean(skey && cachedPtyId);
-
-        // Issue #271 と独立: HMR cache の世代比較。listener が登録された後に
-        // 別 mount で世代番号が更新された場合、古い callback は no-op に倒す。
-        // pre-subscribe 経路 / post-subscribe 経路の両方で参照する。
-        const isCurrentGeneration = (): boolean => {
-          if (!skey) return true;
-          const c = getHmrPtyCache();
-          if (!c) return true;
-          return c[skey]?.generation === myGeneration;
-        };
 
         // 新規 spawn (= attached false) 用の listener コールバック群。
         // pre-subscribe / mismatch re-subscribe で同じ実装を使い回すために effect-local
@@ -383,11 +453,7 @@ export function usePtySession(options: UsePtySessionOptions): void {
           }
         };
 
-        // Issue #285: 新規 spawn の race fix — `terminal_create` を呼ぶ前に
-        // `terminal:data:{id}` 等を listen() 完了まで待ってから create する。
-        // batcher.rs の startup delay は post-subscribe 旧経路用の保険なので
-        // pre-subscribe ならそれに頼らず確実に拾える。client-generated id は Rust
-        // 側で文字種検証 (`is_valid_terminal_id`) + 既存衝突チェックを通る。
+        // client-generated id: Rust 側で文字種検証 + 既存衝突チェックを通る。
         // crypto.randomUUID は Tauri 2 の WebView (Edge WebView2 / WKWebView) では
         // 必ず使えるが、安全側で文字列フォールバックを残す。
         const requestedId =
@@ -398,20 +464,13 @@ export function usePtySession(options: UsePtySessionOptions): void {
               : `term-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
         if (requestedId) {
-          offData = await window.api.terminal.onDataReady(requestedId, newSpawnDataCb);
-          offExit = await window.api.terminal.onExitReady(requestedId, newSpawnExitCb);
-          offSessionId = await window.api.terminal.onSessionIdReady(
+          const ok = await attemptPreSubscribe(
             requestedId,
+            newSpawnDataCb,
+            newSpawnExitCb,
             newSpawnSessionIdCb
           );
-
-          // pre-subscribe 中に component が dispose された (effect cleanup or 新世代へ
-          // 切替) なら、ここで pre-subscribe したリスナーを巻き戻して終了。
-          // PTY はまだ生まれていないので kill 不要。
-          if (localDisposed || disposedRef.current) {
-            unsubscribePtyListeners();
-            return;
-          }
+          if (!ok) return;
         }
 
         const res = await window.api.terminal.create({
@@ -436,7 +495,6 @@ export function usePtySession(options: UsePtySessionOptions): void {
           // - 通常 cleanup (タブ close / restart): kill する
           // - HMR cleanup (hmrDisposeArmed.current = true 中): kill せず cache に id を残し、
           //   次の remount で attach できるようにする
-          // pre-subscribe したリスナーがあれば必ず解除。
           unsubscribePtyListeners();
           if (res.ok && res.id) {
             if (hmrDisposeArmed.current && skey) {
@@ -465,14 +523,13 @@ export function usePtySession(options: UsePtySessionOptions): void {
         // 取り逃がしうる (Issue #285 の元症状) ので必ず *Ready で再 await。
         if (requestedId && res.id !== requestedId) {
           unsubscribePtyListeners();
-          offData = await window.api.terminal.onDataReady(res.id, newSpawnDataCb);
-          offExit = await window.api.terminal.onExitReady(res.id, newSpawnExitCb);
-          offSessionId = await window.api.terminal.onSessionIdReady(
+          const ok = await attemptPreSubscribe(
             res.id,
+            newSpawnDataCb,
+            newSpawnExitCb,
             newSpawnSessionIdCb
           );
-          if (localDisposed || disposedRef.current) {
-            unsubscribePtyListeners();
+          if (!ok) {
             void window.api.terminal.kill(res.id);
             return;
           }
@@ -495,58 +552,8 @@ export function usePtySession(options: UsePtySessionOptions): void {
             : `実行中: ${res.command ?? command}`
         );
 
-        // Issue #271: attach 復帰時は `observeChunkRef` (auto-initial-message のチャンク
-        // 観察) を起動しない。useAutoInitialMessage は spawnKey ごとに「ready 検出 →
-        // initialMessage 送信」を 1 回だけ行うが、HMR remount で観察フックは新しく作り
-        // 直されるため、再度 ready 検出 → 同じ initialMessage を既存セッションに重複
-        // 送信してしまう。`res.attached === true` のときは PTY が既に動いていて、
-        // ユーザーが入力済みかもしれないので initialMessage を再送する判断が UI 側に
-        // ないため、安全側に倒して観察を止める。
         const attached = res.attached === true;
-
-        // attach 経路 (HMR remount): pre-subscribe を skip しているのでここで sync
-        // post-subscribe する。PTY は既に動作中で startup race は起きないため
-        // post-subscribe で十分。新規 spawn 経路は上で pre-subscribe 済みなので skip。
-        if (!offData) {
-          offData = window.api.terminal.onData(res.id, (data) => {
-            if (!isCurrentGeneration()) return;
-            term.write(data);
-            if (data.includes('\n') || data.includes('\r') || data.length >= 4096) {
-              scheduleRenderRepair();
-            }
-            callbacksRef.current.onActivity?.();
-            if (!attached) {
-              observeChunkRef.current(data);
-            }
-          });
-        }
-        if (!offExit) {
-          offExit = window.api.terminal.onExit(res.id, (info) => {
-            if (!isCurrentGeneration()) return;
-            term.writeln(
-              `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m`
-            );
-            callbacksRef.current.onStatus?.(`終了 (exitCode=${info.exitCode})`);
-            ptyIdRef.current = null;
-            if (skey) {
-              const c = getHmrPtyCache();
-              if (c) delete c[skey];
-            }
-            callbacksRef.current.onExit?.();
-          });
-        }
-        if (!offSessionId) {
-          // セッション id は main プロセスが `~/.claude/projects/.../*.jsonl` の
-          // 差分から検出し、`terminal:sessionId:<id>` で通知してくる。
-          offSessionId = window.api.terminal.onSessionId(res.id, (sessionId) => {
-            if (!isCurrentGeneration()) return;
-            try {
-              callbacksRef.current.onSessionId?.(sessionId);
-            } catch {
-              /* noop */
-            }
-          });
-        }
+        setupPostSubscribe(res.id, attached);
       } catch (err) {
         // Issue #285 self-review: 例外発生から effect cleanup までの窓で pre-subscribe
         // した listener が orphan になるのを防ぐため、catch でも明示的に解除する。
