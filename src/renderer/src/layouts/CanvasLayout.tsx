@@ -526,9 +526,9 @@ export function CanvasLayout(): JSX.Element {
       style={isCanvasActive ? undefined : { display: 'none' }}
       aria-hidden={!isCanvasActive}
     >
-      <header className="canvas-header">
+      <header className="canvas-header" data-tauri-drag-region>
         <span className="canvas-header__brand" data-tauri-drag-region>
-          <MonitorSmartphone size={14} strokeWidth={1.75} />
+          <MonitorSmartphone size={14} strokeWidth={1.75} data-tauri-drag-region />
           Canvas
         </span>
         <span className="canvas-header__count" data-tauri-drag-region>{formatCardCount(cardCount, settings.language)}</span>
