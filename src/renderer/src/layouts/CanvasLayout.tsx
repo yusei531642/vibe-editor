@@ -34,6 +34,7 @@ import type {
 import { Canvas } from '../components/canvas/Canvas';
 import { CanvasSidebar } from '../components/canvas/CanvasSidebar';
 import { Rail } from '../components/shell/Rail';
+import { WindowControls } from '../components/shell/WindowControls';
 import type { SidebarView } from '../components/Sidebar';
 import { SettingsModal } from '../components/SettingsModal';
 import { useT } from '../lib/i18n';
@@ -689,6 +690,7 @@ export function CanvasLayout(): JSX.Element {
           <Layout size={13} strokeWidth={1.8} />
           IDE
         </button>
+        <WindowControls />
       </header>
       <div className="canvas-layout__body">
         <Rail
