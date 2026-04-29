@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState, useCallback } from 'react';
+import { memo, useEffect, useId, useMemo, useState, useCallback } from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -15,6 +15,13 @@ import { fileIcon } from '../lib/file-icon-color';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu';
 import { useToast } from '../lib/toast-context';
 import { api } from '../lib/tauri-api';
+import {
+  KEY_SEP,
+  dirKey,
+  splitKey,
+  useFileTreeState,
+  type DirState
+} from '../lib/filetree-state-context';
 
 interface FileTreePanelProps {
   /** メインのプロジェクトルート(ターミナル/Git 等はこちら基準で動作する) */
@@ -29,30 +36,7 @@ interface FileTreePanelProps {
   onOpenFile: (rootPath: string, relPath: string) => void;
   onAddWorkspaceFolder: () => void;
   onRemoveWorkspaceFolder: (path: string) => void;
-  /**
-   * Issue #250: 永続化された展開状態の初期値。
-   * lazy 初期化のためマウント時の値だけが使われる (再レンダーでは無視される)。
-   */
-  initialExpanded?: Set<string>;
-  /** Issue #250: 永続化された折り畳み済みルートの初期値 */
-  initialCollapsedRoots?: Set<string>;
-  /** Issue #250: 状態変化時の永続化コールバック (親で settings に保存) */
-  onPersistState?: (state: { expanded: Set<string>; collapsedRoots: Set<string> }) => void;
 }
-
-interface DirState {
-  loading: boolean;
-  error: string | null;
-  entries: FileNode[];
-}
-
-/**
- * (rootPath, relPath) を一意キーに変換。Map のキーにする。
- * 区切りには NUL 文字を使う (パス内に出現しないため衝突しない)。
- */
-const KEY_SEP = '\0';
-const dirKey = (rootPath: string, relPath: string): string =>
-  `${rootPath}${KEY_SEP}${relPath}`;
 
 const shortName = (abs: string): string => {
   const parts = abs.split(/[\\/]/).filter(Boolean);
@@ -65,28 +49,33 @@ export function FileTreePanel({
   activeFilePath,
   onOpenFile,
   onAddWorkspaceFolder,
-  onRemoveWorkspaceFolder,
-  initialExpanded,
-  initialCollapsedRoots,
-  onPersistState
+  onRemoveWorkspaceFolder
 }: FileTreePanelProps): JSX.Element {
   const t = useT();
-  /**
-   * 全ルート共通のディレクトリキャッシュ。
-   * key = `${rootPath}\0${relPath}` ('' がそのルートの直下)
-   */
-  const [dirs, setDirs] = useState<Map<string, DirState>>(new Map());
-  /** 展開済みディレクトリ集合(同じ key 形式) */
-  const [expanded, setExpanded] = useState<Set<string>>(() => initialExpanded ?? new Set());
-  /** 折り畳み状態のルート集合。primary は初期展開、extra はユーザー操作に委ねる */
-  const [collapsedRoots, setCollapsedRoots] = useState<Set<string>>(
-    () => initialCollapsedRoots ?? new Set()
-  );
+  // Issue #273: 展開状態 / 折り畳み / dir キャッシュは Provider に集約。
+  // 同じ Provider を見ている Sidebar / FileTreeCard は同じ参照を持つので、
+  // 一方でトグルした結果が他方に即時反映され、`update({ fileTreeExpanded })` の
+  // last-writer-wins 上書きも起きない。
+  const {
+    dirs,
+    expanded,
+    collapsedRoots,
+    toggleDir: ctxToggleDir,
+    toggleRoot,
+    loadDir,
+    refreshAll: ctxRefreshAll,
+    registerRoots,
+    unregisterRoots
+  } = useFileTreeState();
+
   /** Issue #251: ファイル右クリックで開く ContextMenu の表示状態 */
   const [contextMenu, setContextMenu] = useState<
     { x: number; y: number; items: ContextMenuItem[] } | null
   >(null);
   const showToast = useToast();
+  // Issue #273: 当該 instance を Provider に登録する一意 id。Sidebar と FileTreeCard が
+  // 同居しても useId で生成された値は重複しない (React 18 の機能)。
+  const instanceId = useId();
 
   /** 現在サイドバーに表示するルート一覧(primary + extras から重複除去)。
    *  Issue #129: 配列リテラルを毎レンダー作ると useEffect deps や子供 props が
@@ -97,62 +86,21 @@ export function FileTreePanel({
         (p, i, arr) => p && arr.indexOf(p) === i
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [primaryRoot, extraRoots.join('')]
+    [primaryRoot, extraRoots.join(KEY_SEP)]
   );
 
-  const loadDir = useCallback(
-    async (rootPath: string, relPath: string): Promise<void> => {
-      if (!rootPath) return;
-      if (!window.api.files) {
-        setDirs((prev) => {
-          const next = new Map(prev);
-          next.set(dirKey(rootPath, relPath), {
-            loading: false,
-            error: 'アプリを再起動してください（preload 更新のため）',
-            entries: []
-          });
-          return next;
-        });
-        return;
-      }
-      const key = dirKey(rootPath, relPath);
-      setDirs((prev) => {
-        const next = new Map(prev);
-        next.set(key, {
-          loading: true,
-          error: null,
-          entries: prev.get(key)?.entries ?? []
-        });
-        return next;
-      });
-      try {
-        const res = await window.api.files.list(rootPath, relPath);
-        setDirs((prev) => {
-          const next = new Map(prev);
-          next.set(key, {
-            loading: false,
-            error: res.ok ? null : res.error ?? 'error',
-            entries: res.entries
-          });
-          return next;
-        });
-      } catch (err) {
-        setDirs((prev) => {
-          const next = new Map(prev);
-          next.set(key, {
-            loading: false,
-            error: String(err),
-            entries: []
-          });
-          return next;
-        });
-      }
-    },
-    []
-  );
+  // Issue #273 #3: 当該 instance の roots を Provider に登録。Provider 側で全 instance の
+  // 和集合に含まれない expanded entry を prune する。unmount 時に解除して、UI 非表示中の
+  // 過剰 prune を避ける。
+  useEffect(() => {
+    registerRoots(instanceId, roots);
+    return () => unregisterRoots(instanceId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instanceId, primaryRoot, extraRoots.join(KEY_SEP), registerRoots, unregisterRoots]);
 
   // ルート構成が変わったら、まだロードしていないルートの直下を自動ロード。
-  // 既にキャッシュ済みのルートは触らず(折り畳みや展開状態を保持)。
+  // dirs キャッシュは Provider 共有なので、Sidebar と FileTreeCard を行き来しても
+  // 既にロード済みのルートは再ロードされない (Issue #273 #4 にも貢献)。
   useEffect(() => {
     for (const root of roots) {
       const key = dirKey(root, '');
@@ -160,90 +108,39 @@ export function FileTreePanel({
         void loadDir(root, '');
       }
     }
-    // 削除されたルートのキャッシュは掃除する
-    setDirs((prev) => {
-      const validPrefixes = new Set(roots.map((r) => `${r}\0`));
-      let changed = false;
-      const next = new Map(prev);
-      for (const key of next.keys()) {
-        const hit = Array.from(validPrefixes).some((p) => key.startsWith(p));
-        if (!hit) {
-          next.delete(key);
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-    // roots は毎回新しい配列なので primaryRoot + extraRoots 依存にする
+    // dirs は Provider state なので毎回新参照だが、`dirs.has` の結果で
+    // load 必要性を判定するので exhaustive-deps の警告は黙殺する。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [primaryRoot, extraRoots.join('\u0001'), loadDir]);
+  }, [primaryRoot, extraRoots.join(KEY_SEP), loadDir]);
 
-  // Issue #250: 永続化された expanded から (initialExpanded として) 復元した
-  // ディレクトリを dirs キャッシュに非同期で読み込む。toggleDir 経由でない展開
-  // 状態 = 復元時のみ意味があり、通常の操作では toggleDir 内で loadDir が呼ばれる。
+  // Issue #250 + #273: 永続化された expanded を Provider 経由で受け取り、未ロードな
+  // ものだけ load を queue に積む (Provider 内の concurrency-limited queue で発火)。
   // expanded を deps に入れると毎トグル再走するので、roots と loadDir のみ依存にする
-  // (mount + ルート切替時に 1 回だけ走る)。
+  // (mount + ルート切替時のみ走る)。
   useEffect(() => {
     for (const key of expanded) {
       if (dirs.has(key)) continue;
-      const sep = key.indexOf(KEY_SEP);
-      if (sep <= 0) continue;
-      const rootPath = key.slice(0, sep);
-      const relPath = key.slice(sep + 1);
-      // 永続化値に他プロジェクトの root が混在することを防ぐため、現在の roots に
-      // 含まれているもののみ load する。relPath が '' のものはルート直下なので
-      // 上の useEffect が読み込むためここでは無視。
-      if (relPath !== '' && roots.includes(rootPath)) {
-        void loadDir(rootPath, relPath);
+      const split = splitKey(key);
+      if (!split) continue;
+      if (split.relPath !== '' && roots.includes(split.rootPath)) {
+        void loadDir(split.rootPath, split.relPath);
       }
     }
-    // expanded を意図的に deps から除外 (mount + roots 変動時のみ走る)
+    // expanded / dirs を意図的に deps から除外 (mount + roots 変動時のみ走る)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [primaryRoot, extraRoots.join(KEY_SEP), loadDir]);
 
   const toggleDir = useCallback(
     (rootPath: string, node: FileNode) => {
       if (!node.isDir) return;
-      const key = dirKey(rootPath, node.path);
-      const wasOpen = expanded.has(key);
-      setExpanded((prev) => {
-        const next = new Set(prev);
-        if (next.has(key)) next.delete(key);
-        else next.add(key);
-        onPersistState?.({ expanded: next, collapsedRoots });
-        return next;
-      });
-      if (!wasOpen && !dirs.has(key)) {
-        void loadDir(rootPath, node.path);
-      }
+      ctxToggleDir(rootPath, node.path);
     },
-    [expanded, collapsedRoots, dirs, loadDir, onPersistState]
+    [ctxToggleDir]
   );
 
   const refreshAll = useCallback(() => {
-    // 展開済みと各ルート直下を再ロード
-    for (const root of roots) {
-      void loadDir(root, '');
-    }
-    for (const key of expanded) {
-      const [rootPath, relPath] = key.split('\0');
-      if (rootPath) void loadDir(rootPath, relPath);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [expanded, loadDir, primaryRoot, extraRoots.join('\u0001')]);
-
-  const toggleRoot = useCallback(
-    (rootPath: string) => {
-      setCollapsedRoots((prev) => {
-        const next = new Set(prev);
-        if (next.has(rootPath)) next.delete(rootPath);
-        else next.add(rootPath);
-        onPersistState?.({ expanded, collapsedRoots: next });
-        return next;
-      });
-    },
-    [expanded, onPersistState]
-  );
+    ctxRefreshAll(roots);
+  }, [ctxRefreshAll, roots]);
 
   // Issue #251: ファイル/ディレクトリ右クリックでパスコピー / エクスプローラ表示の
   // ContextMenu を開く。renderer 側のみで完結 (絶対パスは rootPath + relPath を結合)。
@@ -329,7 +226,9 @@ export function FileTreePanel({
         {state.entries.map((node) => {
           const childKey = dirKey(rootPath, node.path);
           const isOpen = node.isDir && expanded.has(childKey);
-          const childState = node.isDir ? dirs.get(childKey) ?? null : null;
+          const childState: DirState | null = node.isDir
+            ? dirs.get(childKey) ?? null
+            : null;
           const isActive = !node.isDir && activeFilePath === node.path;
           return (
             <FileTreeNode

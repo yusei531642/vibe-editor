@@ -25,6 +25,7 @@ import { useT } from './lib/i18n';
 import { SettingsProvider } from './lib/settings-context';
 import { ToastProvider } from './lib/toast-context';
 import { RoleProfilesProvider } from './lib/role-profiles-context';
+import { FileTreeStateProvider } from './lib/filetree-state-context';
 import { useUiStore } from './stores/ui';
 import { webviewZoom } from './lib/webview-zoom';
 import './index.css';
@@ -228,7 +229,9 @@ ReactDOM.createRoot(rootEl).render(
       <SettingsProvider>
         <ToastProvider>
           <RoleProfilesProvider>
-            <Root />
+            <FileTreeStateProvider>
+              <Root />
+            </FileTreeStateProvider>
           </RoleProfilesProvider>
         </ToastProvider>
       </SettingsProvider>
