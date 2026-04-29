@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 
 export interface ContextMenuItem {
   label: string;
@@ -110,7 +111,11 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Ele
     };
   }, [onClose, items, focusedIndex]);
 
-  return (
+  // Issue #283: 親 (.sidebar など) に backdrop-filter が掛かっていると、
+  // それが position: fixed の containing block になってしまい、メニューが
+  // sidebar の幅 (272px) に閉じ込められて右側が見切れる。document.body 直下に
+  // Portal でレンダーして containing block を viewport に戻す。
+  return createPortal(
     <div
       ref={ref}
       className="context-menu"
@@ -145,6 +150,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Ele
           {item.divider && <div className="context-menu__divider" />}
         </div>
       ))}
-    </div>
+    </div>,
+    document.body
   );
 }
