@@ -16,6 +16,12 @@ const ja: Dict = {
   'toolbar.palette.title': 'コマンドパレット (Ctrl+Shift+P)',
   'toolbar.settings.title': '設定 (Ctrl+,)',
 
+  // ---------- Window controls (Issue #260 PR-2: カスタムタイトルバー) ----------
+  'windowControls.minimize': '最小化',
+  'windowControls.maximize': '最大化',
+  'windowControls.restore': '元のサイズに戻す',
+  'windowControls.close': '閉じる',
+
   // ---------- Topbar (redesign shell) ----------
   'topbar.searchHint': 'コマンドを検索…',
   'topbar.mode.canvas': 'Canvas',
@@ -467,6 +473,12 @@ const en: Dict = {
   'toolbar.restart.title': 'Restart app',
   'toolbar.palette.title': 'Command palette (Ctrl+Shift+P)',
   'toolbar.settings.title': 'Settings (Ctrl+,)',
+
+  // ---------- Window controls (Issue #260 PR-2: custom titlebar) ----------
+  'windowControls.minimize': 'Minimize',
+  'windowControls.maximize': 'Maximize',
+  'windowControls.restore': 'Restore',
+  'windowControls.close': 'Close',
 
   // ---------- Topbar (redesign shell) ----------
   'topbar.searchHint': 'Search commands…',

@@ -10,6 +10,7 @@ import {
 import { useT } from '../../lib/i18n';
 import { useUiStore } from '../../stores/ui';
 import type { AvailableUpdateInfo } from '../../lib/updater-check';
+import { WindowControls } from './WindowControls';
 
 interface TopbarProps {
   projectRoot: string;
@@ -144,6 +145,9 @@ export function Topbar({
       <div className="topbar__user" aria-label="user">
         {userInitial.slice(0, 1).toUpperCase()}
       </div>
+
+      {/* Issue #260 PR-2: カスタムタイトルバーのウィンドウ制御 (decorations: false の代替) */}
+      <WindowControls />
     </div>
   );
 }

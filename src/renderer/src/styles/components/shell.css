@@ -386,6 +386,53 @@
   flex-shrink: 0;
 }
 
+/* ==================== WINDOW CONTROLS (Issue #260 PR-2) ==================== */
+/* `decorations: false` でネイティブ chrome を外した代わりのカスタムボタン群。
+   .topbar の右端に座り、`-webkit-app-region: drag` の親領域から自身は no-drag に
+   抜けることでクリック可能を保つ。 */
+.window-controls {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  margin-left: 8px;
+  gap: 0;
+  flex-shrink: 0;
+  /* Topbar の左 padding (16px) と視覚バランスを揃え、右端まで密着させる */
+  margin-right: -18px;
+  height: 100%;
+}
+
+.window-controls__btn {
+  -webkit-app-region: no-drag;
+  width: 46px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition:
+    background 120ms var(--ease-out),
+    color 120ms var(--ease-out);
+}
+
+.window-controls__btn:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+}
+
+.window-controls__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -3px;
+}
+
+/* Close ボタンだけ Windows 11 / VS Code 流儀で hover 時に赤背景 + 白文字 */
+.window-controls__btn--close:hover {
+  background: #e81123;
+  color: #ffffff;
+}
+
 /* ==================== LEFT RAIL ==================== */
 .rail {
   width: var(--shell-rail);
