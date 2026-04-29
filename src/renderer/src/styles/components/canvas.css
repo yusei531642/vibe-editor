@@ -473,14 +473,12 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
-  /* Issue #261: 旧実装の `overflow: hidden` だと、内側の `.terminal-view` →
-     `.xterm-viewport` の scrollbar が下端でクリップされ、ターミナルの最終行
-     (xterm 内部スクロールでは到達しているが視覚的には隠れる) が見えなかった。
-     `overflow: clip` だと scrollbar 自体が隠れるので、`hidden` を `clip` に
-     変える代わりに `.xterm-viewport` 側で overflow:auto を明示する戦略を採用。
-     ここではクリッピングを維持しつつ、内部 viewport が容器より少しだけ高く
-     なる端数行ケース (compute-unscaled-grid.ts の Math.round 化) でも
-     scrollbar が出るよう min-height: 0 を維持する。 */
+  /* Issue #261 / #272 v3: ここでは外側 wrapper を `overflow: hidden` でクリップしつつ、
+     内側スクロールは xterm v6 自前の SmoothScrollableElement (custom scrollbar) に
+     任せる。旧実装は `.xterm-viewport` 側に `overflow:auto` を明示していたが、xterm v6
+     では誤った native scrollbar を起動するため #272 v3 で撤回。
+     端数行ケース (compute-unscaled-grid.ts の Math.round 化) では xterm 自前 scrollback で
+     吸収されるため、wrapper 側は min-height: 0 を維持するだけで足りる。 */
   overflow: hidden;
   position: relative;
 }
