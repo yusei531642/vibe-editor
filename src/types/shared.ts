@@ -204,6 +204,21 @@ export interface GitDiffResult {
   modified: string;
 }
 
+/**
+ * Issue #326: 設定モーダルのログビューア用。Rust 側 `logs_read_tail` の応答に対応。
+ * 構造体は `src-tauri/src/commands/logs.rs` の `ReadLogTailResponse` と一致させる。
+ */
+export interface ReadLogTailResponse {
+  /** ログ末尾の文字列。`empty=true` のとき空文字列 */
+  content: string;
+  /** ログファイルの絶対パス (表示用) */
+  path: string;
+  /** maxBytes でクリップしたか (= ファイルがそれ以上長い) */
+  truncated: boolean;
+  /** ファイル不在 / size=0 のとき true */
+  empty: boolean;
+}
+
 export interface SessionInfo {
   id: string;
   path: string;

@@ -303,6 +303,19 @@ const ja: Dict = {
   'settings.apply': '適用して保存',
   'settings.custom': '（カスタム）',
 
+  // ---------- Settings: Logs (Issue #326) ----------
+  'settings.logs.title': 'ログ',
+  'settings.logs.desc':
+    'アプリの実行ログ (~/.vibe-editor/logs/vibe-editor.log) の末尾を表示します。バグ報告にはこのログを添付してください。',
+  'settings.logs.refresh': '再読み込み',
+  'settings.logs.openDir': 'ログフォルダを開く',
+  'settings.logs.levelFilter': 'レベル',
+  'settings.logs.level.all': 'すべて',
+  'settings.logs.loading': '読み込み中…',
+  'settings.logs.empty': 'ログはまだありません。',
+  'settings.logs.noMatch': '選択したレベルに該当するログがありません。',
+  'settings.logs.truncated': '末尾のみ表示中',
+
   // ---------- Toast ----------
   'toast.reviewRequested': '差分レビューを依頼: {path}',
   'toast.pathCopied': 'パスをクリップボードにコピー',
@@ -761,6 +774,19 @@ const en: Dict = {
   'settings.cancel': 'Cancel',
   'settings.apply': 'Apply & save',
   'settings.custom': '(custom)',
+
+  // ---------- Settings: Logs (Issue #326) ----------
+  'settings.logs.title': 'Logs',
+  'settings.logs.desc':
+    'Tail of the app runtime log (~/.vibe-editor/logs/vibe-editor.log). Attach this when filing a bug report.',
+  'settings.logs.refresh': 'Refresh',
+  'settings.logs.openDir': 'Open log folder',
+  'settings.logs.levelFilter': 'Level',
+  'settings.logs.level.all': 'All',
+  'settings.logs.loading': 'Loading…',
+  'settings.logs.empty': 'No logs yet.',
+  'settings.logs.noMatch': 'No log lines match the selected level.',
+  'settings.logs.truncated': 'tail only',
 
   // ---------- Toast ----------
   'toast.reviewRequested': 'Review requested: {path}',
