@@ -83,6 +83,32 @@ impl SessionRegistry {
 
     pub fn insert(&self, id: String, handle: SessionHandle) {
         let mut g = recover(self.inner.lock());
+        Self::insert_locked(&mut g, id, handle);
+    }
+
+    /// Issue #292: id 衝突を atomic に検出する insert。Mutex 1 回ロックの中で
+    /// `by_id.contains_key(&id)` の判定 → 採用 / 拒否を行うため、TOCTOU race で別スレッド
+    /// が同 id を先に挿入していても、後勝ち上書きにならない。
+    ///
+    /// 戻り値:
+    ///   - `Ok(())`: 採用された (id は registry に登録済み)
+    ///   - `Err(handle)`: 既存 PTY と id が衝突。caller の handle はそのまま返却される
+    ///     ので、caller 側で `handle.kill()` してから別 id で retry する責務がある。
+    pub fn insert_if_absent(
+        &self,
+        id: String,
+        handle: SessionHandle,
+    ) -> Result<(), SessionHandle> {
+        let mut g = recover(self.inner.lock());
+        if g.by_id.contains_key(&id) {
+            return Err(handle);
+        }
+        Self::insert_locked(&mut g, id, handle);
+        Ok(())
+    }
+
+    /// `insert` / `insert_if_absent` の共通ボディ。caller 側で Mutex を取った状態で呼ぶ。
+    fn insert_locked(g: &mut MutexGuard<'_, Inner>, id: String, handle: SessionHandle) {
         // Issue #42: 同じ agent_id で再 spawn されると、旧 session_id を by_agent が手放した後も
         // by_id に旧 SessionHandle が残り続け、以後 kill されない孤立 PTY になる。
         // insert 時点で同 agent_id の旧 session があれば、by_id から取り出して kill + drop する。

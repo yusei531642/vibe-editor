@@ -497,20 +497,17 @@ pub async fn terminal_create(
     // Issue #285: renderer が指定した id があれば採用 (event 名 `terminal:data:{id}` に
     // 安全な文字種だけ通す)。`attach_if_exists` 経路は preflight で既に return 済みで、
     // ここに到達するのは「新規 spawn 経路」だけなので、両者は構造的に直交している。
-    // 不正値・未指定は UUID v4 にフォールバック。既存 PTY との衝突は実質起こらない
-    // (UUID v4 の 122-bit エントロピー) が、安全側で衝突時も UUID にフォールバックする。
-    // ※ 衝突は registry の lock を握らない get→ 採用→ insert の TOCTOU を含むため、
-    //   完全な atomic 化はフォローアップ issue 扱い (実害シナリオは UUID 衝突ほぼ皆無)。
-    let id = match opts.id.as_deref() {
+    // 不正値・未指定は UUID v4 にフォールバック。
+    //
+    // Issue #292: 衝突検出は registry の `insert_if_absent` に atomic で委ねる。
+    // 旧実装の preflight `state.pty_registry.get(s).is_some()` → spawn → insert は、
+    // 判定と挿入の間に Mutex を一度離すため TOCTOU race が残っていた (UUID v4 の
+    // 122-bit エントロピーで実発生確率はほぼ 0 だが構造的に穴)。renderer-supplied id の
+    // 形式バリデーションのみここで行い、registry 衝突確認は spawn 後の atomic 検出に任せる。
+    let initial_id = match opts.id.as_deref() {
         Some(s) if !is_valid_terminal_id(s) => {
             tracing::warn!(
                 "[terminal] renderer-supplied id rejected (invalid charset/length), falling back to UUID v4"
-            );
-            Uuid::new_v4().to_string()
-        }
-        Some(s) if state.pty_registry.get(s).is_some() => {
-            tracing::warn!(
-                "[terminal] renderer-supplied id {s} collides with existing PTY, falling back to UUID v4"
             );
             Uuid::new_v4().to_string()
         }
@@ -548,9 +545,45 @@ pub async fn terminal_create(
         role: opts.role,
     };
 
-    match spawn_session(app.clone(), id.clone(), spawn_opts, state.pty_registry.clone()) {
-        Ok(handle) => {
-            state.pty_registry.insert(id.clone(), handle);
+    // Issue #292: id 衝突時の retry 上限。実発生はほぼ皆無 (UUID v4 衝突は
+    // 122-bit エントロピー + 同時 spawn 競合) なので 3 回もあれば十分。
+    const MAX_ID_ATTEMPTS: usize = 3;
+    let mut id_candidate = initial_id;
+    let mut attempt = 0usize;
+    let adopt_id_result: Result<String, anyhow::Error> = loop {
+        attempt += 1;
+        match spawn_session(
+            app.clone(),
+            id_candidate.clone(),
+            spawn_opts.clone(),
+            state.pty_registry.clone(),
+        ) {
+            Ok(handle) => match state
+                .pty_registry
+                .insert_if_absent(id_candidate.clone(), handle)
+            {
+                Ok(()) => break Ok(id_candidate),
+                Err(returned_handle) => {
+                    let _ = returned_handle.kill();
+                    if attempt >= MAX_ID_ATTEMPTS {
+                        break Err(anyhow::anyhow!(
+                            "terminal_create failed: id collision persisted after {attempt} attempts"
+                        ));
+                    }
+                    tracing::warn!(
+                        "[terminal] id {id_candidate} collided in registry (attempt {attempt}/{MAX_ID_ATTEMPTS}), retrying with fresh UUID"
+                    );
+                    id_candidate = Uuid::new_v4().to_string();
+                }
+            },
+            Err(e) => break Err(e),
+        }
+    };
+
+    match adopt_id_result {
+        Ok(id) => {
+            // 後続処理: spawn_session の Ok 分岐内で行っていた処理を保持
+            // (id は registry に登録済み、retry を経た場合も Ok(()) 後の状態は insert と等価)。
 
             // Codex stability: 起動した PTY に「最初の user メッセージ」として instructions を注入する。
             // - 1.8 秒待ってから注入 (TUI の初期化 / banner 描画完了を待つ目安)。早すぎると Codex の入力欄が
