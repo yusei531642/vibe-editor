@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="build/icon.png" alt="vibe-editor" width="112" />
+<img src="src/renderer/public/vibe-editor.png" alt="vibe-editor" width="112" />
 
 # vibe-editor
 
