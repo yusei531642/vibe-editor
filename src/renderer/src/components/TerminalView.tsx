@@ -69,6 +69,13 @@ interface TerminalViewProps {
    */
   disableWebgl?: boolean;
   /**
+   * Issue #272 v4: Canvas モード限定で、マウスホイールを xterm の scrollback スクロールへ
+   * 強制ルーティングする。`term.attachCustomWheelEventHandler` 経由で normal buffer +
+   * scrollback ありの時のみ `term.scrollLines()` を発火させる。
+   * alt buffer (vim/less/htop) や Ctrl/Shift wheel は xterm 既定動作のまま (TUI 側に届く)。
+   */
+  forceWheelScrollback?: boolean;
+  /**
    * Issue #253: Canvas モード (transform: scale(zoom) 配下) で論理 px ベース fit を有効化。
    * true にすると getBoundingClientRect 経由ではなく container.clientWidth/clientHeight と
    * `getCellSize()` から cols/rows を直接計算するので、zoom が変わっても PTY サイズが安定する。
@@ -113,6 +120,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       onSessionId,
       onUserInput,
       disableWebgl,
+      forceWheelScrollback,
       unscaledFit,
       getCellSize,
       zoomSubscribe,
@@ -123,7 +131,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     const { settings } = useSettings();
 
     // --- Terminal インスタンス ---
-    const { containerRef, termRef, fitRef } = useXtermInstance(settings, disableWebgl);
+    const { containerRef, termRef, fitRef } = useXtermInstance(
+      settings,
+      disableWebgl,
+      forceWheelScrollback
+    );
 
     // --- ref で state を hook 間共有 ---
     const ptyIdRef = useRef<string | null>(null);

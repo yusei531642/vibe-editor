@@ -19,6 +19,20 @@ import { buildXtermTheme } from './xterm-theme';
 const SCROLLBACK_LINES = 2000;
 
 /*
+ * Issue #272 v4: ホイール → scrollback の lines 換算で使う px-per-line。
+ * Chromium 系で deltaMode=DOM_DELTA_PIXEL のとき、1 ノッチ ~100px 出る環境が多いので
+ * 50 で割って 2 行/ノッチ程度に収める。DOM_DELTA_LINE/DOM_DELTA_PAGE はそれぞれ
+ * 行/ページ単位なのでそのまま使う。
+ */
+const WHEEL_PIXEL_PER_LINE = 50;
+
+function wheelEventToLineDelta(event: WheelEvent, rows: number): number {
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) return event.deltaY * rows;
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) return event.deltaY;
+  return event.deltaY / WHEEL_PIXEL_PER_LINE;
+}
+
+/*
  * Issue #126: Chromium の active WebGL context 上限は通常 16 (実装依存だが Tauri/WebView2
  * でも同等)。MAX_TERMINALS=30 のうち 16 個目以降の WebGL 作成が成功しても、新しい context
  * を作るたびに古い context が暗黙 lost され、ランダムに DOM renderer に降格する。
@@ -91,7 +105,8 @@ function ensureBoxDrawingFallbacks(family: string): string {
  */
 export function useXtermInstance(
   settings: AppSettings,
-  disableWebgl = false
+  disableWebgl = false,
+  forceWheelScrollback = false
 ): {
   containerRef: RefObject<HTMLDivElement>;
   termRef: MutableRefObject<Terminal | null>;
@@ -148,6 +163,53 @@ export function useXtermInstance(
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(container);
+
+    /*
+     * Issue #272 v4: Canvas モード限定で「ホイール → scrollback スクロール」を強制する。
+     *
+     * 背景:
+     *   xterm v6 は mouse protocol が wheel を要求 (Claude/Codex TUI が CoreMouseEventType.WHEEL
+     *   を enable) すると Viewport の `handleMouseWheel` を false にして、wheel を
+     *   CoreBrowserTerminal 側で app mouse wheel report として消費する。
+     *   結果、Canvas のカード上でホイールを回しても scrollback が動かない。scrollbar drag は
+     *   別経路 (DOM scrollbar.vertical) なので影響を受けない。
+     *
+     *   IDE モードでは scrollback を読みたいときも mouse mode を解除する習慣があるので
+     *   既定挙動を維持する方が望ましい。Canvas モードでは「カードの中身を読み返す」用途が強いので
+     *   wheel を scrollback に流すことを優先する。
+     *
+     * 仕様:
+     *   - alt buffer (vim/less/htop など) では `return true` で xterm 既定動作 (TUI に通知)
+     *   - Ctrl/Shift wheel は xterm 既定動作 (フォントサイズ変更など)
+     *   - scrollback が 0 (baseY <= 0) なら xterm 既定動作
+     *   - normal buffer + scrollback あり時のみ preventDefault + term.scrollLines() で末尾スクロール
+     */
+    if (forceWheelScrollback) {
+      let wheelLineRemainder = 0;
+      term.attachCustomWheelEventHandler((event) => {
+        if (event.ctrlKey || event.shiftKey || event.deltaY === 0) return true;
+
+        const activeBuffer = term.buffer.active;
+        if (activeBuffer.type !== 'normal' || activeBuffer.baseY <= 0) {
+          wheelLineRemainder = 0;
+          return true;
+        }
+
+        wheelLineRemainder += wheelEventToLineDelta(event, term.rows);
+        const lines = wheelLineRemainder > 0
+          ? Math.floor(wheelLineRemainder)
+          : Math.ceil(wheelLineRemainder);
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        if (lines !== 0) {
+          wheelLineRemainder -= lines;
+          term.scrollLines(lines);
+        }
+        return false;
+      });
+    }
 
     // WebGL レンダラ (主ケース): DOM renderer を GPU 描画に置き換え。
     // 環境 (headless / GPU 無効 / context lost) で失敗したら try/catch + webgl "contextlost"

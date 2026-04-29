@@ -507,6 +507,20 @@
    ホイール無反応の症状を生んでいたため撤回する。`.xterm-screen` 高さ追従は CSS ではなく
    term.resize() → renderer 側で担保される。 */
 
+/* Issue #272 v4: Canvas のターミナルは xterm v6 の custom scrollbar を「常時表示」にする。
+   xterm の SmoothScrollableElement は `vertical: ScrollbarVisibility.Auto` で生成され、
+   JS が要素の `.visible` / `.invisible` クラスを切替えて opacity/pointer-events を絞る。
+   public API には可視性制御がないため、Canvas スコープの !important で xterm.css の
+   autohide スタイルを上書きする。`.react-flow__node` 配下に限定するので IDE モードへの
+   影響はない (IDE 側ターミナルは React Flow ノード外)。
+   transition も無効化して即時表示 (フェードによるチラつきを避ける)。 */
+.react-flow__node .terminal-view .xterm-scrollable-element > .scrollbar.vertical {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  transition: none !important;
+}
+
 /* Issue #261: AgentNodeCard の min-height は内部 xterm-viewport の高さに引っ張られ
    ないようにし、Canvas モードのリサイズで NodeResizer が小さくしたときも
    scrollbar が出る (xterm 内部スクロールが活きる) ようにする。

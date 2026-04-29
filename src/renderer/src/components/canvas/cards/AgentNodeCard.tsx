@@ -376,6 +376,9 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
             // Canvas zoom で xterm canvas が滲むのを避けるため WebGL を切る (DOM renderer 固定)。
             // text は実 DOM になるので Chromium が親 transform に応じて再ラスタライズしシャープに描く。
             disableWebgl
+            // Issue #272 v4: Canvas モードではホイールを scrollback スクロールへ強制ルーティング
+            // (xterm mouse protocol が wheel を消費して scrollback が動かない問題の対策)
+            forceWheelScrollback
             // Issue #253: 論理 px ベース fit + zoom 購読 + 可観測性
             unscaledFit={fit.unscaledFit}
             getCellSize={fit.getCellSize}
