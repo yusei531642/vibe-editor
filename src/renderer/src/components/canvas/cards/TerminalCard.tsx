@@ -83,7 +83,15 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
     <>
       <Handle type="target" position={Position.Left} style={{ background: '#7a7afd' }} />
       <CardFrame id={id} title={title} minWidth={NODE_MIN_W} minHeight={NODE_MIN_H}>
-        <div className="canvas-terminal-card__term" ref={termContainerRef}>
+        {/* Issue #327: AgentNodeCard と同じく `nodrag nowheel` を付与する。
+            これが無いと React Flow がノード全体で pointerdown を奪い、xterm v6 の
+            custom scrollbar thumb をマウスでドラッグできない (= ホイールは効くが
+            scrollbar が掴めない) 状態になる。Claude 側は Spawn Team 経由で
+            AgentNodeCard に乗るため既に nodrag があったが、Codex 等を「Terminal」
+            カードとして直接立ち上げると TerminalCard 経由で出るためここで揃える。
+            nowheel は AgentNodeCard と対称にし、wheel イベントを React Flow の
+            zoom/pan に奪わせない。xterm.js への wheel 配送は内部処理で完結する。 */}
+        <div className="nodrag nowheel canvas-terminal-card__term" ref={termContainerRef}>
           <TerminalView
             ref={ref}
             // Issue #271: HMR remount で同じ PTY へ再 bind するための論理キー。
