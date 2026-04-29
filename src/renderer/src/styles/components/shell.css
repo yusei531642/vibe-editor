@@ -551,6 +551,7 @@
 
 /* ==================== STATUS BAR ==================== */
 .status {
+  box-sizing: border-box;
   height: var(--shell-status);
   display: flex;
   align-items: center;
