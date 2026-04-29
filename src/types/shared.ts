@@ -436,6 +436,14 @@ export interface TerminalCreateResult {
    * initialMessage 自動送信や session id watcher のセットアップを行いたいケースで参照する。
    */
   attached?: boolean;
+  /**
+   * Issue #285 follow-up: attach 経路で renderer に渡す既存 PTY の直近出力 snapshot。
+   * HMR remount や Canvas/IDE 切替で xterm が新規生成されると、既存 PTY の banner /
+   * prompt は emit 済みで listener には届かない。Rust 側で直前 64 KiB を保持し、
+   * attach hit 時にここに乗せて返すので renderer は最初に term.write(replay) する。
+   * 新規 spawn 経路 / snapshot が空のときは undefined。
+   */
+  replay?: string;
 }
 
 export interface TerminalExitInfo {

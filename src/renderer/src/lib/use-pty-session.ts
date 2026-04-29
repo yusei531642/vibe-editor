@@ -546,14 +546,107 @@ export function usePtySession(options: UsePtySessionOptions): void {
         if (res.warning) {
           term.writeln(`\x1b[33m[警告] ${res.warning}\x1b[0m`);
         }
-        callbacksRef.current.onStatus?.(
-          res.attached
-            ? `再接続: ${res.command ?? command}`
-            : `実行中: ${res.command ?? command}`
-        );
-
         const attached = res.attached === true;
-        setupPostSubscribe(res.id, attached);
+
+        // Issue #285 follow-up: attach 経路の race と表示順序を両立させる設計。
+        //
+        // 問題 1 (Codex Lane 0): snapshot 取得 〜 renderer 側 listener ready の間に届いた新着が lost
+        // 問題 2 (Codex Lane 3): listener ready 〜 term.write(replay) の間の新着が replay より先に描画 → 順序逆転
+        //
+        // 解決:
+        //   (a) listener を *Ready で張ることで「create return 後の新着は必ず受信される」を保証
+        //   (b) listener callback は最初の payload を「buffering 用 queue」に溜め、term.write はしない
+        //   (c) replay snapshot を term.write してから queue を順次 flush する
+        //   (d) flush 完了後 callback の挙動を「直接 term.write」に切替える
+        //
+        // この順序で:
+        //   - replay (snapshot 時点までの過去出力) が先に画面に書かれる
+        //   - その後 queue に溜まっていた「snapshot 後 〜 buffering 切替後」の新着が順序通り flush される
+        //   - 以降の通常 listener が直接 term.write する
+        //
+        // 注: snapshot 末尾と queue 先頭が一部 byte レベルで重複する可能性はあるが、
+        // それは「終端 prompt の再描画」程度で機能性には影響しない (xterm の re-render で吸収される)。
+        if (attached) {
+          unsubscribePtyListeners();
+
+          // (b) attach 経路 listener: 最初は queue に溜める、flush 後は直接 write。
+          let attachQueue: string[] = [];
+          let attachQueueFlushed = false;
+          const writeOrQueue = (data: string): void => {
+            if (!isCurrentGeneration()) return;
+            if (!attachQueueFlushed) {
+              attachQueue.push(data);
+              return;
+            }
+            term.write(data);
+            if (data.includes('\n') || data.includes('\r') || data.length >= 4096) {
+              scheduleRenderRepair();
+            }
+            callbacksRef.current.onActivity?.();
+          };
+
+          // (a) *Ready で listener 登録を await。create return 後の payload は確実に受信される。
+          const ok = await attemptPreSubscribe(
+            res.id,
+            writeOrQueue,
+            (info) => {
+              if (!isCurrentGeneration()) return;
+              term.writeln(
+                `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m`
+              );
+              callbacksRef.current.onStatus?.(`終了 (exitCode=${info.exitCode})`);
+              ptyIdRef.current = null;
+              if (skey) {
+                const c = getHmrPtyCache();
+                if (c) delete c[skey];
+              }
+              callbacksRef.current.onExit?.();
+            },
+            (sessionId) => {
+              if (!isCurrentGeneration()) return;
+              try {
+                callbacksRef.current.onSessionId?.(sessionId);
+              } catch {
+                /* noop */
+              }
+            }
+          );
+          if (!ok) return;
+
+          // (c) listener が queue モードで動いている状態で replay を term.write。
+          if (res.replay && res.replay.length > 0) {
+            try {
+              term.write(res.replay);
+            } catch {
+              /* xterm が dispose 済み等の例外は握りつぶす (replay は best-effort) */
+            }
+          }
+
+          // (d) queue を順次 flush して、以降は直接 write モードに切替える。
+          //     queue 中身は snapshot 取得後 〜 ここまでの新着なので、replay の **後** に来るのが正しい順序。
+          for (const chunk of attachQueue) {
+            try {
+              term.write(chunk);
+            } catch {
+              /* dispose 済みは無視 */
+            }
+          }
+          attachQueue = [];
+          attachQueueFlushed = true;
+
+          // UI 通知は status ラインのみ。xterm buffer に UI メッセージを書き込まない (Codex Lane 1)。
+          callbacksRef.current.onStatus?.(
+            res.replay && res.replay.length > 0
+              ? `再接続 (出力復元): ${res.command ?? command}`
+              : `再接続: ${res.command ?? command}`
+          );
+        } else {
+          // 新規 spawn 経路: pre-subscribe 済みの listener はそのまま使う。
+          // setupPostSubscribe は新規 spawn では if (!offData) ガードで no-op になるが、
+          // 互換性と将来の post-subscribe 経路フォールバック用に呼んでおく。
+          callbacksRef.current.onStatus?.(`実行中: ${res.command ?? command}`);
+          setupPostSubscribe(res.id, attached);
+        }
       } catch (err) {
         // Issue #285 self-review: 例外発生から effect cleanup までの窓で pre-subscribe
         // した listener が orphan になるのを防ぐため、catch でも明示的に解除する。

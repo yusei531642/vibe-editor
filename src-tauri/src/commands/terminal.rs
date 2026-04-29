@@ -61,6 +61,11 @@ pub struct TerminalCreateResult {
     pub warning: Option<String>,
     /// Issue #271: attachIfExists により既存 PTY に接続した場合 true。新規 spawn 時は None。
     pub attached: Option<bool>,
+    /// Issue #285 follow-up: attach 経路で renderer に渡す既存 PTY の直近出力 snapshot。
+    /// HMR remount / Canvas/IDE 切替で xterm が新規生成されると banner / prompt は既に
+    /// emit 済みで listener には届かないため、直前 64 KiB を文字列で同梱して replay させる。
+    /// 新規 spawn 経路や attach 不発 (snapshot 空) では None。
+    pub replay: Option<String>,
 }
 
 #[derive(Serialize, Default)]
@@ -433,11 +438,21 @@ pub async fn terminal_create(
                 .chain(args.iter().cloned())
                 .collect::<Vec<_>>()
                 .join(" ");
+            // Issue #285 follow-up: 既存 PTY の scrollback snapshot を取り出して renderer に
+            // 同梱する。新しい xterm はこれを最初に書き込むことで banner / prompt が
+            // 復元され、attach 直後の空白問題が解消される。SessionHandle が registry から
+            // 既に消えているレース (worker thread の exit watcher が remove した直後など) では
+            // None を返して replay をスキップする。
+            let replay = state
+                .pty_registry
+                .get(&existing_id)
+                .and_then(|h| h.scrollback_snapshot());
             return Ok(TerminalCreateResult {
                 ok: true,
                 id: Some(existing_id),
                 command: Some(cmdline),
                 attached: Some(true),
+                replay,
                 ..Default::default()
             });
         }
@@ -649,6 +664,8 @@ pub async fn terminal_create(
                 // Issue #271: 新規 spawn は明示的に Some(false)。renderer 側で
                 // 「attach 復帰経路かどうか」を毎回判別するときの不確実性をなくす。
                 attached: Some(false),
+                // Issue #285 follow-up: 新規 spawn では replay すべき過去出力は無いので None。
+                replay: None,
             })
         }
         Err(e) => Ok(TerminalCreateResult {

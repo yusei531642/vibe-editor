@@ -73,3 +73,35 @@ describe('Issue #285: TerminalCreateOptions client-generated id', () => {
     expect(opts.id).toBeUndefined();
   });
 });
+
+describe('Issue #285 follow-up: TerminalCreateResult.replay (attach 経路 scrollback)', () => {
+  it('attach 経路で replay 文字列を受け取れる', () => {
+    const r: TerminalCreateResult = {
+      ok: true,
+      id: 'pty-attach',
+      attached: true,
+      replay: '$ claude\n\x1b[36mWelcome to Claude CLI\x1b[0m\n>'
+    };
+    expect(r.replay).toContain('Welcome to Claude CLI');
+    expect(r.attached).toBe(true);
+  });
+
+  it('新規 spawn 経路では replay は undefined', () => {
+    const r: TerminalCreateResult = {
+      ok: true,
+      id: 'pty-new',
+      attached: false
+    };
+    expect(r.replay).toBeUndefined();
+  });
+
+  it('replay 空文字列も型上は許容される (renderer 側で length チェック)', () => {
+    const r: TerminalCreateResult = {
+      ok: true,
+      id: 'pty-empty',
+      attached: true,
+      replay: ''
+    };
+    expect(r.replay).toBe('');
+  });
+});
