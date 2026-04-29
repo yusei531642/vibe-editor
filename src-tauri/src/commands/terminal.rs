@@ -443,6 +443,20 @@ pub async fn terminal_create(
         }
     }
 
+    // Issue #293: 新規 spawn 経路は DoS ガードを通す。
+    // - 同時 PTY 数が `MAX_CONCURRENT_PTY` (=100) に達していたら拒否
+    // - `RATE_LIMIT_WINDOW` (=1s) 内に `MAX_PTY_SPAWNS_PER_WINDOW` (=10) 回以上 spawn 済なら拒否
+    // attach_if_exists で既存 PTY を再利用する経路は新規 spawn ではないので、ここに到達しない。
+    if let Err(gate_err) = state.pty_registry.try_reserve_spawn_slot() {
+        let msg = gate_err.message();
+        tracing::warn!("[terminal] spawn rejected by DoS gate: {msg}");
+        return Ok(TerminalCreateResult {
+            ok: false,
+            error: Some(msg),
+            ..Default::default()
+        });
+    }
+
     let (cwd, warning) =
         crate::pty::session::resolve_valid_cwd(&opts.cwd, opts.fallback_cwd.as_deref());
 
