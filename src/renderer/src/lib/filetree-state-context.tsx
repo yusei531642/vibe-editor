@@ -8,10 +8,20 @@
  *   2. setState updater 内で `onPersistState` を呼んでいた副作用混在 → effect で expanded/
  *      collapsedRoots の変化に追従して persist する。React Strict Mode / concurrent rendering
  *      で updater が複数回実行されても副作用が二重発火しない。
- *   3. 存在しない root / orphan dir の prune 未実装 → mount 時に現在の roots に含まれない
- *      entry を expanded から除去。`loadDir` 失敗時にもそのキーを expanded から除去 (lazy)。
+ *   3. 存在しない root / orphan dir の prune 未実装 → settings.workspaceFolders と
+ *      lastOpenedRoot を canonical な root truth として参照、これに含まれない expanded
+ *      entry を prune。`loadDir` 失敗時にもそのキーを expanded から prune (lazy)。
  *   4. 復元時の I/O storm → `loadDir` を最大 4 並列の queue で発火し、CLI の files.list が
- *      同時多発するのを防ぐ。
+ *      同時多発するのを防ぐ。pending Promise Map で重複呼び出しを統一 Promise 化。
+ *
+ * 自己レビュー (Codex 不在の代替) で発覚した critical 問題への対応:
+ *   - 初期 mount 直後の persist が settings 未ロードの空値で過去保存値を上書きする問題
+ *     → useSettingsLoading + hydratedRef で hydrate 完了まで persist 抑止。
+ *   - useSettings 全購読で他 settings の変化が Provider re-render を誘発する問題
+ *     → useSettingsValue / useSettingsActions の細粒度 selector に置換。
+ *   - toggleDir の closure stale な wasOpen 判定 → setExpanded updater 内で nowOpened 捕捉。
+ *   - Canvas FileTreeCard が limited extraRoots を持つと sidebar の expanded が prune される
+ *     問題 → registerRoots ではなく settings の workspace truth で prune する。
  */
 import {
   createContext,
@@ -24,13 +34,28 @@ import {
   type ReactNode
 } from 'react';
 import type { FileNode } from '../../../types/shared';
-import { useSettings } from './settings-context';
+import {
+  useSettingsActions,
+  useSettingsLoading,
+  useSettingsValue
+} from './settings-context';
 
-const KEY_SEP = '\0';
+const KEY_SEP_CHAR = '\0';
 
-/** (rootPath, relPath) を一意キーに変換する。Map のキーにする。 */
+/** `(rootPath, relPath)` を区切る NUL 文字。パス内に出現しないので衝突しない。
+ *  外部 (FileTreePanel 等) でもこの定数を使い、定義の重複を避ける。 */
+export const KEY_SEP = KEY_SEP_CHAR;
+
+/** (rootPath, relPath) を一意キーに変換する。 */
 export const dirKey = (rootPath: string, relPath: string): string =>
   `${rootPath}${KEY_SEP}${relPath}`;
+
+/** dirKey を分解する。不正な key (sep 無し / 空 root) は null。 */
+export function splitKey(key: string): { rootPath: string; relPath: string } | null {
+  const sep = key.indexOf(KEY_SEP);
+  if (sep <= 0) return null;
+  return { rootPath: key.slice(0, sep), relPath: key.slice(sep + 1) };
+}
 
 export interface DirState {
   loading: boolean;
@@ -54,9 +79,11 @@ export interface FileTreeStateValue {
   /** 与えられた roots について、直下と展開済み配下を再ロードする */
   refreshAll: (roots: string[]) => void;
   /**
-   * 現在 mount されている FileTreePanel の roots を Provider に伝えて、
-   * 不要 entry を prune する trigger にする。Sidebar と FileTreeCard の双方が
-   * 自分の roots を渡し、Provider は和集合に対して prune する。
+   * 現在 mount されている FileTreePanel の roots を Provider に伝える。
+   * 補助情報 (Sidebar / Canvas のどこで FileTreePanel が描画されているか) として記録するが、
+   * prune の真理値は `settings.workspaceFolders + lastOpenedRoot` であり、ここの登録だけで
+   * は expanded を prune しない (Canvas の payload で limited extraRoots が来ると sidebar
+   * の保存値を消してしまうため)。
    */
   registerRoots: (instanceId: string, roots: string[]) => void;
   /** unmount 時に呼ぶ。当該 instance の roots を解除する */
@@ -65,7 +92,9 @@ export interface FileTreeStateValue {
 
 const FileTreeStateContext = createContext<FileTreeStateValue | null>(null);
 
-/** files.list を同時に何本までに絞るか (Issue #273 #4: I/O storm 対策)。 */
+/** files.list を同時に何本までに絞るか (Issue #273 #4: I/O storm 対策)。
+ *  4 は SSD / 一般的な user machine で「逐次キューよりは並列度を取りつつ、
+ *  HDD のシーク負荷で詰まらない」中庸値。設定化は別 issue 候補。 */
 const MAX_CONCURRENT_LOADS = 4;
 
 interface QueuedLoad {
@@ -73,57 +102,154 @@ interface QueuedLoad {
   run: () => Promise<void>;
 }
 
-export function FileTreeStateProvider({ children }: { children: ReactNode }): JSX.Element {
-  const { settings, update } = useSettings();
-
-  // 初期値は settings からの復元。lazy 初期化で mount 時の値だけ採用 (以後は内部 state 単独管理)。
-  const [expanded, setExpanded] = useState<Set<string>>(() => {
-    const set = new Set<string>();
-    const map = settings.fileTreeExpanded ?? {};
-    for (const [root, rels] of Object.entries(map)) {
-      if (typeof root !== 'string' || !root) continue;
-      if (!Array.isArray(rels)) continue;
-      for (const rel of rels) {
-        if (typeof rel !== 'string') continue;
-        set.add(dirKey(root, rel));
-      }
+/** settings.fileTreeExpanded (Record<root, rels[]>) を NUL 区切り Set に展開する。 */
+function deserializeExpanded(map: Record<string, string[]> | undefined): Set<string> {
+  const set = new Set<string>();
+  if (!map) return set;
+  for (const [root, rels] of Object.entries(map)) {
+    if (typeof root !== 'string' || !root) continue;
+    if (!Array.isArray(rels)) continue;
+    for (const rel of rels) {
+      if (typeof rel !== 'string') continue;
+      set.add(dirKey(root, rel));
     }
-    return set;
-  });
-  const [collapsedRoots, setCollapsedRoots] = useState<Set<string>>(
-    () => new Set(settings.fileTreeCollapsedRoots ?? [])
-  );
+  }
+  return set;
+}
+
+/** Set<key> を settings 保存形式 (Record<root, rels[]>) にシリアライズする。 */
+function serializeExpanded(set: Set<string>): Record<string, string[]> {
+  const map: Record<string, string[]> = {};
+  for (const key of set) {
+    const split = splitKey(key);
+    if (!split) continue;
+    (map[split.rootPath] ??= []).push(split.relPath);
+  }
+  return map;
+}
+
+export function FileTreeStateProvider({ children }: { children: ReactNode }): JSX.Element {
+  // settings の他フィールド (テーマ / フォント等) の変化で Provider が re-render しない
+  // ように、必要なフィールドだけ細粒度 selector で購読する。
+  const settingsLoading = useSettingsLoading();
+  const persistedExpanded = useSettingsValue('fileTreeExpanded');
+  const persistedCollapsedRoots = useSettingsValue('fileTreeCollapsedRoots');
+  const lastOpenedRoot = useSettingsValue('lastOpenedRoot');
+  const claudeCwd = useSettingsValue('claudeCwd');
+  const workspaceFolders = useSettingsValue('workspaceFolders');
+  const { update } = useSettingsActions();
+
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [collapsedRoots, setCollapsedRoots] = useState<Set<string>>(new Set());
   const [dirs, setDirs] = useState<Map<string, DirState>>(new Map());
 
-  // mount 中の FileTreePanel ごとの roots を集約して prune に使う。
+  // Issue #273 自己レビュー C1/C2: SettingsProvider は `useState(DEFAULT_SETTINGS)` で
+  // 起動し、`window.api.settings.load()` を await して非同期で hydrate する。よって
+  // FileTreeStateProvider の useState lazy 初期化は「settings 未ロードの空値」を採用
+  // してしまう。それで persist effect が即発火するとディスク上の保存値を空で上書き
+  // するので、`loading=false` になってから一度だけ state を hydrate する + hydrate 前は
+  // persist を完全に skip する。
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (settingsLoading || hydratedRef.current) return;
+    hydratedRef.current = true;
+    setExpanded(deserializeExpanded(persistedExpanded));
+    setCollapsedRoots(new Set(persistedCollapsedRoots ?? []));
+  }, [settingsLoading, persistedExpanded, persistedCollapsedRoots]);
+
+  // mount 中の FileTreePanel ごとの roots を集約 (補助情報。prune 判定には使わない)。
   const [activeRootsByInstance, setActiveRootsByInstance] = useState<Map<string, string[]>>(
     new Map()
   );
 
   // updater 内副作用の代わりに effect で persist する (Issue #273 #2)。
   // settings-context 内で 200ms debounce + atomic_write が走るので、ここでは debounce 不要。
-  // 初期復元で expanded が変わっても update が呼ばれるが、settings との等価性比較は context 側。
+  // hydrate 完了前は skip して空値による上書きを防ぐ (自己レビュー C1)。
   useEffect(() => {
-    const map: Record<string, string[]> = {};
-    for (const key of expanded) {
-      const sep = key.indexOf(KEY_SEP);
-      if (sep <= 0) continue;
-      const root = key.slice(0, sep);
-      const rel = key.slice(sep + 1);
-      (map[root] ??= []).push(rel);
-    }
+    if (!hydratedRef.current) return;
     void update({
-      fileTreeExpanded: map,
+      fileTreeExpanded: serializeExpanded(expanded),
       fileTreeCollapsedRoots: Array.from(collapsedRoots)
     });
   }, [expanded, collapsedRoots, update]);
 
-  // I/O キュー: 並列度を MAX_CONCURRENT_LOADS に制限する。
-  // queue は ref で持つ (state にすると各 enqueue が re-render を誘発する)。
-  // pendingKeys で重複 enqueue を防ぐ (同 key を 2 回 loadDir しても無駄)。
+  // Issue #273 #3: prune の真理値は `settings.workspaceFolders + lastOpenedRoot/claudeCwd`。
+  // 自己レビュー W1: registerRoots 経由で取った instance roots は Canvas で限定 payload
+  // (例: payload.extraRoots) を持たれた場合に sidebar の保存値まで prune してしまうので、
+  // prune の決定打にはしない。settings 由来の workspace truth に含まれないものだけ prune。
+  const canonicalRoots = useMemo(() => {
+    const set = new Set<string>();
+    if (lastOpenedRoot) set.add(lastOpenedRoot);
+    if (claudeCwd) set.add(claudeCwd);
+    if (Array.isArray(workspaceFolders)) {
+      for (const r of workspaceFolders) {
+        if (typeof r === 'string' && r) set.add(r);
+      }
+    }
+    return set;
+  }, [lastOpenedRoot, claudeCwd, workspaceFolders]);
+
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    if (canonicalRoots.size === 0) return;
+
+    setExpanded((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const key of prev) {
+        const split = splitKey(key);
+        if (!split) {
+          next.delete(key);
+          changed = true;
+          continue;
+        }
+        if (!canonicalRoots.has(split.rootPath)) {
+          next.delete(key);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+
+    setCollapsedRoots((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const root of prev) {
+        if (!canonicalRoots.has(root)) {
+          next.delete(root);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+
+    // dirs キャッシュも canonical に含まれない root のものは purge (memory leak 防止)。
+    setDirs((prev) => {
+      let changed = false;
+      const next = new Map(prev);
+      for (const key of prev.keys()) {
+        const split = splitKey(key);
+        if (!split) {
+          next.delete(key);
+          changed = true;
+          continue;
+        }
+        if (!canonicalRoots.has(split.rootPath)) {
+          next.delete(key);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [canonicalRoots]);
+
+  // I/O キュー: 並列度を MAX_CONCURRENT_LOADS に制限する (Issue #273 #4)。
+  // queue は ref で持つ (state にすると enqueue ごとに re-render が起きる)。
+  // 自己レビュー W3: pending 中の Promise を Map に保持し、同 key の重複 loadDir 呼び出し
+  // でも同じ Promise を返す (semantics 統一)。
   const queueRef = useRef<QueuedLoad[]>([]);
   const activeRef = useRef(0);
-  const pendingKeysRef = useRef<Set<string>>(new Set());
+  const pendingPromisesRef = useRef<Map<string, Promise<void>>>(new Map());
 
   const drainQueue = useCallback(() => {
     while (activeRef.current < MAX_CONCURRENT_LOADS && queueRef.current.length > 0) {
@@ -133,16 +259,31 @@ export function FileTreeStateProvider({ children }: { children: ReactNode }): JS
       void item
         .run()
         .finally(() => {
-          pendingKeysRef.current.delete(item.key);
+          pendingPromisesRef.current.delete(item.key);
           activeRef.current -= 1;
           drainQueue();
         });
     }
   }, []);
 
+  /**
+   * loadDir 失敗時に該当 key を expanded から除去する。
+   * orphan dir (削除された / 移動した) を起動時の I/O storm として再試行し続けないための
+   * lazy prune 戦略 (Issue #273 #3 の lazy 部分)。dirs キャッシュ側にエラー DirState は
+   * 残しておくので、UI には「— (空)」相当の error 表示が出る。
+   */
+  const pruneOnLoadFailure = useCallback((key: string) => {
+    setExpanded((prev) => {
+      if (!prev.has(key)) return prev;
+      const next = new Set(prev);
+      next.delete(key);
+      return next;
+    });
+  }, []);
+
   const loadDir = useCallback(
-    async (rootPath: string, relPath: string): Promise<void> => {
-      if (!rootPath) return;
+    (rootPath: string, relPath: string): Promise<void> => {
+      if (!rootPath) return Promise.resolve();
       if (!window.api.files) {
         setDirs((prev) => {
           const next = new Map(prev);
@@ -153,14 +294,13 @@ export function FileTreeStateProvider({ children }: { children: ReactNode }): JS
           });
           return next;
         });
-        return;
+        return Promise.resolve();
       }
       const key = dirKey(rootPath, relPath);
-      // 既に同 key が queue に入っているか実行中なら enqueue しない (重複 IPC 抑制)。
-      if (pendingKeysRef.current.has(key)) return;
-      pendingKeysRef.current.add(key);
+      const existing = pendingPromisesRef.current.get(key);
+      if (existing) return existing;
 
-      return new Promise<void>((resolve) => {
+      const promise = new Promise<void>((resolve) => {
         queueRef.current.push({
           key,
           run: async () => {
@@ -184,15 +324,7 @@ export function FileTreeStateProvider({ children }: { children: ReactNode }): JS
                 });
                 return next;
               });
-              // Issue #273 #3 (lazy prune): list 失敗 = orphan dir 候補。expanded から除去。
-              if (!res.ok) {
-                setExpanded((prev) => {
-                  if (!prev.has(key)) return prev;
-                  const next = new Set(prev);
-                  next.delete(key);
-                  return next;
-                });
-              }
+              if (!res.ok) pruneOnLoadFailure(key);
             } catch (err) {
               setDirs((prev) => {
                 const next = new Map(prev);
@@ -203,13 +335,7 @@ export function FileTreeStateProvider({ children }: { children: ReactNode }): JS
                 });
                 return next;
               });
-              // catch 経路でも prune する (rootPath が無効な絶対パス等)。
-              setExpanded((prev) => {
-                if (!prev.has(key)) return prev;
-                const next = new Set(prev);
-                next.delete(key);
-                return next;
-              });
+              pruneOnLoadFailure(key);
             } finally {
               resolve();
             }
@@ -217,33 +343,37 @@ export function FileTreeStateProvider({ children }: { children: ReactNode }): JS
         });
         drainQueue();
       });
+      pendingPromisesRef.current.set(key, promise);
+      return promise;
     },
-    [drainQueue]
+    [drainQueue, pruneOnLoadFailure]
   );
+
+  // 自己レビュー N1 / W1 / A3: setState updater 内で wasOpen を判定して loadDir 必要性を
+  // 確定する (closure stale を排除)。dirs.has は呼び出し時 closure でも実害なし
+  // (load の重複は pendingPromisesRef で抑止される)。
+  const dirsRef = useRef(dirs);
+  dirsRef.current = dirs;
 
   const toggleDir = useCallback(
     (rootPath: string, relPath: string) => {
       const key = dirKey(rootPath, relPath);
-      // setState updater 内では副作用を呼ばず、純粋に state を更新する (Issue #273 #2)。
-      // 永続化は上の useEffect が expanded の変化を観測して 1 度だけ走る。
+      let nowOpened = false;
       setExpanded((prev) => {
         const next = new Set(prev);
-        const wasOpen = next.has(key);
-        if (wasOpen) next.delete(key);
-        else next.add(key);
+        if (next.has(key)) {
+          next.delete(key);
+        } else {
+          next.add(key);
+          nowOpened = true;
+        }
         return next;
       });
-      // expanded が新規追加された (= wasOpen が false → 新たに展開) ときだけ loadDir。
-      // setState の prev を読まないと wasOpen を判定できないので、ここでは expanded から
-      // 直接読む (closure の expanded は前回 render の値だが、判定は「未キャッシュなら load」
-      // に倒すので問題ない)。
-      const isAlreadyCached = dirs.has(key);
-      const wasOpen = expanded.has(key);
-      if (!wasOpen && !isAlreadyCached) {
+      if (nowOpened && !dirsRef.current.has(key)) {
         void loadDir(rootPath, relPath);
       }
     },
-    [expanded, dirs, loadDir]
+    [loadDir]
   );
 
   const toggleRoot = useCallback((rootPath: string) => {
@@ -255,28 +385,30 @@ export function FileTreeStateProvider({ children }: { children: ReactNode }): JS
     });
   }, []);
 
+  // 自己レビュー: refreshAll 内で expanded を closure 経由で見ると stale なので、
+  // ref 経由で最新値を読む。
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
+
   const refreshAll = useCallback(
     (roots: string[]) => {
       for (const root of roots) {
         void loadDir(root, '');
       }
-      for (const key of expanded) {
-        const sep = key.indexOf(KEY_SEP);
-        if (sep <= 0) continue;
-        const rootPath = key.slice(0, sep);
-        const relPath = key.slice(sep + 1);
-        if (rootPath && roots.includes(rootPath)) {
-          void loadDir(rootPath, relPath);
+      for (const key of expandedRef.current) {
+        const split = splitKey(key);
+        if (!split) continue;
+        if (split.rootPath && roots.includes(split.rootPath)) {
+          void loadDir(split.rootPath, split.relPath);
         }
       }
     },
-    [expanded, loadDir]
+    [loadDir]
   );
 
   const registerRoots = useCallback((instanceId: string, roots: string[]) => {
     setActiveRootsByInstance((prev) => {
       const existing = prev.get(instanceId);
-      // identity 比較で同じなら更新しない (再 render 抑制)。
       if (
         existing &&
         existing.length === roots.length &&
@@ -299,50 +431,10 @@ export function FileTreeStateProvider({ children }: { children: ReactNode }): JS
     });
   }, []);
 
-  // Issue #273 #3: prune. 全 instance の roots 和集合に含まれない entry を expanded から除去。
-  // どの instance も mount されていない (= ファイルツリー UI 非表示) ときは prune しない
-  // (起動初期で root が無いまま expanded を空にしてしまうのを避ける)。
-  useEffect(() => {
-    if (activeRootsByInstance.size === 0) return;
-    const allRoots = new Set<string>();
-    for (const list of activeRootsByInstance.values()) {
-      for (const r of list) {
-        if (r) allRoots.add(r);
-      }
-    }
-    if (allRoots.size === 0) return;
-
-    setExpanded((prev) => {
-      let changed = false;
-      const next = new Set(prev);
-      for (const key of prev) {
-        const sep = key.indexOf(KEY_SEP);
-        if (sep <= 0) {
-          next.delete(key);
-          changed = true;
-          continue;
-        }
-        const root = key.slice(0, sep);
-        if (!allRoots.has(root)) {
-          next.delete(key);
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-
-    setCollapsedRoots((prev) => {
-      let changed = false;
-      const next = new Set(prev);
-      for (const root of prev) {
-        if (!allRoots.has(root)) {
-          next.delete(root);
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [activeRootsByInstance]);
+  // activeRootsByInstance 自体は API 互換のため残すが、現状 prune には使わない
+  // (canonical roots を真理値にした自己レビュー W1 への対応)。将来 UI で
+  // 「現在マウント中のパネルだけ描画」等の判定に使えるよう露出だけしておく。
+  void activeRootsByInstance;
 
   const value = useMemo<FileTreeStateValue>(
     () => ({

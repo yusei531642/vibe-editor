@@ -15,7 +15,13 @@ import { fileIcon } from '../lib/file-icon-color';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu';
 import { useToast } from '../lib/toast-context';
 import { api } from '../lib/tauri-api';
-import { dirKey, useFileTreeState, type DirState } from '../lib/filetree-state-context';
+import {
+  KEY_SEP,
+  dirKey,
+  splitKey,
+  useFileTreeState,
+  type DirState
+} from '../lib/filetree-state-context';
 
 interface FileTreePanelProps {
   /** メインのプロジェクトルート(ターミナル/Git 等はこちら基準で動作する) */
@@ -31,8 +37,6 @@ interface FileTreePanelProps {
   onAddWorkspaceFolder: () => void;
   onRemoveWorkspaceFolder: (path: string) => void;
 }
-
-const KEY_SEP = '\0';
 
 const shortName = (abs: string): string => {
   const parts = abs.split(/[\\/]/).filter(Boolean);
@@ -82,7 +86,7 @@ export function FileTreePanel({
         (p, i, arr) => p && arr.indexOf(p) === i
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [primaryRoot, extraRoots.join('')]
+    [primaryRoot, extraRoots.join(KEY_SEP)]
   );
 
   // Issue #273 #3: 当該 instance の roots を Provider に登録。Provider 側で全 instance の
@@ -92,7 +96,7 @@ export function FileTreePanel({
     registerRoots(instanceId, roots);
     return () => unregisterRoots(instanceId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [instanceId, primaryRoot, extraRoots.join(''), registerRoots, unregisterRoots]);
+  }, [instanceId, primaryRoot, extraRoots.join(KEY_SEP), registerRoots, unregisterRoots]);
 
   // ルート構成が変わったら、まだロードしていないルートの直下を自動ロード。
   // dirs キャッシュは Provider 共有なので、Sidebar と FileTreeCard を行き来しても
@@ -107,7 +111,7 @@ export function FileTreePanel({
     // dirs は Provider state なので毎回新参照だが、`dirs.has` の結果で
     // load 必要性を判定するので exhaustive-deps の警告は黙殺する。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [primaryRoot, extraRoots.join(''), loadDir]);
+  }, [primaryRoot, extraRoots.join(KEY_SEP), loadDir]);
 
   // Issue #250 + #273: 永続化された expanded を Provider 経由で受け取り、未ロードな
   // ものだけ load を queue に積む (Provider 内の concurrency-limited queue で発火)。
@@ -116,12 +120,10 @@ export function FileTreePanel({
   useEffect(() => {
     for (const key of expanded) {
       if (dirs.has(key)) continue;
-      const sep = key.indexOf(KEY_SEP);
-      if (sep <= 0) continue;
-      const rootPath = key.slice(0, sep);
-      const relPath = key.slice(sep + 1);
-      if (relPath !== '' && roots.includes(rootPath)) {
-        void loadDir(rootPath, relPath);
+      const split = splitKey(key);
+      if (!split) continue;
+      if (split.relPath !== '' && roots.includes(split.rootPath)) {
+        void loadDir(split.rootPath, split.relPath);
       }
     }
     // expanded / dirs を意図的に deps から除外 (mount + roots 変動時のみ走る)
