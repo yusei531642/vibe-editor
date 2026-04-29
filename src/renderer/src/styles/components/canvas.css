@@ -500,29 +500,14 @@
   position: relative;
 }
 
-/* Issue #261: Canvas モード限定で xterm-viewport を強制的にスクロール可能にする。
-   - IDE モード (`.terminal-pane .terminal-view`) は親が `min-height: 0` のフレックス
-     で完全フィットするため `overflow: hidden` のままで末尾が隠れない。
-   - Canvas モードは NodeResizer のリサイズ + zoom + Math.round で端数行が出るため、
-     scrollbar を有効化しないと最終行が容器下端で見切れることがある。
-   - `!important` は IDE モード用の `.terminal-view .xterm-viewport`
-     (index.css L1678 周辺) の z-index/background ルールと共存させるため必要。
-   - scrollbar の見た目は index.css L1689-1704 の `.terminal-view .xterm-viewport`
-     スタイルがそのまま適用される (10px 幅 + var(--text-mute) thumb)。 */
-/* Issue #272: xterm v6 の scroll host (`.xterm-scrollable-element`) を Canvas モード限定で
-   カード高さに追従させる。これがないと `.xterm-screen` の固定 px 高さがカード下端に届かず
-   黒帯が残る／最終行が見切れる症状になる。`.react-flow__node` スコープなので IDE モードへの
-   副作用なし。
-   Issue #272 follow-up: overflow-y を明示して scrollbar を確実に表示させる。 */
-.react-flow__node .xterm-scrollable-element {
-  width: 100%;
-  height: 100%;
-  overflow-y: auto;
-}
-
-.react-flow__node .xterm-viewport {
-  overflow-y: auto !important;
-}
+/* Issue #272 v3: xterm v6 の scrollback は SmoothScrollableElement (内部 scroll model) で
+   管理されるため、`.xterm-scrollable-element` や `.xterm-viewport` に外部 CSS で overflow:auto を
+   付与すると native scrollbar が誤起動する。Canvas 側からは触らない（xterm 自前管理に任せる）。
+   PR #284 で `.xterm-scrollable-element { width:100%; height:100%; overflow-y:auto }`、
+   PR #286 で `overflow: hidden auto` に変更し、Issue #261 由来で `.xterm-viewport { overflow-y:auto !important }`
+   も付けていたが、いずれも DOM の native overflow を起動して thumb が track 全範囲を占有 +
+   ホイール無反応の症状を生んでいたため撤回する。`.xterm-screen` 高さ追従は CSS ではなく
+   term.resize() → renderer 側で担保される。 */
 
 /* Issue #261: AgentNodeCard の min-height は内部 xterm-viewport の高さに引っ張られ
    ないようにし、Canvas モードのリサイズで NodeResizer が小さくしたときも

@@ -1716,24 +1716,19 @@ body.is-resizing * {
   background-clip: content-box;
 }
 
-/* Issue #272 follow-up: xterm v6 では実スクロール host が `.xterm-scrollable-element` 側のため、
-   `.xterm-viewport` と同等の scrollbar styling をこちらにも複製する。
-   両方適用しても styling は同一なので副作用なし。 */
-.terminal-view .xterm-scrollable-element::-webkit-scrollbar {
-  width: 10px;
-}
-.terminal-view .xterm-scrollable-element::-webkit-scrollbar-track {
-  background: transparent;
-}
-.terminal-view .xterm-scrollable-element::-webkit-scrollbar-thumb {
-  background: var(--text-mute);
-  border: 2px solid transparent;
-  background-clip: content-box;
+/* Issue #272 v3: xterm v6 の SmoothScrollableElement が描画する custom scrollbar の slider 色を、
+   既存 `.xterm-viewport::-webkit-scrollbar-thumb` (IDE モード) と同じ var(--text-mute) / var(--fg) に揃える。
+   `.xterm-scrollable-element > .scrollbar > .slider` は xterm.css L227 の構造に基づく。
+   PR #286 で追加した `::-webkit-scrollbar*` (native) は xterm v6 の内部 scroll model を起動せず、
+   外部 overflow と組合わさって誤った native scrollbar を生成していたため撤回し、ここで
+   xterm 自前の custom scrollbar (slider) のみに styling を当てる。 */
+.terminal-view .xterm-scrollable-element > .scrollbar > .slider {
+  background: var(--text-mute) !important;
   border-radius: 5px;
 }
-.terminal-view .xterm-scrollable-element::-webkit-scrollbar-thumb:hover {
-  background: var(--fg);
-  background-clip: content-box;
+.terminal-view .xterm-scrollable-element > .scrollbar > .slider:hover,
+.terminal-view .xterm-scrollable-element > .scrollbar > .slider.active {
+  background: var(--fg) !important;
 }
 
 /* Glass テーマ時は xterm を透過させて親の backdrop-filter を活かす (Issue #89)。
