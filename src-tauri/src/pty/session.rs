@@ -22,6 +22,7 @@ pub struct TerminalExitInfo {
     pub signal: Option<i32>,
 }
 
+#[derive(Clone)]
 pub struct SpawnOptions {
     pub command: String,
     pub args: Vec<String>,
