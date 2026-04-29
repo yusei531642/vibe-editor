@@ -151,6 +151,7 @@ export function CanvasLayout(): JSX.Element {
   const availableUpdate = useUiStore((s) => s.availableUpdate);
   const { showToast, dismissToast } = useToast();
   const [spawnOpen, setSpawnOpen] = useState(false);
+  const [tab, setTab] = useState<'preset' | 'recent'>('preset');
   const [addCardOpen, setAddCardOpen] = useState(false);
   const [recent, setRecent] = useState<TeamHistoryEntry[]>([]);
   const [sidebarView, setSidebarView] = useState<SidebarView>('files');
@@ -795,6 +796,27 @@ function AgentBadge({ label, color }: { label: string; color: string }): JSX.Ele
     >
       {label}
     </span>
+  );
+}
+
+function TabBtn({
+  active,
+  onClick,
+  children
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`canvas-popover__tab${active ? ' canvas-popover__tab--active' : ''}`}
+      aria-pressed={active}
+    >
+      {children}
+    </button>
   );
 }
 
