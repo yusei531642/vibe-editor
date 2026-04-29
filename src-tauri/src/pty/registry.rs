@@ -4,8 +4,43 @@
 // TeamHub 側からは agent_id 経由で SessionHandle を引きたいので両方持つ。
 
 use crate::pty::session::SessionHandle;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::{Duration, Instant};
+
+/// Issue #293: 同時 PTY 数の上限。CLAUDE.md の「ターミナル最大 10 タブ」+ Canvas 上の
+/// agent ノード等を考慮しても十分余裕がある値として 100 を採用。renderer の暴走 / 悪意ある
+/// 連投で OS リソースを枯渇させない安全網。
+pub const MAX_CONCURRENT_PTY: usize = 100;
+
+/// Issue #293: spawn のレート制限。token bucket / leaky bucket の代替として、
+/// `RATE_LIMIT_WINDOW` 内に何回 spawn したかを VecDeque で数える単純な実装にする。
+/// 起動時に複数タブを並列復元するケース (~5-10 PTY) を誤検知しないため、上限は 10/sec。
+pub const MAX_PTY_SPAWNS_PER_WINDOW: usize = 10;
+pub const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(1);
+
+/// Issue #293: spawn ゲート判定の結果。caller (terminal_create) が renderer にエラー文字列を
+/// 返すために使う。
+#[derive(Debug, Clone, Copy)]
+pub enum SpawnGateError {
+    /// 同時 PTY 数が上限 (`MAX_CONCURRENT_PTY`) に達している
+    Capacity,
+    /// `RATE_LIMIT_WINDOW` 内の spawn 回数が `MAX_PTY_SPAWNS_PER_WINDOW` に達している
+    RateLimited,
+}
+
+impl SpawnGateError {
+    pub fn message(self) -> String {
+        match self {
+            Self::Capacity => format!(
+                "PTY count limit reached ({MAX_CONCURRENT_PTY}). Close some terminals before opening new ones."
+            ),
+            Self::RateLimited => format!(
+                "PTY spawn rate limit reached ({MAX_PTY_SPAWNS_PER_WINDOW} per {RATE_LIMIT_WINDOW:?}). Slow down terminal creation."
+            ),
+        }
+    }
+}
 
 /// Mutex が poison していたら warn ログを出し、data を取り出して処理を継続する。
 /// panic はしない (上位が IPC 層の場合 panic はプロセスごと吹き飛ばすため)。
@@ -69,6 +104,35 @@ struct Inner {
     /// Issue #271: HMR 経路で「同じ React mount identity の生存 PTY」を逆引きする index。
     /// agent_id を持たない Canvas TerminalCard / IDE タブも attach 対象にできる。
     by_session_key: HashMap<String, String>, // session_key → session_id
+    /// Issue #293: 直近の spawn 時刻 (`RATE_LIMIT_WINDOW` 内のもの)。
+    /// `try_reserve_spawn_slot` が pop_front + push_back で循環的に整理する。
+    spawn_history: VecDeque<Instant>,
+}
+
+/// Issue #293: spawn ゲート判定の pure 関数。`Inner` 全体を渡さずに、判定に必要な
+/// `by_id_len` と `spawn_history` だけを引数に取り、副作用は spawn_history の整理 +
+/// 許可時の push_back のみ。テストで時刻を注入して挙動を確定的に検証できる。
+fn gate_check_pure(
+    by_id_len: usize,
+    spawn_history: &mut VecDeque<Instant>,
+    now: Instant,
+) -> Result<(), SpawnGateError> {
+    if by_id_len >= MAX_CONCURRENT_PTY {
+        return Err(SpawnGateError::Capacity);
+    }
+    // window より古い spawn 履歴を捨てる
+    while let Some(&front) = spawn_history.front() {
+        if now.duration_since(front) >= RATE_LIMIT_WINDOW {
+            spawn_history.pop_front();
+        } else {
+            break;
+        }
+    }
+    if spawn_history.len() >= MAX_PTY_SPAWNS_PER_WINDOW {
+        return Err(SpawnGateError::RateLimited);
+    }
+    spawn_history.push_back(now);
+    Ok(())
 }
 
 #[derive(Default)]
@@ -79,6 +143,17 @@ pub struct SessionRegistry {
 impl SessionRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Issue #293: spawn 開始前に呼ぶ DoS ガード。同時 PTY 数の上限と spawn レートを
+    /// atomic に判定し、許可された場合のみ `spawn_history` に現在時刻を push する。
+    /// `terminal_create` は spawn (= portable-pty が子プロセスを起こす) より前に呼ぶこと。
+    ///
+    /// 拒否された場合 spawn_history は変更しない (試行回数では数えない)。
+    pub fn try_reserve_spawn_slot(&self) -> Result<(), SpawnGateError> {
+        let mut g = recover(self.inner.lock());
+        let by_id_len = g.by_id.len();
+        gate_check_pure(by_id_len, &mut g.spawn_history, Instant::now())
     }
 
     pub fn insert(&self, id: String, handle: SessionHandle) {
@@ -221,6 +296,100 @@ impl SessionRegistry {
 
     pub fn len(&self) -> usize {
         recover(self.inner.lock()).by_id.len()
+    }
+}
+
+#[cfg(test)]
+mod spawn_gate_tests {
+    //! Issue #293: `gate_check_pure` の純粋ロジックを検証する。実 PTY / SessionHandle を
+    //! 作らずに、capacity / rate limit / window 経過のすべての分岐を網羅する。
+    use super::*;
+
+    #[test]
+    fn approves_first_spawn_when_below_limits() {
+        let mut history = VecDeque::new();
+        let now = Instant::now();
+        assert!(gate_check_pure(0, &mut history, now).is_ok());
+        assert_eq!(history.len(), 1);
+    }
+
+    #[test]
+    fn allows_up_to_max_per_window_then_rate_limits() {
+        let mut history = VecDeque::new();
+        let base = Instant::now();
+        for i in 0..MAX_PTY_SPAWNS_PER_WINDOW {
+            let t = base + Duration::from_millis(i as u64 * 10);
+            assert!(
+                gate_check_pure(0, &mut history, t).is_ok(),
+                "{i} 回目は許可されるべき"
+            );
+        }
+        // 上限超え: rate limited
+        let t = base + Duration::from_millis(500);
+        assert!(matches!(
+            gate_check_pure(0, &mut history, t).unwrap_err(),
+            SpawnGateError::RateLimited
+        ));
+        // window 経過後は再度許可される (古い履歴が pop される)
+        let later = base + RATE_LIMIT_WINDOW + Duration::from_millis(10);
+        assert!(gate_check_pure(0, &mut history, later).is_ok());
+    }
+
+    #[test]
+    fn rejects_when_pty_count_at_capacity() {
+        let mut history = VecDeque::new();
+        let now = Instant::now();
+        assert!(matches!(
+            gate_check_pure(MAX_CONCURRENT_PTY, &mut history, now).unwrap_err(),
+            SpawnGateError::Capacity
+        ));
+        // capacity 拒否時は spawn_history を変更しない
+        assert_eq!(history.len(), 0);
+    }
+
+    #[test]
+    fn capacity_is_checked_before_rate_limit() {
+        // by_id_len 上限到達 + spawn_history も上限到達 → capacity が先に報告される
+        let mut history = VecDeque::new();
+        let base = Instant::now();
+        for i in 0..MAX_PTY_SPAWNS_PER_WINDOW {
+            history.push_back(base + Duration::from_millis(i as u64));
+        }
+        let now = base + Duration::from_millis(500);
+        assert!(matches!(
+            gate_check_pure(MAX_CONCURRENT_PTY, &mut history, now).unwrap_err(),
+            SpawnGateError::Capacity
+        ));
+    }
+
+    #[test]
+    fn old_history_entries_are_pruned() {
+        let mut history = VecDeque::new();
+        let base = Instant::now();
+        history.push_back(base);
+        history.push_back(base + Duration::from_millis(10));
+        // window より十分先で要求 → 古い履歴は pop_front される
+        let later = base + RATE_LIMIT_WINDOW + Duration::from_millis(100);
+        assert!(gate_check_pure(0, &mut history, later).is_ok());
+        // 新規 push_back の 1 件だけ残る
+        assert_eq!(history.len(), 1);
+    }
+
+    #[test]
+    fn rejection_does_not_modify_history() {
+        let mut history = VecDeque::new();
+        let base = Instant::now();
+        for i in 0..MAX_PTY_SPAWNS_PER_WINDOW {
+            history.push_back(base + Duration::from_millis(i as u64));
+        }
+        let len_before = history.len();
+        let now = base + Duration::from_millis(500);
+        assert!(gate_check_pure(0, &mut history, now).is_err());
+        assert_eq!(
+            history.len(),
+            len_before,
+            "拒否時は history を変更しない (試行回数では数えない)"
+        );
     }
 }
 
