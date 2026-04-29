@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
+import type { TerminalExitInfo } from '../../../types/shared';
 import { computeUnscaledGrid } from './compute-unscaled-grid';
 import type { CellSize } from './measure-cell-size';
 
@@ -216,6 +217,18 @@ export function usePtySession(options: UsePtySessionOptions): void {
     let offExit: (() => void) | null = null;
     let offSessionId: (() => void) | null = null;
 
+    // Issue #285: pre-subscribe / mismatch re-subscribe / cleanup / catch のどこから
+    // 呼んでも安全な listener 解除関数。`?.()` で null も二重解除も safe。try ブロック
+    // 内でも catch でも同じ参照を使えるよう effect スコープに置く。
+    const unsubscribePtyListeners = (): void => {
+      offData?.();
+      offExit?.();
+      offSessionId?.();
+      offData = null;
+      offExit = null;
+      offSessionId = null;
+    };
+
     // Issue #271: bind 世代番号。listener コールバックは「自分が登録された世代と同じ」
     // なら処理し、古い世代なら無視する。これにより HMR remount で 2 重登録された
     // 古い callback が xterm に二重出力するのを防ぐ。
@@ -335,10 +348,48 @@ export function usePtySession(options: UsePtySessionOptions): void {
           return c[skey]?.generation === myGeneration;
         };
 
+        // 新規 spawn (= attached false) 用の listener コールバック群。
+        // pre-subscribe / mismatch re-subscribe で同じ実装を使い回すために effect-local
+        // closure として 1 度だけ作る。`isCurrentGeneration` で世代外 (HMR 旧世代) を
+        // 弾き、observeChunk (auto-initial-message の ready 検出) は常に呼ぶ。
+        const newSpawnDataCb = (data: string): void => {
+          if (!isCurrentGeneration()) return;
+          term.write(data);
+          if (data.includes('\n') || data.includes('\r') || data.length >= 4096) {
+            scheduleRenderRepair();
+          }
+          callbacksRef.current.onActivity?.();
+          observeChunkRef.current(data);
+        };
+        const newSpawnExitCb = (info: TerminalExitInfo): void => {
+          if (!isCurrentGeneration()) return;
+          term.writeln(
+            `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m`
+          );
+          callbacksRef.current.onStatus?.(`終了 (exitCode=${info.exitCode})`);
+          ptyIdRef.current = null;
+          if (skey) {
+            const c = getHmrPtyCache();
+            if (c) delete c[skey];
+          }
+          callbacksRef.current.onExit?.();
+        };
+        const newSpawnSessionIdCb = (sessionId: string): void => {
+          if (!isCurrentGeneration()) return;
+          try {
+            callbacksRef.current.onSessionId?.(sessionId);
+          } catch {
+            /* noop */
+          }
+        };
+
         // Issue #285: 新規 spawn の race fix — `terminal_create` を呼ぶ前に
         // `terminal:data:{id}` 等を listen() 完了まで待ってから create する。
-        // batcher.rs の固定 delay (250ms) は cold start で取り逃がし得るが、
-        // pre-subscribe なら確実。client-generated id は Rust 側で文字種検証済み。
+        // batcher.rs の startup delay は post-subscribe 旧経路用の保険なので
+        // pre-subscribe ならそれに頼らず確実に拾える。client-generated id は Rust
+        // 側で文字種検証 (`is_valid_terminal_id`) + 既存衝突チェックを通る。
+        // crypto.randomUUID は Tauri 2 の WebView (Edge WebView2 / WKWebView) では
+        // 必ず使えるが、安全側で文字列フォールバックを残す。
         const requestedId =
           wantAttach
             ? null
@@ -346,46 +397,19 @@ export function usePtySession(options: UsePtySessionOptions): void {
               ? crypto.randomUUID()
               : `term-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
-        // pre-subscribe 経路 (新規 spawn): 必ず attached === false なので observeChunk
-        // も常に呼ぶ (auto-initial-message の ready 検出に必要)。
         if (requestedId) {
-          offData = await window.api.terminal.onDataReady(requestedId, (data) => {
-            if (!isCurrentGeneration()) return;
-            term.write(data);
-            if (data.includes('\n') || data.includes('\r') || data.length >= 4096) {
-              scheduleRenderRepair();
-            }
-            callbacksRef.current.onActivity?.();
-            observeChunkRef.current(data);
-          });
-          offExit = await window.api.terminal.onExitReady(requestedId, (info) => {
-            if (!isCurrentGeneration()) return;
-            term.writeln(
-              `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m`
-            );
-            callbacksRef.current.onStatus?.(`終了 (exitCode=${info.exitCode})`);
-            ptyIdRef.current = null;
-            if (skey) {
-              const c = getHmrPtyCache();
-              if (c) delete c[skey];
-            }
-            callbacksRef.current.onExit?.();
-          });
-          offSessionId = await window.api.terminal.onSessionIdReady(requestedId, (sessionId) => {
-            if (!isCurrentGeneration()) return;
-            try {
-              callbacksRef.current.onSessionId?.(sessionId);
-            } catch {
-              /* noop */
-            }
-          });
+          offData = await window.api.terminal.onDataReady(requestedId, newSpawnDataCb);
+          offExit = await window.api.terminal.onExitReady(requestedId, newSpawnExitCb);
+          offSessionId = await window.api.terminal.onSessionIdReady(
+            requestedId,
+            newSpawnSessionIdCb
+          );
 
           // pre-subscribe 中に component が dispose された (effect cleanup or 新世代へ
           // 切替) なら、ここで pre-subscribe したリスナーを巻き戻して終了。
+          // PTY はまだ生まれていないので kill 不要。
           if (localDisposed || disposedRef.current) {
-            offData?.();
-            offExit?.();
-            offSessionId?.();
+            unsubscribePtyListeners();
             return;
           }
         }
@@ -413,10 +437,7 @@ export function usePtySession(options: UsePtySessionOptions): void {
           // - HMR cleanup (hmrDisposeArmed.current = true 中): kill せず cache に id を残し、
           //   次の remount で attach できるようにする
           // pre-subscribe したリスナーがあれば必ず解除。
-          offData?.();
-          offExit?.();
-          offSessionId?.();
-          offData = offExit = offSessionId = null;
+          unsubscribePtyListeners();
           if (res.ok && res.id) {
             if (hmrDisposeArmed.current && skey) {
               const c = getHmrPtyCache();
@@ -430,31 +451,39 @@ export function usePtySession(options: UsePtySessionOptions): void {
 
         if (!res.ok || !res.id) {
           // pre-subscribe 経路で create が失敗した場合は orphan listener を必ず解除。
-          offData?.();
-          offExit?.();
-          offSessionId?.();
-          offData = offExit = offSessionId = null;
+          unsubscribePtyListeners();
           term.writeln(`\x1b[31m[起動エラー] ${res.error ?? '不明なエラー'}\x1b[0m`);
           callbacksRef.current.onStatus?.(`起動失敗: ${res.error ?? ''}`);
           return;
         }
 
-        // 不変式: 新規 spawn 経路 (requestedId !== null) では Rust 側 が同 id を採用するか
-        // 衝突時に UUID 再生成にフォールバック。万一 mismatch なら pre-subscribe 経路の
-        // listener が拾えないので post-subscribe で再 bind する。
+        // Issue #285: 新規 spawn 経路 (requestedId !== null) では Rust 側が
+        // `is_valid_terminal_id` か registry 衝突で UUID 再生成にフォールバックする
+        // 稀ケースがある。万一 mismatch したら、pre-subscribe したリスナーは別 id
+        // (誰も emit しない死 channel) を購読してしまっているので、`res.id` で
+        // 再 pre-subscribe (`*Ready`) する。post-subscribe (sync) だと初期出力を
+        // 取り逃がしうる (Issue #285 の元症状) ので必ず *Ready で再 await。
         if (requestedId && res.id !== requestedId) {
-          offData?.();
-          offExit?.();
-          offSessionId?.();
-          offData = offExit = offSessionId = null;
+          unsubscribePtyListeners();
+          offData = await window.api.terminal.onDataReady(res.id, newSpawnDataCb);
+          offExit = await window.api.terminal.onExitReady(res.id, newSpawnExitCb);
+          offSessionId = await window.api.terminal.onSessionIdReady(
+            res.id,
+            newSpawnSessionIdCb
+          );
+          if (localDisposed || disposedRef.current) {
+            unsubscribePtyListeners();
+            void window.api.terminal.kill(res.id);
+            return;
+          }
         }
 
         ptyIdRef.current = res.id;
         // Issue #271: HMR remount で再 attach できるよう ptyId と世代番号を退避。
         if (skey) {
-          const cache2 = getHmrPtyCache();
-          if (cache2) {
-            cache2[skey] = { ptyId: res.id, generation: myGeneration };
+          const c = getHmrPtyCache();
+          if (c) {
+            c[skey] = { ptyId: res.id, generation: myGeneration };
           }
         }
         if (res.warning) {
@@ -475,8 +504,9 @@ export function usePtySession(options: UsePtySessionOptions): void {
         // ないため、安全側に倒して観察を止める。
         const attached = res.attached === true;
 
-        // attach 経路 (HMR remount) または pre-subscribe id mismatch 時は post-subscribe。
-        // 通常の新規 spawn は pre-subscribe 済みなので skip する。
+        // attach 経路 (HMR remount): pre-subscribe を skip しているのでここで sync
+        // post-subscribe する。PTY は既に動作中で startup race は起きないため
+        // post-subscribe で十分。新規 spawn 経路は上で pre-subscribe 済みなので skip。
         if (!offData) {
           offData = window.api.terminal.onData(res.id, (data) => {
             if (!isCurrentGeneration()) return;
@@ -499,8 +529,8 @@ export function usePtySession(options: UsePtySessionOptions): void {
             callbacksRef.current.onStatus?.(`終了 (exitCode=${info.exitCode})`);
             ptyIdRef.current = null;
             if (skey) {
-              const cache3 = getHmrPtyCache();
-              if (cache3) delete cache3[skey];
+              const c = getHmrPtyCache();
+              if (c) delete c[skey];
             }
             callbacksRef.current.onExit?.();
           });
@@ -518,7 +548,14 @@ export function usePtySession(options: UsePtySessionOptions): void {
           });
         }
       } catch (err) {
-        term.writeln(`\x1b[31m[例外] ${String(err)}\x1b[0m`);
+        // Issue #285 self-review: 例外発生から effect cleanup までの窓で pre-subscribe
+        // した listener が orphan になるのを防ぐため、catch でも明示的に解除する。
+        unsubscribePtyListeners();
+        try {
+          term.writeln(`\x1b[31m[例外] ${String(err)}\x1b[0m`);
+        } catch {
+          /* term が dispose 済み等で writeln 自体が落ちる可能性に備える */
+        }
         callbacksRef.current.onStatus?.(`例外: ${String(err)}`);
       }
     })();
