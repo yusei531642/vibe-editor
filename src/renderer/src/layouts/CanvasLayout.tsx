@@ -526,12 +526,12 @@ export function CanvasLayout(): JSX.Element {
       aria-hidden={!isCanvasActive}
     >
       <header className="canvas-header">
-        <span className="canvas-header__brand">
+        <span className="canvas-header__brand" data-tauri-drag-region>
           <MonitorSmartphone size={14} strokeWidth={1.75} />
           Canvas
         </span>
-        <span className="canvas-header__count">{formatCardCount(cardCount, settings.language)}</span>
-        <div className="canvas-header__spacer" />
+        <span className="canvas-header__count" data-tauri-drag-region>{formatCardCount(cardCount, settings.language)}</span>
+        <div className="canvas-header__spacer" data-tauri-drag-region />
 
         <div className="canvas-popover__wrap" ref={addPopoverRef}>
           <button
