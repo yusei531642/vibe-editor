@@ -375,6 +375,12 @@ export interface FileWriteResult {
 // ---------- ターミナル ----------
 
 export interface TerminalCreateOptions {
+  /**
+   * Issue #285: renderer 側が `terminal:data:{id}` 等を pre-subscribe してから
+   * spawn できるよう、client が事前生成した terminal id を渡せる。`[A-Za-z0-9_-]{1,64}`
+   * のみ有効で、不正値や未指定の場合は Rust 側で UUID を再生成して採用する。
+   */
+  id?: string;
   cwd: string;
   /**
    * `cwd` が無効(存在しない or ディレクトリでない)だった場合に

@@ -19,6 +19,10 @@ use uuid::Uuid;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalCreateOptions {
+    /// Issue #285: renderer が pre-subscribe 用に渡すクライアント側生成 id。
+    /// `[A-Za-z0-9_-]{1,64}` 以外や未指定の場合は Rust 側で UUID を生成する。
+    #[serde(default)]
+    pub id: Option<String>,
     pub cwd: String,
     #[serde(default)]
     pub fallback_cwd: Option<String>,
@@ -65,6 +69,15 @@ pub struct SavePastedImageResult {
     pub ok: bool,
     pub path: Option<String>,
     pub error: Option<String>,
+}
+
+/// Issue #285: renderer から渡される terminal id を検証。
+/// `terminal:data:{id}` 等のイベント名に乗るので、衝突や偽装防止のため
+/// `[A-Za-z0-9_-]{1,64}` のみ許可する (UUID v4 は 36 chars で収まる)。
+fn is_valid_terminal_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// 旧 resolveCommand 相当の最小実装。Phase 1 では「未指定なら 'claude'」だけ。
@@ -292,6 +305,69 @@ fn is_codex_command(command: &str) -> bool {
 }
 
 #[cfg(test)]
+mod terminal_id_validation_tests {
+    use super::is_valid_terminal_id;
+
+    #[test]
+    fn accepts_uuid_v4() {
+        assert!(is_valid_terminal_id("550e8400-e29b-41d4-a716-446655440000"));
+    }
+
+    #[test]
+    fn accepts_alphanumeric_and_separators() {
+        assert!(is_valid_terminal_id("abc_123-XYZ"));
+        assert!(is_valid_terminal_id("term-1761800000000-abcd1234"));
+        assert!(is_valid_terminal_id("a"));
+        assert!(is_valid_terminal_id("0"));
+    }
+
+    #[test]
+    fn accepts_max_length() {
+        let s = "a".repeat(64);
+        assert!(is_valid_terminal_id(&s));
+    }
+
+    #[test]
+    fn rejects_empty() {
+        assert!(!is_valid_terminal_id(""));
+    }
+
+    #[test]
+    fn rejects_overlength() {
+        let s = "a".repeat(65);
+        assert!(!is_valid_terminal_id(&s));
+    }
+
+    #[test]
+    fn rejects_path_traversal() {
+        assert!(!is_valid_terminal_id("../etc/passwd"));
+        assert!(!is_valid_terminal_id("./id"));
+    }
+
+    #[test]
+    fn rejects_event_name_injection() {
+        // ":" を入れると `terminal:data:foo:bar` のように Tauri event 名前空間を細工される懸念
+        assert!(!is_valid_terminal_id("foo:bar"));
+        assert!(!is_valid_terminal_id("data:malicious"));
+    }
+
+    #[test]
+    fn rejects_whitespace_and_shell_metachars() {
+        assert!(!is_valid_terminal_id("abc def"));
+        assert!(!is_valid_terminal_id("abc;rm"));
+        assert!(!is_valid_terminal_id("abc|true"));
+        assert!(!is_valid_terminal_id("abc$VAR"));
+        assert!(!is_valid_terminal_id("abc`whoami`"));
+    }
+
+    #[test]
+    fn rejects_non_ascii() {
+        assert!(!is_valid_terminal_id("日本語"));
+        assert!(!is_valid_terminal_id("café"));
+    }
+}
+
+#[cfg(test)]
 mod codex_command_tests {
     use super::is_codex_command;
 
@@ -418,7 +494,29 @@ pub async fn terminal_create(
         tracing::warn!("[terminal] {w}");
     }
 
-    let id = Uuid::new_v4().to_string();
+    // Issue #285: renderer が指定した id があれば採用 (event 名 `terminal:data:{id}` に
+    // 安全な文字種だけ通す)。`attach_if_exists` 経路は preflight で既に return 済みで、
+    // ここに到達するのは「新規 spawn 経路」だけなので、両者は構造的に直交している。
+    // 不正値・未指定は UUID v4 にフォールバック。既存 PTY との衝突は実質起こらない
+    // (UUID v4 の 122-bit エントロピー) が、安全側で衝突時も UUID にフォールバックする。
+    // ※ 衝突は registry の lock を握らない get→ 採用→ insert の TOCTOU を含むため、
+    //   完全な atomic 化はフォローアップ issue 扱い (実害シナリオは UUID 衝突ほぼ皆無)。
+    let id = match opts.id.as_deref() {
+        Some(s) if !is_valid_terminal_id(s) => {
+            tracing::warn!(
+                "[terminal] renderer-supplied id rejected (invalid charset/length), falling back to UUID v4"
+            );
+            Uuid::new_v4().to_string()
+        }
+        Some(s) if state.pty_registry.get(s).is_some() => {
+            tracing::warn!(
+                "[terminal] renderer-supplied id {s} collides with existing PTY, falling back to UUID v4"
+            );
+            Uuid::new_v4().to_string()
+        }
+        Some(s) => s.to_string(),
+        None => Uuid::new_v4().to_string(),
+    };
 
     // チーム所属端末なら TeamHub の socket/token と team/agent/role を env に注入
     let mut env = opts.env.unwrap_or_default();
