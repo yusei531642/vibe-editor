@@ -24,7 +24,8 @@ import {
   type TeamHistoryEntry,
   type TerminalCreateOptions,
   type TerminalCreateResult,
-  type TerminalExitInfo
+  type TerminalExitInfo,
+  type ThemeName
 } from '../../../types/shared';
 
 /**
@@ -156,8 +157,9 @@ export const api = {
     /**
      * Issue #260 PR-1: テーマに応じて OS ネイティブの window effect (Windows: Acrylic /
      * macOS: vibrancy) を切り替える。Linux 等は no-op (applied=false で返る)。
+     * 引数を `ThemeName` に絞ることで誤った文字列での呼び出しをコンパイル時に弾く。
      */
-    setWindowEffects: (theme: string): Promise<SetWindowEffectsResult> =>
+    setWindowEffects: (theme: ThemeName): Promise<SetWindowEffectsResult> =>
       invoke('app_set_window_effects', { theme }),
     setupTeamMcp: (
       projectRoot: string,

@@ -163,22 +163,27 @@ pub fn run() {
                     *guard = Some(root.clone());
                     tracing::info!("[setup] project_root restored from settings: {root}");
                 }
-                // Issue #260: theme が glass なら初期 effect を適用。それ以外は何もしない
-                // (transparent: true の conf でも OS chrome の不透明背景は維持される)。
+                // Issue #260: theme が glass なら初期 effect を適用。
+                // - tauri.conf.json で `transparent: true` + `backgroundColor: "#171716"` に
+                //   なっており、起動瞬間は claude-dark の bg 相当の不透明色で覆われる。renderer
+                //   が body の `--bg` を rgba(0,0,0,0) に書き換えてから OS chrome 越しに透過する
+                //   ので、glass 以外のテーマで「OS 描画の背景がデスクトップ」になる起動 flash は
+                //   起こらない。
+                // - glass テーマは renderer のテーマ適用直後に Acrylic が乗るが、settings_load の
+                //   disk read を待つ僅かな時間だけ「不透明 #171716 の上に panel が薄く乗る」状態
+                //   になる。実機検証で気になるなら PR-2 でカスタム title bar 化と同時に再評価する。
                 let theme = settings
                     .get("theme")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 if theme == "glass" {
                     if let Some(win) = app_handle_for_root.get_webview_window("main") {
-                        match commands::app::app_set_window_effects(win, theme.to_string()) {
-                            Ok(res) => tracing::info!(
-                                "[setup] window_effects (glass) applied={} error={:?}",
-                                res.applied,
-                                res.error
-                            ),
-                            Err(e) => tracing::warn!("[setup] window_effects failed: {e}"),
-                        }
+                        let res = commands::app::apply_window_effects_for_startup(&win, true);
+                        tracing::info!(
+                            "[setup] window-effects (glass) applied={} error={:?}",
+                            res.applied,
+                            res.error
+                        );
                     }
                 }
             });

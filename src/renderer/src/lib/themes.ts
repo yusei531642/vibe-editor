@@ -272,17 +272,66 @@ export function applyTheme(name: ThemeName, uiFontFamily: string, uiFontSize: nu
   root.style.setProperty('--radius-md', claudeTheme ? '14px' : '12px');
   root.style.setProperty('--radius-lg', claudeTheme ? '16px' : '16px');
   root.style.setProperty('--radius-xl', claudeTheme ? '20px' : '20px');
-  root.dataset.theme = name;
 
   // Issue #260 PR-1: テーマ切替時に OS ネイティブの window effect (Windows: Acrylic /
   // macOS: vibrancy) を切り替える。Linux や非対応環境では IPC が ok / applied=false を
   // 返すだけで失敗扱いにはしない。失敗時もログだけで続行 (CSS backdrop-filter で擬似
   // Glass を維持できる)。
-  if (typeof window !== 'undefined' && window.api?.app?.setWindowEffects) {
-    void window.api.app.setWindowEffects(name).catch((err) => {
-      console.warn('[theme] setWindowEffects failed:', err);
-    });
+  //
+  // 順序の意図 (UX レビュー U-4):
+  //   - **glass に移行**するときは IPC を **CSS データ属性更新の前に** 発火する。
+  //     `data-theme="glass"` を立てると `--bg` が rgba(0,0,0,0) になって window が
+  //     透けるが、その時点で OS Acrylic がまだ来ていないと一瞬デスクトップが見える。
+  //     IPC を先に出すことで OS 側の合成キックを少しでも早める。
+  //   - **glass から離脱**するときは CSS データ属性を先に更新する。`--bg` が不透明色
+  //     に切り替わった瞬間に画面は埋まり、effect 解除はその裏で進む (ユーザーには
+  //     見えない)。
+  //
+  // 注意 (UX レビュー): glass 以外のテーマは必ず不透明 (alpha=1) の bg / bgPanel を持つこと。
+  // tauri.conf.json で `transparent: true` のままなので、半透明 bg のテーマを増やすと
+  // OS 越しにデスクトップが透けてしまう。`THEMES` 定義を変更する PR では再確認すること。
+  const isGlass = name === 'glass';
+  if (isGlass) {
+    triggerSetWindowEffects(name);
+    root.dataset.theme = name;
+  } else {
+    root.dataset.theme = name;
+    triggerSetWindowEffects(name);
   }
+}
+
+/**
+ * Issue #260 自己レビュー R-W2: テーマ連打 (glass → dark → glass を高速切替) 時に
+ * `setWindowEffects` IPC が並列に in-flight になる問題への簡易シリアライズ。
+ * sequence 番号で「最後に発火した呼び出し」だけを正と扱い、それより古い結果は破棄する。
+ * 失敗ログも古い呼び出し由来のものは出さない (UI が既に次のテーマに進んでいるため)。
+ *
+ * 加えて renderer ルート (`<html>`) に `data-window-effect="native" | "fallback"` を
+ * 立てて、PR-3 以降の `.glass-surface` ユーティリティが OS 適用可否で表現を切替えら
+ * れるようにする (D-4B)。
+ */
+let windowEffectsSeq = 0;
+
+function triggerSetWindowEffects(name: ThemeName): void {
+  if (typeof window === 'undefined' || !window.api?.app?.setWindowEffects) return;
+  const my = ++windowEffectsSeq;
+  void window.api.app
+    .setWindowEffects(name)
+    .then((res) => {
+      if (my !== windowEffectsSeq) return;
+      const root = typeof document !== 'undefined' ? document.documentElement : null;
+      if (root) {
+        root.dataset.windowEffect = res.applied ? 'native' : 'fallback';
+      }
+    })
+    .catch((err) => {
+      if (my !== windowEffectsSeq) return;
+      console.warn('[theme] setWindowEffects failed:', err);
+      const root = typeof document !== 'undefined' ? document.documentElement : null;
+      if (root) {
+        root.dataset.windowEffect = 'fallback';
+      }
+    });
 }
 
 export function applyDensity(density: Density): void {
