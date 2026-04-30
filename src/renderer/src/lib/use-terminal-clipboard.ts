@@ -2,7 +2,8 @@ import { useEffect, useRef } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import { insertPastedImageToPty } from './paste-image-client';
-import { useT } from './i18n';
+import { translate } from './i18n';
+import type { Language } from '../../../types/shared';
 
 /**
  * ターミナルのコピー＆ペースト制御を担当するフック。
@@ -22,16 +23,15 @@ export function useTerminalClipboard(options: {
   containerRef: RefObject<HTMLDivElement>;
   /** 文字列を pty に書き込むコールバック (pty id が無ければ no-op) */
   writeToPty: (text: string) => void | Promise<void>;
+  /** Issue #338: 言語の current を ref 経由で受け取る。
+   *  内部 hook が React Context を直接引くと HMR で Context 分裂時にクラッシュ連鎖するため、
+   *  caller 側で settings.language を ref に詰めて渡す。 */
+  langRef: MutableRefObject<Language>;
 }): void {
-  const { termRef, containerRef, writeToPty } = options;
+  const { termRef, containerRef, writeToPty, langRef } = options;
 
   const writeRef = useRef(writeToPty);
   writeRef.current = writeToPty;
-
-  // Issue #64: エラーラベルの i18n 化。effect の [] deps を保つため、最新 t を ref 経由で参照する。
-  const t = useT();
-  const tRef = useRef(t);
-  tRef.current = t;
 
   useEffect(() => {
     const term = termRef.current;
@@ -45,7 +45,7 @@ export function useTerminalClipboard(options: {
     const handleImageBlob = async (blob: Blob, mime: string): Promise<void> => {
       const res = await insertPastedImageToPty(blob, mime, (text) => writeRef.current(text));
       if (!res.ok) {
-        writeError(tRef.current('terminal.pasteImageFailed'), res.error);
+        writeError(translate(langRef.current, 'terminal.pasteImageFailed'), res.error);
       }
     };
 
@@ -120,7 +120,7 @@ export function useTerminalClipboard(options: {
       if (!blob) return;
 
       void handleImageBlob(blob, imageItem.type).catch((err) => {
-        writeError(tRef.current('terminal.pasteException'), String(err));
+        writeError(translate(langRef.current, 'terminal.pasteException'), String(err));
       });
     };
 

@@ -129,6 +129,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     ref
   ): JSX.Element {
     const { settings } = useSettings();
+    // Issue #338: useTerminalClipboard が React Context を直接引かないように、言語の current を
+    // ref で渡す。settings 変化のたびに同期するので stale にならない。
+    const langRef = useRef(settings.language);
+    langRef.current = settings.language;
 
     // --- Terminal インスタンス ---
     const { containerRef, termRef, fitRef } = useXtermInstance(
@@ -220,7 +224,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     useTerminalClipboard({
       termRef,
       containerRef,
-      writeToPty
+      writeToPty,
+      langRef
     });
 
     // --- ResizeObserver + 可視化時 re-fit (不変式 #5) ---

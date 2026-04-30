@@ -126,8 +126,6 @@ struct HubState {
     token: String,
     /// 書き出し済みの bridge スクリプトパス
     bridge_path: PathBuf,
-    /// agent_id → 現在進行中の inject タスク数 (cancel 用には含めない、レート制限用)
-    pending_injects: HashMap<String, usize>,
     /// agent_id → 待機中の recruit (handshake 完了で resolve)。
     /// Issue #122: team_id と role を保持して、同時 team_recruit の人数 / singleton 判定に
     /// pending を含められるようにする (旧実装は registry の handshake 済みだけを見ていたため
@@ -198,7 +196,6 @@ pub struct PendingRecruit {
 
 #[derive(Default, Clone)]
 pub struct TeamInfo {
-    pub id: String,
     pub name: String,
     pub messages: VecDeque<TeamMessage>,
     pub tasks: VecDeque<TeamTask>,
@@ -249,7 +246,6 @@ impl TeamHub {
                 endpoint: String::new(),
                 token: String::new(),
                 bridge_path: PathBuf::new(),
-                pending_injects: HashMap::new(),
                 pending_recruits: HashMap::new(),
                 agent_role_bindings: HashMap::new(),
                 role_profile_summary: Vec::new(),
@@ -579,10 +575,7 @@ impl TeamHub {
         let team = s
             .teams
             .entry(team_id.to_string())
-            .or_insert_with(|| TeamInfo {
-                id: team_id.to_string(),
-                ..Default::default()
-            });
+            .or_insert_with(TeamInfo::default);
         if !name.is_empty() {
             team.name = name.to_string();
         }

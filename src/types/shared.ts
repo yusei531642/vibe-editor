@@ -13,7 +13,7 @@ export type Density = 'compact' | 'normal' | 'comfortable';
 export type Language = 'ja' | 'en';
 
 /** Issue #75: AppSettings の現在スキーマ。破壊変更時に上げる。 */
-export const APP_SETTINGS_SCHEMA_VERSION = 6;
+export const APP_SETTINGS_SCHEMA_VERSION = 7;
 
 /**
  * ユーザーが自由に追加できるエージェントの設定。
@@ -73,6 +73,11 @@ export interface AppSettings {
   workspaceFolders: string[];
   /** 右側 Claude Code パネルの幅 (px) */
   claudeCodePanelWidth: number;
+  /**
+   * Issue #337: 左サイドバーの幅 (px)。ドラッグハンドルでリサイズ可能。
+   * default 272, min 200, max 600。異常値は migrate / runtime clamp で 272 にリセット。
+   */
+  sidebarWidth: number;
   // ---------- Codex ----------
   codexCommand: string;
   codexArgs: string;
@@ -162,6 +167,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   recentProjects: [],
   workspaceFolders: [],
   claudeCodePanelWidth: 460,
+  sidebarWidth: 272,
   codexCommand: 'codex',
   codexArgs: '',
   notepad: '',

@@ -53,6 +53,9 @@ pub async fn handle(hub: &TeamHub, ctx: &CallContext, req: &Value) -> Option<Val
             }
         })),
         "notifications/initialized" | "notifications/cancelled" => None,
+        // Issue #340: bridge → Hub への keepalive 通知。idle drop を防ぐためだけの no-op。
+        // 応答を返すと Claude / Codex の stdout を汚染するので、id 有無に関わらず None を返す。
+        "team-hub/keepalive" => None,
         "ping" => Some(json!({ "jsonrpc": "2.0", "id": id, "result": {} })),
         "tools/list" => Some(json!({
             "jsonrpc": "2.0",
@@ -757,10 +760,7 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
     let team = state
         .teams
         .entry(ctx.team_id.clone())
-        .or_insert_with(|| crate::team_hub::TeamInfo {
-            id: ctx.team_id.clone(),
-            ..Default::default()
-        });
+        .or_insert_with(crate::team_hub::TeamInfo::default);
     // Issue #115: messages.len()+1 だと履歴上限到達後に id が固定して衝突する。
     // 単調増加カウンタにすることで上限を超えても一意性を保つ。
     team.next_message_id = team.next_message_id.saturating_add(1);
@@ -905,10 +905,7 @@ async fn team_read(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
     let team = state
         .teams
         .entry(ctx.team_id.clone())
-        .or_insert_with(|| crate::team_hub::TeamInfo {
-            id: ctx.team_id.clone(),
-            ..Default::default()
-        });
+        .or_insert_with(crate::team_hub::TeamInfo::default);
     let mut out = vec![];
     for m in team.messages.iter_mut() {
         // team_send 側の宛先解決と整合: "all" / role 名 case-insensitive / agent_id 完全一致を許容。
@@ -1022,10 +1019,7 @@ async fn team_assign_task(
         let team = state
             .teams
             .entry(ctx.team_id.clone())
-            .or_insert_with(|| crate::team_hub::TeamInfo {
-                id: ctx.team_id.clone(),
-                ..Default::default()
-            });
+            .or_insert_with(crate::team_hub::TeamInfo::default);
         // Issue #116: tasks.len()+1 だと履歴上限到達後に id が固定して衝突する。
         // 単調増加カウンタで一意性を保つ。
         team.next_task_id = team.next_task_id.saturating_add(1);
