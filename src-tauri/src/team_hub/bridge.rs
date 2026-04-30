@@ -80,6 +80,32 @@ const BASE_RETRY_MS = 500;
 const MAX_RETRY_MS = 10000;
 let givenUp = false;
 
+// Issue #340: Hub の IDLE_TIMEOUT (300s) より十分短い間隔で no-op 通知を送り、
+// 正常稼働中の Leader が「データ無し」で切られて再接続を繰り返すのを防ぐ。
+const KEEPALIVE_INTERVAL_MS = 90 * 1000;
+let keepaliveTimer = null;
+function startKeepalive() {
+  stopKeepalive();
+  keepaliveTimer = setInterval(() => {
+    if (!socket || !connected || socket.destroyed) return;
+    try {
+      socket.write('{"jsonrpc":"2.0","method":"team-hub/keepalive"}\n');
+    } catch (e) {
+      // 書き込み失敗は onClose で拾う
+    }
+  }, KEEPALIVE_INTERVAL_MS);
+  // keepalive timer 単独で Node プロセスを生かさない (stdin 終了で素直に exit するため)
+  if (keepaliveTimer && typeof keepaliveTimer.unref === 'function') {
+    keepaliveTimer.unref();
+  }
+}
+function stopKeepalive() {
+  if (keepaliveTimer) {
+    clearInterval(keepaliveTimer);
+    keepaliveTimer = null;
+  }
+}
+
 function nextBackoffMs() {
   // 500ms → 1s → 2s → ... (cap 10s)
   const ms = Math.min(BASE_RETRY_MS * 2 ** retryCount, MAX_RETRY_MS);
@@ -107,6 +133,8 @@ function connect() {
     if (flushed || dropped) {
       process.stderr.write(`[team-bridge] flushed ${flushed} pending request(s), dropped ${dropped} stale\n`);
     }
+    // Issue #340: handshake 直後に keepalive を起動して Hub の idle drop を防ぐ。
+    startKeepalive();
   });
 
   let buf = '';
@@ -129,6 +157,8 @@ function connect() {
 
   const onClose = () => {
     connected = false;
+    // Issue #340: 切断時は keepalive を止める。次回 connect 成功時に再起動する。
+    stopKeepalive();
     try { socket && socket.destroy(); } catch {}
     socket = null;
     if (givenUp) return;

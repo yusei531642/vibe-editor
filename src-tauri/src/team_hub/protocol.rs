@@ -53,6 +53,9 @@ pub async fn handle(hub: &TeamHub, ctx: &CallContext, req: &Value) -> Option<Val
             }
         })),
         "notifications/initialized" | "notifications/cancelled" => None,
+        // Issue #340: bridge → Hub への keepalive 通知。idle drop を防ぐためだけの no-op。
+        // 応答を返すと Claude / Codex の stdout を汚染するので、id 有無に関わらず None を返す。
+        "team-hub/keepalive" => None,
         "ping" => Some(json!({ "jsonrpc": "2.0", "id": id, "result": {} })),
         "tools/list" => Some(json!({
             "jsonrpc": "2.0",
