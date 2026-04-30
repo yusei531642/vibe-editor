@@ -32,6 +32,11 @@ function wheelEventToLineDelta(event: WheelEvent, rows: number): number {
   return event.deltaY / WHEEL_PIXEL_PER_LINE;
 }
 
+function shouldUseTransparentXtermBackground(theme: AppSettings['theme'], disableWebgl: boolean): boolean {
+  // WebGL は Issue #333 回避のため透過必須。glass は DOM renderer でも透過を維持する。
+  return !disableWebgl || theme === 'glass';
+}
+
 /*
  * Issue #126: Chromium の active WebGL context 上限は通常 16 (実装依存だが Tauri/WebView2
  * でも同等)。MAX_TERMINALS=30 のうち 16 個目以降の WebGL 作成が成功しても、新しい context
@@ -142,8 +147,8 @@ export function useXtermInstance(
       letterSpacing: 0,
       cursorBlink: true,
       allowProposedApi: true,
-      // glass テーマで xterm キャンバスを透過させるために必要 (Issue #89)。
-      // 他テーマでも不透明色を渡しているので挙動は変わらない。
+      // glass テーマと WebGL 経路で xterm 背景を透過させるために必要 (Issue #89/#333)。
+      // Canvas の DOM renderer では非 glass テーマのみ実背景色を渡し、文字色の同化を避ける (#343)。
       allowTransparency: true,
       // Block Elements (U+2580-U+259F) と Box Drawing (U+2500-U+257F) を
       // フォントから取らず WebGL/Canvas renderer 内蔵のベクター描画でラスタライズする。
@@ -156,7 +161,9 @@ export function useXtermInstance(
       // CJK や全角記号など、セル幅を超える glyph をセル内に縮小して描画する。
       // ASCII art に CJK が混じった場合の桁ズレを防ぐ。
       rescaleOverlappingGlyphs: true,
-      theme: buildXtermTheme(initial.theme),
+      theme: buildXtermTheme(initial.theme, {
+        transparentBackground: shouldUseTransparentXtermBackground(initial.theme, disableWebgl)
+      }),
       scrollback: SCROLLBACK_LINES,
       convertEol: false
     });
@@ -266,7 +273,9 @@ export function useXtermInstance(
       settings.terminalFontFamily || settings.editorFontFamily
     );
     term.options.fontSize = settings.terminalFontSize;
-    term.options.theme = buildXtermTheme(settings.theme);
+    term.options.theme = buildXtermTheme(settings.theme, {
+      transparentBackground: shouldUseTransparentXtermBackground(settings.theme, disableWebgl)
+    });
     // Issue #123: WebGL renderer はグリフをテクスチャアトラスにキャッシュするため、
     // fontFamily/fontSize を切り替えても古いフォントの glyph が描画され続けることがある。
     // clearTextureAtlas() で強制的にアトラスを破棄して新フォントで再ラスタライズさせる。
@@ -288,7 +297,13 @@ export function useXtermInstance(
         // fit は container 不在 / Terminal dispose 直後で例外を投げ得る (無視で安全)
       }
     });
-  }, [settings.theme, settings.terminalFontFamily, settings.editorFontFamily, settings.terminalFontSize]);
+  }, [
+    settings.theme,
+    settings.terminalFontFamily,
+    settings.editorFontFamily,
+    settings.terminalFontSize,
+    disableWebgl
+  ]);
 
   return { containerRef, termRef, fitRef };
 }
