@@ -140,6 +140,16 @@ export function migrateSettings(raw: unknown): AppSettings {
     }
   }
 
+  // --- Version 6 → 7: サイドバー幅の永続化 (Issue #337) ---
+  if (version < 7) {
+    if (typeof data.sidebarWidth !== 'number' || !Number.isFinite(data.sidebarWidth)) {
+      data.sidebarWidth = DEFAULT_SETTINGS.sidebarWidth;
+    } else if ((data.sidebarWidth as number) < 100 || (data.sidebarWidth as number) > 1200) {
+      // 異常値 (負/巨大) は default に戻す。runtime clamp は別途 200..600 で行う。
+      data.sidebarWidth = DEFAULT_SETTINGS.sidebarWidth;
+    }
+  }
+
   data.schemaVersion = APP_SETTINGS_SCHEMA_VERSION;
   // 最終マージで欠損フィールドを DEFAULT_SETTINGS で埋める
   return { ...DEFAULT_SETTINGS, ...data } as AppSettings;

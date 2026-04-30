@@ -73,6 +73,8 @@
   --toolbar-h: 40px;
   --shell-sidebar-w: 272px;
   --shell-sidebar-min: 248px;
+  /* Issue #337: サイドバーと main の間のリサイズハンドル幅 */
+  --shell-sidebar-handle: 5px;
   --shell-panel-w: var(--claude-code-width, 460px);
   --shell-panel-min: 320px;
 

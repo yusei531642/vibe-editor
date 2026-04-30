@@ -240,6 +240,7 @@ export function App(): JSX.Element {
     recentProjects: useSettingsValue('recentProjects'),
     workspaceFolders: useSettingsValue('workspaceFolders'),
     claudeCodePanelWidth: useSettingsValue('claudeCodePanelWidth'),
+    sidebarWidth: useSettingsValue('sidebarWidth'),
     codexCommand: useSettingsValue('codexCommand'),
     codexArgs: useSettingsValue('codexArgs'),
     language: useSettingsValue('language'),
@@ -609,6 +610,12 @@ export function App(): JSX.Element {
   const MAX_PANEL = 900;
   const resizeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
+  // ---------- サイドバー リサイズ (Issue #337) ----------
+  const MIN_SIDEBAR = 200;
+  const MAX_SIDEBAR = 600;
+  const DEFAULT_SIDEBAR = 272;
+  const sidebarResizeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+
   // 設定からの初期幅を CSS 変数に反映
   useEffect(() => {
     const w = Math.max(
@@ -617,6 +624,15 @@ export function App(): JSX.Element {
     );
     document.documentElement.style.setProperty('--claude-code-width', `${w}px`);
   }, [settings.claudeCodePanelWidth]);
+
+  // Issue #337: サイドバー幅を CSS 変数に反映
+  useEffect(() => {
+    const w = Math.max(
+      MIN_SIDEBAR,
+      Math.min(MAX_SIDEBAR, settings.sidebarWidth ?? DEFAULT_SIDEBAR)
+    );
+    document.documentElement.style.setProperty('--shell-sidebar-w', `${w}px`);
+  }, [settings.sidebarWidth]);
 
   const handleResizeStart = useCallback(
     (e: React.MouseEvent<HTMLDivElement>) => {
@@ -666,6 +682,58 @@ export function App(): JSX.Element {
     },
     [settings.claudeCodePanelWidth, updateSettings]
   );
+
+  // Issue #337: サイドバーと main の境界をドラッグして幅を調整する
+  const handleSidebarResizeStart = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      const currentWidth = Math.max(
+        MIN_SIDEBAR,
+        Math.min(MAX_SIDEBAR, settings.sidebarWidth ?? DEFAULT_SIDEBAR)
+      );
+      sidebarResizeDragRef.current = {
+        startX: e.clientX,
+        startWidth: currentWidth
+      };
+      document.body.classList.add('is-resizing');
+      const handleEl = e.currentTarget;
+      handleEl.classList.add('is-dragging');
+
+      let latestWidth = currentWidth;
+
+      const onMove = (ev: MouseEvent): void => {
+        const drag = sidebarResizeDragRef.current;
+        if (!drag) return;
+        // 右へドラッグ = width 増える (claude-code-panel と方向が逆)
+        const dx = ev.clientX - drag.startX;
+        const next = Math.max(
+          MIN_SIDEBAR,
+          Math.min(MAX_SIDEBAR, drag.startWidth + dx)
+        );
+        latestWidth = next;
+        document.documentElement.style.setProperty('--shell-sidebar-w', `${next}px`);
+      };
+
+      const onUp = (): void => {
+        sidebarResizeDragRef.current = null;
+        document.body.classList.remove('is-resizing');
+        handleEl.classList.remove('is-dragging');
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        void updateSettings({ sidebarWidth: latestWidth });
+      };
+
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    },
+    [settings.sidebarWidth, updateSettings]
+  );
+
+  // Issue #337: ダブルクリックで default 幅にリセット
+  const handleSidebarResizeDouble = useCallback(() => {
+    document.documentElement.style.setProperty('--shell-sidebar-w', `${DEFAULT_SIDEBAR}px`);
+    void updateSettings({ sidebarWidth: DEFAULT_SIDEBAR });
+  }, [updateSettings]);
 
   const dirtyEditorTabs = useMemo(
     () => editorTabs.filter((tab) => !tab.isBinary && tab.content !== tab.originalContent),
@@ -2240,6 +2308,15 @@ export function App(): JSX.Element {
         onResumeTeam={(entry) => void handleResumeTeam(entry)}
         onDeleteTeamHistory={(id) => void handleDeleteTeamHistory(id)}
         onOpenSettings={() => setSettingsOpen(true)}
+      />
+      {/* Issue #337: サイドバー幅調整ハンドル */}
+      <div
+        className="resize-handle resize-handle--sidebar"
+        onMouseDown={handleSidebarResizeStart}
+        onDoubleClick={handleSidebarResizeDouble}
+        title="ドラッグでサイドバー幅を調整 / ダブルクリックでリセット"
+        role="separator"
+        aria-orientation="vertical"
       />
       <main className="main">
         {tabs.length > 0 && (

@@ -163,7 +163,8 @@ body,
 
 .layout {
   display: grid;
-  grid-template-columns: 272px minmax(0, 1fr) 5px var(--claude-code-width, 460px);
+  /* Issue #337: 旧 .layout も CSS 変数化 (実体は .layout--redesign に上書きされる) */
+  grid-template-columns: var(--shell-sidebar-w) minmax(0, 1fr) 5px var(--claude-code-width, 460px);
   /* Issue #307: Windows 最大化時の -8px 不可視リサイズ境界補正。
      margin shorthand (4値) は値の取り違えリスクが高いので使わず、
      margin-top / margin-left の個別指定で左上方向だけ押し戻す。
@@ -179,14 +180,16 @@ body,
 
 /* diff なし → メイン非表示、パネルがフル幅 */
 .layout--terminal-full {
-  grid-template-columns: 272px 0 0 minmax(0, 1fr);
+  grid-template-columns: var(--shell-sidebar-w) 0 0 minmax(0, 1fr);
 }
 
 .layout--terminal-full .main {
   display: none;
 }
 
-.layout--terminal-full .resize-handle {
+/* Issue #337: terminal-full は claude-code-panel 側のハンドルだけ畳む。
+   サイドバーハンドル (.resize-handle--sidebar) は terminal-full でも表示する。 */
+.layout--terminal-full .resize-handle:not(.resize-handle--sidebar) {
   display: none;
 }
 

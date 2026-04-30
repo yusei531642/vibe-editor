@@ -838,9 +838,9 @@
 }
 
 /* ==================== LAYOUT INTEGRATION ==================== */
-/* Redesign shell は 3 段 x 5 列:
+/* Redesign shell は 3 段 x 6 列 (Issue #337):
  *   row 1: topbar (全幅)
- *   row 2: rail | sidebar | main | resize | panel
+ *   row 2: rail | sidebar | sidebar-handle | main | panel-handle | panel
  *   row 3: status (全幅)
  * 既存 .layout (index.css:102) のカラム定義を上書きする。
  * .layout--terminal-full との両立にも追加ルールで対応。
@@ -851,6 +851,7 @@
   grid-template-columns:
     var(--shell-rail)
     var(--shell-sidebar-w)
+    var(--shell-sidebar-handle)
     minmax(0, 1fr)
     5px
     var(--claude-code-width, 460px);
@@ -867,17 +868,21 @@
   grid-row: 2;
   grid-column: 2;
 }
-.layout.layout--redesign > .main {
+.layout.layout--redesign > .resize-handle--sidebar {
   grid-row: 2;
   grid-column: 3;
 }
-.layout.layout--redesign > .resize-handle {
+.layout.layout--redesign > .main {
   grid-row: 2;
   grid-column: 4;
 }
-.layout.layout--redesign > .claude-code-panel {
+.layout.layout--redesign > .resize-handle:not(.resize-handle--sidebar) {
   grid-row: 2;
   grid-column: 5;
+}
+.layout.layout--redesign > .claude-code-panel {
+  grid-row: 2;
+  grid-column: 6;
 }
 .layout.layout--redesign > .status {
   grid-row: 3;
@@ -889,16 +894,18 @@
   grid-template-columns:
     var(--shell-rail)
     var(--shell-sidebar-w)
+    var(--shell-sidebar-handle)
     0
     0
     minmax(0, 1fr);
 }
 
-/* Sidebar 折り畳み: column 2 を 0 幅にして main / panel を広げる。
+/* Sidebar 折り畳み: column 2 / 3 を 0 幅にして main / panel を広げる。
    .sidebar 自体は visibility:hidden で要素ライフサイクルを保ちつつ非表示にする。 */
 .layout.layout--redesign.layout--sidebar-collapsed {
   grid-template-columns:
     var(--shell-rail)
+    0
     0
     minmax(0, 1fr)
     5px
@@ -910,9 +917,14 @@
     0
     0
     0
+    0
     minmax(0, 1fr);
 }
 .layout.layout--redesign.layout--sidebar-collapsed > .sidebar {
+  visibility: hidden;
+  pointer-events: none;
+}
+.layout.layout--redesign.layout--sidebar-collapsed > .resize-handle--sidebar {
   visibility: hidden;
   pointer-events: none;
 }
@@ -923,6 +935,7 @@
     grid-template-columns:
       0
       var(--shell-sidebar-w)
+      var(--shell-sidebar-handle)
       minmax(0, 1fr)
       5px
       var(--claude-code-width, 460px);
@@ -934,6 +947,7 @@
     grid-template-columns:
       0
       var(--shell-sidebar-w)
+      var(--shell-sidebar-handle)
       0
       0
       minmax(0, 1fr);
