@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type Context,
   type ReactNode
 } from 'react';
 import { DEFAULT_SETTINGS, type AppSettings } from '../../../types/shared';
@@ -32,7 +33,30 @@ interface SettingsStore {
   reset: () => Promise<void>;
 }
 
-const SettingsContext = createContext<SettingsStore | null>(null);
+// Issue #338: HMR で settings-context.tsx が再評価されると SettingsContext インスタンスが
+// 作り直され、別 HMR boundary の consumer (i18n.ts → use-terminal-clipboard.ts 等) が旧
+// Context 参照を保持して `useContext` が null を返す → throw → fewer hooks chain。
+// これを防ぐため、Context インスタンスは globalThis に保存して identity を維持する。
+type SettingsContextSlot = Context<SettingsStore | null>;
+declare global {
+  // eslint-disable-next-line no-var
+  var __vibeSettingsContext: SettingsContextSlot | undefined;
+}
+const SettingsContext: SettingsContextSlot =
+  globalThis.__vibeSettingsContext ?? createContext<SettingsStore | null>(null);
+if (!globalThis.__vibeSettingsContext) {
+  globalThis.__vibeSettingsContext = SettingsContext;
+}
+
+// Issue #338: 自モジュールの HMR を受け入れて再評価伝播を止める。dev のみ有効。
+// production では import.meta.hot は undefined なので no-op。
+const __hot = (import.meta as unknown as { hot?: { accept: (cb?: () => void) => void } }).hot;
+if (__hot) {
+  __hot.accept(() => {
+    // 何もしない: Context 識別子は globalThis 経由で保たれているので、
+    // モジュール再評価しても provider/consumer は同じ Context を見る。
+  });
+}
 
 export function SettingsProvider({ children }: { children: ReactNode }): JSX.Element {
   const [settingsState, setSettingsState] = useState<AppSettings>(DEFAULT_SETTINGS);
