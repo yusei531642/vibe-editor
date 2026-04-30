@@ -757,10 +757,7 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
     let team = state
         .teams
         .entry(ctx.team_id.clone())
-        .or_insert_with(|| crate::team_hub::TeamInfo {
-            id: ctx.team_id.clone(),
-            ..Default::default()
-        });
+        .or_insert_with(crate::team_hub::TeamInfo::default);
     // Issue #115: messages.len()+1 だと履歴上限到達後に id が固定して衝突する。
     // 単調増加カウンタにすることで上限を超えても一意性を保つ。
     team.next_message_id = team.next_message_id.saturating_add(1);
@@ -905,10 +902,7 @@ async fn team_read(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
     let team = state
         .teams
         .entry(ctx.team_id.clone())
-        .or_insert_with(|| crate::team_hub::TeamInfo {
-            id: ctx.team_id.clone(),
-            ..Default::default()
-        });
+        .or_insert_with(crate::team_hub::TeamInfo::default);
     let mut out = vec![];
     for m in team.messages.iter_mut() {
         // team_send 側の宛先解決と整合: "all" / role 名 case-insensitive / agent_id 完全一致を許容。
@@ -1022,10 +1016,7 @@ async fn team_assign_task(
         let team = state
             .teams
             .entry(ctx.team_id.clone())
-            .or_insert_with(|| crate::team_hub::TeamInfo {
-                id: ctx.team_id.clone(),
-                ..Default::default()
-            });
+            .or_insert_with(crate::team_hub::TeamInfo::default);
         // Issue #116: tasks.len()+1 だと履歴上限到達後に id が固定して衝突する。
         // 単調増加カウンタで一意性を保つ。
         team.next_task_id = team.next_task_id.saturating_add(1);

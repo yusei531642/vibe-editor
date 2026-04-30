@@ -156,11 +156,6 @@ impl SessionRegistry {
         gate_check_pure(by_id_len, &mut g.spawn_history, Instant::now())
     }
 
-    pub fn insert(&self, id: String, handle: SessionHandle) {
-        let mut g = recover(self.inner.lock());
-        Self::insert_locked(&mut g, id, handle);
-    }
-
     /// Issue #292: id 衝突を atomic に検出する insert。Mutex 1 回ロックの中で
     /// `by_id.contains_key(&id)` の判定 → 採用 / 拒否を行うため、TOCTOU race で別スレッド
     /// が同 id を先に挿入していても、後勝ち上書きにならない。
@@ -320,9 +315,6 @@ impl SessionRegistry {
         }
     }
 
-    pub fn len(&self) -> usize {
-        recover(self.inner.lock()).by_id.len()
-    }
 }
 
 #[cfg(test)]

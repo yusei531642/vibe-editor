@@ -59,8 +59,12 @@ pub struct AppUserInfo {
     pub webview_version: String,
 }
 
+// Issue #336: 全フィールドが現状未参照だが、renderer から `app_setup_team_mcp` に
+// 渡される情報のシグネチャを保つため struct ごと保持する。将来 MCP 設定生成や
+// telemetry で読み出しを再開する想定。
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[allow(dead_code)]
 pub struct TeamMcpMember {
     pub agent_id: String,
     pub role: String,
