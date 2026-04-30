@@ -17,6 +17,8 @@ import '@fontsource-variable/geist';
 import '@fontsource-variable/source-serif-4';
 import '@fontsource-variable/jetbrains-mono';
 import '@fontsource-variable/geist-mono';
+// Issue #346: Nerd Font 同梱 (Powerline / Devicons / Material Icons の glyph を保証)
+import './styles/fonts.css';
 import React, { useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
