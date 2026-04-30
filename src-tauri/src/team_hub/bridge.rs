@@ -24,15 +24,23 @@ const net = require('net');
 const SOCKET = process.env.VIBE_TEAM_SOCKET || '';
 const TOKEN = process.env.VIBE_TEAM_TOKEN || '';
 const TEAM_ID = process.env.VIBE_TEAM_ID || '';
-const ROLE = process.env.VIBE_TEAM_ROLE || 'unknown';
+// Issue #339: 既定値 'unknown' を撤廃する。これがあると env 未設定の bridge が空 handshake で
+// connect → Hub に reject → 即再接続のループになりログを汚染する。
+const ROLE = process.env.VIBE_TEAM_ROLE || '';
 const AGENT_ID = process.env.VIBE_AGENT_ID || '';
 
-// Issue #62: SOCKET / TOKEN が欠落しているときは、offline fallback で「繋がっているフリ」を
-// するのではなく、initialize を明示的にエラーで返すことで Claude / Codex が
-// vibe-team MCP を「失敗サーバ」として認識できるようにする (ユーザーが気付きやすい)。
-const MISSING_HUB_ENV = !SOCKET || !TOKEN;
+// Issue #62 / #339: env が 1 つでも欠けているなら connect しない。
+// 旧実装は SOCKET/TOKEN だけ判定していたため、TEAM_ID/ROLE/AGENT_ID 欠落で空 handshake
+// → Hub の `empty field` reject → 0.8 秒間隔の再接続ループが発生していた。
+const missingEnv = [];
+if (!SOCKET) missingEnv.push('VIBE_TEAM_SOCKET');
+if (!TOKEN) missingEnv.push('VIBE_TEAM_TOKEN');
+if (!TEAM_ID) missingEnv.push('VIBE_TEAM_ID');
+if (!ROLE) missingEnv.push('VIBE_TEAM_ROLE');
+if (!AGENT_ID) missingEnv.push('VIBE_AGENT_ID');
+const MISSING_HUB_ENV = missingEnv.length > 0;
 if (MISSING_HUB_ENV) {
-  process.stderr.write('[team-bridge] missing VIBE_TEAM_SOCKET or VIBE_TEAM_TOKEN — team tools disabled\n');
+  process.stderr.write('[team-bridge] missing env: ' + missingEnv.join(', ') + ' — team tools disabled\n');
 }
 
 function resolveConnectionTarget(raw) {
@@ -84,7 +92,8 @@ function connect() {
     const hello = JSON.stringify({ token: TOKEN, teamId: TEAM_ID, role: ROLE, agentId: AGENT_ID });
     socket.write(hello + '\n');
     connected = true;
-    retryCount = 0; // 成功したので backoff リセット
+    // Issue #339: retryCount は TCP 接続時ではなく Hub から最初のバイトを受信した時に
+    // リセットする。handshake reject 後の即再接続ループで backoff が常に 500ms に戻るのを防ぐ。
     // Issue #100: connect 完了で pending request を flush。
     // TTL 切れの pending は捨て、生きているものだけ送る。
     const now = Date.now();
@@ -101,7 +110,14 @@ function connect() {
   });
 
   let buf = '';
+  // Issue #339: socket ごとにフラグを持ち、同 socket での data 初回受信時のみ retryCount を
+  // リセットする。再接続で新しい socket になったらまた false スタート。
+  let resetOnFirstData = false;
   socket.on('data', (chunk) => {
+    if (!resetOnFirstData) {
+      retryCount = 0;
+      resetOnFirstData = true;
+    }
     buf += chunk.toString('utf-8');
     let nl;
     while ((nl = buf.indexOf('\n')) !== -1) {
@@ -181,7 +197,7 @@ function localFallback(req) {
   // 「失敗していること」を明示するため、id 付き request には error を返す。
   const { method, id } = req;
   const reason = MISSING_HUB_ENV
-    ? 'vibe-team bridge is not configured (VIBE_TEAM_SOCKET / VIBE_TEAM_TOKEN missing)'
+    ? 'vibe-team bridge is not configured (missing env: ' + missingEnv.join(', ') + ')'
     : 'vibe-team hub is unreachable (gave up reconnecting)';
   if (id !== undefined && id !== null) {
     return {
