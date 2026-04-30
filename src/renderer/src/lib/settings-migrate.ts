@@ -150,6 +150,17 @@ export function migrateSettings(raw: unknown): AppSettings {
     }
   }
 
+  // --- Version 7 → 8: terminalFontFamily を JetBrainsMono Nerd Font Mono 既定へ (Issue #346) ---
+  // 旧 default (Cascadia Mono 優先チェーン) のまま使っているユーザーだけ新 default に置き換え、
+  // ユーザーが明示的に変えていた場合は尊重する。Nerd Font は本体に同梱済み。
+  if (version < 8) {
+    const OLD_TERMINAL_FONT_DEFAULT_V7 =
+      "'Cascadia Mono', 'Cascadia Code', Consolas, 'Lucida Console', 'Segoe UI Symbol', monospace";
+    if (data.terminalFontFamily === OLD_TERMINAL_FONT_DEFAULT_V7) {
+      data.terminalFontFamily = DEFAULT_SETTINGS.terminalFontFamily;
+    }
+  }
+
   data.schemaVersion = APP_SETTINGS_SCHEMA_VERSION;
   // 最終マージで欠損フィールドを DEFAULT_SETTINGS で埋める
   return { ...DEFAULT_SETTINGS, ...data } as AppSettings;

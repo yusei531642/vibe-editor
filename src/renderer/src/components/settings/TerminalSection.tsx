@@ -48,7 +48,9 @@ export function TerminalSection({ draft, update }: Props): JSX.Element {
         </label>
       </div>
       <p className="modal__note">
-        既定は Cascadia Mono / Consolas です。罫線や折り返しが崩れにくい、素直なターミナル向けフォントです。
+        既定は <strong>JetBrains Mono Nerd Font</strong> (本体同梱)。Powerline / Devicons /
+        Material Icons の glyph を含み、Starship や oh-my-posh の icon が tofu になりません。
+        ★ は本体にバンドルされたフォントで、OS 未インストールでも常に同じルックで描画されます。
       </p>
     </section>
   );

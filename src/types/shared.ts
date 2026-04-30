@@ -13,7 +13,7 @@ export type Density = 'compact' | 'normal' | 'comfortable';
 export type Language = 'ja' | 'en';
 
 /** Issue #75: AppSettings の現在スキーマ。破壊変更時に上げる。 */
-export const APP_SETTINGS_SCHEMA_VERSION = 7;
+export const APP_SETTINGS_SCHEMA_VERSION = 8;
 
 /**
  * ユーザーが自由に追加できるエージェントの設定。
@@ -154,10 +154,12 @@ export const DEFAULT_SETTINGS: AppSettings = {
   editorFontFamily:
     "'JetBrains Mono Variable', 'Geist Mono Variable', 'Cascadia Code', 'Consolas', monospace",
   editorFontSize: 13,
-  // ターミナルはセル幅の安定が最優先。Canvas モードは DOM renderer 固定で
-  // customGlyphs が効かないため、罫線/濃淡 glyph を OS mono から素直に取る。
+  // Issue #346: Nerd Font 同梱の JetBrainsMono Nerd Font Mono を最優先。
+  // Powerline / Devicons / Material Icons の glyph を OS 未インストールでも提供する。
+  // セル幅安定のため Mono variant (single-cell width icon) を採用。
+  // 罫線 / 濃淡 glyph は同フォント内に揃っており、ロゴ ASCII art が tofu 化しない。
   terminalFontFamily:
-    "'Cascadia Mono', 'Cascadia Code', Consolas, 'Lucida Console', 'Segoe UI Symbol', monospace",
+    "'JetBrainsMono Nerd Font Mono', 'JetBrains Mono Variable', 'Cascadia Mono', 'Cascadia Code', Consolas, 'Lucida Console', 'Segoe UI Symbol', monospace",
   terminalFontSize: 13,
   density: 'normal',
   claudeCommand: 'claude',

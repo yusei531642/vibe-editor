@@ -1,0 +1,34 @@
+/*
+ * fonts.css — リポジトリ内 (assets/fonts/) に同梱されたフォントの @font-face 宣言。
+ *
+ * @fontsource-variable/* は npm ライブラリ側が CSS を提供するが、
+ * Nerd Font のような patched font は npm に存在しないので、
+ * .ttf を直接 Vite asset として参照する形で同梱する。
+ *
+ * Issue #346: ターミナル既定フォントを JetBrains Mono Nerd Font に変更 + 同梱。
+ */
+
+@font-face {
+  font-family: 'JetBrainsMono Nerd Font Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: block;
+  src:
+    local('JetBrainsMono Nerd Font Mono Regular'),
+    local('JetBrainsMono Nerd Font Mono'),
+    local('JetBrainsMonoNerdFontMono-Regular'),
+    url('../assets/fonts/jetbrains-mono-nerd-font/JetBrainsMonoNerdFontMono-Regular.ttf')
+      format('truetype');
+}
+
+@font-face {
+  font-family: 'JetBrainsMono Nerd Font Mono';
+  font-style: normal;
+  font-weight: 700;
+  font-display: block;
+  src:
+    local('JetBrainsMono Nerd Font Mono Bold'),
+    local('JetBrainsMonoNerdFontMono-Bold'),
+    url('../assets/fonts/jetbrains-mono-nerd-font/JetBrainsMonoNerdFontMono-Bold.ttf')
+      format('truetype');
+}
