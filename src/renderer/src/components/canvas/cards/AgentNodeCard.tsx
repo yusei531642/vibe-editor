@@ -361,7 +361,9 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
             cwd={cwd}
             fallbackCwd={cwd}
             command={command}
-            args={payload.args ?? args}
+            // Issue #341: payload.args が空配列で永続化された場合に settings 由来の args が
+            // 潰れないようガード (`?? args` だと `[]` でも truthy 扱いで args が無視される)。
+            args={payload.args && payload.args.length > 0 ? payload.args : args}
             codexInstructions={codexInstructions}
             visible={true}
             teamId={payload.teamId}
