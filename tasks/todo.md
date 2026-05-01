@@ -1,5 +1,27 @@
 # vibe-editor Tauri ハイブリッド移行 + 無限キャンバス UI 革新 TODO
 
+## ステータスマスコット スプライト追加 (完了)
+
+計画: `tasks/mascot-sprite-plan.md`
+
+- [x] 既存 StatusBar / terminal 状態 / テーマ CSS を調査
+- [x] 実装前計画と Next Steps を記録
+- [x] ユーザー確認を受ける
+- [x] GitHub Issue 作成 (`enhancement`, `ui`) と `feature/issue-XXX` ブランチ作成
+- [x] 6 パターンの inline SVG sprite sheet を持つ `StatusMascot` を追加
+- [x] 状態導出を `App.tsx` から `StatusBar` へ接続
+- [x] CSS でテーマ追従、状態別アニメーション、reduced motion を実装
+- [x] i18n tooltip / aria ラベルを追加
+- [x] `npm run typecheck` / `npm run test` / `npm run dev` UI 表示確認
+- [x] 実装後レビュー観点と検証結果を記録
+
+検証結果:
+- `npm run typecheck`: 成功
+- `npx vitest run src/renderer/src/lib/__tests__/status-mascot.test.ts`: 6 tests 成功
+- `npm run test`: 12 files / 83 tests 成功
+- `npm run dev`: Tauri dev profile build 成功、`target\debug\vibe-editor.exe` 起動、ネイティブウィンドウでステータスマスコット表示を確認
+- `npm run build:vite`: 成功。既存の大きい chunk / dynamic import warning のみ
+
 承認済みプラン: `C:\Users\yusei\.claude\plans\concurrent-wobbling-bunny.md`
 
 ## Phase 0 — 意思決定スパイク (1〜2週)
@@ -397,3 +419,20 @@ _(未着手)_
 
 ### Phase 4 レビュー
 _(未着手)_
+
+### Issue #353 ステータスマスコット調整レビュー (2026-05-01)
+
+**実施内容**
+- 22px 拡大時にスプライトシート本体とフレーム移動量が 16px 固定だった問題を修正。
+- マスコットを 32px の整数スケールにし、`--shell-status` を 40px に広げて崩れを防止。
+- `status__mascot-track` を追加し、状態別に横移動アニメーションを設定。
+- `running` はトラック幅いっぱいを左右に往復、`dirty` / `reviewing` は中距離、`editing` は短距離で移動。
+
+**検証結果**
+- ✅ `npm run typecheck`
+- ✅ `npx vitest run src/renderer/src/lib/__tests__/status-mascot.test.ts`
+- ✅ `git diff --check`
+- ✅ `npm run build:vite`
+
+**Next Tasks**
+- 実機で動きが強すぎる場合は `--mascot-track-width` と animation duration を微調整する。

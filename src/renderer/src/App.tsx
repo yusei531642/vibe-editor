@@ -45,6 +45,7 @@ import { MenuBar, MenuItem, MenuDivider, MenuSection } from './components/shell/
 import { useRecruitListener } from './lib/use-recruit-listener';
 import { useWindowFrameInsets } from './lib/use-window-frame-insets';
 import { ClaudeNotFound } from './components/ClaudeNotFound';
+import { getStatusMascotState } from './lib/status-mascot';
 import { useT } from './lib/i18n';
 import {
   useSettingsActions,
@@ -333,6 +334,7 @@ export function App(): JSX.Element {
   const [activeTerminalTabId, setActiveTerminalTabId] = useState<number>(0);
   const nextTerminalIdRef = useRef(1);
   const terminalRefs = useRef(new Map<number, TerminalViewHandle>());
+  const terminalActivityTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
   const [tabCreateMenuOpen, setTabCreateMenuOpen] = useState(false);
   const [teams, setTeams] = useState<Team[]>([]);
   const [pendingTeamClose, setPendingTeamClose] = useState<{
@@ -342,6 +344,32 @@ export function App(): JSX.Element {
   const [dragTabId, setDragTabId] = useState<number | null>(null);
   const [dragOverTabId, setDragOverTabId] = useState<number | null>(null);
   const [editingLabelTabId, setEditingLabelTabId] = useState<number | null>(null);
+  const markTerminalActivity = useCallback((tabId: number) => {
+    const existing = terminalActivityTimers.current.get(tabId);
+    if (existing) window.clearTimeout(existing);
+
+    setTerminalTabs((prev) =>
+      prev.map((tab) =>
+        tab.id === tabId && !tab.hasActivity ? { ...tab, hasActivity: true } : tab
+      )
+    );
+
+    const timer = window.setTimeout(() => {
+      terminalActivityTimers.current.delete(tabId);
+      setTerminalTabs((prev) =>
+        prev.map((tab) => (tab.id === tabId ? { ...tab, hasActivity: false } : tab))
+      );
+    }, 900);
+    terminalActivityTimers.current.set(tabId, timer);
+  }, []);
+  useEffect(() => {
+    return () => {
+      for (const timer of terminalActivityTimers.current.values()) {
+        window.clearTimeout(timer);
+      }
+      terminalActivityTimers.current.clear();
+    };
+  }, []);
 
   // Claude CLI 検査状態
   const [claudeCheck, setClaudeCheck] = useState<{
@@ -2075,6 +2103,24 @@ export function App(): JSX.Element {
   const activeDiffPath = activeDiffTab?.relPath ?? null;
   const activeFilePath = activeEditorTab?.relPath ?? null;
   const hasActiveContent = activeDiffTab !== null || activeEditorTab !== null;
+  const mascotState = useMemo(
+    () =>
+      getStatusMascotState({
+        viewMode,
+        activeFilePath,
+        activeEditorDirty: activeEditorTab
+          ? activeEditorTab.content !== activeEditorTab.originalContent
+          : false,
+        hasActiveDiff: activeDiffTab !== null,
+        gitChangeCount: gitStatus?.ok ? gitStatus.files.length : 0,
+        terminals: terminalTabs.map((tab) => ({
+          status: tab.status,
+          exited: tab.exited,
+          hasActivity: tab.hasActivity
+        }))
+      }),
+    [activeDiffTab, activeEditorTab, activeFilePath, gitStatus, terminalTabs, viewMode]
+  );
 
   const projectName = projectRoot.split(/[\\/]/).pop() || 'no project';
   const activeTab = terminalTabs.find((t) => t.id === activeTerminalTabId) ?? null;
@@ -2642,6 +2688,7 @@ export function App(): JSX.Element {
                       prev.map((t) => (t.id === tab.id ? { ...t, status: s } : t))
                     )
                   }
+                  onActivity={() => markTerminalActivity(tab.id)}
                   onExit={() =>
                     setTerminalTabs((prev) =>
                       prev.map((t) => (t.id === tab.id ? { ...t, exited: true } : t))
@@ -2708,6 +2755,7 @@ export function App(): JSX.Element {
         gitStatus={gitStatus}
         activeFilePath={activeFilePath}
         terminalCount={terminalTabs.length}
+        mascotState={mascotState}
       />
 
       {activityOpen ? (

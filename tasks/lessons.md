@@ -62,6 +62,11 @@ if let Some(window) = app.get_webview_window("main") {
 
 ## ブラウザ / Playwright
 
+### Tauri UI の視覚確認は `npm run dev` を使う
+- Vite 直アクセス (`npm run dev:vite`) は `__TAURI_INTERNALS__` が存在しないため、WindowControls や IPC 依存箇所が Tauri 実行時と同じ条件にならない。
+- ステータスバー、WebView2、Tauri IPC、ウィンドウフレームに関わる UI は `npm run dev` (`cargo tauri dev`) でネイティブウィンドウを起動して確認する。
+- 補助的にブラウザで DOM を確認する場合も、最終判定は Tauri ネイティブウィンドウのログと画面キャプチャで行う。
+
 ### Playwright headless の FPS 計測は不正確
 - `requestAnimationFrame` がバックグラウンド throttle される (~1Hz)
 - パフォーマンス計測は実ブラウザ (chrome --headless=new でも同様) で

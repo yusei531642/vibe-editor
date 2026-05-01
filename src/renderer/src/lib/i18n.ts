@@ -34,6 +34,12 @@ const ja: Dict = {
   'status.lang': '言語',
   'status.theme': 'テーマ',
   'status.ready': '準備完了',
+  'status.mascot.idle': '待機中',
+  'status.mascot.editing': '編集中',
+  'status.mascot.dirty': '変更あり',
+  'status.mascot.running': 'エージェント応答中',
+  'status.mascot.reviewing': '確認中',
+  'status.mascot.blocked': '対応が必要',
 
   // ---------- Activity feed ----------
   'activity.title': 'アクティビティ',
@@ -505,6 +511,12 @@ const en: Dict = {
   'status.lang': 'lang',
   'status.theme': 'theme',
   'status.ready': 'Ready',
+  'status.mascot.idle': 'Idle',
+  'status.mascot.editing': 'Editing',
+  'status.mascot.dirty': 'Changes pending',
+  'status.mascot.running': 'Agent active',
+  'status.mascot.reviewing': 'Reviewing',
+  'status.mascot.blocked': 'Needs attention',
 
   // ---------- Activity feed ----------
   'activity.title': 'Activity',

@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
 import type { GitStatus } from '../../../../types/shared';
+import type { StatusMascotState } from '../../lib/status-mascot';
 import { useT } from '../../lib/i18n';
 import { useSettings } from '../../lib/settings-context';
 import { useUiStore } from '../../stores/ui';
+import { StatusMascot } from './StatusMascot';
 
 interface StatusBarProps {
   gitStatus: GitStatus | null;
   activeFilePath: string | null;
   terminalCount: number;
+  mascotState: StatusMascotState;
 }
 
 /**
@@ -19,7 +22,8 @@ interface StatusBarProps {
 export function StatusBar({
   gitStatus,
   activeFilePath,
-  terminalCount
+  terminalCount,
+  mascotState
 }: StatusBarProps): JSX.Element {
   const t = useT();
   const { settings } = useSettings();
@@ -39,9 +43,11 @@ export function StatusBar({
 
   return (
     <div className="status" role="contentinfo">
-      <span className="status__item">
-        <span className="status__dot" aria-hidden="true" />
-        <span>{viewMode === 'canvas' ? 'canvas' : 'ide'}</span>
+      <span className="status__item status__item--mode">
+        <span className="status__mascot-track">
+          <StatusMascot state={mascotState} label={t(`status.mascot.${mascotState}`)} />
+        </span>
+        <span className="status__mode-label">{viewMode === 'canvas' ? 'canvas' : 'ide'}</span>
       </span>
       {branch ? (
         <span className="status__item" title={branch}>

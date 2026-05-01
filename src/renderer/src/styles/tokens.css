@@ -86,9 +86,9 @@
   --shell-header: 44px;
   --shell-dock: 320px;
   --shell-activity: 300px;
-  /* status bar: 26 だと細すぎて窮屈に見えるので 30 に揃える。grid-template-rows と
+  /* status bar: 26/30 だとマスコットが小さく崩れるので 40 に揃える。grid-template-rows と
    * activity panel の bottom: var(--shell-status) 配置がトークン参照なので副作用は無い。 */
-  --shell-status: 30px;
+  --shell-status: 40px;
 
   /* ---------- Role Colors (team canvas) ----------
    * ROLE_META (team-roles.ts) の hex とは別に、UI surface 側で参照する
