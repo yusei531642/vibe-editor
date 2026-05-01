@@ -13,6 +13,7 @@ import { useCanvasStore, NODE_W, NODE_H } from '../stores/canvas';
 import type { Node } from '@xyflow/react';
 import type { CardData } from '../stores/canvas';
 import { useRoleProfiles } from './role-profiles-context';
+import { ackRecruit } from './recruit-ack';
 
 interface RecruitRequestPayload {
   teamId: string;
@@ -142,53 +143,103 @@ export function useRecruitListener(): void {
     void listen<RecruitRequestPayload>('team:recruit-request', (e) => {
       if (cancelled) return;
       const p = e.payload;
-      const store = useCanvasStore.getState();
-      const requester = store.nodes.find((n) => {
-        const data = n.data?.payload as { agentId?: string } | undefined;
-        return data?.agentId === p.requesterAgentId;
-      });
-      if (!requester) {
-        console.warn('[recruit] requester card not found', p.requesterAgentId);
-        return;
-      }
-      // 動的ロール定義が同梱されていれば、AgentNodeCard が system prompt を組み立てる前に
-      // RoleProfilesContext に登録する。team:role-created event でも同じことが起きるが、
-      // 到達順に依存しないようここでも投入する。
-      if (p.dynamicRole) {
-        registerDynamicRole({
-          id: p.dynamicRole.id,
-          label: p.dynamicRole.label,
-          description: p.dynamicRole.description,
-          instructions: p.dynamicRole.instructions,
-          instructionsJa: p.dynamicRole.instructionsJa,
-          teamId: p.teamId
-        });
-      }
-      const teamNodes = store.nodes.filter((n) => {
-        const data = n.data?.payload as { teamId?: string } | undefined;
-        return data?.teamId === p.teamId;
-      });
-      const pos = findRecruitPosition(requester, teamNodes);
-      const titleHint = p.agentLabelHint?.trim() || p.roleProfileId;
-      store.addCard({
-        type: 'agent',
-        title: titleHint,
-        position: pos,
-        payload: {
-          agent: p.engine,
-          roleProfileId: p.roleProfileId,
-          // 旧コード互換: role 旧フィールドにも書く (一時的)
-          role: p.roleProfileId,
-          teamId: p.teamId,
-          agentId: p.newAgentId,
-          // Issue #117: AgentNodeCard が拾って Claude(--append-system-prompt) /
-          // Codex(model_instructions_file) 両方の経路に注入する正本フィールド。
-          customInstructions: p.customInstructions || undefined
+      void (async () => {
+        // Issue #342 Phase 1: requester 探索は 2 段階で行う。
+        //   1. agentId 完全一致で 1 回走査 (旧挙動)。
+        //   2. 見つからなければ 200ms grace を 1 回挟んで再走査
+        //      (Canvas mode 起動直後・HMR 直後等、recruit emit が canvas store の
+        //       hydration を追い越すレースを緩和する)。
+        //   3. それでも無ければ「同 teamId の leader / hr」を fallback として採用
+        //      (識別子分離で agentId が古いままになっても、同チームの権限ある
+        //       カードに対して配置できれば UX 上は復帰できる)。
+        // すべて失敗したら Hub に `phase=requester_not_found` で ack(false) を返す。
+        // 自カードは消さず、Hub が emit する `team:recruit-cancelled` event の
+        // ハンドラ側で一元的に removeCard する (チャネル方向の一意化)。
+        const findRequester = (): Node<CardData> | undefined => {
+          const nodes = useCanvasStore.getState().nodes;
+          const exact = nodes.find((n) => {
+            const data = n.data?.payload as { agentId?: string } | undefined;
+            return data?.agentId === p.requesterAgentId;
+          });
+          if (exact) return exact;
+          // 同 teamId 内の leader / hr に fallback
+          return nodes.find((n) => {
+            const data = n.data?.payload as
+              | { agentId?: string; teamId?: string; roleProfileId?: string; role?: string }
+              | undefined;
+            if (!data || data.teamId !== p.teamId) return false;
+            const r = data.roleProfileId ?? data.role ?? '';
+            return r === 'leader' || r === 'hr';
+          });
+        };
+
+        let requester = findRequester();
+        if (!requester) {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          if (cancelled) return;
+          requester = findRequester();
         }
-      });
-      // Issue #253: 新メンバー配置後に Canvas 側で fitView を発火させる。
-      // RECRUIT_RADIUS=NODE_W+80 で 6 名同心円配置時に端が viewport 外になる UX 退行を吸収。
-      store.notifyRecruit();
+        if (!requester) {
+          console.warn('[recruit] requester card not found', p.requesterAgentId);
+          try {
+            await ackRecruit(p.newAgentId, p.teamId, {
+              ok: false,
+              reason: 'requester card not found',
+              phase: 'requester_not_found'
+            });
+          } catch (err) {
+            console.warn('[recruit] ack(requester_not_found) failed', err);
+          }
+          return;
+        }
+        // 動的ロール定義が同梱されていれば、AgentNodeCard が system prompt を組み立てる前に
+        // RoleProfilesContext に登録する。team:role-created event でも同じことが起きるが、
+        // 到達順に依存しないようここでも投入する。
+        if (p.dynamicRole) {
+          registerDynamicRole({
+            id: p.dynamicRole.id,
+            label: p.dynamicRole.label,
+            description: p.dynamicRole.description,
+            instructions: p.dynamicRole.instructions,
+            instructionsJa: p.dynamicRole.instructionsJa,
+            teamId: p.teamId
+          });
+        }
+        const store = useCanvasStore.getState();
+        const teamNodes = store.nodes.filter((n) => {
+          const data = n.data?.payload as { teamId?: string } | undefined;
+          return data?.teamId === p.teamId;
+        });
+        const pos = findRecruitPosition(requester, teamNodes);
+        const titleHint = p.agentLabelHint?.trim() || p.roleProfileId;
+        store.addCard({
+          type: 'agent',
+          title: titleHint,
+          position: pos,
+          payload: {
+            agent: p.engine,
+            roleProfileId: p.roleProfileId,
+            // 旧コード互換: role 旧フィールドにも書く (一時的)
+            role: p.roleProfileId,
+            teamId: p.teamId,
+            agentId: p.newAgentId,
+            // Issue #117: AgentNodeCard が拾って Claude(--append-system-prompt) /
+            // Codex(model_instructions_file) 両方の経路に注入する正本フィールド。
+            customInstructions: p.customInstructions || undefined
+          }
+        });
+        // Issue #253: 新メンバー配置後に Canvas 側で fitView を発火させる。
+        // RECRUIT_RADIUS=NODE_W+80 で 6 名同心円配置時に端が viewport 外になる UX 退行を吸収。
+        store.notifyRecruit();
+        // Issue #342 Phase 1: addCard 完了 (= spawn 開始) 時点で Hub に受領通知を返す。
+        // handshake 完了は待たない (それは Hub 側 RECRUIT_TIMEOUT=30s 経路の責務)。
+        // ack(true) だけでは MCP success にはならず、真の成功判定は handshake のみ。
+        try {
+          await ackRecruit(p.newAgentId, p.teamId, { ok: true });
+        } catch (err) {
+          console.warn('[recruit] ack(ok) failed', err);
+        }
+      })();
     }).then((u) => {
       if (cancelled) {
         u();

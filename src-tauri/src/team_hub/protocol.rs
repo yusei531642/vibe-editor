@@ -3,14 +3,18 @@
 // 旧 team-hub.ts の handleMcpRequest 等価。
 // initialize / tools/list / tools/call (team_send 等 7 ツール + 新 recruit 系) を実装。
 
+use crate::team_hub::error::RecruitError;
 use crate::team_hub::{inject, CallContext, DynamicRole, TeamHub, TeamMessage, TeamTask};
 use chrono::Utc;
 use serde_json::{json, Value};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::Emitter;
 use uuid::Uuid;
 
 const RECRUIT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Issue #342 Phase 1: renderer 側 `app_recruit_ack` invoke 受領を待つ短期タイムアウト。
+/// 「addCard / spawn 開始の受領通知」だけを待つので 5s で十分 (handshake 完了までは待たない)。
+const RECRUIT_ACK_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_MEMBERS_PER_TEAM: usize = 12;
 /// 動的ロール instructions の最大長。Leader が暴走して巨大プロンプトを投げてくるのを抑える。
 const MAX_DYNAMIC_INSTRUCTIONS_LEN: usize = 16 * 1024; // 16 KiB
@@ -79,16 +83,27 @@ pub async fn handle(hub: &TeamHub, ctx: &CallContext, req: &Value) -> Option<Val
                         ]
                     }
                 })),
-                Err(msg) => Some(json!({
-                    "jsonrpc": "2.0",
-                    "id": id,
-                    "result": {
-                        "content": [
-                            { "type": "text", "text": json!({ "error": msg }).to_string() }
-                        ],
-                        "isError": true
-                    }
-                })),
+                Err(msg) => {
+                    // Issue #342 Phase 1 (1.7b): 構造化 JSON 文字列を Err に詰めるツール
+                    // (現在は team_recruit のみ) が、`json!({"error": msg})` で文字列値として
+                    // 二重エスケープされてクライアントが 2 回 parse する必要がある問題を回避。
+                    // msg が JSON object として parse できれば object のまま `error` キーに乗せ、
+                    // そうでなければ従来どおり文字列値として包む。
+                    let text = match serde_json::from_str::<Value>(&msg) {
+                        Ok(v) if v.is_object() => json!({ "error": v }).to_string(),
+                        _ => json!({ "error": msg }).to_string(),
+                    };
+                    Some(json!({
+                        "jsonrpc": "2.0",
+                        "id": id,
+                        "result": {
+                            "content": [
+                                { "type": "text", "text": text }
+                            ],
+                            "isError": true
+                        }
+                    }))
+                }
             }
         }
         _ => {
@@ -533,21 +548,28 @@ async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<
     // Issue #122: 「singleton / 人数上限チェック」と「pending 登録」を同じクリティカルセクションで実行。
     // pending recruit も人数 / role 重複の判定対象に含めることで、並行 team_recruit が
     // 両方 pass して上限超過 / singleton 重複が発生する競合を防ぐ。
+    //
+    // Issue #342 Phase 1: ack 駆動への移行に伴い、handshake 用の `rx` に加えて renderer 側
+    // `app_recruit_ack` invoke を待つ `ack_rx` も同時に生成する。
+    let started = Instant::now();
     let current_members = hub.registry.list_team_members(&ctx.team_id);
-    let rx = match hub
+    let channels = match hub
         .try_register_pending_recruit(
             new_agent_id.clone(),
             ctx.team_id.clone(),
             role_profile_id.clone(),
+            ctx.agent_id.clone(),
             is_singleton,
             &current_members,
             MAX_MEMBERS_PER_TEAM,
         )
         .await
     {
-        Ok(rx) => rx,
+        Ok(c) => c,
         Err(e) => return Err(e),
     };
+    let rx = channels.handshake;
+    let ack_rx = channels.ack;
 
     // 動的ロールであれば、その定義もペイロードに同梱する。renderer 側はこの payload を見て
      // RoleProfilesContext のメモリキャッシュへ追加し、worker template に instructions を流し込む。
@@ -585,7 +607,88 @@ async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<
         return Err("renderer not available (canvas mode required)".into());
     }
 
-    // handshake 完了を待つ
+    // Issue #342 Phase 1 (1.11): 環境変数 `VIBE_TEAM_DISABLE_RECRUIT_ACK=1` で旧 fire-and-forget
+    // 動作にフォールバック (ack 待ちをスキップしていきなり handshake 30s 待機)。緊急ロールバック用。
+    let disable_ack =
+        std::env::var("VIBE_TEAM_DISABLE_RECRUIT_ACK").as_deref() == Ok("1");
+
+    if !disable_ack {
+        // Issue #342 Phase 1: ack 短期待機 (5s)。renderer が `team:recruit-request` を受領して
+        // addCard / spawn を開始した時点で `app_recruit_ack(ok=true)` が来る。
+        // ack 失敗 / timeout なら handshake を待たずに即座に構造化エラーを返す。
+        match tokio::time::timeout(RECRUIT_ACK_TIMEOUT, ack_rx).await {
+            Ok(Ok(ack)) if ack.ok => {
+                // ack 受領 OK。続けて handshake 待機へ。
+                // ※ ack=true は受領通知のみ。MCP 成功判定は依然 handshake 経由のみ。
+            }
+            Ok(Ok(ack)) => {
+                // renderer から ack(ok=false) が来た = 起動失敗を即時通知された
+                hub.cancel_pending_recruit(&new_agent_id).await;
+                let phase_str = ack
+                    .phase
+                    .map(|p| p.as_str().to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                let reason = ack.reason.unwrap_or_default();
+                if let Some(app) = &app {
+                    let _ = app.emit(
+                        "team:recruit-cancelled",
+                        json!({ "newAgentId": new_agent_id, "reason": phase_str.clone() }),
+                    );
+                }
+                let message = if reason.is_empty() {
+                    format!("recruit failed (phase={phase_str})")
+                } else {
+                    format!("recruit failed: {reason}")
+                };
+                return Err(RecruitError {
+                    code: "recruit_failed".into(),
+                    message,
+                    phase: Some(phase_str),
+                    elapsed_ms: Some(started.elapsed().as_millis() as u64),
+                }
+                .into_err_string());
+            }
+            Ok(Err(_)) => {
+                // ack_tx が drop された (renderer 側が pending を resolve せずに崩壊) — 緊急 cancel 扱い
+                hub.cancel_pending_recruit(&new_agent_id).await;
+                if let Some(app) = &app {
+                    let _ = app.emit(
+                        "team:recruit-cancelled",
+                        json!({ "newAgentId": new_agent_id, "reason": "ack_dropped" }),
+                    );
+                }
+                return Err(RecruitError {
+                    code: "recruit_ack_dropped".into(),
+                    message: "renderer ack channel was dropped before reply".into(),
+                    phase: Some("ack".into()),
+                    elapsed_ms: Some(started.elapsed().as_millis() as u64),
+                }
+                .into_err_string());
+            }
+            Err(_) => {
+                // ack timeout (5s)。renderer が `team:recruit-request` を受け取れていない可能性。
+                hub.cancel_pending_recruit(&new_agent_id).await;
+                if let Some(app) = &app {
+                    let _ = app.emit(
+                        "team:recruit-cancelled",
+                        json!({ "newAgentId": new_agent_id, "reason": "ack_timeout" }),
+                    );
+                }
+                return Err(RecruitError {
+                    code: "recruit_ack_timeout".into(),
+                    message: format!(
+                        "renderer did not ack recruit-request within {}s",
+                        RECRUIT_ACK_TIMEOUT.as_secs()
+                    ),
+                    phase: Some("ack".into()),
+                    elapsed_ms: Some(started.elapsed().as_millis() as u64),
+                }
+                .into_err_string());
+            }
+        }
+    }
+
+    // handshake 完了を待つ (Issue #342 Phase 1: ack 成功後のみ到達。disable_ack=1 では従来通り即座に到達)
     match tokio::time::timeout(RECRUIT_TIMEOUT, rx).await {
         Ok(Ok(outcome)) => Ok(json!({
             "success": true,
@@ -598,7 +701,14 @@ async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<
             // 孤立 pending が try_register_pending_recruit の人数/singleton 判定に
             // 永久カウントされ、再起動まで採用不能化していた。
             hub.cancel_pending_recruit(&new_agent_id).await;
-            Err("recruit cancelled".into())
+            // Issue #342 Phase 1: 構造化エラーで返す (cancelled は handshake 直前 cancel 等)
+            Err(RecruitError {
+                code: "recruit_cancelled".into(),
+                message: "recruit cancelled before handshake".into(),
+                phase: Some("handshake".into()),
+                elapsed_ms: Some(started.elapsed().as_millis() as u64),
+            }
+            .into_err_string())
         }
         Err(_) => {
             // timeout
@@ -607,13 +717,20 @@ async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<
             if let Some(app) = &app {
                 let _ = app.emit(
                     "team:recruit-cancelled",
-                    json!({ "newAgentId": new_agent_id, "reason": "timeout" }),
+                    json!({ "newAgentId": new_agent_id, "reason": "handshake_timeout" }),
                 );
             }
-            Err(format!(
-                "recruit timeout (>{}s); the spawned agent failed to handshake",
-                RECRUIT_TIMEOUT.as_secs()
-            ))
+            // Issue #342 Phase 1: 構造化エラー化
+            Err(RecruitError {
+                code: "recruit_handshake_timeout".into(),
+                message: format!(
+                    "agent did not handshake within {}s",
+                    RECRUIT_TIMEOUT.as_secs()
+                ),
+                phase: Some("handshake".into()),
+                elapsed_ms: Some(started.elapsed().as_millis() as u64),
+            }
+            .into_err_string())
         }
     }
 }

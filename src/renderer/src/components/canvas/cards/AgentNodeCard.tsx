@@ -20,6 +20,7 @@ import { useXtermScrollToBottomOnResize } from '../../../lib/use-xterm-scroll-on
 import { fallbackProfile, profileText, renderSystemPrompt, useRoleProfiles } from '../../../lib/role-profiles-context';
 import { parseShellArgs } from '../../../lib/parse-args';
 import { resolveAgentConfig } from '../../../lib/agent-resolver';
+import { useRecruitSpawnAck } from '../../../lib/use-terminal-spawn';
 
 interface AgentPayload {
   agent?: 'claude' | 'codex';
@@ -108,6 +109,10 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const accent = profile.visual.color;
   const meta = profileText(profile, settings.language);
   const title = (data?.title as string) ?? meta.label;
+  // Issue #342 Phase 1: recruit 経路の spawn 失敗を Hub に ack するためのコールバック。
+  // payload.agentId / payload.teamId が揃っているとき (= 通常の AgentNode は常に揃う)
+  // のみ実体化し、それ以外は no-op を返す。
+  const onSpawnError = useRecruitSpawnAck(payload.agentId, payload.teamId);
   const [status, setStatus] = useState<string>('');
   // Phase 4: ステータスバッジ。出力を最近受け取ったら typing、暫く来なければ idle。
   const [activity, setActivity] = useState<AgentStatus>('idle');
@@ -375,6 +380,9 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
             onSessionId={(sid) => {
               if (sid) setCardPayload(id, { resumeSessionId: sid });
             }}
+            // Issue #342 Phase 1: terminal_create 失敗を Hub に ack(false) する。
+            // 30 秒の handshake timeout を待たず、recruit MCP に構造化エラーが即返る。
+            onSpawnError={onSpawnError}
             // Canvas zoom で xterm canvas が滲むのを避けるため WebGL を切る (DOM renderer 固定)。
             // text は実 DOM になるので Chromium が親 transform に応じて再ラスタライズしシャープに描く。
             disableWebgl

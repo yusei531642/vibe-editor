@@ -9,16 +9,19 @@
 // - team_send 等のツール呼び出しを PTY に直接 write 注入する (64B / 15ms)
 
 pub mod bridge;
+pub mod error;
 pub mod inject;
 pub mod protocol;
 
 use crate::pty::SessionRegistry;
+use crate::team_hub::error::{AckError, AckFailPhase};
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 #[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
@@ -188,10 +191,45 @@ pub struct RecruitOutcome {
 
 /// pending_recruits の値。team_id と role を保持して、並行 recruit でも整合性のある
 /// 人数 / singleton 判定ができるようにする (Issue #122)。
+///
+/// Issue #342 Phase 1: ack 駆動への移行に伴い、以下を追加:
+/// - `requester_agent_id`: ack 認可ガード時の診断ログ用 (誰の recruit が落ちたか追跡可能にする)
+/// - `ack_tx`: renderer の `app_recruit_ack` invoke を待つための oneshot。受領通知のみで
+///   handshake 完了は別経路 (`tx`) で待つ。
+/// - `ack_done`: 重複 ack を弾くための AtomicBool。renderer のバグや競合で 2 回 ack が来ても
+///   2 回目以降は no-op になる。
 pub struct PendingRecruit {
     pub team_id: String,
     pub role_profile_id: String,
+    pub requester_agent_id: String,
     pub tx: oneshot::Sender<RecruitOutcome>,
+    pub ack_tx: Option<oneshot::Sender<RecruitAckOutcome>>,
+    pub ack_done: AtomicBool,
+}
+
+/// Issue #342 Phase 1: renderer から `app_recruit_ack` で渡される受領通知 outcome。
+///
+/// `ok=true` は「renderer が `team:recruit-request` を受け取って addCard / spawn を開始した」
+/// という受領通知のみ。**handshake 完了ではない**。真の成功判定は既存の
+/// `resolve_pending_recruit` (handshake 経由) で行う。
+///
+/// `ok=false` の場合は `phase` に失敗種別 (spawn / engine_binary_missing / 等) が入り、
+/// `reason` に追加情報 (任意の文字列、長さ 256 byte 上限) が入る。
+#[derive(Clone, Debug)]
+pub struct RecruitAckOutcome {
+    pub ok: bool,
+    pub reason: Option<String>,
+    pub phase: Option<AckFailPhase>,
+}
+
+/// Issue #342 Phase 1: `try_register_pending_recruit` が返す 2 系統の Receiver。
+///
+/// - `ack`: renderer から `app_recruit_ack` invoke が来たら resolve される短期 (5s) 待機用
+/// - `handshake`: spawn された agent が socket / pipe で handshake を済ませると resolve される
+///   長期 (30s) 待機用 (既存 `resolve_pending_recruit` 経路)
+pub struct PendingRecruitChannels {
+    pub handshake: oneshot::Receiver<RecruitOutcome>,
+    pub ack: oneshot::Receiver<RecruitAckOutcome>,
 }
 
 #[derive(Default, Clone)]
@@ -322,11 +360,13 @@ impl TeamHub {
         agent_id: String,
         team_id: String,
         role_profile_id: String,
+        requester_agent_id: String,
         is_singleton: bool,
         current_members: &[(String, String)],
         max_members: usize,
-    ) -> Result<oneshot::Receiver<RecruitOutcome>, String> {
+    ) -> Result<PendingRecruitChannels, String> {
         let (tx, rx) = oneshot::channel();
+        let (ack_tx, ack_rx) = oneshot::channel();
         let mut s = self.state.lock().await;
         // 同 team_id に属する pending を列挙
         let pending_for_team: Vec<&PendingRecruit> = s
@@ -358,10 +398,16 @@ impl TeamHub {
             PendingRecruit {
                 team_id,
                 role_profile_id,
+                requester_agent_id,
                 tx,
+                ack_tx: Some(ack_tx),
+                ack_done: AtomicBool::new(false),
             },
         );
-        Ok(rx)
+        Ok(PendingRecruitChannels {
+            handshake: rx,
+            ack: ack_rx,
+        })
     }
 
     /// handshake 内で agent_id がマッチしたら呼ぶ。recruit が待機中ならここで resolve。
@@ -411,6 +457,62 @@ impl TeamHub {
     pub async fn cancel_pending_recruit(&self, agent_id: &str) {
         let mut s = self.state.lock().await;
         s.pending_recruits.remove(agent_id);
+    }
+
+    /// Issue #342 Phase 1: renderer 側 `app_recruit_ack` invoke の核ロジック。
+    ///
+    /// 認可ガード (3 重防御):
+    ///   1. **pending エントリ存在確認**: `pending_recruits.get(agent_id)` が None なら no-op + warn
+    ///   2. **team_id 一致確認**: pending の `team_id != expected_team_id` なら no-op + warn
+    ///      (cross-team から偽の cancel を仕込めないようにする)
+    ///   3. **重複 ack 弾き**: `ack_done.compare_exchange(false, true, ...)` で 2 回目以降を no-op 化
+    ///
+    /// `ok=true` を受け取っても **MCP `team_recruit` の戻り値はまだ成功にしない**。
+    /// 真の成功判定は `resolve_pending_recruit` (handshake 経由) のみ。renderer 信頼境界違反で
+    /// 偽 `ok=true` を打たれても MCP caller は騙されない。
+    pub async fn resolve_recruit_ack(
+        &self,
+        agent_id: &str,
+        expected_team_id: &str,
+        outcome: RecruitAckOutcome,
+    ) -> Result<(), AckError> {
+        let mut s = self.state.lock().await;
+        let pending = match s.pending_recruits.get_mut(agent_id) {
+            Some(p) => p,
+            None => {
+                tracing::warn!(
+                    "[teamhub] recruit_ack ignored: no pending recruit for agent={agent_id}"
+                );
+                return Err(AckError::NotFound);
+            }
+        };
+        if pending.team_id != expected_team_id {
+            tracing::warn!(
+                "[teamhub] recruit_ack ignored: team_id mismatch agent={agent_id} \
+                 pending_team={} expected_team={expected_team_id} requester={}",
+                pending.team_id,
+                pending.requester_agent_id
+            );
+            return Err(AckError::TeamMismatch);
+        }
+        if pending
+            .ack_done
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            tracing::warn!(
+                "[teamhub] recruit_ack ignored: already acked agent={agent_id}"
+            );
+            return Err(AckError::AlreadyAcked);
+        }
+        let ack_tx = pending.ack_tx.take();
+        // pending エントリ自体は handshake 待機中の `tx` をまだ保持している必要があるため remove しない。
+        drop(s);
+        if let Some(tx) = ack_tx {
+            // 受信側 (team_recruit) が既に drop していても無視 (タイムアウト後の遅延 ack 等)
+            let _ = tx.send(outcome);
+        }
+        Ok(())
     }
 
     /// setup 後に AppHandle を注入 (event::emit で使う)

@@ -24,6 +24,14 @@ export interface PtySessionCallbacks {
   /** ユーザーの xterm 入力 (キーストローク・改行含む) を観察したいとき。
    *  画面表示や pty 書き込みは別途行うので、純粋にスニファとして使う想定。 */
   onUserInput?: (data: string) => void;
+  /**
+   * Issue #342 Phase 1: terminal_create の spawn 失敗時に呼ばれる。
+   * `res.error` の文字列をそのまま渡す。AgentNodeCard などが本コールバックで
+   * `ackRecruit({ ok: false, phase: 'spawn' | 'engine_binary_missing' })` を発火し、
+   * Hub の recruit timeout (>30s) を待たず即座に構造化エラーを返せるようにする。
+   * 通常タブ等 recruit に紐付かない経路では未指定で OK (no-op)。
+   */
+  onSpawnError?: (error: string) => void;
 }
 
 export interface UsePtySessionOptions {
@@ -510,8 +518,12 @@ export function usePtySession(options: UsePtySessionOptions): void {
         if (!res.ok || !res.id) {
           // pre-subscribe 経路で create が失敗した場合は orphan listener を必ず解除。
           unsubscribePtyListeners();
-          term.writeln(`\x1b[31m[起動エラー] ${res.error ?? '不明なエラー'}\x1b[0m`);
+          const errMsg = res.error ?? '不明なエラー';
+          term.writeln(`\x1b[31m[起動エラー] ${errMsg}\x1b[0m`);
           callbacksRef.current.onStatus?.(`起動失敗: ${res.error ?? ''}`);
+          // Issue #342 Phase 1: recruit 経路から呼ばれた spawn なら、Hub に失敗を ack して
+          // 30 秒の handshake timeout を待たず即座に構造化エラーで返せるようにする。
+          callbacksRef.current.onSpawnError?.(errMsg);
           return;
         }
 

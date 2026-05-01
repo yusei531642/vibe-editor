@@ -543,6 +543,81 @@ pub async fn app_cancel_recruit(
     Ok(())
 }
 
+/// Issue #342 Phase 1: renderer から `team:recruit-request` を受領 / spawn 結果を通知するための ack 経路。
+///
+/// renderer が `team:recruit-request` event を受けて addCard / spawn を開始した時点で
+/// `ok=true` を打つ。spawn 失敗 / requester 不在等で起動できなかった場合は `ok=false`
+/// + `phase` (`spawn` / `engine_binary_missing` / `instructions_load` / `requester_not_found`)
+/// + 任意 `reason` を打つ。
+///
+/// 設計原則:
+///   - **flat 引数**: 既存 `app_cancel_recruit(agent_id)` の流儀に揃える (renderer 側合意)
+///   - **ack の意味は受領通知のみ**: `ok=true` でも MCP `team_recruit` の戻り値はまだ成功にしない。
+///     真の成功判定は handshake 経路 (`resolve_pending_recruit`) のみ。renderer 信頼境界違反で
+///     偽 `ok=true` を打たれても MCP caller は騙されない。
+///   - **入力サニタイズ (Reviewer D Critical 反映)**:
+///       - `phase` は enum ホワイトリスト 4 値に制限 (任意文字列を log injection に使われないように)
+///       - `reason` は 256 byte 上限で truncate (DoS 抑止)
+///   - **認可ガード**: pending 不在 / team_id 不一致 / 重複 ack はすべて Hub 側で no-op + warn ログ。
+///     呼び出し側 (renderer) には `Ok(())` を返してエラー観測点を作らない (偽装試行を区別不能にする)。
+#[tauri::command]
+pub async fn app_recruit_ack(
+    state: State<'_, AppState>,
+    new_agent_id: String,
+    team_id: String,
+    ok: bool,
+    reason: Option<String>,
+    phase: Option<String>,
+) -> Result<(), String> {
+    use crate::team_hub::error::AckFailPhase;
+    use crate::team_hub::RecruitAckOutcome;
+
+    /// renderer 側 reason 文字列の最大長 (UTF-8 byte 数)。これを超えたら byte 単位で切り詰める。
+    /// 文字境界をまたぐと char_indices で見つかる手前位置に丸める。
+    const MAX_REASON_BYTES: usize = 256;
+
+    fn truncate_reason(s: String) -> String {
+        if s.len() <= MAX_REASON_BYTES {
+            return s;
+        }
+        // UTF-8 boundary を尊重して切り詰め
+        let mut cut = MAX_REASON_BYTES;
+        while cut > 0 && !s.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        let mut out = s;
+        out.truncate(cut);
+        out
+    }
+
+    // phase 文字列を enum に正規化。未知値は ok=false 時のみ問題なので、
+    // None に丸めて後続ロジックは「不明な失敗」として扱う。
+    let phase_enum = phase.as_deref().and_then(AckFailPhase::from_str);
+    if !ok && phase.is_some() && phase_enum.is_none() {
+        tracing::warn!(
+            "[teamhub] recruit_ack rejected unknown phase value: {:?} (agent={new_agent_id})",
+            phase
+        );
+        // 未知 phase は無視せず、no-op で握り潰す代わりに pending を cancel して
+        // ユーザーをロックさせない (この経路は renderer のバグか改ざんなので cancel が安全側)
+        state.team_hub.cancel_pending_recruit(&new_agent_id).await;
+        return Ok(());
+    }
+
+    let outcome = RecruitAckOutcome {
+        ok,
+        reason: reason.map(truncate_reason),
+        phase: phase_enum,
+    };
+
+    // 認可ガードは Hub 側で完結。エラーは呼び出し元には返さず、内部診断ログのみ。
+    let _ = state
+        .team_hub
+        .resolve_recruit_ack(&new_agent_id, &team_id, outcome)
+        .await;
+    Ok(())
+}
+
 #[tauri::command]
 pub fn app_get_user_info(app: tauri::AppHandle) -> AppUserInfo {
     tracing::info!("[IPC] app_get_user_info called");
