@@ -251,10 +251,21 @@ code,
 pre,
 kbd,
 samp,
-.terminal-view,
-.xterm,
 .monaco-editor {
   font-feature-settings: "kern", "liga", "calt", "tnum", "zero";
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+/* Issue #349: xterm スコープでは ligatures / kerning / calt を切る。
+ * Canvas DOM renderer の CJK fallback フォントは GSUB / kern を持たないか壊れて
+ * いるケースがあり、ASCII 用に効かせた "kern" / "liga" / "calt" が日本語 glyph の
+ * 字幅・縦位置に微妙なズレを起こしていた。tnum / zero (slashed) は数字列の桁
+ * 揃え用なので維持し、それ以外は no-op に倒して fallback を素直に描画させる。 */
+.terminal-view,
+.xterm {
+  font-kerning: none;
+  font-variant-ligatures: none;
+  font-feature-settings: "tnum", "zero";
   font-variant-numeric: tabular-nums slashed-zero;
 }
 

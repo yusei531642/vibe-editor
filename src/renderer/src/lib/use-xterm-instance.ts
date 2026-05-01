@@ -62,6 +62,18 @@ const BOX_DRAWING_FALLBACKS = [
 ] as const;
 
 /**
+ * Issue #349: 日本語 (CJK) glyph を確実に持つ Windows OS フォント。ユーザー設定 fontFamily
+ * の chain (BoxDrawing fallback の後ろ、generic `monospace` の直前) に注入することで、
+ * 既定フォント `JetBrainsMono Nerd Font Mono` (latin-only webfont) や類似の CJK 非対応
+ * primary フォントを使っているときも、日本語が常に同じ Windows OS フォントから拾われ、
+ * Canvas 内 xterm DOM renderer の見た目が安定する (browser の monospace 降格に依らない)。
+ *
+ * 順序は `Yu Gothic UI` → `Meiryo` → `MS Gothic` の優先度で、Windows 10/11 のいずれかに
+ * 必ずどれかが存在するように冗長化している。
+ */
+const CJK_FALLBACKS = ["'Yu Gothic UI'", 'Meiryo', "'MS Gothic'"] as const;
+
+/**
  * ユーザー設定の fontFamily に、罫線/濃淡 glyph を確実に持つ Windows OS フォントを
  * fallback として注入する。
  *
@@ -94,6 +106,48 @@ function ensureBoxDrawingFallbacks(family: string): string {
     return `${m[1]}, ${missing.join(', ')}${m[2]}`;
   }
   return `${trimmed}, ${missing.join(', ')}, monospace`;
+}
+
+/**
+ * Issue #349: ユーザー設定の fontFamily に、日本語 (CJK) glyph を確実に持つ Windows OS
+ * フォントを fallback として注入する。
+ *
+ * 背景:
+ *   v1.4.x で既定 fontFamily を `JetBrainsMono Nerd Font Mono` (本体同梱、latin-only
+ *   webfont) に切り替えた (Issue #346 / PR #347)。Nerd Font の patched glyph には
+ *   ASCII + Powerline/Devicons は含まれるが、CJK Unified Ideographs (U+4E00-U+9FFF) や
+ *   Hiragana/Katakana は含まれない。chain に明示的な日本語フォントが無いと、Chromium の
+ *   monospace 降格が選ぶ OS フォントが環境依存で、Canvas 内 xterm の DOM renderer で
+ *   日本語が「少しずつ違う glyph」で描画される (見た目が崩れる)。
+ *
+ *   ここで `Yu Gothic UI` / `Meiryo` / `MS Gothic` を BoxDrawing fallback の後ろ、
+ *   generic `monospace` の直前に注入することで、Windows 環境で常に同じ glyph が拾われ
+ *   見た目を安定させる。primary font は preserve するので、ASCII / 罫線の見た目は変わらない
+ *   (CJK の範囲だけ後段の fallback が拾う)。既に chain に含まれているフォントは
+ *   重複追加しない (case-insensitive)。
+ */
+function ensureCjkFallbacks(family: string): string {
+  const trimmed = family.trim().replace(/,\s*$/, '');
+  if (!trimmed) return trimmed;
+  const lower = trimmed.toLowerCase();
+  const missing = CJK_FALLBACKS.filter((fb) => {
+    const name = fb.replace(/['"]/g, '').toLowerCase();
+    return !lower.includes(name);
+  });
+  if (missing.length === 0) return family;
+  const m = trimmed.match(/^(.*?)(\s*,\s*monospace\s*)$/i);
+  if (m) {
+    return `${m[1]}, ${missing.join(', ')}${m[2]}`;
+  }
+  return `${trimmed}, ${missing.join(', ')}, monospace`;
+}
+
+/**
+ * Issue #349: 安全のため必ず BoxDrawing → CJK の順で fallback を積む共通入口。
+ * 順序は Latin/罫線 (ASCII の見た目を崩さないよう前) → CJK → generic `monospace`。
+ */
+function applySafetyFallbacks(family: string): string {
+  return ensureCjkFallbacks(ensureBoxDrawingFallbacks(family));
 }
 
 /**
@@ -135,9 +189,11 @@ export function useXtermInstance(
     const initial = initialSettingsRef.current;
     const term = new Terminal({
       // ターミナル専用フォントを優先、未設定なら editor フォントに fallback。
-      // ensureBoxDrawingFallbacks: Canvas モードの DOM renderer で罫線/濃淡が崩れないよう
-      // 設定値に Cascadia Mono / Consolas / Lucida Console / Segoe UI Symbol を必ず含める。
-      fontFamily: ensureBoxDrawingFallbacks(initial.terminalFontFamily || initial.editorFontFamily),
+      // applySafetyFallbacks (Issue #261 + #349): Canvas モードの DOM renderer で罫線/濃淡が
+      // 崩れないよう Cascadia Mono / Consolas / Lucida Console / Segoe UI Symbol を、
+      // 日本語 glyph の見た目を安定させるため Yu Gothic UI / Meiryo / MS Gothic を
+      // 設定値に必ず含める (順序: BoxDrawing → CJK → monospace)。
+      fontFamily: applySafetyFallbacks(initial.terminalFontFamily || initial.editorFontFamily),
       fontSize: initial.terminalFontSize,
       // 選択座標ズレ対策: lineHeight=1.2 × fontSize=13 → cellHeight=15.6 (非整数) だと
       // xterm v6 の selection 矩形計算で行方向にサブピクセル誤差が積もり、ドラッグ選択
@@ -269,7 +325,7 @@ export function useXtermInstance(
   useEffect(() => {
     const term = termRef.current;
     if (!term) return;
-    term.options.fontFamily = ensureBoxDrawingFallbacks(
+    term.options.fontFamily = applySafetyFallbacks(
       settings.terminalFontFamily || settings.editorFontFamily
     );
     term.options.fontSize = settings.terminalFontSize;
