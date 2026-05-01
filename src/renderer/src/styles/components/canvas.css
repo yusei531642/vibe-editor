@@ -601,6 +601,16 @@
    ホイール無反応の症状を生んでいたため撤回する。`.xterm-screen` 高さ追従は CSS ではなく
    term.resize() → renderer 側で担保される。 */
 
+/* Issue #343: グローバル `.terminal-view .xterm-viewport { z-index: 1 }` は
+   IDE/WebGL の旧 scrollbar 対策だが、Canvas の DOM renderer では viewport の
+   不透明背景が `.xterm-screen` より前に出て文字を覆う。選択時だけ見えるのは
+   xterm が選択セルへ `.xterm-decoration-top` (z-index: 2) を付けるため。
+   Canvas では xterm v6 の SmoothScrollableElement を使うため viewport を前面に
+   出さず、文字レイヤーを通常どおり上に描かせる。 */
+.react-flow__node .terminal-view .xterm-viewport {
+  z-index: auto;
+}
+
 /* Issue #272 v4: Canvas のターミナルは xterm v6 の custom scrollbar を「常時表示」にする。
    xterm の SmoothScrollableElement は `vertical: ScrollbarVisibility.Auto` で生成され、
    JS が要素の `.visible` / `.invisible` クラスを切替えて opacity/pointer-events を絞る。
