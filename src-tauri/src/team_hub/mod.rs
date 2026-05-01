@@ -252,6 +252,13 @@ pub struct TeamMessage {
     pub from: String,
     pub from_agent_id: String,
     pub to: String,
+    /// Issue #342 Phase 2: 送信時点で `resolve_targets` が解決した宛先 agent_id 群。
+    /// `team_read` の `is_for_me` 判定はこれを SSOT として使う (raw `to` を read 時に
+    /// `ctx.role` / `ctx.agent_id` で再解釈する旧設計は identity 分離 (HMR / 再接続 /
+    /// team_id 不一致) に対してサイレント沈黙する脆弱性があったため)。
+    /// in-memory only。`#[derive(Clone)]` のみで Serialize/Deserialize は付けない
+    /// (TeamMessage 自体が永続化対象ではないため migration 不要)。
+    pub resolved_recipient_ids: Vec<String>,
     pub message: String,
     pub timestamp: String,
     pub read_by: Vec<String>,
@@ -416,13 +423,26 @@ impl TeamHub {
     ///   2. 既存 agent_role_bindings に bind 済み role と一致するか (再接続経路)
     /// を照合する。どちらも不一致なら false を返してハンドラ側で接続切断。
     /// 初回 handshake が成功したら agent_id → role を bind する。
+    ///
+    /// Issue #342 Phase 2: `team_id` も照合対象に追加。pending の `team_id` と
+    /// handshake で送られてきた `team_id` が一致しない場合は false を返して接続を切る
+    /// (cross-team 偽 handshake / 旧 context 残骸の混線を防ぐ)。`agent_role_bindings`
+    /// の構造拡張は行わない (registry が `(agent_id, team_id)` の SSOT のため)。
     pub async fn resolve_pending_recruit(
         &self,
         agent_id: &str,
+        team_id: &str,
         role_profile_id: &str,
     ) -> bool {
         let mut s = self.state.lock().await;
         if let Some(p) = s.pending_recruits.get(agent_id) {
+            if p.team_id != team_id {
+                tracing::warn!(
+                    "[teamhub] team_id mismatch on handshake (pending) agent={} expected={} got={}",
+                    agent_id, p.team_id, team_id
+                );
+                return false;
+            }
             if p.role_profile_id != role_profile_id {
                 tracing::warn!(
                     "[teamhub] role mismatch on handshake (pending) agent={} expected={} got={}",
@@ -777,7 +797,11 @@ where
     );
     // 待機中の team_recruit があればここで resolve (caller への MCP response が解放される)
     // Issue #183: client が予約 role と異なる role を主張していたら切断する。
-    if !hub.resolve_pending_recruit(&ctx.agent_id, &ctx.role).await {
+    // Issue #342 Phase 2: pending の team_id 不一致も切断対象 (cross-team 偽 handshake 防御)。
+    if !hub
+        .resolve_pending_recruit(&ctx.agent_id, &ctx.team_id, &ctx.role)
+        .await
+    {
         tokio::time::sleep(AUTH_FAIL_DELAY).await;
         return Ok(());
     }

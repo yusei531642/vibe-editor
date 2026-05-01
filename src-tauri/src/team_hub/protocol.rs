@@ -7,6 +7,7 @@ use crate::team_hub::error::RecruitError;
 use crate::team_hub::{inject, CallContext, DynamicRole, TeamHub, TeamMessage, TeamTask};
 use chrono::Utc;
 use serde_json::{json, Value};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tauri::Emitter;
 use uuid::Uuid;
@@ -766,6 +767,11 @@ async fn team_dismiss(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<
             json!({ "teamId": ctx.team_id, "agentId": agent_id }),
         );
     }
+    // Issue #342 Phase 2: dismiss 時に pending_recruits の同 agent_id エントリも掃除する。
+    // 旧実装は emit のみで Hub 状態を直接触らなかったため、handshake 完了前に
+    // dismiss された pending が孤立し、try_register_pending_recruit の人数 / singleton
+    // 判定にゴミとして残り続けていた (renderer 反映の冪等性が壊れる)。
+    hub.cancel_pending_recruit(&agent_id).await;
     Ok(json!({ "success": true, "agentId": agent_id }))
 }
 
@@ -871,6 +877,19 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         ));
     }
 
+    // Issue #342 Phase 2: lock 順序を逆転。先に registry から宛先を解決して
+    // `resolved_recipient_ids` を作り、それから state.lock を取って message を
+    // 「最初から resolved_recipient_ids を埋めた状態」で push する。
+    // 旧実装は (a) state.lock → push (b) drop → list_team_members → resolve_targets
+    // の 2 段で、push 時点では recipient 情報を持てなかったため `team_read` が raw `to`
+    // を読み手 ctx で再解釈する設計になっていた (identity 分離でサイレント沈黙の温床)。
+    // 新順序では state.lock を保持しない時に registry を呼ぶので、deadlock 余地は無い。
+    let registry = hub.registry.clone();
+    let team_members = registry.list_team_members(&ctx.team_id);
+    let targets = resolve_targets(&team_members, &ctx.agent_id, &to);
+    let resolved_recipient_ids: Vec<String> =
+        targets.iter().map(|(aid, _)| aid.clone()).collect();
+
     // メッセージ履歴に追加
     let timestamp = Utc::now().to_rfc3339();
     let mut state = hub.state.lock().await;
@@ -887,6 +906,7 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         from: ctx.role.clone(),
         from_agent_id: ctx.agent_id.clone(),
         to: to.clone(),
+        resolved_recipient_ids: resolved_recipient_ids.clone(),
         message: message.to_string(),
         timestamp: timestamp.clone(),
         read_by: vec![ctx.agent_id.clone()],
@@ -902,12 +922,9 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
     // 旧実装はメンバーごとに inject().await を直列で回し、to=all + 6 メンバー +
     // 4KB メッセージで 6 秒間 RPC を握りっぱなしになっていた (sleep 15ms × 64chunk × 6人)。
     // → 各宛先を tokio::spawn で並列発火して JoinSet で集約する。
-    let registry = hub.registry.clone();
-    let team_members = registry.list_team_members(&ctx.team_id);
     let preview: String = message.chars().take(80).collect();
     let app = hub.app_handle.lock().await.clone();
 
-    let targets = resolve_targets(&team_members, &ctx.agent_id, &to);
     let other_members: Vec<(String, String)> = team_members
         .iter()
         .filter(|(aid, _)| aid != &ctx.agent_id)
@@ -1013,6 +1030,38 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
     }))
 }
 
+/// Issue #342 Phase 2: `team_read` の宛先判定ロジック。
+///
+/// 送信時点で解決した `resolved_recipient_ids` を SSOT にする。
+/// 旧実装は raw `to` を読み手 ctx (`reader_role` / `reader_agent_id`) に対して毎回
+/// 再解釈していたため、send 時と read 時で identity (team_id / role / agent_id) が
+/// 分離していると `delivered: ["leader"]` が返ったのに `team_read` で 0 件、という
+/// サイレント沈黙が起きていた。`resolved_recipient_ids.contains(reader_agent_id)` で
+/// 厳密一致に倒すことで、読み手側の ctx 揺れに耐性を持たせる。
+///
+/// `legacy_message_fallback` feature が有効な場合のみ、空 `resolved_recipient_ids`
+/// を持つ message に対して旧来の raw `to` 再解釈経路を残す (staging hotfix 用、
+/// 1 週間後に削除予定)。
+fn message_is_for_me(
+    resolved_recipient_ids: &[String],
+    raw_to: &str,
+    reader_role: &str,
+    reader_agent_id: &str,
+) -> bool {
+    if !resolved_recipient_ids.is_empty() {
+        return resolved_recipient_ids
+            .iter()
+            .any(|aid| aid == reader_agent_id);
+    }
+    if cfg!(feature = "legacy_message_fallback") {
+        let to_trim = raw_to.trim();
+        return to_trim.eq_ignore_ascii_case("all")
+            || to_trim.eq_ignore_ascii_case(reader_role)
+            || to_trim == reader_agent_id;
+    }
+    false
+}
+
 async fn team_read(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
     let unread_only = args
         .get("unread_only")
@@ -1025,11 +1074,12 @@ async fn team_read(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         .or_insert_with(crate::team_hub::TeamInfo::default);
     let mut out = vec![];
     for m in team.messages.iter_mut() {
-        // team_send 側の宛先解決と整合: "all" / role 名 case-insensitive / agent_id 完全一致を許容。
-        let to_trim = m.to.trim();
-        let is_for_me = to_trim.eq_ignore_ascii_case("all")
-            || to_trim.eq_ignore_ascii_case(&ctx.role)
-            || to_trim == ctx.agent_id;
+        let is_for_me = message_is_for_me(
+            &m.resolved_recipient_ids,
+            &m.to,
+            &ctx.role,
+            &ctx.agent_id,
+        );
         let from_someone_else = m.from_agent_id != ctx.agent_id;
         // 「自分宛て かつ 自分以外が送信したもの」だけ表示する (旧来の挙動を保ったまま肯定形で記述)
         if !(is_for_me && from_someone_else) {
@@ -1053,24 +1103,46 @@ async fn team_read(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
 }
 
 async fn team_info(hub: &TeamHub, ctx: &CallContext) -> Result<Value, String> {
+    // Issue #342 Phase 2: identity 分離検出のため `agent_role_bindings` を一緒に取る。
+    // member の registry 上 role と handshake 時に bind した role が乖離している (= 別
+    // プロセスが同 agent_id で違う role を主張した / context が古い) なら
+    // `inconsistent: true` を返す。`bindingTeamId` 等の cross-member 機微情報は伏字化し、
+    // 自分自身の binding (`myBoundRole`) のみフル表示する。
     let state = hub.state.lock().await;
     let name = state
         .teams
         .get(&ctx.team_id)
         .map(|t| t.name.clone())
         .unwrap_or_default();
+    let bindings_snapshot: HashMap<String, String> = state.agent_role_bindings.clone();
     drop(state);
     let members: Vec<_> = hub
         .registry
         .list_team_members(&ctx.team_id)
         .into_iter()
-        .map(|(aid, role)| json!({ "role": role, "agentId": aid, "online": true }))
+        .map(|(aid, role)| {
+            // role 比較は case-insensitive (resolve_targets と同じ流儀)。
+            // bind 未登録 (handshake 未完など) の member は inconsistent=false 扱い
+            // (まだ bind 機会が無いだけで矛盾とは言えないため)。
+            let inconsistent = match bindings_snapshot.get(&aid) {
+                Some(bound) => !bound.eq_ignore_ascii_case(&role),
+                None => false,
+            };
+            json!({
+                "role": role,
+                "agentId": aid,
+                "online": true,
+                "inconsistent": inconsistent,
+            })
+        })
         .collect();
+    let my_bound_role = bindings_snapshot.get(&ctx.agent_id).cloned();
     Ok(json!({
         "teamId": ctx.team_id,
         "teamName": name,
         "myRole": ctx.role,
         "myAgentId": ctx.agent_id,
+        "myBoundRole": my_bound_role,
         "members": members,
     }))
 }
@@ -1236,10 +1308,82 @@ async fn team_update_task(
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_targets;
+    use super::{message_is_for_me, resolve_targets};
 
     fn member(aid: &str, role: &str) -> (String, String) {
         (aid.to_string(), role.to_string())
+    }
+
+    fn ids(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    // ===== Issue #342 Phase 2: message_is_for_me / resolved_recipient_ids tests =====
+
+    #[test]
+    fn is_for_me_uses_resolved_ids_when_present() {
+        // resolved_recipient_ids が SSOT。raw `to` が読み手 role と違っても、
+        // 自分の agent_id が含まれていれば受信できる (identity 分離耐性)。
+        let resolved = ids(&["vc-leader-1"]);
+        // raw `to` は "team-lead" (送信時の role 名)、読み手 ctx は role="Leader"
+        // (case 違い) かつ agent_id="vc-leader-1"。resolved を見るので true。
+        assert!(message_is_for_me(&resolved, "team-lead", "Leader", "vc-leader-1"));
+        // 読み手 agent_id が違えば自分宛てではない (broadcast でも resolved に居なければ false)。
+        assert!(!message_is_for_me(&resolved, "team-lead", "Leader", "vc-other"));
+    }
+
+    #[test]
+    fn is_for_me_two_receivers_with_same_role_both_match() {
+        // 同 role 2 名がチームに居て team_send(to: "<role>") を打つと、
+        // 送信時 resolve で 2 名の agent_id が resolved_recipient_ids に入る。
+        // 両者の team_read が個別に true を返すこと (Phase 2 受け入れ基準)。
+        let resolved = ids(&["vc-prog-1", "vc-prog-2"]);
+        assert!(message_is_for_me(&resolved, "programmer", "programmer", "vc-prog-1"));
+        assert!(message_is_for_me(&resolved, "programmer", "programmer", "vc-prog-2"));
+        // 第三者 (別 role) は受信しない。
+        assert!(!message_is_for_me(&resolved, "programmer", "reviewer", "vc-rev"));
+    }
+
+    #[test]
+    fn is_for_me_silent_drop_when_resolved_empty_and_no_legacy() {
+        // resolved が空 = 送信時に宛先 0 件 (例: 不明 role への送信、または未来の
+        // legacy 残骸)。default features では無条件 false にして、`team_read` 0 件で
+        // identity 分離を可視化する (旧実装の raw `to` 再解釈サイレント沈黙を回避)。
+        // ※ legacy_message_fallback feature が立つと別 branch に入るため、この
+        //   アサーションは default features 下でのみ意味を持つ。
+        #[cfg(not(feature = "legacy_message_fallback"))]
+        {
+            let resolved: Vec<String> = vec![];
+            assert!(!message_is_for_me(&resolved, "leader", "leader", "vc-leader"));
+            assert!(!message_is_for_me(&resolved, "all", "leader", "vc-leader"));
+            assert!(!message_is_for_me(&resolved, "vc-leader", "leader", "vc-leader"));
+        }
+    }
+
+    #[cfg(feature = "legacy_message_fallback")]
+    #[test]
+    fn is_for_me_legacy_fallback_when_resolved_empty() {
+        // legacy_message_fallback 有効時のみ、空 resolved に対して旧 raw `to`
+        // 再解釈経路で受信できる (staging hotfix の安全弁)。
+        let empty: Vec<String> = vec![];
+        // role 名 case-insensitive
+        assert!(message_is_for_me(&empty, "Leader", "leader", "vc-leader"));
+        // "all" は全員に届く
+        assert!(message_is_for_me(&empty, "ALL", "programmer", "vc-prog"));
+        // agent_id 完全一致
+        assert!(message_is_for_me(&empty, "vc-leader", "leader", "vc-leader"));
+        // 関係ない role / agent_id は false
+        assert!(!message_is_for_me(&empty, "reviewer", "leader", "vc-leader"));
+    }
+
+    #[test]
+    fn is_for_me_resolved_present_overrides_legacy_path() {
+        // resolved が非空のときは legacy_message_fallback の有無に関わらず
+        // resolved だけを見る (raw `to` の再解釈は走らない)。
+        let resolved = ids(&["vc-prog-1"]);
+        // raw `to` は "all" だが resolved に自分が居ないので false。
+        // (送信時に意図的に self を弾いた、または resolve_targets が一部だけ採用した想定)
+        assert!(!message_is_for_me(&resolved, "all", "reviewer", "vc-rev"));
     }
 
     #[test]
