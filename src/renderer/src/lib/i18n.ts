@@ -338,6 +338,11 @@ const ja: Dict = {
   'terminal.pasteImageFailed': '画像保存失敗',
   'terminal.pasteException': 'ペースト例外',
 
+  // ---------- Terminal context menu (Issue #356) ----------
+  'terminal.ctxMenu.paste': '貼り付け',
+  'terminal.ctxMenu.copySelection': '選択範囲をコピー',
+  'terminal.ctxMenu.clear': 'ターミナルをクリア',
+
   // ---------- Command palette (Issue #39) ----------
   'palette.ariaLabel': 'コマンドパレット',
   'palette.placeholder': 'コマンドを検索…',
@@ -816,6 +821,11 @@ const en: Dict = {
   // ---------- Terminal (paste errors) ----------
   'terminal.pasteImageFailed': 'Paste image failed',
   'terminal.pasteException': 'Paste exception',
+
+  // ---------- Terminal context menu (Issue #356) ----------
+  'terminal.ctxMenu.paste': 'Paste',
+  'terminal.ctxMenu.copySelection': 'Copy selection',
+  'terminal.ctxMenu.clear': 'Clear terminal',
 
   // ---------- Command palette (Issue #39) ----------
   'palette.ariaLabel': 'Command palette',

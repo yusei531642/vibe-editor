@@ -1,0 +1,23 @@
+{
+  "name": "vibe-editor-promo-video",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "audio": "node scripts/make-audio.mjs",
+    "studio": "remotion studio src/index.ts",
+    "still": "remotion still src/index.ts VibeEditorPromo --frame=180 --scale=0.4 out/preview.png",
+    "render": "npm run audio && remotion render src/index.ts VibeEditorPromo out/vibe-editor-promo.mp4 --codec=h264 --pixel-format=yuv420p"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.388",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "remotion": "^4.0.388"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^6.0.3"
+  }
+}

@@ -436,3 +436,38 @@ _(未着手)_
 
 **Next Tasks**
 - 実機で動きが強すぎる場合は `--mascot-track-width` と animation duration を微調整する。
+
+---
+
+## Issue #342 最終実装計画 v2 実施
+
+### 計画
+- [x] `origin/main` を最新化し、既存 Phase 1/3 実装の有無を確認する
+- [x] `feature/issue-342` ブランチで作業する
+- [x] `TeamMessage` に送信時解決済み recipient を保持し、`team_read` を recipient ベース判定へ変更する
+- [x] pending recruit の handshake で `team_id` 一致を検証する
+- [x] v2 で求められた fail-fast 経路が最新 Phase 1 実装で満たされているか確認し、不足があれば補う
+- [x] `cargo check` / `cargo build` / `npm run typecheck` / `npm run build:vite` / `cargo test team_hub` で検証する
+
+### Next Steps
+- 実装差分をレビューし、手動 smoke で worker -> leader の送受信と dismiss -> re-recruit の挙動を確認する
+
+### 進捗
+- 最新 `origin/main` は `36a87da` で、Phase 1/3 の recruit ack fail-fast 実装が投入済みだったため、renderer 側の追加変更は不要と判断した
+- `TeamMessage.recipient_agent_ids` を追加し、`team_send` で解決済み recipient を保存、`team_read` は recipient 優先で判定するよう変更した
+- `resolve_pending_recruit` に `team_id` 引数を追加し、pending recruit と異なる team からの handshake を拒否するよう変更した
+- Rust unit test を追加し、recipient 優先判定・legacy fallback・pending recruit の team/role mismatch を検証対象にした
+- Windows の Rust test harness が `TaskDialogIndirect` を import する一方で Common Controls v6 manifest が無く、`cargo test team_hub` が `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)` で起動前失敗していたため、build.rs で共通 manifest を `/MANIFESTINPUT` として埋め込むよう修正した
+
+### 検証
+- `cargo check --manifest-path src-tauri\Cargo.toml`: PASS
+- `cargo build --manifest-path src-tauri\Cargo.toml`: PASS
+- `npm run typecheck`: PASS
+- `npm run build:vite`: PASS（既存の chunk size / dynamic import warning あり）
+- `cargo test --manifest-path src-tauri\Cargo.toml team_hub --no-run`: PASS
+- `cargo test --manifest-path src-tauri\Cargo.toml team_hub -- --no-capture`: PASS（15 tests）
+- `git diff --check`: PASS
+
+### Next Tasks
+- 手動 smoke で worker -> leader の `team_send` / `team_read({ unread_only: false })` と dismiss -> re-recruit の挙動を確認する
+- PR 作成後に CodeRabbit と人間レビューを待つ

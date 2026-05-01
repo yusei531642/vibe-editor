@@ -340,7 +340,12 @@ samp,
  * "画面全体に対してどの層にいるか" が問題になるものだけを集約する。
  *
  * 9000 台は Canvas モード (常時最前面) とノイズオーバーレイ専用。
- * アプリ全体の最前面 (modal/context-menu/toast) は 1000〜3500 台。
+ * アプリ全体の最前面 (modal/palette/toast) は 1000〜3500 台。
+ *
+ * Issue #356: ContextMenu は createPortal(document.body) で body 直下に出るため、
+ * Canvas モード時は .canvas-layout (z-index: --z-canvas-root = 9200) と body の
+ * stacking context を共有する。3500 のままでは Canvas root の後ろに完全に隠れて
+ * 右クリックメニューが見えない。9500 (canvas-root + noise-overlay より上) に置く。
  */
 :root {
   --z-dropdown: 100;
@@ -352,10 +357,10 @@ samp,
   --z-palette: 2000;
   --z-toast: 3000;
   --z-toast-top: 3200;
-  --z-context-menu: 3500;
   --z-noise-overlay: 9000;
   --z-canvas-toggle: 9100;
   --z-canvas-root: 9200;
+  --z-context-menu: 9500;
 }
 
 /* ==========================================================================
