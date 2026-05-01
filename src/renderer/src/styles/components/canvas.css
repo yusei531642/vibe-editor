@@ -73,19 +73,24 @@
 .react-flow__node {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  text-rendering: geometricPrecision;
+  /* Issue #349: geometricPrecision は CJK fallback の hinting を無視して
+     サブピクセル境界に乗せるため、日本語 glyph の縦位置がズレて見える。
+     auto に戻して Chromium 既定 (optimizeSpeed/Legibility 自動切替) に任せる。 */
+  text-rendering: auto;
 }
 
 /* Canvas 内の xterm DOM テキストを Chromium 任せに毎フレーム再ラスタさせる。
-   font-smoothing / text-rendering を明示しないと親 .react-flow__node の値が
-   行末の cursor 行など個別に上書きされていることがあるので、ここで揃える。
-   span 単位で当てると全文字にマッチして CSS コストが嵩むうえ、xterm が将来
-   cursor 等で transform を使ったときに壊れるので、構造要素にのみ適用する。 */
+   font-smoothing を明示しないと親 .react-flow__node の値が行末の cursor 行など
+   個別に上書きされていることがあるので、ここで揃える。span 単位で当てると
+   全文字にマッチして CSS コストが嵩むうえ、xterm が将来 cursor 等で transform
+   を使ったときに壊れるので、構造要素にのみ適用する。
+   Issue #349: text-rendering は geometricPrecision から auto に戻し、CJK
+   fallback フォントのサブピクセル描画ズレを緩和する。 */
 .react-flow__node .xterm,
 .react-flow__node .xterm-rows {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  text-rendering: geometricPrecision;
+  text-rendering: auto;
 }
 
 .react-flow__node img,
