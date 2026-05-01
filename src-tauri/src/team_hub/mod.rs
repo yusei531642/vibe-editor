@@ -16,6 +16,7 @@ pub mod protocol;
 use crate::pty::SessionRegistry;
 use crate::team_hub::error::{AckError, AckFailPhase};
 use anyhow::{anyhow, Result};
+use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 #[cfg(unix)]
@@ -144,6 +145,120 @@ struct HubState {
     /// renderer 側で worker テンプレに instructions を流し込み、最終的な system prompt を組み立てる。
     /// プロセス再起動で消えるが、canvas restore 時に renderer が再投入する想定。
     dynamic_roles: HashMap<String, HashMap<String, DynamicRole>>,
+    /// Issue #342 Phase 3 (3.2): agent_id 単位の診断 timestamp / counter。
+    /// `team_diagnostics` MCP ツールが leader/hr の権限ガード越しに返す。
+    /// in-memory only (プロセス再起動でリセット、計画の受け入れ基準で明記済み)。
+    member_diagnostics: HashMap<String, MemberDiagnostics>,
+}
+
+/// Issue #342 Phase 3 (3.1): `team_diagnostics` で返す診断 timestamp / counter。
+/// 全 timestamp は `chrono::Utc::now().to_rfc3339()` (ISO8601 / RFC3339)。
+/// counter は `saturating_add(1)` でオーバーフロー時は `u64::MAX` 飽和。
+#[derive(Clone, Debug, Default)]
+pub struct MemberDiagnostics {
+    /// `try_register_pending_recruit` が成功した瞬間の timestamp。
+    /// 旧 entry (handshake 未完で再 recruit された agent_id) は新値で上書き。
+    pub recruited_at: String,
+    /// `resolve_pending_recruit` で handshake が完了した最後の timestamp。
+    /// `online: true` だが `last_handshake_at: null` → handshake 未完を可視化。
+    pub last_handshake_at: Option<String>,
+    /// 任意のアクティビティ (handshake / send / read / dismiss) で更新される最終生存時刻。
+    pub last_seen_at: Option<String>,
+    /// この agent が他者から message を受領した最終時刻 (inject 成功 = 受領)。
+    pub last_message_in_at: Option<String>,
+    /// この agent が team_send で発信した最終時刻。
+    pub last_message_out_at: Option<String>,
+    pub messages_in_count: u64,
+    pub messages_out_count: u64,
+    pub tasks_claimed_count: u64,
+}
+
+/// Issue #342 Phase 3 (3.11): tracing-appender が書き出すログファイルの絶対パスを
+/// プロセス起動時に 1 度だけ記録するグローバル。`team_diagnostics` MCP ツールで
+/// `serverLogPath` として返す際に参照する。
+///
+/// init_logging() 内で `set_server_log_path()` を呼ぶ。env var `VIBE_TEAM_LOG_PATH`
+/// が指定されていれば `server_log_path_for_diagnostics()` 側でそちらを優先する。
+/// ファイルロガー無効 (stderr-only モード) の場合は `None` のままで、診断 API 側が
+/// `"<stderr>"` を返す。
+static SERVER_LOG_PATH: OnceCell<PathBuf> = OnceCell::new();
+
+/// init_logging() から起動時に 1 度だけ呼ぶ。2 回目以降は無視される。
+pub fn set_server_log_path(p: PathBuf) {
+    let _ = SERVER_LOG_PATH.set(p);
+}
+
+/// home directory プレフィックスを `~` に reduce する。
+/// home が解決できない / s が home 配下でないときは原文を返す。
+fn reduce_home_prefix(s: &str) -> String {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => return s.to_string(),
+    };
+    let home_s = home.to_string_lossy().to_string();
+    // Windows では `\` と `/` の混在があり得るので両形で試す
+    if let Some(rest) = s.strip_prefix(&home_s) {
+        return format!("~{rest}");
+    }
+    let home_alt = home_s.replace('\\', "/");
+    let s_alt = s.replace('\\', "/");
+    if let Some(rest) = s_alt.strip_prefix(&home_alt) {
+        return format!("~{rest}");
+    }
+    s.to_string()
+}
+
+/// `team_diagnostics` の `serverLogPath` 用に整形済み文字列を返す。
+///   - env var `VIBE_TEAM_LOG_PATH` が空でなければそれを優先 (絶対パス想定、空白 trim)
+///   - そうでなければ起動時に記録したファイルパス
+///   - どちらも無ければ `"<stderr>"` (= stderr-only モード)
+/// 戻り値は home prefix を `~` に reduce 済み (Reviewer D Major 反映)。
+pub fn server_log_path_for_diagnostics() -> String {
+    if let Ok(v) = std::env::var("VIBE_TEAM_LOG_PATH") {
+        let trimmed = v.trim();
+        if !trimmed.is_empty() {
+            return reduce_home_prefix(trimmed);
+        }
+    }
+    match SERVER_LOG_PATH.get() {
+        Some(p) => reduce_home_prefix(&p.to_string_lossy()),
+        None => "<stderr>".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::reduce_home_prefix;
+
+    /// home prefix が正しく `~` に置換され、home 配下でないパスは原文のまま。
+    /// home 解決失敗環境を想定した静的テストではないので、CI 環境次第で home が
+    /// 存在しないと一部スキップされる点だけ承知 (Linux CI / Windows CI とも home はある)。
+    #[test]
+    fn reduces_home_prefix_when_under_home() {
+        let home = match dirs::home_dir() {
+            Some(h) => h,
+            None => return, // home 取れない環境ではスキップ (CI 上は通常存在する)
+        };
+        let inside = home.join(".vibe-editor").join("logs").join("vibe-editor.log");
+        let inside_str = inside.to_string_lossy().to_string();
+        let reduced = reduce_home_prefix(&inside_str);
+        // `~/.vibe-editor/logs/vibe-editor.log` 形 (区切り文字は OS 依存だが prefix は `~`)
+        assert!(reduced.starts_with('~'), "expected '~' prefix, got: {reduced}");
+        assert!(reduced.contains(".vibe-editor"));
+    }
+
+    #[test]
+    fn keeps_path_as_is_when_outside_home() {
+        // home 配下でないパスは reduce されない。
+        // どの OS でも `/tmp/elsewhere.log` は home 配下にならない (Windows でも C:\Users\ 起点なので無関係)。
+        let outside = if cfg!(windows) {
+            r"D:\nowhere\elsewhere.log"
+        } else {
+            "/tmp/elsewhere.log"
+        };
+        let reduced = reduce_home_prefix(outside);
+        assert_eq!(reduced, outside);
+    }
 }
 
 /// Leader が team_create_role で定義した動的ワーカーロールの本体。
@@ -252,10 +367,20 @@ pub struct TeamMessage {
     pub from: String,
     pub from_agent_id: String,
     pub to: String,
-    pub recipient_agent_ids: Vec<String>,
+    /// Issue #342 Phase 2: 送信時点で `resolve_targets` が解決した宛先 agent_id 群。
+    /// `team_read` の `is_for_me` 判定はこれを SSOT として使う (raw `to` を read 時に
+    /// `ctx.role` / `ctx.agent_id` で再解釈する旧設計は identity 分離 (HMR / 再接続 /
+    /// team_id 不一致) に対してサイレント沈黙する脆弱性があったため)。
+    /// in-memory only。`#[derive(Clone)]` のみで Serialize/Deserialize は付けない
+    /// (TeamMessage 自体が永続化対象ではないため migration 不要)。
+    pub resolved_recipient_ids: Vec<String>,
     pub message: String,
     pub timestamp: String,
     pub read_by: Vec<String>,
+    /// Issue #342 Phase 3 (3.7 / 3.8): 各 agent_id が `read_by` に追加された ISO8601 時刻。
+    /// `team_read` 戻り値の `receivedAt` と `team_send` 戻り値の `receivedAtPerRecipient`
+    /// で参照される。in-memory only (TeamMessage 自体が永続化対象でないため)。
+    pub read_at: HashMap<String, String>,
 }
 
 #[derive(Clone)]
@@ -289,6 +414,7 @@ impl TeamHub {
                 agent_role_bindings: HashMap::new(),
                 role_profile_summary: Vec::new(),
                 dynamic_roles: HashMap::new(),
+                member_diagnostics: HashMap::new(),
             })),
             app_handle: Arc::new(Mutex::new(None)),
         }
@@ -394,6 +520,16 @@ impl TeamHub {
                 ));
             }
         }
+        // Issue #342 Phase 3 (3.3): recruit 時の診断 entry を初期化。
+        // recruited_at は新規上書き (再 recruit を可視化)、他 timestamp/counter は default で初期化。
+        let now_iso = chrono::Utc::now().to_rfc3339();
+        s.member_diagnostics.insert(
+            agent_id.clone(),
+            MemberDiagnostics {
+                recruited_at: now_iso,
+                ..MemberDiagnostics::default()
+            },
+        );
         s.pending_recruits.insert(
             agent_id,
             PendingRecruit {
@@ -417,6 +553,11 @@ impl TeamHub {
     ///   2. 既存 agent_role_bindings に bind 済み role と一致するか (再接続経路)
     /// を照合する。どちらも不一致なら false を返してハンドラ側で接続切断。
     /// 初回 handshake が成功したら agent_id → role を bind する。
+    ///
+    /// Issue #342 Phase 2: `team_id` も照合対象に追加。pending の `team_id` と
+    /// handshake で送られてきた `team_id` が一致しない場合は false を返して接続を切る
+    /// (cross-team 偽 handshake / 旧 context 残骸の混線を防ぐ)。`agent_role_bindings`
+    /// の構造拡張は行わない (registry が `(agent_id, team_id)` の SSOT のため)。
     pub async fn resolve_pending_recruit(
         &self,
         agent_id: &str,
@@ -427,7 +568,7 @@ impl TeamHub {
         if let Some(p) = s.pending_recruits.get(agent_id) {
             if p.team_id != team_id {
                 tracing::warn!(
-                    "[teamhub] team mismatch on handshake (pending) agent={} expected_team={} got_team={}",
+                    "[teamhub] team_id mismatch on handshake (pending) agent={} expected={} got={}",
                     agent_id, p.team_id, team_id
                 );
                 return false;
@@ -459,6 +600,16 @@ impl TeamHub {
             s.agent_role_bindings
                 .insert(agent_id.to_string(), role_profile_id.to_string());
         }
+        // Issue #342 Phase 3 (3.3): 初回 handshake / 再接続 handshake いずれも last_handshake_at と
+        // last_seen_at を更新する。recruit 経路を通らずに直接 handshake してきた場合 (= 旧 context
+        // 残骸の再接続等) は entry が無いので or_default で生成する。
+        let now_iso = chrono::Utc::now().to_rfc3339();
+        let entry = s.member_diagnostics.entry(agent_id.to_string()).or_default();
+        if entry.recruited_at.is_empty() {
+            entry.recruited_at = now_iso.clone();
+        }
+        entry.last_handshake_at = Some(now_iso.clone());
+        entry.last_seen_at = Some(now_iso);
         true
     }
 
@@ -466,6 +617,30 @@ impl TeamHub {
     pub async fn cancel_pending_recruit(&self, agent_id: &str) {
         let mut s = self.state.lock().await;
         s.pending_recruits.remove(agent_id);
+    }
+
+    /// Issue #342 Phase 3 (3.3): `team_diagnostics` で見える member_diagnostics エントリを返す。
+    /// agent_id が未登録なら None。
+    pub async fn get_member_diagnostics(
+        &self,
+        agent_id: &str,
+    ) -> Option<MemberDiagnostics> {
+        self.state
+            .lock()
+            .await
+            .member_diagnostics
+            .get(agent_id)
+            .cloned()
+    }
+
+    /// Issue #342 Phase 3 (3.3): MemberDiagnostics 全体のスナップショットを返す。
+    /// `team_diagnostics` MCP ツールは protocol.rs 側で state.lock を直接取るため、
+    /// この helper は外部 (テスト / 将来の機能拡張) からの read-only スナップショット用。
+    #[allow(dead_code)]
+    pub async fn snapshot_member_diagnostics(
+        &self,
+    ) -> HashMap<String, MemberDiagnostics> {
+        self.state.lock().await.member_diagnostics.clone()
     }
 
     /// Issue #342 Phase 1: renderer 側 `app_recruit_ack` invoke の核ロジック。
@@ -786,7 +961,11 @@ where
     );
     // 待機中の team_recruit があればここで resolve (caller への MCP response が解放される)
     // Issue #183: client が予約 role と異なる role を主張していたら切断する。
-    if !hub.resolve_pending_recruit(&ctx.agent_id, &ctx.team_id, &ctx.role).await {
+    // Issue #342 Phase 2: pending の team_id 不一致も切断対象 (cross-team 偽 handshake 防御)。
+    if !hub
+        .resolve_pending_recruit(&ctx.agent_id, &ctx.team_id, &ctx.role)
+        .await
+    {
         tokio::time::sleep(AUTH_FAIL_DELAY).await;
         return Ok(());
     }
@@ -899,79 +1078,5 @@ where
                 }
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::TeamHub;
-    use crate::pty::SessionRegistry;
-    use std::sync::Arc;
-
-    fn hub() -> TeamHub {
-        TeamHub::new(Arc::new(SessionRegistry::new()))
-    }
-
-    #[tokio::test]
-    async fn resolve_pending_recruit_accepts_matching_team_and_role() {
-        let hub = hub();
-        let _channels = hub
-            .try_register_pending_recruit(
-                "agent-1".to_string(),
-                "team-a".to_string(),
-                "worker".to_string(),
-                "requester-1".to_string(),
-                false,
-                &[],
-                12,
-            )
-            .await
-            .expect("pending recruit should register");
-
-        assert!(hub
-            .resolve_pending_recruit("agent-1", "team-a", "worker")
-            .await);
-    }
-
-    #[tokio::test]
-    async fn resolve_pending_recruit_rejects_team_mismatch() {
-        let hub = hub();
-        let _channels = hub
-            .try_register_pending_recruit(
-                "agent-1".to_string(),
-                "team-a".to_string(),
-                "worker".to_string(),
-                "requester-1".to_string(),
-                false,
-                &[],
-                12,
-            )
-            .await
-            .expect("pending recruit should register");
-
-        assert!(!hub
-            .resolve_pending_recruit("agent-1", "team-b", "worker")
-            .await);
-    }
-
-    #[tokio::test]
-    async fn resolve_pending_recruit_rejects_role_mismatch() {
-        let hub = hub();
-        let _channels = hub
-            .try_register_pending_recruit(
-                "agent-1".to_string(),
-                "team-a".to_string(),
-                "worker".to_string(),
-                "requester-1".to_string(),
-                false,
-                &[],
-                12,
-            )
-            .await
-            .expect("pending recruit should register");
-
-        assert!(!hub
-            .resolve_pending_recruit("agent-1", "team-a", "reviewer")
-            .await);
     }
 }

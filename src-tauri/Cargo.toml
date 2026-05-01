@@ -60,6 +60,12 @@ sha2 = "0.11"
 # デフォルトで dev tools 有効
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+# Issue #342 Phase 2: `team_read` の旧 raw `to` 再解釈経路を残すための staging hotfix flag。
+# `TeamMessage.resolved_recipient_ids` が空 (= 旧 push の残骸) なメッセージに限り、
+# raw `to` を読み手 ctx で再マッチする旧挙動を復活させる。staging で 1 週間
+# `inconsistent: true` のログ無し / 既存テストグリーンを確認できたら削除予定。
+# `cargo test --features legacy_message_fallback` 用。
+legacy_message_fallback = []
 
 [lib]
 name = "vibe_editor_lib"

@@ -370,7 +370,7 @@ export function CanvasLayout(): JSX.Element {
   }, [autoSavePayload, projectRoot]);
 
   const applyPreset = async (preset: WorkspacePreset): Promise<void> => {
-    const teamId = `team-${Date.now().toString(36)}`;
+    const teamId = `team-${crypto.randomUUID()}`;
     const cwd = projectRoot;
     const presetName = t(preset.i18nKey);
     // Issue #72: setupTeamMcp を addCards より前に完了させる
