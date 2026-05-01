@@ -44,7 +44,10 @@ function installWindowApi(
       load: settingsLoad ?? (() => new Promise(() => undefined)),
       save: vi.fn(() => Promise.resolve())
     },
-    app: {}
+    app: {
+      setProjectRoot: vi.fn(() => Promise.resolve()),
+      setZoomLevel: vi.fn(() => Promise.resolve())
+    }
   };
 }
 
