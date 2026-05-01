@@ -1,0 +1,373 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800&family=Noto+Sans+JP:wght@500;700;800&display=swap");
+
+:root {
+  font-family: "Inter", "Noto Sans JP", system-ui, sans-serif;
+  color: #fff8ee;
+  background: #11100f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.video {
+  overflow: hidden;
+  background: #10100f;
+}
+
+.backdrop {
+  background:
+    radial-gradient(circle at 50% 52%, rgba(255, 154, 42, 0.17), transparent 29%),
+    linear-gradient(135deg, #151210 0%, #20201d 48%, #0b0c0d 100%);
+}
+
+.grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.14;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(circle at center, black 0%, transparent 75%);
+}
+
+.halo {
+  position: absolute;
+  width: 720px;
+  height: 720px;
+  border-radius: 50%;
+  filter: blur(54px);
+}
+
+.halo-a {
+  left: -150px;
+  top: -180px;
+  background: rgba(255, 126, 45, 0.34);
+}
+
+.halo-b {
+  right: -180px;
+  bottom: -220px;
+  background: rgba(150, 121, 91, 0.26);
+}
+
+.grid {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(255, 190, 130, 0.07) 1px, transparent 1px),
+    linear-gradient(rgba(255, 190, 130, 0.045) 1px, transparent 1px);
+  background-size: 84px 84px;
+  transform: perspective(700px) rotateX(62deg) translateY(330px) scale(1.5);
+  transform-origin: bottom;
+  opacity: 0.36;
+}
+
+.scene {
+  align-items: center;
+  justify-content: center;
+}
+
+.logoWrap {
+  position: relative;
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 34px 50px rgba(0, 0, 0, 0.42));
+}
+
+.logoImg {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 42px;
+}
+
+.logoPulse {
+  position: absolute;
+  inset: 16%;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 176, 73, 0.28);
+  box-shadow: 0 0 70px rgba(255, 154, 42, 0.42);
+}
+
+.heroOrbits {
+  position: absolute;
+  width: 800px;
+  height: 800px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 211, 164, 0.12);
+}
+
+.heroOrbits span {
+  position: absolute;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #ffad40;
+  box-shadow: 0 0 32px rgba(255, 173, 64, 0.8);
+}
+
+.heroOrbits span:nth-child(1) {
+  left: 50%;
+  top: -6px;
+}
+
+.heroOrbits span:nth-child(2) {
+  right: 42px;
+  top: 590px;
+}
+
+.heroOrbits span:nth-child(3) {
+  left: 32px;
+  top: 490px;
+}
+
+.heroText {
+  position: absolute;
+  top: 665px;
+  text-align: center;
+}
+
+.eyebrow {
+  color: #ffad67;
+  font-size: 25px;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  margin-top: 10px;
+  font-size: 104px;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.heroCopy {
+  position: absolute;
+  top: 820px;
+  width: 100%;
+  text-align: center;
+  font-size: 38px;
+  font-weight: 700;
+  color: #f2ded1;
+}
+
+.sectionText {
+  position: absolute;
+  width: 455px;
+}
+
+.leftText {
+  left: 116px;
+  top: 120px;
+}
+
+.sectionText h2,
+.closingText h2 {
+  margin-top: 12px;
+  font-size: 50px;
+  line-height: 1.12;
+  letter-spacing: 0;
+}
+
+.sectionText p,
+.closingText p {
+  margin-top: 22px;
+  color: #d7c8bd;
+  font-size: 23px;
+  line-height: 1.55;
+  font-weight: 600;
+}
+
+.teamLines {
+  position: absolute;
+  inset: 0;
+}
+
+.teamLines path {
+  fill: none;
+  stroke: rgba(255, 179, 92, 0.74);
+  stroke-width: 4;
+  filter: drop-shadow(0 0 14px rgba(255, 145, 50, 0.6));
+}
+
+.leaderNode,
+.agentNode,
+.messageChip,
+.floatingPanel,
+.featurePill {
+  border: 1px solid rgba(255, 218, 178, 0.18);
+  background: rgba(27, 25, 23, 0.78);
+  box-shadow: 0 26px 80px rgba(0, 0, 0, 0.36);
+  backdrop-filter: blur(18px);
+}
+
+.leaderNode {
+  position: absolute;
+  left: 960px;
+  top: 520px;
+  width: 260px;
+  height: 260px;
+  border-radius: 36px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 14px;
+}
+
+.leaderNode strong {
+  font-size: 34px;
+}
+
+.leaderNode small,
+.agentNode span,
+.floatingPanel span {
+  color: #ffb778;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.crown {
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(255, 156, 49, 0.16);
+  color: #ffd6a6;
+  font-weight: 800;
+}
+
+.agentNode {
+  position: absolute;
+  width: 250px;
+  height: 138px;
+  border-radius: 28px;
+  padding: 28px;
+}
+
+.agentNode strong {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 30px;
+}
+
+.messageChip {
+  position: absolute;
+  right: 150px;
+  bottom: 94px;
+  border-radius: 999px;
+  padding: 22px 34px;
+  color: #fff5e8;
+  font-size: 28px;
+  font-weight: 800;
+}
+
+.productFrame {
+  width: 1480px;
+  height: 820px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 218, 178, 0.18);
+  border-radius: 30px;
+  box-shadow: 0 45px 120px rgba(0, 0, 0, 0.58);
+  background: #252421;
+}
+
+.screenshot {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.scanLine {
+  position: absolute;
+  left: 260px;
+  top: 130px;
+  width: 180px;
+  height: 820px;
+  background: linear-gradient(90deg, transparent, rgba(255, 177, 92, 0.28), transparent);
+  transform: skewX(-12deg);
+}
+
+.floatingPanel {
+  position: absolute;
+  width: 390px;
+  min-height: 130px;
+  border-radius: 26px;
+  padding: 28px;
+}
+
+.floatingPanel strong {
+  display: block;
+  margin-top: 12px;
+  font-size: 28px;
+  line-height: 1.35;
+}
+
+.floatingPanel.diff {
+  left: 185px;
+  bottom: 124px;
+}
+
+.floatingPanel.terminal {
+  right: 168px;
+  top: 130px;
+}
+
+.closing {
+  text-align: center;
+}
+
+.closingText {
+  margin-top: 42px;
+  width: 1050px;
+}
+
+.closingText h2 {
+  font-size: 72px;
+}
+
+.featureRow {
+  display: flex;
+  gap: 16px;
+  margin-top: 46px;
+}
+
+.featurePill {
+  border-radius: 999px;
+  padding: 18px 26px;
+  color: #f8e5d3;
+  font-size: 23px;
+  font-weight: 800;
+}
+
+.finalLockup {
+  position: absolute;
+  bottom: 80px;
+  color: #ffb15e;
+  font-size: 36px;
+  font-weight: 800;
+}
+
+.timebar {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.timebar span {
+  display: block;
+  height: 100%;
+  max-width: 100%;
+  background: linear-gradient(90deg, #ff7b3b, #ffd27d);
+}

@@ -44,6 +44,16 @@ Tauri ベースの Claude Code / Codex 専用エディタ (v1.4.x)
 - 破壊的変更は `feat!:` / `fix!:` のように `!` を付ける。
 - 例: `fix(canvas): ノード削除時に edge が残るバグを修正`、`chore: bump tauri to 2.x.y`
 
+### 6. コミット / PR に Claude の名前を入れない (厳守)
+- コミットメッセージ・PR タイトル・PR 本文に **Claude の署名や生成ツール名を一切書かない**。
+- 具体的に禁止:
+  - `Co-Authored-By: Claude ...` / `Co-Authored-By: Claude Code ...` などの trailer
+  - `🤖 Generated with [Claude Code](...)` 等の生成元クレジット行
+  - `by Claude` / `by Claude Code` / `via Claude` 等の文言
+  - 本文末尾の「このコミットは Claude が…」のような注記
+- PR 本文の `## Test plan` や `## Summary` 等は書いて良いが、Claude/Anthropic に紐づくクレジットだけは含めない。
+- ユーザーが明示的に「Claude の署名を入れて」と指示した場合のみ例外として許可する。
+
 ## アーキテクチャ原則
 - Rust 側 (`src-tauri/`): ファイル I/O、git、PTY (portable-pty)、設定永続化、TeamHub、MCP 設定、updater
 - レンダラー (`src/renderer/`): UI 描画のみ
