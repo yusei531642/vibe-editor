@@ -81,6 +81,7 @@ pub fn run() {
             commands::app::app_get_team_hub_info,
             commands::app::app_set_role_profile_summary,
             commands::app::app_cancel_recruit,
+            commands::app::app_recruit_ack,
             commands::app::app_get_user_info,
             commands::app::app_open_external,
             commands::app::app_reveal_in_file_manager,

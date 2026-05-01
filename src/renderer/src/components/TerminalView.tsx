@@ -63,6 +63,13 @@ interface TerminalViewProps {
   /** ユーザーが xterm 上で入力したキーストロークの sniff (タイトル auto-summary 等の用途) */
   onUserInput?: (data: string) => void;
   /**
+   * Issue #342 Phase 1: terminal_create の spawn 失敗時に呼ばれる。
+   * AgentNodeCard などが本コールバックで `ackRecruit` を発火し、recruit timeout
+   * (>30s) を待たず即座に Hub へ失敗を通知できる。recruit 経路に紐付かない通常
+   * タブでは未指定で OK (no-op)。
+   */
+  onSpawnError?: (error: string) => void;
+  /**
    * Canvas モードのカード内で使うとき true にする。
    * WebglAddon を読み込まず DOM renderer に固定することで、React Flow の親 transform
    * で xterm が滲む問題を回避する。
@@ -119,6 +126,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       onExit,
       onSessionId,
       onUserInput,
+      onSpawnError,
       disableWebgl,
       forceWheelScrollback,
       unscaledFit,
@@ -180,9 +188,17 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       onActivity,
       onExit,
       onSessionId,
-      onUserInput
+      onUserInput,
+      onSpawnError
     });
-    callbacksRef.current = { onStatus, onActivity, onExit, onSessionId, onUserInput };
+    callbacksRef.current = {
+      onStatus,
+      onActivity,
+      onExit,
+      onSessionId,
+      onUserInput,
+      onSpawnError
+    };
 
     // --- 共通の write ヘルパ (closure で ptyIdRef を読む) ---
     const writeToPty = (text: string): void => {
