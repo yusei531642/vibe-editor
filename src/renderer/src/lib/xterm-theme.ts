@@ -52,8 +52,6 @@ export function buildXtermTheme(
     yellow: isLightSurface ? '#a67c2a' : '#d4b261',
     brightYellow: isLightSurface ? '#c08a2a' : '#e5c785',
     // 他の ANSI もハイ彩度を抑え、Claude.ai のウォームパレットに寄せる
-    blue: isLightSurface ? '#2563eb' : '#8aadf4',
-    brightBlue: isLightSurface ? '#1d4ed8' : '#a5c8ff',
     red: isLightSurface ? '#c94b3b' : '#e57474',
     brightRed: isLightSurface ? '#d95a48' : '#ef8d8d',
     green: isLightSurface ? '#4a8f3b' : '#93c67a',
