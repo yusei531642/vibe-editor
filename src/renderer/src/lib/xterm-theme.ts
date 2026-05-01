@@ -35,29 +35,19 @@ export function buildXtermTheme(
   const themeVars = THEMES[themeName] ?? THEMES.dark;
   const isLight = themeName === 'light';
   const transparentBackground = options.transparentBackground ?? true;
-  const isLightSurface = isLight;
-  const ansiBlack = isLightSurface ? themeVars.text : themeVars.textMute;
-  const ansiBrightBlack = themeVars.textDim;
-  const ansiWhite = themeVars.textDim;
-  const ansiBrightWhite = themeVars.text;
   /*
    * ANSI パレット (yellow/red 系) を xterm デフォルトの彩度高めの値から
    * 目に優しいパステル調へ上書き。デフォルトの yellow (#e5e510) は
    * 濃い背景でも眩しく、警告/ログで連続表示されると疲労の原因になる。
    * ここでは warm-beige (#d4b261 系) に寄せ、コントラストは保ちつつ刺激を下げる。
    */
+  const isLightSurface = isLight;
   return {
     background: transparentBackground ? 'rgba(0, 0, 0, 0)' : themeVars.bg,
     foreground: themeVars.text,
     cursor: themeVars.text,
     cursorAccent: themeVars.bg,
     selectionBackground: isLight ? '#add6ff' : '#264f78',
-    // Claude/Codex TUI は muted text に ANSI black/brightBlack を使うことがある。
-    // xterm 既定の純黒/純白は Canvas の dark/light 背景に沈むため、テーマの text 系に寄せる。
-    black: ansiBlack,
-    brightBlack: ansiBrightBlack,
-    white: ansiWhite,
-    brightWhite: ansiBrightWhite,
     // 警告色系を和らげた yellow
     yellow: isLightSurface ? '#a67c2a' : '#d4b261',
     brightYellow: isLightSurface ? '#c08a2a' : '#e5c785',
