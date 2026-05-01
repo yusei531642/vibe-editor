@@ -1,5 +1,6 @@
-import { forwardRef, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useImperativeHandle, useRef, useState, useCallback } from 'react';
 import { useSettings } from '../lib/settings-context';
+import { useT } from '../lib/i18n';
 import { useXtermInstance } from '../lib/use-xterm-instance';
 import {
   usePtySession,
@@ -10,6 +11,7 @@ import { useTerminalClipboard } from '../lib/use-terminal-clipboard';
 import { useAutoInitialMessage } from '../lib/use-auto-initial-message';
 import { useFitToContainer } from '../lib/use-fit-to-container';
 import type { CellSize } from '../lib/measure-cell-size';
+import { ContextMenu, type ContextMenuItem } from './ContextMenu';
 
 /**
  * TerminalView を外から操作するためのハンドル。
@@ -137,10 +139,18 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     ref
   ): JSX.Element {
     const { settings } = useSettings();
+    const t = useT();
     // Issue #338: useTerminalClipboard が React Context を直接引かないように、言語の current を
     // ref で渡す。settings 変化のたびに同期するので stale にならない。
     const langRef = useRef(settings.language);
     langRef.current = settings.language;
+
+    // Issue #356: 右クリックコンテキストメニュー (paste / copy selection / clear)。
+    const [contextMenu, setContextMenu] = useState<{
+      x: number;
+      y: number;
+      items: ContextMenuItem[];
+    } | null>(null);
 
     // --- Terminal インスタンス ---
     const { containerRef, termRef, fitRef } = useXtermInstance(
@@ -266,6 +276,52 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       lastScheduledRef
     });
 
+    // Issue #356: 右クリックでカスタムメニューを開く。xterm 本体上の contextmenu を拾う。
+    const handleContextMenu = useCallback(
+      (e: React.MouseEvent): void => {
+        const term = termRef.current;
+        if (!term) return;
+        e.preventDefault();
+        e.stopPropagation();
+        const selection = term.getSelection();
+        const items: ContextMenuItem[] = [
+          {
+            label: t('terminal.ctxMenu.paste'),
+            action: () => {
+              void (async () => {
+                try {
+                  // 画像があれば clipboard event 経由 (use-terminal-clipboard) に任せ、
+                  // ここではテキストペーストを優先する。
+                  const text = await navigator.clipboard.readText();
+                  if (text) term.paste(text);
+                } catch {
+                  /* noop */
+                }
+              })();
+            }
+          },
+          {
+            label: t('terminal.ctxMenu.copySelection'),
+            action: () => {
+              if (!selection) return;
+              void navigator.clipboard.writeText(selection);
+              term.clearSelection();
+            },
+            disabled: !selection,
+            divider: true
+          },
+          {
+            label: t('terminal.ctxMenu.clear'),
+            action: () => term.clear()
+          }
+        ];
+        setContextMenu({ x: e.clientX, y: e.clientY, items });
+      },
+      // termRef は stable
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      [t]
+    );
+
     // --- 外部操作用ハンドル (public API は不変) ---
     useImperativeHandle(
       ref,
@@ -289,13 +345,24 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     );
 
     return (
-      <div
-        className="terminal-view"
-        ref={containerRef}
-        // Canvas の TerminalCard 内では、xterm のテキストエリアに focus が入らず
-        // キー入力が届かない現象がある。空白領域をクリックしても明示的に focus を奪う。
-        onMouseDown={() => termRef.current?.focus()}
-      />
+      <>
+        <div
+          className="terminal-view"
+          ref={containerRef}
+          // Canvas の TerminalCard 内では、xterm のテキストエリアに focus が入らず
+          // キー入力が届かない現象がある。空白領域をクリックしても明示的に focus を奪う。
+          onMouseDown={() => termRef.current?.focus()}
+          onContextMenu={handleContextMenu}
+        />
+        {contextMenu && (
+          <ContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            items={contextMenu.items}
+            onClose={() => setContextMenu(null)}
+          />
+        )}
+      </>
     );
   }
 );
