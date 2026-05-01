@@ -252,6 +252,7 @@ pub struct TeamMessage {
     pub from: String,
     pub from_agent_id: String,
     pub to: String,
+    pub recipient_agent_ids: Vec<String>,
     pub message: String,
     pub timestamp: String,
     pub read_by: Vec<String>,
@@ -419,10 +420,18 @@ impl TeamHub {
     pub async fn resolve_pending_recruit(
         &self,
         agent_id: &str,
+        team_id: &str,
         role_profile_id: &str,
     ) -> bool {
         let mut s = self.state.lock().await;
         if let Some(p) = s.pending_recruits.get(agent_id) {
+            if p.team_id != team_id {
+                tracing::warn!(
+                    "[teamhub] team mismatch on handshake (pending) agent={} expected_team={} got_team={}",
+                    agent_id, p.team_id, team_id
+                );
+                return false;
+            }
             if p.role_profile_id != role_profile_id {
                 tracing::warn!(
                     "[teamhub] role mismatch on handshake (pending) agent={} expected={} got={}",
@@ -777,7 +786,7 @@ where
     );
     // 待機中の team_recruit があればここで resolve (caller への MCP response が解放される)
     // Issue #183: client が予約 role と異なる role を主張していたら切断する。
-    if !hub.resolve_pending_recruit(&ctx.agent_id, &ctx.role).await {
+    if !hub.resolve_pending_recruit(&ctx.agent_id, &ctx.team_id, &ctx.role).await {
         tokio::time::sleep(AUTH_FAIL_DELAY).await;
         return Ok(());
     }
@@ -890,5 +899,79 @@ where
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TeamHub;
+    use crate::pty::SessionRegistry;
+    use std::sync::Arc;
+
+    fn hub() -> TeamHub {
+        TeamHub::new(Arc::new(SessionRegistry::new()))
+    }
+
+    #[tokio::test]
+    async fn resolve_pending_recruit_accepts_matching_team_and_role() {
+        let hub = hub();
+        let _channels = hub
+            .try_register_pending_recruit(
+                "agent-1".to_string(),
+                "team-a".to_string(),
+                "worker".to_string(),
+                "requester-1".to_string(),
+                false,
+                &[],
+                12,
+            )
+            .await
+            .expect("pending recruit should register");
+
+        assert!(hub
+            .resolve_pending_recruit("agent-1", "team-a", "worker")
+            .await);
+    }
+
+    #[tokio::test]
+    async fn resolve_pending_recruit_rejects_team_mismatch() {
+        let hub = hub();
+        let _channels = hub
+            .try_register_pending_recruit(
+                "agent-1".to_string(),
+                "team-a".to_string(),
+                "worker".to_string(),
+                "requester-1".to_string(),
+                false,
+                &[],
+                12,
+            )
+            .await
+            .expect("pending recruit should register");
+
+        assert!(!hub
+            .resolve_pending_recruit("agent-1", "team-b", "worker")
+            .await);
+    }
+
+    #[tokio::test]
+    async fn resolve_pending_recruit_rejects_role_mismatch() {
+        let hub = hub();
+        let _channels = hub
+            .try_register_pending_recruit(
+                "agent-1".to_string(),
+                "team-a".to_string(),
+                "worker".to_string(),
+                "requester-1".to_string(),
+                false,
+                &[],
+                12,
+            )
+            .await
+            .expect("pending recruit should register");
+
+        assert!(!hub
+            .resolve_pending_recruit("agent-1", "team-a", "reviewer")
+            .await);
     }
 }

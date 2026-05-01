@@ -837,6 +837,20 @@ fn resolve_targets(
     out
 }
 
+fn message_targets_ctx(message: &TeamMessage, ctx: &CallContext) -> bool {
+    if !message.recipient_agent_ids.is_empty() {
+        return message
+            .recipient_agent_ids
+            .iter()
+            .any(|aid| aid == &ctx.agent_id);
+    }
+
+    let to_trim = message.to.trim();
+    to_trim.eq_ignore_ascii_case("all")
+        || to_trim.eq_ignore_ascii_case(&ctx.role)
+        || to_trim == ctx.agent_id
+}
+
 async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
     // trim は resolve_targets 内で行うので、ここでは生文字列を保持して履歴 / 検証に使う。
     let to = args
@@ -871,6 +885,17 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         ));
     }
 
+    let registry = hub.registry.clone();
+    let team_members = registry.list_team_members(&ctx.team_id);
+    let targets = resolve_targets(&team_members, &ctx.agent_id, &to);
+    let recipient_agent_ids: Vec<String> =
+        targets.iter().map(|(aid, _)| aid.clone()).collect();
+    let other_members: Vec<(String, String)> = team_members
+        .iter()
+        .filter(|(aid, _)| aid != &ctx.agent_id)
+        .cloned()
+        .collect();
+
     // メッセージ履歴に追加
     let timestamp = Utc::now().to_rfc3339();
     let mut state = hub.state.lock().await;
@@ -887,6 +912,7 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         from: ctx.role.clone(),
         from_agent_id: ctx.agent_id.clone(),
         to: to.clone(),
+        recipient_agent_ids,
         message: message.to_string(),
         timestamp: timestamp.clone(),
         read_by: vec![ctx.agent_id.clone()],
@@ -902,17 +928,8 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
     // 旧実装はメンバーごとに inject().await を直列で回し、to=all + 6 メンバー +
     // 4KB メッセージで 6 秒間 RPC を握りっぱなしになっていた (sleep 15ms × 64chunk × 6人)。
     // → 各宛先を tokio::spawn で並列発火して JoinSet で集約する。
-    let registry = hub.registry.clone();
-    let team_members = registry.list_team_members(&ctx.team_id);
     let preview: String = message.chars().take(80).collect();
     let app = hub.app_handle.lock().await.clone();
-
-    let targets = resolve_targets(&team_members, &ctx.agent_id, &to);
-    let other_members: Vec<(String, String)> = team_members
-        .iter()
-        .filter(|(aid, _)| aid != &ctx.agent_id)
-        .cloned()
-        .collect();
     tracing::debug!(
         "[team_send] from agent={} role={} to={} → targets={}/{} other_members",
         ctx.agent_id,
@@ -1025,11 +1042,8 @@ async fn team_read(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         .or_insert_with(crate::team_hub::TeamInfo::default);
     let mut out = vec![];
     for m in team.messages.iter_mut() {
-        // team_send 側の宛先解決と整合: "all" / role 名 case-insensitive / agent_id 完全一致を許容。
-        let to_trim = m.to.trim();
-        let is_for_me = to_trim.eq_ignore_ascii_case("all")
-            || to_trim.eq_ignore_ascii_case(&ctx.role)
-            || to_trim == ctx.agent_id;
+        // team_send 時点で解決した recipient を優先し、古い in-memory message だけ raw to fallback する。
+        let is_for_me = message_targets_ctx(m, ctx);
         let from_someone_else = m.from_agent_id != ctx.agent_id;
         // 「自分宛て かつ 自分以外が送信したもの」だけ表示する (旧来の挙動を保ったまま肯定形で記述)
         if !(is_for_me && from_someone_else) {
@@ -1236,10 +1250,35 @@ async fn team_update_task(
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_targets;
+    use super::{message_targets_ctx, resolve_targets};
+    use crate::team_hub::{CallContext, TeamMessage};
 
     fn member(aid: &str, role: &str) -> (String, String) {
         (aid.to_string(), role.to_string())
+    }
+
+    fn ctx(agent_id: &str, role: &str) -> CallContext {
+        CallContext {
+            team_id: "team-a".to_string(),
+            role: role.to_string(),
+            agent_id: agent_id.to_string(),
+        }
+    }
+
+    fn message(to: &str, recipient_agent_ids: &[&str]) -> TeamMessage {
+        TeamMessage {
+            id: 1,
+            from: "worker".to_string(),
+            from_agent_id: "agent-sender".to_string(),
+            to: to.to_string(),
+            recipient_agent_ids: recipient_agent_ids
+                .iter()
+                .map(|aid| (*aid).to_string())
+                .collect(),
+            message: "hello".to_string(),
+            timestamp: "2026-05-01T00:00:00Z".to_string(),
+            read_by: vec![],
+        }
     }
 
     #[test]
@@ -1322,5 +1361,27 @@ mod tests {
         ];
         let got = resolve_targets(&members, "vc-leader", "researcher");
         assert!(got.is_empty());
+    }
+
+    #[test]
+    fn message_targets_ctx_prefers_resolved_recipient_ids() {
+        let ctx = ctx("vc-leader", "leader");
+
+        let not_for_me = message("leader", &["vc-other"]);
+        assert!(!message_targets_ctx(&not_for_me, &ctx));
+
+        let for_me = message("programmer", &["vc-leader"]);
+        assert!(message_targets_ctx(&for_me, &ctx));
+    }
+
+    #[test]
+    fn message_targets_ctx_uses_legacy_fallback_when_recipient_ids_empty() {
+        let ctx = ctx("vc-leader", "leader");
+
+        assert!(message_targets_ctx(&message("leader", &[]), &ctx));
+        assert!(message_targets_ctx(&message("Leader", &[]), &ctx));
+        assert!(message_targets_ctx(&message("vc-leader", &[]), &ctx));
+        assert!(message_targets_ctx(&message("all", &[]), &ctx));
+        assert!(!message_targets_ctx(&message("programmer", &[]), &ctx));
     }
 }
