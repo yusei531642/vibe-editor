@@ -37,6 +37,17 @@ function shouldUseTransparentXtermBackground(theme: AppSettings['theme'], disabl
   return !disableWebgl || theme === 'glass';
 }
 
+function shouldAllowXtermTransparency(theme: AppSettings['theme'], disableWebgl: boolean): boolean {
+  // Canvas の非 glass テーマでは透明描画自体を切り、選択時だけ文字が見える症状を避ける。
+  return shouldUseTransparentXtermBackground(theme, disableWebgl);
+}
+
+function getMinimumContrastRatio(disableWebgl: boolean): number {
+  // Canvas の DOM renderer は Claude/Codex TUI の黒寄り ANSI 色が背景に沈むことがある。
+  // xterm 側の contrast guard を有効にして、選択しなくても読める foreground に補正する。
+  return disableWebgl ? 4.5 : 1;
+}
+
 /*
  * Issue #126: Chromium の active WebGL context 上限は通常 16 (実装依存だが Tauri/WebView2
  * でも同等)。MAX_TERMINALS=30 のうち 16 個目以降の WebGL 作成が成功しても、新しい context
@@ -148,8 +159,10 @@ export function useXtermInstance(
       cursorBlink: true,
       allowProposedApi: true,
       // glass テーマと WebGL 経路で xterm 背景を透過させるために必要 (Issue #89/#333)。
-      // Canvas の DOM renderer では非 glass テーマのみ実背景色を渡し、文字色の同化を避ける (#343)。
-      allowTransparency: true,
+      // allowTransparency は open() 後に変えられないため、初期テーマに合わせて渡す。
+      // Canvas の非 glass テーマでは透過描画自体を切り、文字色の同化を避ける (#343)。
+      allowTransparency: shouldAllowXtermTransparency(initial.theme, disableWebgl),
+      minimumContrastRatio: getMinimumContrastRatio(disableWebgl),
       // Block Elements (U+2580-U+259F) と Box Drawing (U+2500-U+257F) を
       // フォントから取らず WebGL/Canvas renderer 内蔵のベクター描画でラスタライズする。
       // Claude Code 起動時の Anthropic ロゴ ASCII art (▀▄█▌▐ 等) が、JetBrains Mono
@@ -273,6 +286,7 @@ export function useXtermInstance(
       settings.terminalFontFamily || settings.editorFontFamily
     );
     term.options.fontSize = settings.terminalFontSize;
+    term.options.minimumContrastRatio = getMinimumContrastRatio(disableWebgl);
     term.options.theme = buildXtermTheme(settings.theme, {
       transparentBackground: shouldUseTransparentXtermBackground(settings.theme, disableWebgl)
     });
