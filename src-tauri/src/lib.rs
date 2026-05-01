@@ -28,6 +28,32 @@ fn init_logging() {
 
     let log_dir = commands::logs::log_dir();
     let _ = std::fs::create_dir_all(&log_dir); // best-effort
+    let log_path = log_dir.join("vibe-editor.log");
+
+    // Issue #342 Phase 3 (3.12): ログファイル ACL を強制する。
+    //   - Unix: 0o600 (既存 `bind_local_listener` / `team-bridge.js` 書き出しと同流儀)
+    //   - Windows: ~ 配下の user profile default ACL に依存 (新規 ACE は付けない)
+    // tracing-appender が append open する前に空ファイルを先行作成しておくことで、
+    // 「ログファイル作成された瞬間」にも ACL が掛かっている状態を保証する。
+    {
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = std::fs::set_permissions(
+                &log_path,
+                std::fs::Permissions::from_mode(0o600),
+            );
+        }
+    }
+
+    // Issue #342 Phase 3 (3.11): `team_diagnostics` の `serverLogPath` 用に実パスを記録。
+    // env var `VIBE_TEAM_LOG_PATH` で override 可能 (server_log_path_for_diagnostics 側で参照)。
+    team_hub::set_server_log_path(log_path.clone());
+
     let file_appender = tracing_appender::rolling::never(log_dir, "vibe-editor.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
     // WorkerGuard はプロセス終了まで保持する必要があるため leak で 'static 化する。

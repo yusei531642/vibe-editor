@@ -3,8 +3,10 @@
 // 旧 team-hub.ts の handleMcpRequest 等価。
 // initialize / tools/list / tools/call (team_send 等 7 ツール + 新 recruit 系) を実装。
 
-use crate::team_hub::error::RecruitError;
-use crate::team_hub::{inject, CallContext, DynamicRole, TeamHub, TeamMessage, TeamTask};
+use crate::team_hub::error::{AssignError, DismissError, RecruitError, SendError};
+use crate::team_hub::{
+    inject, CallContext, DynamicRole, MemberDiagnostics, TeamHub, TeamMessage, TeamTask,
+};
 use chrono::Utc;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -230,6 +232,12 @@ fn tool_defs() -> Value {
             }
         },
         {
+            "name": "team_diagnostics",
+            "description":
+                "(leader / hr only) Return per-member diagnostic timestamps (recruitedAt, lastHandshakeAt, lastSeenAt, lastMessageInAt/OutAt) and counters (messagesIn/Out, tasksClaimed) plus the server log file path. Use this to debug 'online but silent' members and to reconstruct incident timelines.",
+            "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
             "name": "team_list_role_profiles",
             "description":
                 "List all available role profiles (id, label, permissions). Includes both built-in (leader / hr) \
@@ -256,6 +264,7 @@ async fn dispatch_tool(
         "team_recruit" => team_recruit(hub, ctx, args).await,
         "team_dismiss" => team_dismiss(hub, ctx, args).await,
         "team_list_role_profiles" => team_list_role_profiles(hub, ctx).await,
+        "team_diagnostics" => team_diagnostics(hub, ctx).await,
         other => Err(format!("Unknown tool: {other}")),
     }
 }
@@ -287,12 +296,16 @@ fn builtin_role_permission(role: &str, perm: &str) -> bool {
         ("leader", "canDismiss") => true,
         ("leader", "canAssignTasks") => true,
         ("leader", "canCreateRoleProfile") => true,
-        // HR: 採用 + タスク割振 + 動的ロール登録 (Leader 代理として)
+        ("leader", "canViewDiagnostics") => true,
+        // HR: 採用 + タスク割振 + 動的ロール登録 (Leader 代理として) + 診断
         ("hr", "canRecruit") => true,
         ("hr", "canAssignTasks") => true,
         ("hr", "canCreateRoleProfile") => true,
+        ("hr", "canViewDiagnostics") => true,
         // 一般ワーカー (planner / programmer / researcher / reviewer 等) はいずれも不可。
         // 動的ロール (renderer が作った任意 id) も match しないので全 false。
+        // Issue #342 Phase 3 (3.5): canViewDiagnostics は leader/hr のみ true。
+        // 一般ワーカーが server_log_path 等を覗けると秘匿パス漏えいになるため default false。
         _ => false,
     }
 }
@@ -691,11 +704,21 @@ async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<
 
     // handshake 完了を待つ (Issue #342 Phase 1: ack 成功後のみ到達。disable_ack=1 では従来通り即座に到達)
     match tokio::time::timeout(RECRUIT_TIMEOUT, rx).await {
-        Ok(Ok(outcome)) => Ok(json!({
-            "success": true,
-            "agentId": outcome.agent_id,
-            "roleProfileId": outcome.role_profile_id,
-        })),
+        Ok(Ok(outcome)) => {
+            // Issue #342 Phase 3 (3.6): 成功時に recruitedAt / handshakeAt を返す。
+            // recruited_at は registry 登録時刻、handshakeAt は handshake 完了時刻。
+            // どちらも `resolve_pending_recruit` で member_diagnostics に書き込み済み。
+            let diag = hub.get_member_diagnostics(&outcome.agent_id).await;
+            let recruited_at = diag.as_ref().map(|d| d.recruited_at.clone()).unwrap_or_default();
+            let handshake_at = diag.and_then(|d| d.last_handshake_at);
+            Ok(json!({
+                "success": true,
+                "agentId": outcome.agent_id,
+                "roleProfileId": outcome.role_profile_id,
+                "recruitedAt": recruited_at,
+                "handshakeAt": handshake_at,
+            }))
+        }
         Ok(Err(_)) => {
             // Issue #173: sender dropped 経路でも pending を必ず掃除する。
             // 旧実装は cancel_pending_recruit を呼ばずに Err を返していたため、
@@ -738,10 +761,13 @@ async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<
 
 async fn team_dismiss(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
     if !caller_has_permission(hub, &ctx.role, "canDismiss").await {
-        return Err(format!(
-            "permission denied: role '{}' cannot dismiss",
-            ctx.role
-        ));
+        return Err(DismissError {
+            code: "dismiss_permission_denied".into(),
+            message: format!("permission denied: role '{}' cannot dismiss", ctx.role),
+            phase: None,
+            elapsed_ms: None,
+        }
+        .into_err_string());
     }
     let agent_id = args
         .get("agent_id")
@@ -749,16 +775,40 @@ async fn team_dismiss(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<
         .unwrap_or("")
         .to_string();
     if agent_id.is_empty() {
-        return Err("agent_id is required".into());
+        return Err(DismissError {
+            code: "dismiss_invalid_args".into(),
+            message: "agent_id is required".into(),
+            phase: None,
+            elapsed_ms: None,
+        }
+        .into_err_string());
     }
     if agent_id == ctx.agent_id {
-        return Err("cannot dismiss yourself".into());
+        return Err(DismissError {
+            code: "dismiss_self".into(),
+            message: "cannot dismiss yourself".into(),
+            phase: None,
+            elapsed_ms: None,
+        }
+        .into_err_string());
     }
     // チーム所属チェック
     let members = hub.registry.list_team_members(&ctx.team_id);
     if !members.iter().any(|(aid, _)| aid == &agent_id) {
-        return Err(format!("agent '{agent_id}' is not in this team"));
+        return Err(DismissError {
+            code: "dismiss_not_found".into(),
+            message: format!("agent '{agent_id}' is not in this team"),
+            phase: None,
+            elapsed_ms: None,
+        }
+        .into_err_string());
     }
+    // Issue #342 Phase 3 (3.6): dismiss 直前に被 dismiss 側の last_seen_at / 既存 recruited_at を
+    // スナップしておき、戻り値に `lastSeenAt` を載せる (= 最後の生存時刻)。
+    let last_seen_at = hub
+        .get_member_diagnostics(&agent_id)
+        .await
+        .and_then(|d| d.last_seen_at);
     // Renderer に閉じてもらう
     let app = hub.app_handle.lock().await.clone();
     if let Some(app) = &app {
@@ -772,7 +822,13 @@ async fn team_dismiss(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<
     // dismiss された pending が孤立し、try_register_pending_recruit の人数 / singleton
     // 判定にゴミとして残り続けていた (renderer 反映の冪等性が壊れる)。
     hub.cancel_pending_recruit(&agent_id).await;
-    Ok(json!({ "success": true, "agentId": agent_id }))
+    let dismissed_at = Utc::now().to_rfc3339();
+    Ok(json!({
+        "success": true,
+        "agentId": agent_id,
+        "dismissedAt": dismissed_at,
+        "lastSeenAt": last_seen_at,
+    }))
 }
 
 async fn team_list_role_profiles(hub: &TeamHub, ctx: &CallContext) -> Result<Value, String> {
@@ -852,29 +908,47 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         .to_string();
     let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("");
     if to.trim().is_empty() || message.is_empty() {
-        return Err("to and message are required".into());
+        return Err(SendError {
+            code: "send_invalid_args".into(),
+            message: "to and message are required".into(),
+            phase: None,
+            elapsed_ms: None,
+        }
+        .into_err_string());
     }
     // Issue #107: 1 メッセージのハードリミット超過は拒否 (途中で truncate すると意味が壊れる)
     if message.len() > MAX_MESSAGE_LEN {
-        return Err(format!(
-            "message too large: {} bytes (limit {} bytes)",
-            message.len(),
-            MAX_MESSAGE_LEN
-        ));
+        return Err(SendError {
+            code: "send_message_too_large".into(),
+            message: format!(
+                "message too large: {} bytes (limit {} bytes)",
+                message.len(),
+                MAX_MESSAGE_LEN
+            ),
+            phase: None,
+            elapsed_ms: None,
+        }
+        .into_err_string());
     }
     // 「長文ペイロード・ルール」: SOFT_PAYLOAD_LIMIT 超過は弾いてファイル経由を強制する。
     // PTY 注入のチャンク分割や受信側 Claude 入力制限で truncate しやすいので、
     // 「2000 文字超は .vibe-team/tmp/<short_id>.md に書き出してパスを送る」設計に倒す。
     if message.len() > SOFT_PAYLOAD_LIMIT {
-        return Err(format!(
-            "message exceeds the long-payload threshold ({} > {} bytes). \
-             Write the full content to `.vibe-team/tmp/<short_id>.md` with the Write tool, \
-             then call team_send again with a brief summary plus the file path. \
-             (Inline messages up to 32 KiB are now delivered via bracketed paste, but anything \
-             beyond that should still be passed by file path.)",
-            message.len(),
-            SOFT_PAYLOAD_LIMIT
-        ));
+        return Err(SendError {
+            code: "send_payload_threshold".into(),
+            message: format!(
+                "message exceeds the long-payload threshold ({} > {} bytes). \
+                 Write the full content to `.vibe-team/tmp/<short_id>.md` with the Write tool, \
+                 then call team_send again with a brief summary plus the file path. \
+                 (Inline messages up to 32 KiB are now delivered via bracketed paste, but anything \
+                 beyond that should still be passed by file path.)",
+                message.len(),
+                SOFT_PAYLOAD_LIMIT
+            ),
+            phase: None,
+            elapsed_ms: None,
+        }
+        .into_err_string());
     }
 
     // Issue #342 Phase 2: lock 順序を逆転。先に registry から宛先を解決して
@@ -901,6 +975,9 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
     // 単調増加カウンタにすることで上限を超えても一意性を保つ。
     team.next_message_id = team.next_message_id.saturating_add(1);
     let msg_id = team.next_message_id;
+    // Issue #342 Phase 3 (3.7 / 3.8): read_at の初期化。送信者自身は send 時刻で受領済み扱い。
+    let mut initial_read_at: HashMap<String, String> = HashMap::new();
+    initial_read_at.insert(ctx.agent_id.clone(), timestamp.clone());
     team.messages.push_back(TeamMessage {
         id: msg_id,
         from: ctx.role.clone(),
@@ -910,12 +987,21 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         message: message.to_string(),
         timestamp: timestamp.clone(),
         read_by: vec![ctx.agent_id.clone()],
+        read_at: initial_read_at,
     });
     // Issue #107 / #216: 上限超過分は古い順に破棄してメモリ青天井を防ぐ。
     // VecDeque::pop_front() で O(1) eviction にする。
     while team.messages.len() > MAX_MESSAGES_PER_TEAM {
         let _ = team.messages.pop_front();
     }
+    // Issue #342 Phase 3 (3.3): 送信者自身の last_message_out_at / messages_out_count / last_seen_at を更新
+    let sender_diag = state
+        .member_diagnostics
+        .entry(ctx.agent_id.clone())
+        .or_default();
+    sender_diag.last_message_out_at = Some(timestamp.clone());
+    sender_diag.last_seen_at = Some(timestamp.clone());
+    sender_diag.messages_out_count = sender_diag.messages_out_count.saturating_add(1);
     drop(state);
 
     // Issue #150: 宛先メンバーへの inject を並列実行する。
@@ -960,6 +1046,13 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         });
     }
 
+    // Issue #342 Phase 3 (3.7): 受領時刻を recipient agent_id ごとに追跡。
+    // 全 target は最初 None で初期化し、inject 成功した瞬間に Some(now) を入れる。
+    // 未配信 (inject 失敗) の target はそのまま None で戻り値に乗る。
+    let mut received_at_per_recipient: HashMap<String, Option<String>> = targets
+        .iter()
+        .map(|(aid, _)| (aid.clone(), None))
+        .collect();
     let mut delivered: Vec<String> = Vec::new();
     while let Some(joined) = join_set.join_next().await {
         if let Ok((target_aid, target_role, ok)) = joined {
@@ -971,14 +1064,26 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
             } else {
                 target_role.clone()
             });
-            // read_by に追加
+            let received_at = Utc::now().to_rfc3339();
+            received_at_per_recipient.insert(target_aid.clone(), Some(received_at.clone()));
+            // read_by / read_at に追加 + 受信側 diagnostics 更新
             {
                 let mut state = hub.state.lock().await;
                 if let Some(t) = state.teams.get_mut(&ctx.team_id) {
                     if let Some(m) = t.messages.iter_mut().find(|m| m.id == msg_id) {
                         m.read_by.push(target_aid.clone());
+                        m.read_at.insert(target_aid.clone(), received_at.clone());
                     }
                 }
+                // Issue #342 Phase 3 (3.3): 受信側 diagnostics 更新
+                let recipient_diag = state
+                    .member_diagnostics
+                    .entry(target_aid.clone())
+                    .or_default();
+                recipient_diag.last_message_in_at = Some(received_at.clone());
+                recipient_diag.last_seen_at = Some(received_at.clone());
+                recipient_diag.messages_in_count =
+                    recipient_diag.messages_in_count.saturating_add(1);
             }
             // Phase 3: hand-off イベントを Canvas にブロードキャスト
             if let Some(app) = &app {
@@ -1027,6 +1132,8 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         "messageId": msg_id,
         "delivered": delivered,
         "note": note,
+        "sentAt": timestamp,
+        "receivedAtPerRecipient": received_at_per_recipient,
     }))
 }
 
@@ -1067,6 +1174,7 @@ async fn team_read(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         .get("unread_only")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
+    let now_iso = Utc::now().to_rfc3339();
     let mut state = hub.state.lock().await;
     let team = state
         .teams
@@ -1091,14 +1199,27 @@ async fn team_read(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
         if !m.read_by.contains(&ctx.agent_id) {
             m.read_by.push(ctx.agent_id.clone());
         }
+        // Issue #342 Phase 3 (3.8): 自分が読んだ時刻を記録 (既に inject 経由で値が入って
+        // いれば後勝ちで上書きせず保持する。最初の "received" 時刻を尊重するため)。
+        m.read_at
+            .entry(ctx.agent_id.clone())
+            .or_insert_with(|| now_iso.clone());
+        let received_at = m.read_at.get(&ctx.agent_id).cloned();
         out.push(json!({
             "id": m.id,
             "from": m.from,
             "message": m.message,
             "timestamp": m.timestamp,
+            "receivedAt": received_at,
         }));
     }
     let count = out.len();
+    // Issue #342 Phase 3 (3.3): team_read を打った agent の last_seen_at を更新 (heartbeat 兼)
+    let reader_diag = state
+        .member_diagnostics
+        .entry(ctx.agent_id.clone())
+        .or_default();
+    reader_diag.last_seen_at = Some(now_iso);
     Ok(json!({ "messages": out, "count": count }))
 }
 
@@ -1147,6 +1268,73 @@ async fn team_info(hub: &TeamHub, ctx: &CallContext) -> Result<Value, String> {
     }))
 }
 
+/// Issue #342 Phase 3 (3.4): `team_diagnostics` MCP ツール。
+///
+/// 認可: `canViewDiagnostics` (= leader / hr のみ true)。一般ワーカーは
+/// `permission denied` で弾く (server_log_path 漏えい防止)。
+///
+/// 戻り値スキーマ:
+/// ```json
+/// {
+///   "myAgentId": "...", "myRole": "leader", "teamId": "...",
+///   "serverLogPath": "~/.vibe-editor/logs/vibe-editor.log" or "<stderr>",
+///   "members": [{ agentId, role, online, inconsistent, recruitedAt,
+///                 lastHandshakeAt, lastSeenAt, lastMessageInAt, lastMessageOutAt,
+///                 messagesInCount, messagesOutCount, tasksClaimedCount }]
+/// }
+/// ```
+///
+/// `team_info` の `inconsistent` 判定と同じロジックを共有する (handshake で bind した
+/// role と registry の role が乖離していたら true、bind 未登録は false)。
+async fn team_diagnostics(hub: &TeamHub, ctx: &CallContext) -> Result<Value, String> {
+    if !caller_has_permission(hub, &ctx.role, "canViewDiagnostics").await {
+        return Err(format!(
+            "permission denied: role '{}' cannot view diagnostics",
+            ctx.role
+        ));
+    }
+    let bindings_snapshot: HashMap<String, String>;
+    let diag_snapshot: HashMap<String, MemberDiagnostics>;
+    {
+        let state = hub.state.lock().await;
+        bindings_snapshot = state.agent_role_bindings.clone();
+        diag_snapshot = state.member_diagnostics.clone();
+    }
+    let members: Vec<_> = hub
+        .registry
+        .list_team_members(&ctx.team_id)
+        .into_iter()
+        .map(|(aid, role)| {
+            let inconsistent = match bindings_snapshot.get(&aid) {
+                Some(bound) => !bound.eq_ignore_ascii_case(&role),
+                None => false,
+            };
+            let d = diag_snapshot.get(&aid).cloned().unwrap_or_default();
+            json!({
+                "agentId": aid,
+                "role": role,
+                "online": true,
+                "inconsistent": inconsistent,
+                "recruitedAt": d.recruited_at,
+                "lastHandshakeAt": d.last_handshake_at,
+                "lastSeenAt": d.last_seen_at,
+                "lastMessageInAt": d.last_message_in_at,
+                "lastMessageOutAt": d.last_message_out_at,
+                "messagesInCount": d.messages_in_count,
+                "messagesOutCount": d.messages_out_count,
+                "tasksClaimedCount": d.tasks_claimed_count,
+            })
+        })
+        .collect();
+    Ok(json!({
+        "myAgentId": ctx.agent_id,
+        "myRole": ctx.role,
+        "teamId": ctx.team_id,
+        "serverLogPath": crate::team_hub::server_log_path_for_diagnostics(),
+        "members": members,
+    }))
+}
+
 async fn team_assign_task(
     hub: &TeamHub,
     ctx: &CallContext,
@@ -1155,16 +1343,25 @@ async fn team_assign_task(
     // Issue #114: 旧実装は assignee / description の空チェックだけで権限を見ておらず、
     // canAssignTasks=false のロールでも task を作成できてしまっていた。先頭で必ず権限検証する。
     if !caller_has_permission(hub, &ctx.role, "canAssignTasks").await {
-        return Err(format!(
-            "permission denied: role '{}' cannot assign tasks",
-            ctx.role
-        ));
+        return Err(AssignError {
+            code: "assign_permission_denied".into(),
+            message: format!("permission denied: role '{}' cannot assign tasks", ctx.role),
+            phase: None,
+            elapsed_ms: None,
+        }
+        .into_err_string());
     }
     let assignee_raw = args.get("assignee").and_then(|v| v.as_str()).unwrap_or("");
     let assignee = assignee_raw.trim();
     let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
     if assignee.is_empty() || description.is_empty() {
-        return Err("assignee and description are required".into());
+        return Err(AssignError {
+            code: "assign_invalid_args".into(),
+            message: "assignee and description are required".into(),
+            phase: None,
+            elapsed_ms: None,
+        }
+        .into_err_string());
     }
     // 旧実装は assignee を一切検証せずに task を作成していた。
     // Claude (LLM) が "Programmer" / "プログラマー" / 存在しない role 名を渡すと、
@@ -1183,26 +1380,39 @@ async fn team_assign_task(
             .collect();
         other_roles.sort();
         other_roles.dedup();
-        return Err(format!(
-            "assignee '{assignee}' does not match any current team member. Valid roles: {other_roles:?} (or 'all', or an agentId)"
-        ));
+        return Err(AssignError {
+            code: "assign_unknown_assignee".into(),
+            message: format!(
+                "assignee '{assignee}' does not match any current team member. \
+                 Valid roles: {other_roles:?} (or 'all', or an agentId)"
+            ),
+            phase: None,
+            elapsed_ms: None,
+        }
+        .into_err_string());
     }
     // 「長文ペイロード・ルール」: description も SOFT_PAYLOAD_LIMIT で弾いてファイル経由を強制。
     // bulk な指示 (21 連続 issue 起票の YAML 等) はここで必ず途中切れしないために。
     if description.len() > SOFT_PAYLOAD_LIMIT {
-        return Err(format!(
-            "description exceeds the long-payload threshold ({} > {} bytes). \
-             Write the full task brief to `.vibe-team/tmp/<short_id>.md` with the Write tool first, \
-             then call team_assign_task again with a brief summary plus the file path \
-             (e.g. \"21 件起票。詳細は .vibe-team/tmp/issue_bulk.md を参照\"). \
-             (Inline descriptions up to 32 KiB are now delivered via bracketed paste, but anything \
-             beyond that should still be passed by file path.)",
-            description.len(),
-            SOFT_PAYLOAD_LIMIT
-        ));
+        return Err(AssignError {
+            code: "assign_payload_threshold".into(),
+            message: format!(
+                "description exceeds the long-payload threshold ({} > {} bytes). \
+                 Write the full task brief to `.vibe-team/tmp/<short_id>.md` with the Write tool first, \
+                 then call team_assign_task again with a brief summary plus the file path \
+                 (e.g. \"21 件起票。詳細は .vibe-team/tmp/issue_bulk.md を参照\"). \
+                 (Inline descriptions up to 32 KiB are now delivered via bracketed paste, but anything \
+                 beyond that should still be passed by file path.)",
+                description.len(),
+                SOFT_PAYLOAD_LIMIT
+            ),
+            phase: None,
+            elapsed_ms: None,
+        }
+        .into_err_string());
     }
     let task_id;
-    let timestamp = Utc::now().to_rfc3339();
+    let assigned_at = Utc::now().to_rfc3339();
     {
         let mut state = hub.state.lock().await;
         let team = state
@@ -1219,11 +1429,22 @@ async fn team_assign_task(
             description: description.to_string(),
             status: "pending".into(),
             created_by: ctx.role.clone(),
-            created_at: timestamp,
+            created_at: assigned_at.clone(),
         });
         // Issue #107 / #216: tasks も件数上限で古い順に O(1) で破棄
         while team.tasks.len() > MAX_TASKS_PER_TEAM {
             let _ = team.tasks.pop_front();
+        }
+        // Issue #342 Phase 3 (3.3): 割り振られた agent 側の tasks_claimed_count を +1 する。
+        // assignee = "all" なら resolve した全員、role 名なら同 role の複数メンバー全員、
+        // agent_id 指定なら 1 名。team_assign_task は「Leader が task を渡した時点」の意味で
+        // claim カウンタを増やすので、後続で worker が status を変えるか否かに依存しない。
+        for (target_aid, _) in &resolved {
+            let diag = state
+                .member_diagnostics
+                .entry(target_aid.clone())
+                .or_default();
+            diag.tasks_claimed_count = diag.tasks_claimed_count.saturating_add(1);
         }
     }
     // Issue #172: 通知の team_send を await せず fire-and-forget でバックグラウンド spawn する。
@@ -1258,7 +1479,11 @@ async fn team_assign_task(
             }
         }
     });
-    Ok(json!({ "success": true, "taskId": task_id }))
+    Ok(json!({
+        "success": true,
+        "taskId": task_id,
+        "assignedAt": assigned_at,
+    }))
 }
 
 async fn team_get_tasks(hub: &TeamHub, ctx: &CallContext) -> Result<Value, String> {
