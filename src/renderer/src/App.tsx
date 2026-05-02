@@ -39,6 +39,7 @@ import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { MenuBar, MenuItem, MenuDivider, MenuSection } from './components/shell/MenuBar';
 import { useRecruitListener } from './lib/use-recruit-listener';
 import { useWindowFrameInsets } from './lib/use-window-frame-insets';
+import { useHistoryBadgeCount } from './lib/use-history-badge-count';
 import { ClaudeNotFound } from './components/ClaudeNotFound';
 import { getStatusMascotState } from './lib/status-mascot';
 import { useT } from './lib/i18n';
@@ -694,6 +695,13 @@ export function App(): JSX.Element {
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const availableUpdate = useUiStore((s) => s.availableUpdate);
 
+  // Issue #387: Rail の History バッジは「総件数」ではなく「未確認件数」。
+  // 履歴パネル表示中 (sidebarView === 'sessions' かつ折り畳まれていない) を確認済みとみなす。
+  const historyBadgeCount = useHistoryBadgeCount(
+    totalHistoryCount,
+    sidebarView === 'sessions' && !sidebarCollapsed
+  );
+
   // 「更新」ボタンクリック: 確認ダイアログ → DL → install → (Win 以外) relaunch。
   // 実行中タブ数を runningTaskCount に渡し、ダイアログで警告できるようにする。
   const handleClickUpdate = useCallback(() => {
@@ -856,7 +864,7 @@ export function App(): JSX.Element {
         sidebarView={sidebarView}
         onSidebarViewChange={setSidebarView}
         changeCount={gitChangeCount}
-        historyCount={totalHistoryCount}
+        historyBadgeCount={historyBadgeCount}
         onOpenSettings={() => setSettingsOpen(true)}
         hasGitRepo={hasGitRepo}
       />
