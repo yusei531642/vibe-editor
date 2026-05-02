@@ -110,11 +110,11 @@ pub fn detect_text_or_binary(bytes: &[u8]) -> (bool, String, String) {
                 || (b < 0x09)
                 || b == 0x0B
                 || b == 0x0C
-                || (b >= 0x0E && b < 0x20 && b != 0x1B) // ESC (0x1B) は xterm 系で許容
+                || ((0x0E..0x20).contains(&b) && b != 0x1B) // ESC (0x1B) は xterm 系で許容
         })
         .count();
     // 非テキスト率が 30% を超えるなら binary とみなす
-    if sample.len() > 0 && non_text * 100 / sample.len() >= 30 {
+    if !sample.is_empty() && non_text * 100 / sample.len() >= 30 {
         return (true, String::new(), "binary".to_string());
     }
     match std::str::from_utf8(bytes) {

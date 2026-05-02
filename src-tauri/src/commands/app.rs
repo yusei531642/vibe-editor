@@ -663,6 +663,7 @@ pub fn app_get_user_info(app: tauri::AppHandle) -> AppUserInfo {
 /// Issue #49: 許可するスキームの allowlist。
 /// - `http`/`https`: 通常の Web ページ (Release ページ、ドキュメント等)
 /// - `mailto`: メール feedback
+///
 /// それ以外 (`file:`, `javascript:`, `data:`, OS カスタムプロトコル) は拒否する。
 const ALLOWED_EXTERNAL_SCHEMES: &[&str] = &["http", "https", "mailto"];
 

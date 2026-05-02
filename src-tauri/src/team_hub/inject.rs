@@ -43,6 +43,7 @@ const BP_END: &[u8] = b"\x1b[201~";
 /// - \x00 (NUL): pty バッファの不正切断要因
 /// - \x08 (BS) / \x7f (DEL): 受信側 readline の手前消し悪用防止
 /// - \x9b (CSI 単一バイト): 一部端末で ESC[ 相当に解釈される
+///
 /// 改行 (`\n`) と TAB (`\t`) は paste の意味的内容なので維持する。
 fn sanitize_for_paste(s: &str) -> String {
     let mut out = String::with_capacity(s.len());

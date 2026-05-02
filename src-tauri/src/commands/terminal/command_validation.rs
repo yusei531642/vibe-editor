@@ -54,6 +54,7 @@ pub fn configured_terminal_commands() -> HashSet<String> {
 /// renderer 由来の任意コマンド実行を避けるため、起動できるバイナリを
 /// 1. 組み込み allowlist (Claude / Codex / 代表的な対話シェル)
 /// 2. ユーザーが settings.json に保存した既知の command
+///
 /// に限定する。
 pub fn is_allowed_terminal_command(command: &str) -> bool {
     const SAFE_BASENAMES: &[&str] = &[
