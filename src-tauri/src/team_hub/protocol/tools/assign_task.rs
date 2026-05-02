@@ -82,7 +82,12 @@ pub async fn team_assign_task(
     }
     // 「長文ペイロード・ルール」: description も SOFT_PAYLOAD_LIMIT で弾いてファイル経由を強制。
     // bulk な指示 (21 連続 issue 起票の YAML 等) はここで必ず途中切れしないために。
-    if description.len() > SOFT_PAYLOAD_LIMIT {
+    // Issue #409: 通知本文には Standard response protocol hint (~700 bytes) を後から append するため、
+    // 1 KiB の安全マージンを引いてから判定し、合算後に SOFT_PAYLOAD_LIMIT (= team_send 側の上限) を
+    // 超えるリスクを避ける。
+    const PROTOCOL_HINT_RESERVE: usize = 1024;
+    let description_limit = SOFT_PAYLOAD_LIMIT.saturating_sub(PROTOCOL_HINT_RESERVE);
+    if description.len() > description_limit {
         return Err(AssignError {
             code: "assign_payload_threshold".into(),
             message: format!(
@@ -93,7 +98,7 @@ pub async fn team_assign_task(
                  (Inline descriptions up to 32 KiB are now delivered via bracketed paste, but anything \
                  beyond that should still be passed by file path.)",
                 description.len(),
-                SOFT_PAYLOAD_LIMIT
+                description_limit
             ),
             phase: None,
             elapsed_ms: None,
@@ -139,7 +144,16 @@ pub async fn team_assign_task(
     // Issue #172: 通知の team_send を await せず fire-and-forget でバックグラウンド spawn する。
     // assignee="all" のとき fan-out で sleep 累積して MCP RPC を秒単位でブロックしていたのを解消。
     // 配信失敗のときも呼び出し側 (Leader) には task 作成結果だけを即返す。
-    let notify_args = json!({ "to": assignee, "message": format!("[Task #{task_id}] {description}") });
+    //
+    // Issue #409: タスク本文の末尾に「最低限の応答プロトコル」を必ず付与する。
+    // Leader が個別タスク説明に書き忘れても、ワーカーが
+    //   1) 開始 ACK を team_send で返す
+    //   2) team_update_task(task_id, "in_progress") に変える
+    //   3) 長時間タスクでは team_status で進捗を残す
+    //   4) 完了時に team_send + team_update_task("done" or "blocked") を呼ぶ
+    // ことで、Leader が `team_read` 0 件だけで「無応答」と誤判定するのを防ぐ。
+    let notify_message = build_task_notification(task_id, description);
+    let notify_args = json!({ "to": assignee, "message": notify_message });
     let hub_clone = hub.clone();
     let ctx_clone = ctx.clone();
     let task_id_for_log = task_id;
@@ -173,4 +187,44 @@ pub async fn team_assign_task(
         "taskId": task_id,
         "assignedAt": assigned_at,
     }))
+}
+
+/// Issue #409: タスク通知本文に「最低限の応答プロトコル」を必ず付与する。
+/// Leader が個別タスク説明にプロトコル指示を書き忘れても、ワーカーが
+///   1) 開始 ACK を team_send で返す
+///   2) team_update_task(task_id, "in_progress") に変える
+///   3) 長時間タスクでは team_status で進捗を残す
+///   4) 完了時に team_send + team_update_task("done"/"blocked") を呼ぶ
+/// ことで、Leader が `team_read` 0 件だけで「無応答」と誤判定するのを防ぐ。
+pub(super) fn build_task_notification(task_id: u32, description: &str) -> String {
+    format!(
+        "[Task #{task_id}] {description}\n\n\
+         [Standard response protocol — follow even if not repeated in the task body]\n\
+         1. Reply immediately with `team_send(\"leader\", \"ACK: Task #{task_id} received, starting...\")`.\n\
+         2. Call `team_update_task({task_id}, \"in_progress\")`.\n\
+         3. For long-running steps, call `team_status(\"...short progress line...\")` every meaningful step \
+         so the Leader can see you are alive via team_diagnostics.\n\
+         4. When done, send a `team_send(\"leader\", \"完了報告: ...\")` and call \
+         `team_update_task({task_id}, \"done\")` (or `\"blocked\"` if you cannot finish)."
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_task_notification;
+
+    /// Issue #409: 通知 payload に ACK / in_progress / status / 完了プロトコルが含まれること。
+    #[test]
+    fn notification_embeds_standard_response_protocol() {
+        let msg = build_task_notification(42u32, "リポジトリ clone & 調査");
+        // 元の description が落ちていない
+        assert!(msg.starts_with("[Task #42] リポジトリ clone & 調査"));
+        // プロトコル節 4 項目が含まれる
+        assert!(msg.contains("Standard response protocol"));
+        assert!(msg.contains("ACK: Task #42 received"));
+        assert!(msg.contains("team_update_task(42, \"in_progress\")"));
+        assert!(msg.contains("team_status("));
+        assert!(msg.contains("team_update_task(42, \"done\")"));
+        assert!(msg.contains("\"blocked\""));
+    }
 }
