@@ -57,6 +57,7 @@ import { useUiStore } from './stores/ui';
 import { webviewZoom } from './lib/webview-zoom';
 import { parseShellArgs } from './lib/parse-args';
 import { dedupPrepend, listContainsPath } from './lib/path-norm';
+import { useProjectLoader } from './lib/hooks/use-project-loader';
 import type { Command } from './lib/commands';
 
 const THEMES_FOR_PALETTE: ThemeName[] = [
@@ -254,7 +255,6 @@ export function App(): JSX.Element {
   // Canvas モードでは App が裏で常時マウントされるが、下の初回タブ生成
   // useEffect を抑制して "迷子ターミナル" が裏で起動しないようにする。
   const viewMode = useUiStore((s) => s.viewMode);
-  const [projectRoot, setProjectRoot] = useState<string>('');
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
   const [status, setStatus] = useState<string>('');
@@ -262,9 +262,37 @@ export function App(): JSX.Element {
   // sidebar
   const [sidebarView, setSidebarView] = useState<SidebarView>('changes');
 
-  // git
-  const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
-  const [gitLoading, setGitLoading] = useState<boolean>(true);
+  // Phase 1-1 (Issue #373): プロジェクトローダ責務を hook に外出し。
+  // confirmDiscardEditorTabs / onProjectSwitched / onLoaded はこのコンポーネント
+  // の下方で宣言される state setter / 派生値に依存するため、ref 経由で渡す。
+  // Phase 1-2/1-3/1-4 で各 hook に分散したらこの ref ブリッジは順次解消する。
+  const confirmDiscardRef = useRef<() => boolean>(() => true);
+  const projectSwitchedRef = useRef<(root: string) => void>(() => {});
+  const projectLoadedRef = useRef<
+    (snapshot: { gitStatus: GitStatus; sessions: SessionInfo[] }) => void
+  >(() => {});
+  const stableConfirmDiscard = useCallback(() => confirmDiscardRef.current(), []);
+  const stableProjectSwitched = useCallback(
+    (root: string) => projectSwitchedRef.current(root),
+    []
+  );
+  const stableProjectLoaded = useCallback(
+    (snapshot: { gitStatus: GitStatus; sessions: SessionInfo[] }) =>
+      projectLoadedRef.current(snapshot),
+    []
+  );
+  const {
+    projectRoot,
+    loadProject,
+    refreshGit,
+    gitStatus,
+    gitLoading
+  } = useProjectLoader({
+    confirmDiscardEditorTabs: stableConfirmDiscard,
+    onProjectSwitched: stableProjectSwitched,
+    onLoaded: stableProjectLoaded,
+    setStatus
+  });
 
   // sessions
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
@@ -791,149 +819,42 @@ export function App(): JSX.Element {
     [dirtyEditorTabs, t]
   );
 
-  /** 指定ルートでプロジェクトを読み込み直す */
-  const loadProject = useCallback(
-    async (root: string, options: { addToRecent?: boolean } = { addToRecent: true }) => {
-      if (projectRoot && projectRoot !== root && !confirmDiscardEditorTabs()) {
-        return false;
+  // Phase 1-1 (Issue #373): loadProject / 初回ロード effect / タイトルバー effect /
+  // refreshGit は use-project-loader.ts に移管済み。
+  // confirmDiscardEditorTabs / onProjectSwitched / onLoaded を hook に橋渡しする。
+  confirmDiscardRef.current = confirmDiscardEditorTabs;
+  projectSwitchedRef.current = (root: string): void => {
+    // タブ・セッション状態をリセット
+    setDiffTabs([]);
+    setEditorTabs([]);
+    setRecentlyClosed([]);
+    setActiveTabId(null);
+    setActiveSessionId(null);
+    // ターミナル＆チームをリセット（全タブ閉じて新規1つ）
+    setTeams([]);
+    const newId = nextTerminalIdRef.current++;
+    setTerminalTabs([
+      {
+        id: newId,
+        version: 0,
+        agent: 'claude',
+        role: null,
+        teamId: null,
+        agentId: `agent-${newId}`,
+        status: '起動中…',
+        exited: false,
+        resumeSessionId: null,
+        teamHistoryMemberIdx: null,
+        label: 'Claude #1',
+        customLabel: null
       }
-      setProjectRoot(root);
-      setStatus('プロジェクト読み込み中…');
-      setGitLoading(true);
-
-      try {
-        const [gs, sess] = await Promise.all([
-          window.api.git.status(root),
-          window.api.sessions.list(root)
-        ]);
-        // MCP 初期化は await する（新規タブ spawn より前に claude.json を確定）
-        // settings.mcpAutoSetup === false の場合は MCP 自動書換を全てスキップする
-        if (settings.mcpAutoSetup !== false) {
-          try {
-            await window.api.app.setupTeamMcp(root, '_init', '', []);
-          } catch (err) {
-            console.warn('[loadProject] setupTeamMcp failed:', err);
-          }
-        }
-
-        setGitStatus(gs);
-        setSessions(sess);
-        // タブ・セッション状態をリセット
-        setDiffTabs([]);
-        setEditorTabs([]);
-        setRecentlyClosed([]);
-        setActiveTabId(null);
-        setActiveSessionId(null);
-        // ターミナル＆チームをリセット（全タブ閉じて新規1つ）
-        setTeams([]);
-        const newId = nextTerminalIdRef.current++;
-        setTerminalTabs([
-          {
-            id: newId,
-            version: 0,
-            agent: 'claude',
-            role: null,
-            teamId: null,
-            agentId: `agent-${newId}`,
-            status: '起動中…',
-            exited: false,
-            resumeSessionId: null,
-            teamHistoryMemberIdx: null,
-            label: 'Claude #1',
-            customLabel: null
-          }
-        ]);
-        setActiveTerminalTabId(newId);
-        setStatus(`${root.split(/[\\/]/).pop()}`);
-        // ここでは runtime の「最後に開いたルート」のみ永続化する。
-        // `claudeCwd` は SettingsModal で設定されるユーザー設定のため上書き厳禁。
-        if (options.addToRecent !== false) {
-          const rp = settings.recentProjects ?? [];
-          // Issue #67: path を raw 比較すると表記揺れで重複エントリが増える。
-          // normalize 後キーで dedup。
-          const next = dedupPrepend(rp, root, 10);
-          void updateSettings({ recentProjects: next, lastOpenedRoot: root });
-        } else {
-          void updateSettings({ lastOpenedRoot: root });
-        }
-        return true;
-      } catch (err) {
-        setStatus(`読み込みエラー: ${String(err)}`);
-        return false;
-      } finally {
-        setGitLoading(false);
-      }
-    },
-    [projectRoot, confirmDiscardEditorTabs, settings.recentProjects, updateSettings]
-  );
-
-  // 初回ロード — lastOpenedRoot (前回開いたルート) があれば復元、なければフォルダ選択ダイアログ。
-  // 以前は process.cwd() に fallback していたが、インストール版だと vibe-editor 自身の
-  // インストールディレクトリが選ばれてしまう。明示的にユーザーに選んでもらう。
-  // Onboarding 未完了時は Onboarding 側でルートを選ばせるため、ここでは何もしない。
-  const didInitRef = useRef(false);
-  useEffect(() => {
-    if (settingsLoading) return;
-    if (didInitRef.current) return;
-    if (!settings.hasCompletedOnboarding) return;
-    didInitRef.current = true;
-    let cancelled = false;
-    (async () => {
-      try {
-        // 既存ユーザーの移行: lastOpenedRoot が空で claudeCwd が設定されている場合は
-        // かつての挙動 (claudeCwd = 最後に開いたルート) を尊重して再利用する。
-        const remembered = settings.lastOpenedRoot || settings.claudeCwd;
-        let root = remembered;
-        if (!root) {
-          const picked = await window.api.dialog.openFolder(t('appMenu.openFolderDialogTitle'));
-          if (cancelled) return;
-          if (!picked) {
-            // ユーザーがキャンセルした場合は projectRoot 未設定のまま空状態を維持。
-            // 上部の AppMenu / コマンドパレットから後で開けるようにしておく。
-            setStatus(t('status.noProject'));
-            setGitLoading(false);
-            return;
-          }
-          root = picked;
-        }
-        if (cancelled) return;
-        setProjectRoot(root);
-        if (root !== settings.lastOpenedRoot) {
-          void updateSettings({ lastOpenedRoot: root });
-        }
-        const [gs, sess] = await Promise.all([
-          window.api.git.status(root),
-          window.api.sessions.list(root)
-        ]);
-        // MCP 初期化は await する（新規タブ spawn より前に claude.json を確定）
-        if (settings.mcpAutoSetup !== false) {
-          try {
-            await window.api.app.setupTeamMcp(root, '_init', '', []);
-          } catch (err) {
-            console.warn('[init] setupTeamMcp failed:', err);
-          }
-        }
-        if (cancelled) return;
-        setGitStatus(gs);
-        setGitLoading(false);
-        setSessions(sess);
-        setStatus(root.split(/[\\/]/).pop() ?? root);
-      } catch (err) {
-        setStatus(`初期化エラー: ${String(err)}`);
-        setGitLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsLoading, settings.hasCompletedOnboarding]);
-
-  // タイトルバー
-  useEffect(() => {
-    const name = projectRoot.split(/[\\/]/).pop() || 'vibe-editor';
-    window.api.app.setWindowTitle(`vibe-editor — ${name}`).catch(() => undefined);
-  }, [projectRoot]);
+    ]);
+    setActiveTerminalTabId(newId);
+    void root; // root は現状未使用 (将来の拡張余地として残す)
+  };
+  projectLoadedRef.current = ({ sessions: sess }) => {
+    setSessions(sess);
+  };
 
   const handleRestart = useCallback(async () => {
     if (dirtyEditorTabs.length > 0) {
@@ -950,17 +871,6 @@ export function App(): JSX.Element {
   }, [dirtyEditorTabs.length, t]);
 
   // ---------- データ更新 ----------
-
-  const refreshGit = useCallback(async () => {
-    if (!projectRoot) return;
-    setGitLoading(true);
-    try {
-      const gs = await window.api.git.status(projectRoot);
-      setGitStatus(gs);
-    } finally {
-      setGitLoading(false);
-    }
-  }, [projectRoot]);
 
   const refreshTeamHistory = useCallback(async () => {
     if (!projectRoot) return;
