@@ -215,7 +215,7 @@ export function useRecruitListener(): void {
         });
         const pos = findRecruitPosition(requester, teamNodes);
         const titleHint = p.agentLabelHint?.trim() || p.roleProfileId;
-        store.addCard({
+        const newNodeId = store.addCard({
           type: 'agent',
           title: titleHint,
           position: pos,
@@ -232,9 +232,10 @@ export function useRecruitListener(): void {
             customInstructions: p.customInstructions || undefined
           }
         });
-        // Issue #253: 新メンバー配置後に Canvas 側で fitView を発火させる。
-        // RECRUIT_RADIUS=NODE_W+80 で 6 名同心円配置時に端が viewport 外になる UX 退行を吸収。
-        store.notifyRecruit();
+        // Issue #253 / #372: 新メンバー配置後、Canvas 側で「新しい worker」を中心に
+        // viewport を寄せる。HR が worker を増やすケースでも Leader ではなく
+        // 追加されたばかりの worker が viewport の中央に来る。
+        store.notifyRecruit(newNodeId);
         // Issue #342 Phase 1: addCard 完了 (= spawn 開始) 時点で Hub に受領通知を返す。
         // handshake 完了は待たない (それは Hub 側 RECRUIT_TIMEOUT=30s 経路の責務)。
         // ack(true) だけでは MCP success にはならず、真の成功判定は handshake のみ。
