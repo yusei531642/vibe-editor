@@ -883,8 +883,18 @@ fn resolve_targets(
     members: &[(String, String)],
     self_agent_id: &str,
     raw_to: &str,
+    active_leader_agent_id: Option<&str>,
 ) -> Vec<(String, String)> {
     let to = raw_to.trim();
+    if to.eq_ignore_ascii_case("leader") {
+        if let Some(active) = active_leader_agent_id.filter(|v| !v.trim().is_empty()) {
+            return members
+                .iter()
+                .filter(|(aid, _)| aid == active && aid != self_agent_id)
+                .cloned()
+                .collect();
+        }
+    }
     // "all" 判定はメンバー数に依らない定数なのでループ外で 1 度だけ計算する
     let is_all = to.eq_ignore_ascii_case("all");
     let mut out: Vec<(String, String)> = Vec::new();
@@ -960,7 +970,19 @@ async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Val
     // 新順序では state.lock を保持しない時に registry を呼ぶので、deadlock 余地は無い。
     let registry = hub.registry.clone();
     let team_members = registry.list_team_members(&ctx.team_id);
-    let targets = resolve_targets(&team_members, &ctx.agent_id, &to);
+    let active_leader_agent_id = {
+        let state = hub.state.lock().await;
+        state
+            .teams
+            .get(&ctx.team_id)
+            .and_then(|team| team.active_leader_agent_id.clone())
+    };
+    let targets = resolve_targets(
+        &team_members,
+        &ctx.agent_id,
+        &to,
+        active_leader_agent_id.as_deref(),
+    );
     let resolved_recipient_ids: Vec<String> =
         targets.iter().map(|(aid, _)| aid.clone()).collect();
 
@@ -1369,7 +1391,19 @@ async fn team_assign_task(
     // Leader からは「task は登録されたのに何も起こらない」サイレント失敗になる。
     // → 作成前に resolve_targets で検証し、無効ならエラーで弾いて roles を案内する。
     let members = hub.registry.list_team_members(&ctx.team_id);
-    let resolved = resolve_targets(&members, &ctx.agent_id, assignee);
+    let active_leader_agent_id = {
+        let state = hub.state.lock().await;
+        state
+            .teams
+            .get(&ctx.team_id)
+            .and_then(|team| team.active_leader_agent_id.clone())
+    };
+    let resolved = resolve_targets(
+        &members,
+        &ctx.agent_id,
+        assignee,
+        active_leader_agent_id.as_deref(),
+    );
     if resolved.is_empty() {
         // 同 role 複数名がいる場合の重複ヒント表示を避けるため一意化する
         let mut other_roles: Vec<String> = members
@@ -1617,7 +1651,7 @@ mod tests {
             member("vc-leader", "leader"),
             member("vc-prog", "programmer"),
         ];
-        let got = resolve_targets(&members, "vc-leader", "programmer");
+        let got = resolve_targets(&members, "vc-leader", "programmer", None);
         assert_eq!(got, vec![member("vc-prog", "programmer")]);
     }
 
@@ -1628,9 +1662,9 @@ mod tests {
             member("vc-prog", "programmer"),
         ];
         // Claude が "Programmer" / "PROGRAMMER" で送ってきても届くこと
-        let got = resolve_targets(&members, "vc-leader", "Programmer");
+        let got = resolve_targets(&members, "vc-leader", "Programmer", None);
         assert_eq!(got, vec![member("vc-prog", "programmer")]);
-        let got = resolve_targets(&members, "vc-leader", "PROGRAMMER");
+        let got = resolve_targets(&members, "vc-leader", "PROGRAMMER", None);
         assert_eq!(got, vec![member("vc-prog", "programmer")]);
     }
 
@@ -1641,7 +1675,7 @@ mod tests {
             member("vc-prog", "programmer"),
         ];
         // 呼び出し側で trim 済みである前提だが、resolve_targets 自体も trim する
-        let got = resolve_targets(&members, "vc-leader", "  programmer  ");
+        let got = resolve_targets(&members, "vc-leader", "  programmer  ", None);
         assert_eq!(got, vec![member("vc-prog", "programmer")]);
     }
 
@@ -1653,7 +1687,7 @@ mod tests {
             member("vc-prog-2", "programmer"),
         ];
         // 同 role の複数メンバー中から agent_id で 1 名指定
-        let got = resolve_targets(&members, "vc-leader", "vc-prog-2");
+        let got = resolve_targets(&members, "vc-leader", "vc-prog-2", None);
         assert_eq!(got, vec![member("vc-prog-2", "programmer")]);
     }
 
@@ -1664,11 +1698,11 @@ mod tests {
             member("vc-prog", "programmer"),
             member("vc-rev", "reviewer"),
         ];
-        let got = resolve_targets(&members, "vc-leader", "all");
+        let got = resolve_targets(&members, "vc-leader", "all", None);
         assert_eq!(got.len(), 2);
         assert!(got.iter().all(|(aid, _)| aid != "vc-leader"));
         // "ALL" でも通る
-        let got = resolve_targets(&members, "vc-leader", "ALL");
+        let got = resolve_targets(&members, "vc-leader", "ALL", None);
         assert_eq!(got.len(), 2);
     }
 
@@ -1679,7 +1713,7 @@ mod tests {
             member("vc-prog", "programmer"),
         ];
         // 自分自身 (leader) を狙っても自分は含めない
-        let got = resolve_targets(&members, "vc-leader", "leader");
+        let got = resolve_targets(&members, "vc-leader", "leader", None);
         assert!(got.is_empty());
     }
 
@@ -1689,7 +1723,7 @@ mod tests {
             member("vc-leader", "leader"),
             member("vc-prog", "programmer"),
         ];
-        let got = resolve_targets(&members, "vc-leader", "researcher");
+        let got = resolve_targets(&members, "vc-leader", "researcher", None);
         assert!(got.is_empty());
     }
 }

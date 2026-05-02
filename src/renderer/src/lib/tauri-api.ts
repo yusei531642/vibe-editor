@@ -18,6 +18,10 @@ import {
   type FileWriteResult,
   type GitDiffResult,
   type GitStatus,
+  type HandoffCheckpoint,
+  type HandoffCreateRequest,
+  type HandoffCreateResult,
+  type HandoffMutationResult,
   type ReadLogTailResponse,
   type RoleProfilesFile,
   type SessionInfo,
@@ -65,6 +69,10 @@ interface CleanupTeamMcpResult {
   ok: boolean;
   error?: string;
   removed?: boolean;
+}
+interface ActiveLeaderResult {
+  ok: boolean;
+  error?: string;
 }
 interface OpenExternalResult {
   ok: boolean;
@@ -114,6 +122,8 @@ export const api = {
       invoke('app_setup_team_mcp', { projectRoot, teamId, teamName, members }),
     cleanupTeamMcp: (projectRoot: string, teamId: string): Promise<CleanupTeamMcpResult> =>
       invoke('app_cleanup_team_mcp', { projectRoot, teamId }),
+    setActiveLeader: (teamId: string, agentId?: string | null): Promise<ActiveLeaderResult> =>
+      invoke('app_set_active_leader', { teamId, agentId }),
     getTeamFilePath: (teamId: string): Promise<string> =>
       invoke('app_get_team_file_path', { teamId }),
     getMcpServerPath: (): Promise<string> => invoke('app_get_mcp_server_path'),
@@ -204,6 +214,27 @@ export const api = {
     saveBatch: (entries: TeamHistoryEntry[]): Promise<MutationResult> =>
       invoke('team_history_save_batch', { entries }),
     delete: (id: string): Promise<MutationResult> => invoke('team_history_delete', { id })
+  },
+
+  handoffs: {
+    create: (request: HandoffCreateRequest): Promise<HandoffCreateResult> =>
+      invoke('handoffs_create', { req: request }),
+    list: (projectRoot: string, teamId?: string | null): Promise<HandoffCheckpoint[]> =>
+      invoke('handoffs_list', { projectRoot, teamId }),
+    read: (
+      projectRoot: string,
+      teamId: string | null | undefined,
+      handoffId: string
+    ): Promise<HandoffCheckpoint | null> =>
+      invoke('handoffs_read', { projectRoot, teamId, handoffId }),
+    updateStatus: (
+      projectRoot: string,
+      teamId: string | null | undefined,
+      handoffId: string,
+      status: string,
+      toAgentId?: string | null
+    ): Promise<HandoffMutationResult> =>
+      invoke('handoffs_update_status', { projectRoot, teamId, handoffId, status, toAgentId })
   },
 
   dialog: {

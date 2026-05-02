@@ -27,6 +27,7 @@ import {
 import type { CardData, CardType } from '../stores/canvas';
 import type {
   Language,
+  HandoffReference,
   TeamHistoryEntry,
   TeamRole,
   TerminalAgent
@@ -92,6 +93,7 @@ function serializeAutoSavePayload(payload: {
     {
       name: string;
       canvasNodes: { agentId: string; x: number; y: number; width?: number; height?: number }[];
+      latestHandoff?: HandoffReference;
     }
   >;
   viewport: { x: number; y: number; zoom: number };
@@ -103,7 +105,8 @@ function serializeAutoSavePayload(payload: {
         info.canvasNodes
           .map((c) => `${c.agentId}@${c.x},${c.y}:${c.width}x${c.height}`)
           .sort()
-          .join(',')
+          .join(',') +
+        `|handoff:${info.latestHandoff?.id ?? ''}:${info.latestHandoff?.status ?? ''}`
     );
   }
   parts.sort();
@@ -301,10 +304,21 @@ export function CanvasLayout(): JSX.Element {
   recentRef.current = recent;
   const autoSavePayload = useMemo(() => {
     if (nodes.length === 0) return null;
-    interface TeamEntryInfo { name: string; members: { role: TeamRole; agent: TerminalAgent }[]; canvasNodes: { agentId: string; x: number; y: number; width?: number; height?: number }[]; }
+    interface TeamEntryInfo {
+      name: string;
+      members: { role: TeamRole; agent: TerminalAgent }[];
+      canvasNodes: { agentId: string; x: number; y: number; width?: number; height?: number }[];
+      latestHandoff?: HandoffReference;
+    }
     const byTeam = new Map<string, TeamEntryInfo>();
     for (const n of nodes) {
-      const p = (n.data?.payload ?? {}) as { teamId?: string; agentId?: string; role?: string; agent?: string };
+      const p = (n.data?.payload ?? {}) as {
+        teamId?: string;
+        agentId?: string;
+        role?: string;
+        agent?: string;
+        latestHandoff?: HandoffReference;
+      };
       if (!p.teamId || !p.agentId) continue;
       const title = String(n.data?.title ?? 'Team');
       const entry = byTeam.get(p.teamId) ?? { name: title, members: [], canvasNodes: [] };
@@ -320,6 +334,14 @@ export function CanvasLayout(): JSX.Element {
         width: typeof n.style?.width === 'number' ? Math.round(n.style.width as number) : undefined,
         height: typeof n.style?.height === 'number' ? Math.round(n.style.height as number) : undefined
       });
+      if (p.latestHandoff) {
+        const prev = entry.latestHandoff;
+        const prevTime = prev?.updatedAt ?? prev?.createdAt ?? '';
+        const nextTime = p.latestHandoff.updatedAt ?? p.latestHandoff.createdAt ?? '';
+        if (!prev || nextTime >= prevTime) {
+          entry.latestHandoff = p.latestHandoff;
+        }
+      }
       byTeam.set(p.teamId, entry);
     }
     return { byTeam, viewport };
@@ -344,7 +366,8 @@ export function CanvasLayout(): JSX.Element {
           createdAt: existing?.createdAt ?? nowIso,
           lastUsedAt: nowIso,
           members: mergeCanvasMembers(info.members, existing),
-          canvasState: { nodes: info.canvasNodes, viewport: autoSavePayload.viewport }
+          canvasState: { nodes: info.canvasNodes, viewport: autoSavePayload.viewport },
+          latestHandoff: info.latestHandoff ?? existing?.latestHandoff
         };
         nextEntries.push(entry);
       }
@@ -448,7 +471,8 @@ export function CanvasLayout(): JSX.Element {
           role: m.role,
           teamId: entry.id,
           agentId,
-          cwd
+          cwd,
+          latestHandoff: entry.latestHandoff
         }
       };
     });

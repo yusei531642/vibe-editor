@@ -9,6 +9,7 @@ pub mod dialog;
 pub mod files;
 pub mod fs_watch;
 pub mod git;
+pub mod handoffs;
 pub mod logs;
 pub mod role_profiles;
 pub mod sessions;

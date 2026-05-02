@@ -352,6 +352,9 @@ pub struct TeamInfo {
     pub name: String,
     pub messages: VecDeque<TeamMessage>,
     pub tasks: VecDeque<TeamTask>,
+    /// Issue #359: leader handoff 中の role 宛て二重配送を避けるため、
+    /// team_send("leader", ...) はこの agent_id が設定されていれば単一宛先に絞る。
+    pub active_leader_agent_id: Option<String>,
     /// 次に採番する message_id (Issue #115)。
     /// 旧実装は `messages.len() + 1` を使っていたため、履歴上限到達後はずっと同値になり ID 衝突した。
     /// 単調増加カウンタにすることで上限到達後も一意性を保つ。saturating_add で u32::MAX を超えたら
@@ -875,6 +878,21 @@ impl TeamHub {
         // 動的ロールもチーム単位でクリア (チーム破棄でロール定義を残す意味は無い)
         s.dynamic_roles.remove(team_id);
         s.active_teams.is_empty()
+    }
+
+    /// Issue #359: app 側の leader replacement 経路から active leader を切り替える。
+    /// 通常の team_recruit singleton 制約を迂回して同一 teamId に新 leader を直接 spawn するため、
+    /// role 宛て配送だけは Hub 側で単一 leader に固定する。
+    pub async fn set_active_leader(&self, team_id: &str, agent_id: Option<String>) {
+        if team_id.trim().is_empty() {
+            return;
+        }
+        let mut s = self.state.lock().await;
+        let team = s
+            .teams
+            .entry(team_id.to_string())
+            .or_insert_with(TeamInfo::default);
+        team.active_leader_agent_id = agent_id.filter(|v| !v.trim().is_empty());
     }
 }
 

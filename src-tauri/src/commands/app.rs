@@ -43,6 +43,13 @@ pub struct CleanupTeamMcpResult {
 
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct ActiveLeaderResult {
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
+#[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct TeamHubInfo {
     pub socket: String,
     pub token: String,
@@ -490,6 +497,25 @@ pub async fn app_cleanup_team_mcp(
     Ok(CleanupTeamMcpResult {
         ok: true,
         removed: Some(removed),
+        error: None,
+    })
+}
+
+#[tauri::command]
+pub async fn app_set_active_leader(
+    state: State<'_, AppState>,
+    team_id: String,
+    agent_id: Option<String>,
+) -> Result<ActiveLeaderResult, String> {
+    if team_id.trim().is_empty() {
+        return Ok(ActiveLeaderResult {
+            ok: false,
+            error: Some("teamId is required".into()),
+        });
+    }
+    state.team_hub.set_active_leader(&team_id, agent_id).await;
+    Ok(ActiveLeaderResult {
+        ok: true,
         error: None,
     })
 }
