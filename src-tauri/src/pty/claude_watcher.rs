@@ -17,9 +17,9 @@ use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watche
 use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::channel;
 use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use std::sync::mpsc::channel;
+use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter};
 
 /// Issue #30 + #148: claim 済み sessionId の集合。
@@ -115,6 +115,61 @@ fn list_session_ids(dir: &Path) -> HashSet<String> {
     out
 }
 
+struct SessionCandidate {
+    id: String,
+    path: PathBuf,
+    modified: SystemTime,
+}
+
+/// watcher 起動時点ですでに jsonl が作られている race を救済するため、
+/// spawn 開始以降に更新された session ファイルも候補として拾う。
+fn list_recent_session_candidates(dir: &Path, since: SystemTime) -> Vec<SessionCandidate> {
+    let read = match std::fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for entry in read.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            continue;
+        };
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let Ok(modified) = metadata.modified() else {
+            continue;
+        };
+        if modified >= since {
+            out.push(SessionCandidate {
+                id: stem.to_string(),
+                path,
+                modified,
+            });
+        }
+    }
+    out.sort_by(|a, b| a.modified.cmp(&b.modified).then_with(|| a.id.cmp(&b.id)));
+    out
+}
+
+fn emit_session_id(app: &AppHandle, terminal_id: &str, session_id: &str) -> bool {
+    let event_name = format!("terminal:sessionId:{terminal_id}");
+    if let Err(e) = app.emit(&event_name, session_id.to_string()) {
+        tracing::warn!("[claude_watcher] emit failed: {e}");
+        false
+    } else {
+        tracing::info!(
+            "[claude_watcher] sessionId detected tid={} sid={}",
+            terminal_id,
+            session_id
+        );
+        true
+    }
+}
+
 /// 1 つの terminal セッションに対して watch を開始する。
 /// `is_alive` が false を返したら自動停止。
 /// 検出した sessionId は callback に渡される (1 回限り)。
@@ -122,6 +177,7 @@ pub fn spawn_watcher(
     app: AppHandle,
     terminal_id: String,
     project_root: String,
+    spawned_at: SystemTime,
     is_alive: impl Fn() -> bool + Send + 'static,
 ) {
     std::thread::spawn(move || {
@@ -159,6 +215,30 @@ pub fn spawn_watcher(
             snapshot.len()
         );
 
+        // Issue #429: Claude Code が非常に速く jsonl を作ると、watcher 起動後の
+        // 初期 snapshot にその session が入ってしまい、difference では二度と検出できない。
+        // terminal_create 開始以降に更新された jsonl は「この spawn の候補」として
+        // snapshot 済みでも 1 度だけ claim を試す。
+        let expected_norm = super::path_norm::normalize_project_root(&project_root);
+        for candidate in list_recent_session_candidates(&dir, spawned_at) {
+            if is_claimed(&candidate.id) {
+                continue;
+            }
+            if !jsonl_matches_project(&candidate.path, &expected_norm) {
+                tracing::debug!(
+                    "[claude_watcher] skip recent {} (cwd mismatch)",
+                    candidate.id
+                );
+                continue;
+            }
+            if !try_claim(&candidate.id) {
+                continue;
+            }
+            if emit_session_id(&app, &terminal_id, &candidate.id) {
+                return;
+            }
+        }
+
         let (tx, rx) = channel::<notify::Result<Event>>();
         let mut watcher = match RecommendedWatcher::new(
             move |res: notify::Result<Event>| {
@@ -185,10 +265,7 @@ pub fn spawn_watcher(
             }
             match rx.recv_timeout(Duration::from_millis(500)) {
                 Ok(Ok(event)) => {
-                    if !matches!(
-                        event.kind,
-                        EventKind::Create(_) | EventKind::Modify(_)
-                    ) {
+                    if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
                         continue;
                     }
                     let current = list_session_ids(&dir);
@@ -202,33 +279,20 @@ pub fn spawn_watcher(
                     new_ids.sort();
                     // Issue #31 対策用 normalize。毎イベント再計算しても軽量 (canonicalize は
                     // 最初にキャッシュされる OS FS cache にヒットする)。
-                    let expected_norm =
-                        super::path_norm::normalize_project_root(&project_root);
                     for candidate in new_ids {
                         // jsonl の cwd が一致しないなら別 project の衝突なのでスキップ
                         let candidate_path = dir.join(format!("{}.jsonl", candidate));
                         if !jsonl_matches_project(&candidate_path, &expected_norm) {
-                            tracing::debug!(
-                                "[claude_watcher] skip {} (cwd mismatch)",
-                                candidate
-                            );
+                            tracing::debug!("[claude_watcher] skip {} (cwd mismatch)", candidate);
                             continue;
                         }
                         if !try_claim(candidate) {
                             // 競合で claim できず → 次の候補へ
                             continue;
                         }
-                        let event_name = format!("terminal:sessionId:{terminal_id}");
-                        if let Err(e) = app.emit(&event_name, candidate.clone()) {
-                            tracing::warn!("[claude_watcher] emit failed: {e}");
-                        } else {
-                            tracing::info!(
-                                "[claude_watcher] sessionId detected tid={} sid={}",
-                                terminal_id,
-                                candidate
-                            );
+                        if emit_session_id(&app, &terminal_id, candidate) {
+                            return;
                         }
-                        return;
                     }
                     // まだ自分の番が来ていない → snapshot を更新して次イベントを待つ。
                     // (他の watcher が claim した id は snapshot に足し、次回の difference から除外する)
@@ -238,6 +302,45 @@ pub fn spawn_watcher(
                 Err(_) => break,
             }
         }
-        tracing::debug!("[claude_watcher] tid={} watcher exit (timeout / dead)", terminal_id);
+        tracing::debug!(
+            "[claude_watcher] tid={} watcher exit (timeout / dead)",
+            terminal_id
+        );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::Duration;
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("vibe-editor-{name}-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    #[test]
+    fn recent_candidates_include_only_files_modified_after_since() {
+        let dir = unique_temp_dir("claude-watcher-recent");
+        let old_path = dir.join("old-session.jsonl");
+        fs::write(&old_path, "{}\n").expect("write old jsonl");
+
+        std::thread::sleep(Duration::from_millis(20));
+        let since = SystemTime::now();
+        std::thread::sleep(Duration::from_millis(20));
+
+        let new_path = dir.join("new-session.jsonl");
+        fs::write(&new_path, "{}\n").expect("write new jsonl");
+        fs::write(dir.join("ignored.txt"), "{}\n").expect("write ignored file");
+
+        let ids = list_recent_session_candidates(&dir, since)
+            .into_iter()
+            .map(|c| c.id)
+            .collect::<Vec<_>>();
+
+        assert_eq!(ids, vec!["new-session"]);
+        let _ = fs::remove_dir_all(dir);
+    }
 }
