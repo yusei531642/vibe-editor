@@ -324,6 +324,14 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       [t]
     );
 
+    const focusTerminal = useCallback((): void => {
+      const term = termRef.current;
+      term?.focus();
+      if (term) {
+        window.requestAnimationFrame(() => term.focus());
+      }
+    }, []);
+
     // --- 外部操作用ハンドル (public API は不変) ---
     useImperativeHandle(
       ref,
@@ -335,7 +343,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           void window.api.terminal.write(id, payload);
         },
         focus(): void {
-          termRef.current?.focus();
+          focusTerminal();
         },
         scrollToBottom(): void {
           termRef.current?.scrollToBottom();
@@ -352,9 +360,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           return lines.join('\n').trim();
         }
       }),
-      // ptyIdRef / termRef は stable な ref なので deps 不要
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      []
+      [focusTerminal]
     );
 
     return (
@@ -364,7 +370,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
           ref={containerRef}
           // Canvas の TerminalCard 内では、xterm のテキストエリアに focus が入らず
           // キー入力が届かない現象がある。空白領域をクリックしても明示的に focus を奪う。
-          onMouseDown={() => termRef.current?.focus()}
+          onPointerDownCapture={focusTerminal}
+          onMouseDown={focusTerminal}
           onContextMenu={handleContextMenu}
         />
         {contextMenu && (

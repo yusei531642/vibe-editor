@@ -5,6 +5,10 @@ import type { FitAddon } from '@xterm/addon-fit';
 import type { TerminalExitInfo } from '../../../types/shared';
 import { computeUnscaledGrid } from './compute-unscaled-grid';
 import type { CellSize } from './measure-cell-size';
+import {
+  createTerminalInputGate,
+  type TerminalInputGateResetReason
+} from './terminal-input-gate';
 
 export interface PtySpawnSnapshot {
   args?: string[];
@@ -672,17 +676,50 @@ export function usePtySession(options: UsePtySessionOptions): void {
       }
     })();
 
-    // IME composition 中は onData を抑制して候補ウィンドウの位置ジャンプを防ぐ
-    let composing = false;
+    // IME composition 中は onData を抑制して候補ウィンドウの位置ジャンプを防ぐ。
+    // compositionend を逃した場合は blur/focusout/cancel で端末単位の stuck を解除する。
+    const inputGate = createTerminalInputGate();
     const textarea = term.textarea;
-    const onCompStart = (): void => { composing = true; };
-    const onCompEnd = (): void => { composing = false; };
+    let lastSuppressedInputLogAt = 0;
+    const logInputGateReset = (reason: TerminalInputGateResetReason): void => {
+      if (!import.meta.env.DEV) return;
+      console.debug(
+        `[terminal:${ptyIdRef.current ?? 'pending'}] composition reset by ${reason}`
+      );
+    };
+    const logSuppressedInput = (): void => {
+      if (!import.meta.env.DEV) return;
+      const now = Date.now();
+      if (now - lastSuppressedInputLogAt < 1000) return;
+      lastSuppressedInputLogAt = now;
+      console.debug(
+        `[terminal:${ptyIdRef.current ?? 'pending'}] onData suppressed while composing`
+      );
+    };
+    const resetComposition = (reason: TerminalInputGateResetReason): void => {
+      if (inputGate.resetComposition(reason)) {
+        if (reason !== 'compositionend') {
+          logInputGateReset(reason);
+        }
+      }
+    };
+    const onCompStart = (): void => { inputGate.startComposition(); };
+    const onCompEnd = (): void => { resetComposition('compositionend'); };
+    const onCompCancel = (): void => { resetComposition('compositioncancel'); };
+    const onBlur = (): void => { resetComposition('blur'); };
+    const onFocusOut = (): void => { resetComposition('focusout'); };
     textarea?.addEventListener('compositionstart', onCompStart);
     textarea?.addEventListener('compositionend', onCompEnd);
+    textarea?.addEventListener('compositioncancel', onCompCancel);
+    textarea?.addEventListener('blur', onBlur);
+    textarea?.addEventListener('focusout', onFocusOut);
 
     // キー入力 → pty へ
     const dataSub = term.onData((data) => {
-      if (composing) return;
+      if (!inputGate.shouldForward(data)) {
+        logSuppressedInput();
+        return;
+      }
       if (ptyIdRef.current) {
         void window.api.terminal.write(ptyIdRef.current, data);
       }
@@ -699,6 +736,9 @@ export function usePtySession(options: UsePtySessionOptions): void {
       dataSub.dispose();
       textarea?.removeEventListener('compositionstart', onCompStart);
       textarea?.removeEventListener('compositionend', onCompEnd);
+      textarea?.removeEventListener('compositioncancel', onCompCancel);
+      textarea?.removeEventListener('blur', onBlur);
+      textarea?.removeEventListener('focusout', onFocusOut);
       // Issue #271: HMR cleanup と通常 unmount を厳密に区別する。
       //   - `hmrDisposeArmed.current === true` のとき: Vite が hot.dispose() の cb を
       //     呼んだ直後 (= HMR が module を捨てる経路) なので、kill せず cache に残す。
