@@ -507,3 +507,27 @@ _(未着手)_
 ### Next Tasks
 - Tauri 実機で Agent card の handoff 作成、新規セッション起動、`handoff_ack:<handoffId>` による旧 card 自動退役を smoke 確認する
 - PR 作成後に CodeRabbit と人間レビューを待つ。自動マージは禁止
+
+---
+
+## Release v1.4.7 計画
+
+Issue: #361
+
+### 計画
+- [x] `origin/main` を最新化し、`chore/release-1.4.7` ブランチを作成する
+- [x] `package.json` / `package-lock.json` / `src-tauri/Cargo.toml` / `src-tauri/Cargo.lock` / `src-tauri/tauri.conf.json` を `1.4.7` に揃える
+- [x] `npm run typecheck`、`npm run build:vite`、`cargo check --manifest-path src-tauri\Cargo.toml --all-targets` を通す
+- [ ] release bump PR を作成し、CI / bot review の完了と merge を待つ
+- [ ] merge 後の `origin/main` に `v1.4.7` タグを作成して push し、release workflow を起動する
+- [ ] draft release の成果物と `latest.json` を確認し、問題なければ publish する
+
+### Next Steps
+- ユーザー確認後、release bump ブランチ作成とバージョン更新に進む
+- release workflow 完了後、成果物一覧・検証結果・残課題をここへ追記する
+
+### 検証
+- `npm run typecheck`: PASS
+- `npm run build:vite`: PASS (既存の chunk size / dynamic import warning あり)
+- `cargo check --manifest-path src-tauri\Cargo.toml --all-targets`: PASS
+- `git diff --check`: PASS
