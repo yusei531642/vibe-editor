@@ -70,6 +70,13 @@ const ja: Dict = {
   'canvas.hud.fit': 'フィット',
   'canvas.hud.zoomIn': 'ズームイン',
   'canvas.hud.zoomOut': 'ズームアウト',
+  'canvas.hud.arrange.open': '整理',
+  'canvas.hud.arrange.tidy': '整頓',
+  'canvas.hud.arrange.unifySize': 'サイズ統一',
+  'canvas.hud.arrange.gap.label': '間隔',
+  'canvas.hud.arrange.gap.tight': '狭い',
+  'canvas.hud.arrange.gap.normal': '標準',
+  'canvas.hud.arrange.gap.wide': '広い',
 
   // ---------- AppMenu ----------
   'appMenu.title': 'プロジェクトメニュー',
@@ -560,6 +567,13 @@ const en: Dict = {
   'canvas.hud.fit': 'Fit',
   'canvas.hud.zoomIn': 'Zoom in',
   'canvas.hud.zoomOut': 'Zoom out',
+  'canvas.hud.arrange.open': 'Arrange',
+  'canvas.hud.arrange.tidy': 'Tidy up',
+  'canvas.hud.arrange.unifySize': 'Unify size',
+  'canvas.hud.arrange.gap.label': 'Gap',
+  'canvas.hud.arrange.gap.tight': 'Tight',
+  'canvas.hud.arrange.gap.normal': 'Normal',
+  'canvas.hud.arrange.gap.wide': 'Wide',
 
   // ---------- AppMenu ----------
   'appMenu.title': 'Project menu',

@@ -809,6 +809,87 @@
   margin: 0 3px;
 }
 
+/* Issue #369: arrange popover anchored to HUD */
+.tc__hud-arrange {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.tc__hud-arrange-pop {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  right: 0;
+  min-width: 168px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--surface-glass, rgba(20, 20, 19, 0.86));
+  backdrop-filter: blur(14px) saturate(160%);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-md);
+  z-index: 30;
+  font-size: 11.5px;
+  color: var(--text);
+}
+.tc__hud-arrange-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-mute);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: all 140ms var(--ease-out);
+}
+.tc__hud-arrange-item:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+.tc__hud-arrange-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 2px;
+}
+.tc__hud-arrange-label {
+  padding: 2px 10px;
+  color: var(--text-mute);
+  font-size: 10.5px;
+  letter-spacing: 0.02em;
+}
+.tc__hud-arrange-gaps {
+  display: flex;
+  gap: 4px;
+  padding: 2px;
+}
+.tc__hud-arrange-gap {
+  flex: 1;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-mute);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  transition: all 140ms var(--ease-out);
+}
+.tc__hud-arrange-gap:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.tc__hud-arrange-gap.is-active {
+  background: var(--bg-elev);
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
 /* handoff edge: stroke-dasharray flow */
 @keyframes tcEdgeFlow {
   to {
