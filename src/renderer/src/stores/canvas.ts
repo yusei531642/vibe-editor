@@ -7,6 +7,11 @@
 import { create } from 'zustand';
 import { persist, subscribeWithSelector } from 'zustand/middleware';
 import type { Edge, Node, Viewport } from '@xyflow/react';
+import {
+  tidyTerminals,
+  unifyTerminalSize,
+  type ArrangeGap
+} from '../lib/canvas-arrange';
 
 export type CardType = 'terminal' | 'agent' | 'editor' | 'diff' | 'fileTree' | 'changes';
 
@@ -66,6 +71,16 @@ interface CanvasState {
    */
   lastRecruitAt: number | null;
   notifyRecruit: () => void;
+  /**
+   * Issue #369: Canvas 内の terminal / agent カードを一括整理整頓する。
+   * 既存 PTY を維持するため node id / data / payload は触らず、
+   * position と style.width/height だけを更新する。
+   * 次回 `tidyTerminals` 用に最後に選ばれた gap も保存しておく。
+   */
+  arrangeGap: ArrangeGap;
+  setArrangeGap: (gap: ArrangeGap) => void;
+  tidyTerminalCards: (gap?: ArrangeGap) => void;
+  unifyTerminalCardSize: () => void;
 }
 
 export type StageView = 'stage' | 'list' | 'focus';
@@ -273,7 +288,17 @@ export const useCanvasStore = create<CanvasState>()(
       },
       // Issue #253: recruit 後の fitView トリガー (use-recruit-listener が書き、Canvas が監視)
       lastRecruitAt: null,
-      notifyRecruit: () => set({ lastRecruitAt: Date.now() })
+      notifyRecruit: () => set({ lastRecruitAt: Date.now() }),
+      // Issue #369: terminal/agent カードの一括整理整頓
+      arrangeGap: 'normal',
+      setArrangeGap: (gap) => set({ arrangeGap: gap }),
+      tidyTerminalCards: (gap) =>
+        set((state) => ({
+          nodes: tidyTerminals(state.nodes, { gap: gap ?? state.arrangeGap }),
+          arrangeGap: gap ?? state.arrangeGap
+        })),
+      unifyTerminalCardSize: () =>
+        set((state) => ({ nodes: unifyTerminalSize(state.nodes) }))
     }),
     {
       name: 'vibe-editor:canvas',
@@ -388,7 +413,8 @@ export const useCanvasStore = create<CanvasState>()(
         nodes: s.nodes,
         viewport: s.viewport,
         stageView: s.stageView,
-        teamLocks: s.teamLocks
+        teamLocks: s.teamLocks,
+        arrangeGap: s.arrangeGap
       })
     }
     )
