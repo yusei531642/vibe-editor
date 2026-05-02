@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
-  Team,
   TerminalAgent,
   TeamRole
 } from '../../../../types/shared';
@@ -67,15 +66,11 @@ export interface UseTerminalTabsOptions {
   /** 上限警告 / 復元失敗トースト用。 */
   showToast: ToastFn;
   /**
-   * teams 配列。Phase 1-3 では read-only に opts 経由で受け取る。
-   * standaloneTabList / teamGroupList の useMemo・closeTerminalTab の
-   * leader 判定で参照する。Phase 1-4 (use-team-management) で本格移管予定。
-   */
-  teams: Team[];
-  /**
    * leader タブを閉じる確認後、または leader 1 人だけの "empty team" を
-   * 即終了するパスで呼ばれる callback。Phase 1-4 まで App.tsx に実装を残し、
-   * hook には注入する (teams setter / clearSpawnTimers / cleanupTeamMcp が絡むため)。
+   * 即終了するパスで呼ばれる callback。Phase 1-4 (use-team-management) が
+   * doCloseTeam を提供し、App.tsx 側で ref ブリッジ経由で注入する
+   * (teams setter / clearSpawnTimers / cleanupTeamMcp が絡むため
+   * 本 hook 内で完結させない)。
    */
   closeTeam: (teamId: string) => void;
 }
@@ -127,10 +122,6 @@ export interface UseTerminalTabsResult {
   // ---- inline label edit ----
   editingLabelTabId: number | null;
   setEditingLabelTabId: React.Dispatch<React.SetStateAction<number | null>>;
-
-  // ---- 派生値 ----
-  standaloneTabList: TerminalTab[];
-  teamGroupList: { team: Team; tabs: TerminalTab[] }[];
 
   // ---- next id ref (App.tsx 残置 callback で id 採番が必要な場合に使う) ----
   nextTerminalIdRef: React.MutableRefObject<number>;
@@ -349,27 +340,6 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
     }
   }, [opts.claudeReady, opts.projectRoot, terminalTabs.length, addTerminalTab, opts.viewMode]);
 
-  const { standaloneTabList, teamGroupList } = useMemo(() => {
-    const standalone = terminalTabs.filter((t) => !t.teamId);
-    const teamMap = new Map<string, TerminalTab[]>();
-    for (const t of terminalTabs) {
-      if (t.teamId) {
-        const arr = teamMap.get(t.teamId) || [];
-        arr.push(t);
-        teamMap.set(t.teamId, arr);
-      }
-    }
-    const teamGroups = [...teamMap.entries()].map(([teamId, tabs]) => ({
-      team: opts.teams.find((t) => t.id === teamId) ?? { id: teamId, name: 'Team' },
-      tabs: tabs.sort((a, b) => {
-        if (a.role === 'leader') return -1;
-        if (b.role === 'leader') return 1;
-        return a.id - b.id;
-      })
-    }));
-    return { standaloneTabList: standalone, teamGroupList: teamGroups };
-  }, [terminalTabs, opts.teams]);
-
   const getDnDProps = useCallback(
     (tabId: number): DnDHandlers => ({
       draggable: true,
@@ -453,8 +423,6 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
     getDnDProps,
     editingLabelTabId,
     setEditingLabelTabId,
-    standaloneTabList,
-    teamGroupList,
     nextTerminalIdRef,
     resetForProjectSwitch
   };
