@@ -303,13 +303,23 @@ function FlowApp(): JSX.Element {
   // Issue #259 (継承): zoom が MIN_RECRUIT_ZOOM を下回ると TUI が読めなくなるため、
   // 現在の zoom がそれより大きければ尊重し、下回っていれば minZoom にクランプして寄せる。
   const MIN_RECRUIT_ZOOM = 0.7;
-  const lastRecruitFocus = useCanvasStore((s) => s.lastRecruitFocus);
+  // 旧 #372 review (vibe-editor-reviewer #418): selector で `lastRecruitFocus` を
+  // オブジェクトのまま購読すると、zustand が毎回新しい参照を返すため effect deps が
+  // 「object reference に敏感」になり、useReactFlow の参照変化と組み合わさって
+  // 過剰再実行に繋がりうる。primitive (`nodeId` / `requestedAt`) だけを deps に置き、
+  // 旧 trigger (`requestedAt`) が変化したときだけ effect を発火させる。
+  const recruitFocusNodeId = useCanvasStore(
+    (s) => s.lastRecruitFocus?.nodeId ?? null
+  );
+  const recruitFocusRequestedAt = useCanvasStore(
+    (s) => s.lastRecruitFocus?.requestedAt ?? 0
+  );
   const reactFlow = useReactFlow();
   useEffect(() => {
-    if (!lastRecruitFocus) return;
+    if (!recruitFocusNodeId || !recruitFocusRequestedAt) return;
     const timer = window.setTimeout(() => {
       try {
-        const targetNode = reactFlow.getNode(lastRecruitFocus.nodeId);
+        const targetNode = reactFlow.getNode(recruitFocusNodeId);
         // recruit cancel 等で対象ノードが消えていれば no-op
         if (!targetNode) return;
         const vp = reactFlow.getViewport();
@@ -330,7 +340,7 @@ function FlowApp(): JSX.Element {
       }
     }, 200);
     return () => window.clearTimeout(timer);
-  }, [lastRecruitFocus, reactFlow]);
+  }, [recruitFocusNodeId, recruitFocusRequestedAt, reactFlow]);
 
   return (
     <div
