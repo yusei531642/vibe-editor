@@ -50,7 +50,6 @@ import {
 } from './lib/settings-context';
 import { useToast } from './lib/toast-context';
 import { useUiStore } from './stores/ui';
-import { webviewZoom } from './lib/webview-zoom';
 import { dedupPrepend, listContainsPath } from './lib/path-norm';
 import { useProjectLoader } from './lib/hooks/use-project-loader';
 import { useFileTabs } from './lib/hooks/use-file-tabs';
@@ -64,6 +63,7 @@ import {
 import type { TerminalTab } from './lib/hooks/use-terminal-tabs';
 import { useTeamManagement } from './lib/hooks/use-team-management';
 import { useLayoutResize } from './lib/hooks/use-layout-resize';
+import { useAppShortcuts } from './lib/hooks/use-app-shortcuts';
 import type { Command } from './lib/commands';
 
 const THEMES_FOR_PALETTE: ThemeName[] = [
@@ -797,85 +797,18 @@ export function App(): JSX.Element {
     dismissToast
   ]);
 
-  // ---------- Shift+ホイールで webview zoom ----------
-  // webviewZoom (factor 0.5-3.0) に委譲。Ctrl+=/-/0 と同じ値を共有するので
-  // 両方の経路を混ぜて操作しても状態が食い違わない。
-  useEffect(() => {
-    const handler = (e: WheelEvent): void => {
-      if (!e.shiftKey) return;
-      e.preventDefault();
-      webviewZoom.adjust(e.deltaY > 0 ? -webviewZoom.STEP : webviewZoom.STEP);
-    };
-    window.addEventListener('wheel', handler, { passive: false });
-    return () => window.removeEventListener('wheel', handler);
-  }, []);
-
-  // ---------- グローバルショートカット ----------
-
-  useEffect(() => {
-    const handler = (e: KeyboardEvent): void => {
-      const mod = e.ctrlKey || e.metaKey;
-      if (!mod) {
-        if (e.key === 'Escape') {
-          if (paletteOpen) setPaletteOpen(false);
-          else if (settingsOpen) setSettingsOpen(false);
-        }
-        return;
-      }
-      // Issue #162: Ctrl+Shift+P (パレット toggle) と Ctrl+, (設定) は modal open 中でも
-      // 反応してよい (toggle 用途のため)。それ以外のショートカット (Ctrl+S / Ctrl+Tab /
-      // Ctrl+W / Ctrl+Shift+T) は modal/palette open 中はブロックする。
-      const modalIsOpen = paletteOpen || settingsOpen;
-      if (e.shiftKey && (e.key === 'P' || e.key === 'p')) {
-        e.preventDefault();
-        e.stopPropagation();
-        setPaletteOpen((v) => !v);
-        return;
-      }
-      if (e.key === ',') {
-        e.preventDefault();
-        setSettingsOpen(true);
-        return;
-      }
-      if (modalIsOpen) {
-        // 以降の保存・タブ切替・タブ閉じはブロック
-        return;
-      }
-      if (!e.shiftKey && (e.key === 's' || e.key === 'S')) {
-        if (activeTabId && activeTabId.startsWith('edit:')) {
-          e.preventDefault();
-          e.stopPropagation();
-          void saveEditorTab(activeTabId);
-        }
-        return;
-      }
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        e.stopPropagation();
-        cycleTab(e.shiftKey ? -1 : 1);
-        return;
-      }
-      if (e.key === 'w' || e.key === 'W') {
-        // Issue #38: フォーカスが xterm (Claude / Codex / シェル) の中にあるときは
-        // Ctrl+W を「直前の単語を削除」として PTY に素通しさせる。
-        const active = document.activeElement as HTMLElement | null;
-        const inTerminal = active?.closest?.('.xterm') !== undefined &&
-          active?.closest?.('.xterm') !== null;
-        if (!inTerminal && activeTabId) {
-          e.preventDefault();
-          e.stopPropagation();
-          closeTab(activeTabId);
-        }
-        return;
-      }
-      if (e.shiftKey && (e.key === 'T' || e.key === 't')) {
-        e.preventDefault();
-        reopenLastClosed();
-      }
-    };
-    window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
-  }, [paletteOpen, settingsOpen, activeTabId, cycleTab, closeTab, reopenLastClosed, saveEditorTab]);
+  // Phase 1-6 (Issue #373): グローバルショートカット + Shift+wheel zoom を hook に集約。
+  useAppShortcuts({
+    paletteOpen,
+    setPaletteOpen,
+    settingsOpen,
+    setSettingsOpen,
+    activeTabId,
+    cycleTab,
+    closeTab,
+    reopenLastClosed,
+    saveEditorTab
+  });
 
   // 起動引数合成 (getTerminalArgs / getCodexInstructions / getTerminalEnv /
   // getRolePrompt) と チーム履歴 resume/削除 / Leader-only close /
