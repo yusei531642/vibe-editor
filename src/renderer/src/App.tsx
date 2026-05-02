@@ -2151,24 +2151,6 @@ export function App(): JSX.Element {
       setSidebarView('files');
     }
   }, [hasGitRepo, sidebarView]);
-  const [userInitial, setUserInitial] = useState<string>('');
-  useEffect(() => {
-    let cancelled = false;
-    window.api.app
-      .getUserInfo()
-      .then((info) => {
-        if (cancelled) return;
-        const first = (info.username || '').trim().slice(0, 1);
-        setUserInitial(first ? first.toUpperCase() : '?');
-      })
-      .catch(() => {
-        if (!cancelled) setUserInitial('?');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   const activityFeed = useActivityFeed();
   // Phase 6: vibe-canvas:recruit/dismiss イベントを listen して canvas store に反映
   useRecruitListener();
@@ -2218,7 +2200,6 @@ export function App(): JSX.Element {
         status={status}
         onRestart={handleRestart}
         onOpenPalette={() => setPaletteOpen(true)}
-        userInitial={userInitial}
         availableUpdate={availableUpdate}
         onClickUpdate={handleClickUpdate}
         menuBar={
