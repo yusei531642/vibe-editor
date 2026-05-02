@@ -17,7 +17,6 @@ interface TopbarProps {
   status: string;
   onRestart: () => void;
   onOpenPalette: () => void;
-  userInitial?: string;
   /** 左側に置く自作メニューバー (File / View / Help…) */
   menuBar?: ReactNode;
   /** silentCheckForUpdate で検出された更新情報。null のときボタンは出さない */
@@ -30,14 +29,13 @@ interface TopbarProps {
  * Redesign shell の上端バー (44px)。
  * Claude Design バンドル "vibe-editor Redesign" の .topbar セクションを
  * Tauri アプリ向けに移植。ブランドドット + プロジェクトクラム + モードピル
- * + ⌘K 検索トリガ + アイコン + ユーザーアバター の 6 パート構成。
+ * + ⌘K 検索トリガ + アイコンの 5 パート構成。
  */
 export function Topbar({
   projectRoot,
   status,
   onRestart,
   onOpenPalette,
-  userInitial = 'U',
   menuBar,
   availableUpdate,
   onClickUpdate
@@ -140,10 +138,6 @@ export function Topbar({
         >
           <CommandIcon size={14} strokeWidth={1.9} />
         </button>
-      </div>
-
-      <div className="topbar__user" aria-label="user">
-        {userInitial.slice(0, 1).toUpperCase()}
       </div>
 
       {/* Issue #260 PR-2: カスタムタイトルバーのウィンドウ制御 (decorations: false の代替) */}

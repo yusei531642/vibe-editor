@@ -371,21 +371,6 @@
   white-space: nowrap;
 }
 
-.topbar__user {
-  -webkit-app-region: no-drag;
-  width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  background: var(--accent);
-  color: white;
-  display: grid;
-  place-items: center;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  flex-shrink: 0;
-}
-
 /* ==================== WINDOW CONTROLS (Issue #260 PR-2) ==================== */
 /* `decorations: false` でネイティブ chrome を外した代わりのカスタムボタン群。
    .topbar の右端に座り、`-webkit-app-region: drag` の親領域から自身は no-drag に
