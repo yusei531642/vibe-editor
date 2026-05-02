@@ -3,9 +3,9 @@
 // portable-pty 経由で PTY を spawn、SessionRegistry に登録、
 // terminal:data:{id} / terminal:exit:{id} イベントを emit する。
 
-mod paste_image;
 mod codex_instructions;
 mod command_validation;
+mod paste_image;
 
 use crate::pty::{spawn_session, SpawnOptions, UserWriteOutcome};
 use crate::state::AppState;
@@ -164,6 +164,7 @@ pub async fn terminal_create(
             ..Default::default()
         });
     }
+    let is_codex_command = command_validation::is_codex_command(&command);
 
     // Issue #271: HMR remount 経路では renderer 側 hook が `attachIfExists: true` を立て、
     // 既存 PTY に bind し直したいシグナルを送る。allowlist / immediate-exec チェックを通った
@@ -225,6 +226,9 @@ pub async fn terminal_create(
 
     let (cwd, warning) =
         crate::pty::session::resolve_valid_cwd(&opts.cwd, opts.fallback_cwd.as_deref());
+    if is_codex_command {
+        crate::pty::codex_broker::cleanup_stale_for_cwd(&cwd);
+    }
 
     // Issue #99 / Codex stability: codex かつ instructions ありなら、
     // (1) 一時ファイル化して `--config model_instructions_file=<path>` を args 末尾に追加 (古い経路)。
@@ -233,7 +237,7 @@ pub async fn terminal_create(
     //     その場合でもプロンプトが「最初の user input」としては必ず届くようにする。
     //     team_hub::inject::build_chunks を共有して ConPTY-safe (64B / 15ms チャンク + UTF-8 境界保護) な
     //     注入を行う。同じロジックでチームメッセージの注入と挙動を揃えることで、xterm 表示の崩れも避けられる。
-    let codex_instructions_for_inject: Option<String> = if command_validation::is_codex_command(&command) {
+    let codex_instructions_for_inject: Option<String> = if is_codex_command {
         if let Some(instr) = opts
             .codex_instructions
             .as_deref()
@@ -242,9 +246,7 @@ pub async fn terminal_create(
         {
             if let Some(path) = codex_instructions::prepare_codex_instructions_file(instr).await {
                 let path_str = path.to_string_lossy().into_owned();
-                tracing::info!(
-                    "[terminal] codex model_instructions_file={path_str}"
-                );
+                tracing::info!("[terminal] codex model_instructions_file={path_str}");
                 args.push("--config".to_string());
                 args.push(format!("model_instructions_file={path_str}"));
             }
@@ -266,9 +268,7 @@ pub async fn terminal_create(
         opts.cols,
         opts.rows
     );
-    tracing::debug!(
-        "[IPC] terminal_create (verbose) args={args:?} cwd={cwd}"
-    );
+    tracing::debug!("[IPC] terminal_create (verbose) args={args:?} cwd={cwd}");
 
     if let Some(w) = &warning {
         tracing::warn!("[terminal] {w}");
@@ -314,6 +314,7 @@ pub async fn terminal_create(
         command: command.clone(),
         args: args.clone(),
         cwd,
+        is_codex: is_codex_command,
         cols: opts.cols.min(u32::from(u16::MAX)) as u16,
         rows: opts.rows.min(u32::from(u16::MAX)) as u16,
         env,
@@ -398,9 +399,12 @@ pub async fn terminal_create(
                 } else {
                     watcher_root
                 };
-                crate::pty::claude_watcher::spawn_watcher(app.clone(), watcher_id.clone(), actual_root, move || {
-                    registry.get(&watcher_id).is_some()
-                });
+                crate::pty::claude_watcher::spawn_watcher(
+                    app.clone(),
+                    watcher_id.clone(),
+                    actual_root,
+                    move || registry.get(&watcher_id).is_some(),
+                );
             }
             let cmdline = std::iter::once(command.clone())
                 .chain(args.iter().cloned())
@@ -462,7 +466,10 @@ pub async fn terminal_resize(
 ) -> Result<(), String> {
     if let Some(s) = state.pty_registry.get(&id) {
         // resize 失敗は無害なので握りつぶす (旧実装と同じ)
-        let _ = s.resize(cols.min(u32::from(u16::MAX)) as u16, rows.min(u32::from(u16::MAX)) as u16);
+        let _ = s.resize(
+            cols.min(u32::from(u16::MAX)) as u16,
+            rows.min(u32::from(u16::MAX)) as u16,
+        );
     }
     Ok(())
 }
