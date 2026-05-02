@@ -15,7 +15,6 @@ import {
   Settings as SettingsIcon
 } from 'lucide-react';
 import type {
-  GitDiffResult,
   GitFileChange,
   GitStatus,
   SessionInfo,
@@ -58,6 +57,8 @@ import { webviewZoom } from './lib/webview-zoom';
 import { parseShellArgs } from './lib/parse-args';
 import { dedupPrepend, listContainsPath } from './lib/path-norm';
 import { useProjectLoader } from './lib/hooks/use-project-loader';
+import { useFileTabs } from './lib/hooks/use-file-tabs';
+import type { DiffTab, EditorTab } from './lib/hooks/use-file-tabs';
 import type { Command } from './lib/commands';
 
 const THEMES_FOR_PALETTE: ThemeName[] = [
@@ -69,45 +70,7 @@ const THEMES_FOR_PALETTE: ThemeName[] = [
   'light'
 ];
 
-interface DiffTab {
-  id: string;
-  relPath: string;
-  result: GitDiffResult | null;
-  loading: boolean;
-  pinned: boolean;
-}
-
-interface EditorTab {
-  id: string;
-  /**
-   * Issue #4: 開いているファイルがどのワークスペースルート配下かを記憶する。
-   * 同名の相対パスが別ルートに存在し得るので、read/write や ID 衝突回避に必須。
-   */
-  rootPath: string;
-  relPath: string;
-  content: string;
-  originalContent: string;
-  isBinary: boolean;
-  /**
-   * Issue #35: 非 UTF-8 (CP932 など) を from_utf8_lossy で読んだ場合に true。
-   * 編集は許可しない (保存すると lossy 変換後の UTF-8 で上書きされ、元 encoding を失うため)。
-   */
-  lossyEncoding: boolean;
-  /**
-   * Issue #102: read 時に検出した encoding。save 時にこの encoding で再エンコードして
-   * 書き戻すことで UTF-16/UTF-32/UTF-8 BOM が UTF-8 にロスっと変換されるのを防ぐ。
-   */
-  encoding: string;
-  /** Issue #65: 開いた時点の mtime (ms since epoch)。save 時の external-change 検出に使う */
-  mtimeMs?: number;
-  /** Issue #104: 開いた時点の size。mtime 解像度の粗い FS 用に併用検出する */
-  sizeBytes?: number;
-  /** Issue #119: 開いた時点の SHA-256 (hex)。同サイズ・1 秒以内の外部変更を検出するのに使う */
-  contentHash?: string;
-  loading: boolean;
-  error: string | null;
-  pinned: boolean;
-}
+// DiffTab / EditorTab の型定義は use-file-tabs.ts に移管済み (Issue #373 Phase 1-2)。
 
 /** 同時に立てられるターミナルの上限。メモリ/レイアウト保護の安全弁 */
 const MAX_TERMINALS = 30;
@@ -294,6 +257,30 @@ export function App(): JSX.Element {
     setStatus
   });
 
+  // Phase 1-2 (Issue #373): editor / diff tab + recentlyClosed を hook に外出し。
+  // editor/diff の DnD は現状存在しない (DnD は terminal タブ専用) ため hook では扱わない。
+  const {
+    editorTabs,
+    setEditorTabs,
+    diffTabs,
+    setDiffTabs,
+    recentlyClosed,
+    activeTabId,
+    setActiveTabId,
+    dirtyEditorTabs,
+    confirmDiscardEditorTabs,
+    openEditorTab,
+    updateEditorContent,
+    saveEditorTab,
+    openDiffTab,
+    refreshDiffTabsForPath,
+    closeTab,
+    togglePin,
+    reopenLastClosed,
+    cycleTab,
+    resetForProjectSwitch: resetTabsForProjectSwitch
+  } = useFileTabs({ projectRoot, refreshGit, gitStatus, showToast });
+
   // sessions
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState<boolean>(false);
@@ -349,11 +336,7 @@ export function App(): JSX.Element {
     };
   }, [flushTeamHistoryNow]);
 
-  // tabs: diff タブと editor タブを並立させ、id プレフィックスで判別する
-  const [activeTabId, setActiveTabId] = useState<string | null>(null);
-  const [diffTabs, setDiffTabs] = useState<DiffTab[]>([]);
-  const [editorTabs, setEditorTabs] = useState<EditorTab[]>([]);
-  const [recentlyClosed, setRecentlyClosed] = useState<DiffTab[]>([]);
+  // tabs (editor / diff / recentlyClosed) は useFileTabs で集中管理する。
   const [sideBySide, setSideBySide] = useState<boolean>(true);
 
   // Claude Code / Codex terminal tabs (最大10個の同時実行をサポート)
@@ -799,36 +782,13 @@ export function App(): JSX.Element {
     void updateSettings({ sidebarWidth: DEFAULT_SIDEBAR });
   }, [updateSettings]);
 
-  const dirtyEditorTabs = useMemo(
-    () => editorTabs.filter((tab) => !tab.isBinary && tab.content !== tab.originalContent),
-    [editorTabs]
-  );
-
-  const confirmDiscardEditorTabs = useCallback(
-    (tabIds?: string[]): boolean => {
-      const targets =
-        tabIds && tabIds.length > 0
-          ? dirtyEditorTabs.filter((tab) => tabIds.includes(tab.id))
-          : dirtyEditorTabs;
-      if (targets.length === 0) return true;
-      if (targets.length === 1) {
-        return window.confirm(t('editor.discardSingle', { path: targets[0].relPath }));
-      }
-      return window.confirm(t('editor.discardMultiple', { count: targets.length }));
-    },
-    [dirtyEditorTabs, t]
-  );
-
-  // Phase 1-1 (Issue #373): loadProject / 初回ロード effect / タイトルバー effect /
-  // refreshGit は use-project-loader.ts に移管済み。
+  // Phase 1-1 / 1-2 (Issue #373): loadProject / 初回ロード effect / タイトルバー effect /
+  // refreshGit は use-project-loader.ts、editor/diff tab 関連は use-file-tabs.ts に移管済み。
   // confirmDiscardEditorTabs / onProjectSwitched / onLoaded を hook に橋渡しする。
   confirmDiscardRef.current = confirmDiscardEditorTabs;
   projectSwitchedRef.current = (root: string): void => {
-    // タブ・セッション状態をリセット
-    setDiffTabs([]);
-    setEditorTabs([]);
-    setRecentlyClosed([]);
-    setActiveTabId(null);
+    // タブのリセットは use-file-tabs に委譲。
+    resetTabsForProjectSwitch();
     setActiveSessionId(null);
     // ターミナル＆チームをリセット（全タブ閉じて新規1つ）
     setTeams([]);
@@ -903,90 +863,8 @@ export function App(): JSX.Element {
     if (sidebarView === 'sessions') void refreshSessions();
   }, [sidebarView, refreshSessions]);
 
-  const openDiffTab = useCallback(
-    async (file: GitFileChange) => {
-      if (!projectRoot) return;
-      const id = `diff:${file.path}`;
-      setActiveTabId(id);
-      setDiffTabs((prev) => {
-        if (prev.some((t) => t.id === id)) return prev;
-        return [
-          ...prev,
-          { id, relPath: file.path, result: null, loading: true, pinned: false }
-        ];
-      });
-      try {
-        // Issue #19: rename の場合は HEAD 側を originalPath から引く
-        const result = await window.api.git.diff(projectRoot, file.path, file.originalPath);
-        setDiffTabs((prev) =>
-          prev.map((t) => (t.id === id ? { ...t, result, loading: false } : t))
-        );
-      } catch (err) {
-        setDiffTabs((prev) =>
-          prev.map((t) =>
-            t.id === id
-              ? {
-                  ...t,
-                  loading: false,
-                  result: {
-                    ok: false,
-                    error: String(err),
-                    path: file.path,
-                    isNew: false,
-                    isDeleted: false,
-                    isBinary: false,
-                    original: '',
-                    modified: ''
-                  }
-                }
-              : t
-          )
-        );
-      }
-    },
-    [projectRoot]
-  );
-
-  const refreshDiffTabsForPath = useCallback(
-    async (relPath: string) => {
-      if (!projectRoot) return;
-      if (!diffTabs.some((tab) => tab.relPath === relPath)) return;
-      // Issue #19: rename entry なら HEAD 側を引くため originalPath を同時に渡す
-      const originalPath = gitStatus?.files.find((f) => f.path === relPath)?.originalPath;
-      try {
-        const result = await window.api.git.diff(projectRoot, relPath, originalPath);
-        setDiffTabs((prev) =>
-          prev.map((tab) =>
-            tab.relPath === relPath ? { ...tab, result, loading: false } : tab
-          )
-        );
-      } catch (err) {
-        setDiffTabs((prev) =>
-          prev.map((tab) =>
-            tab.relPath === relPath
-              ? {
-                  ...tab,
-                  loading: false,
-                  result: {
-                    ok: false,
-                    error: String(err),
-                    path: relPath,
-                    isNew: false,
-                    isDeleted: false,
-                    isBinary: false,
-                    original: '',
-                    modified: ''
-                  }
-                }
-              : tab
-          )
-        );
-      }
-    },
-    [projectRoot, diffTabs, gitStatus]
-  );
-
-  // Issue #66: fs watcher の callback が ref 経由で最新 refresh 関数を引けるように同期
+  // Issue #66: fs watcher の callback が ref 経由で最新 refresh 関数を引けるように同期。
+  // openDiffTab / refreshDiffTabsForPath は use-file-tabs.ts に移管済み (Issue #373 Phase 1-2)。
   fsWatchHandlersRef.current = {
     refreshGit,
     refreshDiffTabsForPath,
@@ -995,151 +873,8 @@ export function App(): JSX.Element {
 
   // ---------- エディタタブ ----------
 
-  const openEditorTab = useCallback(
-    async (rootPath: string, relPath: string) => {
-      const effectiveRoot = rootPath || projectRoot;
-      if (!effectiveRoot) return;
-      // Issue #4: 同じ相対パスが別ルートに存在しうるので id に root も混ぜる
-      const id = `edit:${effectiveRoot}\u0001${relPath}`;
-      setActiveTabId(id);
-      setEditorTabs((prev) => {
-        if (prev.some((t) => t.id === id)) return prev;
-        return [
-          ...prev,
-          {
-            id,
-            rootPath: effectiveRoot,
-            relPath,
-            content: '',
-            originalContent: '',
-            isBinary: false,
-            lossyEncoding: false,
-            encoding: 'utf-8',
-            loading: true,
-            error: null,
-            pinned: false
-          }
-        ];
-      });
-      try {
-        const res = await window.api.files.read(effectiveRoot, relPath);
-        const lossy = res.encoding === 'lossy';
-        // Issue #35: lossy 読み込み時はユーザーに明示的に通知する
-        if (lossy) {
-          showToast(
-            t('editor.nonUtf8Warning', { path: relPath }),
-            { tone: 'warning' }
-          );
-        }
-        setEditorTabs((prev) =>
-          prev.map((tab) =>
-            tab.id === id
-              ? {
-                  ...tab,
-                  loading: false,
-                  error: res.ok ? null : res.error ?? 'error',
-                  content: res.content,
-                  originalContent: res.content,
-                  isBinary: res.isBinary,
-                  lossyEncoding: lossy,
-                  encoding: res.encoding || 'utf-8',
-                  mtimeMs: res.mtimeMs,
-                  sizeBytes: res.sizeBytes,
-                  contentHash: res.contentHash
-                }
-              : tab
-          )
-        );
-      } catch (err) {
-        setEditorTabs((prev) =>
-          prev.map((tab) =>
-            tab.id === id ? { ...tab, loading: false, error: String(err) } : tab
-          )
-        );
-      }
-    },
-    [projectRoot, showToast, t]
-  );
-
-  const updateEditorContent = useCallback((id: string, content: string) => {
-    setEditorTabs((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, content } : t))
-    );
-  }, []);
-
-  const saveEditorTab = useCallback(
-    async (id: string) => {
-      const tab = editorTabs.find((t) => t.id === id);
-      if (!tab) return;
-      const targetRoot = tab.rootPath || projectRoot;
-      if (!targetRoot) return;
-      if (tab.isBinary) return;
-      // Issue #35: lossy で読み込んだ (非 UTF-8) タブは UTF-8 書き戻すと元 encoding を失う。
-      // 保存を拒否し、ユーザーに明示する。
-      if (tab.lossyEncoding) {
-        showToast(t('editor.nonUtf8SaveBlocked', { path: tab.relPath }), { tone: 'warning' });
-        return;
-      }
-      if (tab.content === tab.originalContent) return;
-      try {
-        // Issue #65 / #104 / #102 / #119: mtime + size + encoding + content_hash を渡して、
-        // 同サイズかつ秒精度で見逃す外部変更も内容ハッシュで検出する。
-        let res = await window.api.files.write(
-          targetRoot,
-          tab.relPath,
-          tab.content,
-          tab.mtimeMs,
-          tab.sizeBytes,
-          tab.encoding,
-          tab.contentHash
-        );
-        if (res.conflict) {
-          // ユーザーに確認 → OK なら再度 mtime/size/hash チェック無しで書き込む
-          const overwrite = window.confirm(
-            t('editor.externalChangeConfirm', { path: tab.relPath })
-          );
-          if (!overwrite) {
-            showToast(t('editor.saveAborted', { path: tab.relPath }), { tone: 'warning' });
-            return;
-          }
-          res = await window.api.files.write(
-            targetRoot,
-            tab.relPath,
-            tab.content,
-            undefined,
-            undefined,
-            tab.encoding,
-            undefined
-          );
-        }
-        if (res.ok) {
-          setEditorTabs((prev) =>
-            prev.map((t) =>
-              t.id === id
-                ? {
-                    ...t,
-                    originalContent: t.content,
-                    mtimeMs: res.mtimeMs,
-                    sizeBytes: res.sizeBytes,
-                    contentHash: res.contentHash
-                  }
-                : t
-            )
-          );
-          showToast(t('editor.saved', { path: tab.relPath }), { tone: 'success' });
-          void refreshGit();
-          void refreshDiffTabsForPath(tab.relPath);
-        } else {
-          showToast(t('editor.saveFailed', { error: res.error ?? 'error' }), {
-            tone: 'error'
-          });
-        }
-      } catch (err) {
-        showToast(t('editor.saveFailed', { error: String(err) }), { tone: 'error' });
-      }
-    },
-    [projectRoot, editorTabs, refreshDiffTabsForPath, refreshGit, showToast, t]
-  );
+  // openEditorTab / updateEditorContent / saveEditorTab は use-file-tabs.ts に移管済み
+  // (Issue #373 Phase 1-2)。
 
   // ---------- 差分レビュー依頼 ----------
 
@@ -1201,86 +936,6 @@ export function App(): JSX.Element {
       addTerminalTab({ resumeSessionId: session.id });
     },
     [showToast, addTerminalTab]
-  );
-
-  // ---------- タブ操作 ----------
-
-  const closeTab = useCallback(
-    (id: string) => {
-      if (id.startsWith('edit:')) {
-        setEditorTabs((prev) => {
-          const target = prev.find((t) => t.id === id);
-          if (!target || target.pinned) return prev;
-          if (
-            !target.isBinary &&
-            target.content !== target.originalContent &&
-            !confirmDiscardEditorTabs([id])
-          ) {
-            return prev;
-          }
-          const next = prev.filter((t) => t.id !== id);
-          if (activeTabId === id) {
-            // 残ったエディタ or 差分タブのうち末尾を選択
-            const fallback =
-              next.length > 0 ? next[next.length - 1].id : diffTabs[diffTabs.length - 1]?.id ?? null;
-            setActiveTabId(fallback);
-          }
-          return next;
-        });
-        return;
-      }
-      setDiffTabs((prev) => {
-        const target = prev.find((t) => t.id === id);
-        if (!target || target.pinned) return prev;
-        setRecentlyClosed((rc) =>
-          [target, ...rc.filter((r) => r.id !== id)].slice(0, 10)
-        );
-        const next = prev.filter((t) => t.id !== id);
-        if (activeTabId === id) {
-          const fallback =
-            next.length > 0 ? next[next.length - 1].id : editorTabs[editorTabs.length - 1]?.id ?? null;
-          setActiveTabId(fallback);
-        }
-        return next;
-      });
-    },
-    [activeTabId, confirmDiscardEditorTabs, diffTabs, editorTabs]
-  );
-
-  const togglePin = useCallback((id: string) => {
-    if (id.startsWith('edit:')) {
-      setEditorTabs((prev) =>
-        prev.map((t) => (t.id === id ? { ...t, pinned: !t.pinned } : t))
-      );
-      return;
-    }
-    setDiffTabs((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, pinned: !t.pinned } : t))
-    );
-  }, []);
-
-  const reopenLastClosed = useCallback(() => {
-    setRecentlyClosed((rc) => {
-      if (rc.length === 0) return rc;
-      const [first, ...rest] = rc;
-      setDiffTabs((prev) => [...prev, { ...first }]);
-      setActiveTabId(first.id);
-      return rest;
-    });
-  }, []);
-
-  const cycleTab = useCallback(
-    (direction: 1 | -1) => {
-      const allIds = [
-        ...diffTabs.map((t) => t.id),
-        ...editorTabs.map((t) => t.id)
-      ];
-      if (allIds.length === 0) return;
-      const idx = activeTabId ? allIds.indexOf(activeTabId) : -1;
-      const next = ((idx < 0 ? 0 : idx) + direction + allIds.length) % allIds.length;
-      setActiveTabId(allIds[next]);
-    },
-    [activeTabId, diffTabs, editorTabs]
   );
 
   // ---------- プロジェクトメニュー操作 ----------
