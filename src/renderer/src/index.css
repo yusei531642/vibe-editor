@@ -1698,10 +1698,13 @@ body.is-resizing * {
 /* Issue #252: IDE mode terminal scrollbar restore - L1668-1685 (このブロックから下)
    xterm v6 + WebGL renderer 利用時、`.xterm-viewport` の上に WebGL canvas が
    `position: absolute` で被さってネイティブスクロールバーが隠れる問題を回避するため
-   z-index を上げる。背景色は維持（!important で下層 canvas の透過を防ぐ）。
-   pointer-events も保持して通常のスクロールが効く。 */
+   z-index を上げる。pointer-events も保持して通常のスクロールが効く。
+   Issue #365: 背景色は親 `.terminal-view` が `var(--bg)` で担当する。viewport は
+   `.xterm-screen` の兄弟で z-index 1 により最前面に来るため、ここで背景色を持たせると
+   下層の文字レイヤ (WebGL canvas / DOM text rows) を完全に覆い、Glass 以外のテーマで
+   ターミナル表示が消える。全テーマで viewport は透過にして文字レイヤを覆わない。 */
 .terminal-view .xterm-viewport {
-  background-color: var(--bg) !important;
+  background-color: transparent !important;
   z-index: 1;
 }
 
@@ -1744,13 +1747,10 @@ body.is-resizing * {
 }
 
 /* Glass テーマ時は xterm を透過させて親の backdrop-filter を活かす (Issue #89)。
-   `.terminal-view` の solid 背景と `.xterm-viewport` の `!important` 背景を両方打ち消す。 */
+   `.xterm-viewport` の透過は Issue #365 の修正で全テーマ共通になったため、ここでは
+   `.terminal-view` の solid 背景のみを打ち消す。 */
 [data-theme="glass"] .terminal-view {
   background: transparent;
-}
-
-[data-theme="glass"] .terminal-view .xterm-viewport {
-  background-color: transparent !important;
 }
 
 /* ---------- 右側固定 Claude Code パネル ---------- */
