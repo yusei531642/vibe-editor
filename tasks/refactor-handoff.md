@@ -1,6 +1,6 @@
 # Issue #373 Refactor 引き継ぎ書
 
-最終更新: 2026-05-02 (Phase 2 完了時点 / Phase 3 設計済み・未着手)
+最終更新: 2026-05-02 (Phase 2 完了時点 / Phase 3 設計確定済み・実装未着手)
 
 このドキュメントは Issue #373 (God File 解体ロードマップ) の進捗状況と、次のセッションが続きを引き取るための申し送り事項をまとめたもの。
 
@@ -36,7 +36,7 @@
 | ファイル | Phase 0 開始時 | Phase 2 完了時 | 目標 (Issue #373) |
 |---|---|---|---|
 | `App.tsx` | 2795 | **1275** | < 800 |
-| `team_hub/protocol.rs` | 1729 | 削除 (18 ファイルに分割、合計 1927) | < 1000/file |
+| `team_hub/protocol.rs` | 1729 | 分割 (1729 行 → 18 ファイル合計 1927 行 / +198 は mod.rs と pub use 集約・use 文重複・test 拡充による増分) | < 1000/file |
 | App.tsx 累計削減 | — | **-1520** | -1995 |
 | 進捗 | — | **76%** | 100% |
 
@@ -44,7 +44,7 @@
 
 | ファイル | 行数 | 責務 |
 |---|---|---|
-| `src/renderer/src/lib/hooks/use-project-loader.ts` | 197 | Phase 1-1: projectRoot / loadProject / refreshGit |
+| `src/renderer/src/lib/hooks/use-project-loader.ts` | 196 | Phase 1-1: projectRoot / loadProject / refreshGit |
 | `src/renderer/src/lib/hooks/use-file-tabs.ts` | 481 | Phase 1-2: editor tab / diff tab / recentlyClosed |
 | `src/renderer/src/lib/hooks/use-terminal-tabs.ts` | 429 | Phase 1-3: terminal tab + DnD + activity Set |
 | `src/renderer/src/lib/team-prompts.ts` | 88 | Phase 1-4: ROLE_DESC / ROLE_ORDER / generateTeamSystemPrompt (純粋関数) |
@@ -61,7 +61,7 @@
 
 | Phase | 概要 | 状態 | 備考 |
 |---|---|---|---|
-| **3** | PTY 境界整理 (`commands/terminal.rs` の race 無関係 helper を sub-module に move) | **設計済み・未着手** | **race 再生産 NG。慎重**。Phase 3 詳細設計は本文書末尾参照 |
+| **3** | PTY 境界整理 (`commands/terminal.rs` の race 無関係 helper を sub-module に move) | **設計確定済み・実装未着手** | **race 再生産 NG。慎重に進める**。Phase 3 詳細設計は本文書末尾参照 |
 | 4 | `CanvasLayout.tsx` / `SettingsModal.tsx` / `commands/files.rs` の細分化 | 未着手 | 3 PR 想定 |
 | 5 | 横断クリーンアップ (`tauri-api.ts` 領域別分割等) | 未着手 | 1 PR |
 
@@ -71,7 +71,7 @@
 
 ### スコープ判定 (慎重に絞った最終案)
 
-引き継ぎ書「**race 再生産 NG。慎重**」を最優先。subagent (Explore + Plan) で慎重に調査した結果、**最小スコープ move-only PR (案 A')** を採用する方針:
+引き継ぎ書「**race 再生産 NG。慎重に進める**」を最優先。subagent (Explore + Plan) で慎重に調査した結果、**最小スコープ move-only PR (案 A')** を採用する方針:
 
 #### 触ってよい (race と無関係な純関数群)
 
@@ -85,7 +85,7 @@
 
 `#[tauri::command]` を持つ pub async fn (`terminal_save_pasted_image` 等) は **`terminal.rs` 側に thin wrapper として残す**。これにより `lib.rs` の `invoke_handler!` 登録 (IPC コマンド名) は **1 行も変えない**。
 
-`terminal.rs` は 866 → 約 530 行に縮減。
+`terminal.rs` は 866 行 → 約 530 行に縮減 (sub-module へ move する純関数群が約 310 行 + thin wrapper 化による本体短縮で約 26 行追加削減)。
 
 #### 絶対に触らない (race 再生産リスクが大きい領域)
 
@@ -97,13 +97,13 @@
 | `terminal_create` の id 衝突リトライ | `terminal.rs:579-610` | Issue #292 atomic 検出 |
 | `attach_if_exists` preflight (snapshot 取得含む) | `terminal.rs:421-459` | Issue #271 + #285 follow-up |
 | `inject_codex_prompt_to_pty` の 1.8s + 15ms チャンク | `terminal.rs:250-296` | TUI race の経験値 |
-| 16ms / 32KB / 50ms startup-delay | `batcher.rs:13-22` | renderer 60fps 維持 / cold start 取りこぼし防止 |
+| 16ms / 32KB / 50ms startup delay | `batcher.rs:13-22` | renderer 60fps 維持 / cold start 取りこぼし防止 |
 | `safe_utf8_boundary` / scrollback `append_scrollback` | `batcher.rs:110` / `session.rs:31` | UTF-8 文字化け / scrollback テスト一式 |
 | `should_inherit_env` (ConPTY env allowlist) | `session.rs:278-323` | Issue #211 |
 | `spawn_session` 全体 (reader thread / mpsc / batcher 起動) | `session.rs:492-604` | reader → mpsc → batcher → emit のタイミングが PTY race の核心 |
 | `claude_watcher::spawn_watcher` 呼び出し | `terminal.rs:634-653` | jsonl 監視の race |
 
-#### `use-pty-session.ts` (744 行) は触らない
+#### `use-pty-session.ts` (`src/renderer/src/lib/use-pty-session.ts`, 744 行) は触らない
 
 既に effect 内で `loadInitialMetrics` / `attemptPreSubscribe` / `setupPostSubscribe` の 3 helper に分割済み。これ以上のファイル分離は:
 
@@ -115,7 +115,7 @@
 
 ### 推奨実装ステップ (Phase 3 を再開する次回セッション向け)
 
-```
+```text
 ステップ 0  ブランチ refactor/issue-373-phase3-terminal-helpers を origin/main から切る
             (運用ルールに従い main fetch → 切る → push 直前に再 fetch)
 
@@ -147,6 +147,8 @@
 各ステップで `git diff` を見て **「関数本体の 1 文字も変えていない」** ことを目視確認 (signature・doc コメント・cfg・型注釈すべて bit identical)。
 
 ### Phase 3 検証 (`tasks/refactor-smoke.md` Phase 3 必須)
+
+※ smoke 項目番号 (#1, #2, ...) の定義は `tasks/refactor-smoke.md` を参照。
 
 | # | 項目 | 重点確認 |
 |---|---|---|
@@ -188,19 +190,19 @@
 
 1. PR を出したら `vibe-editor-reviewer` (GitHub bot) が自動レビュー
 2. 指摘があれば修正 → 再 push → 再レビューが merge まで自動
-3. CodeRabbit は **任意** (任意の Phase で WSL Ubuntu の `coderabbit review --prompt-only --base main --type committed --no-color` で実行可、hourly cap あり)
+3. CodeRabbit は **任意** (いずれの Phase でも WSL Ubuntu の `coderabbit review --prompt-only --base main --type committed --no-color` で実行可、hourly cap あり)
 4. **trivial 判定で即 merge されることがある** → CodeRabbit 指摘修正は別 PR に分けるのが安全
 5. Phase 1 〜 2 の経験では **多くは初回 LGTM で即 merge**。Phase 1-2 のみ proofread Warning が 1 件出て fixup PR で吸収した
 
 ### 検証コマンド (Phase 完了ごと)
 
-```
+```bash
 npm run typecheck
 cargo check --manifest-path src-tauri/Cargo.toml
 cargo clippy --manifest-path src-tauri/Cargo.toml --no-deps
 ```
 
-3 つすべて green が PR 提出の最低条件。`cargo clippy` は **新規警告ゼロ** が判定基準 (既存 15 件は `tasks/refactor-clippy-baseline.md` を参照、Phase 2 完了時点で 14 件に減少している場合あり)。
+3 つすべて green が PR 提出の最低条件。`cargo clippy` は **新規警告ゼロ** が判定基準 (既存件数の最新値は `tasks/refactor-clippy-baseline.md` を参照)。
 
 `cargo test` は team_hub 触る Phase 2 / PTY 触る Phase 3 では必須。それ以外は影響範囲によって判断。
 
