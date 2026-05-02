@@ -189,6 +189,7 @@ export function CanvasSidebar({
             role: m.role,
             teamId: entry.id,
             agentId,
+            resumeSessionId: m.sessionId ?? null,
             cwd,
             organization: entry.organization
           }

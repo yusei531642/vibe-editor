@@ -286,6 +286,7 @@ export function CanvasLayout(): JSX.Element {
           role: m.role,
           teamId: entry.id,
           agentId,
+          resumeSessionId: m.sessionId ?? null,
           cwd,
           organization: entry.organization,
           latestHandoff: entry.latestHandoff
