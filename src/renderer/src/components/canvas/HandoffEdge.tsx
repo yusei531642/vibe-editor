@@ -2,7 +2,7 @@
  * HandoffEdge — team_send の hand-off を可視化するアニメーション付き edge。
  *
  * Rust 側 TeamHub が `team:handoff` event を emit すると、Canvas が一時的に
- * このエッジを追加 → 1.5 秒で自動 fade out。
+ * このエッジを追加 → 10 秒で自動 fade out (#379)。
  *
  * 表現:
  *   - bezier path

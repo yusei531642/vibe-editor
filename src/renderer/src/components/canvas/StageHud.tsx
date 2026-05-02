@@ -46,10 +46,25 @@ export function StageHud(): JSX.Element {
     };
   }, [arrangeOpen]);
 
-  const views: Array<{ id: StageView; label: string; icon: JSX.Element }> = [
-    { id: 'stage', label: t('canvas.hud.stage'), icon: <Users size={12} strokeWidth={2} /> },
-    { id: 'list', label: t('canvas.hud.list'), icon: <List size={12} strokeWidth={2} /> },
-    { id: 'focus', label: t('canvas.hud.focus'), icon: <Maximize2 size={12} strokeWidth={2} /> }
+  const views: Array<{ id: StageView; label: string; tip: string; icon: JSX.Element }> = [
+    {
+      id: 'stage',
+      label: t('canvas.hud.stage'),
+      tip: t('canvas.hud.stage.tooltip'),
+      icon: <Users size={12} strokeWidth={2} />
+    },
+    {
+      id: 'list',
+      label: t('canvas.hud.list'),
+      tip: t('canvas.hud.list.tooltip'),
+      icon: <List size={12} strokeWidth={2} />
+    },
+    {
+      id: 'focus',
+      label: t('canvas.hud.focus'),
+      tip: t('canvas.hud.focus.tooltip'),
+      icon: <Maximize2 size={12} strokeWidth={2} />
+    }
   ];
 
   const gaps: Array<{ id: ArrangeGap; label: string }> = [
@@ -66,7 +81,8 @@ export function StageHud(): JSX.Element {
           type="button"
           className={stageView === v.id ? 'is-active' : ''}
           onClick={() => setStageView(v.id)}
-          title={v.label}
+          title={v.tip}
+          aria-label={v.tip}
         >
           {v.icon}
           <span>{v.label}</span>
@@ -76,21 +92,24 @@ export function StageHud(): JSX.Element {
       <button
         type="button"
         onClick={() => fitView({ duration: 320, padding: 0.18 })}
-        title={t('canvas.hud.fit')}
+        title={t('canvas.hud.fit.tooltip')}
+        aria-label={t('canvas.hud.fit.tooltip')}
       >
         <Maximize2 size={12} strokeWidth={2} />
       </button>
       <button
         type="button"
         onClick={() => zoomOut({ duration: 200 })}
-        title={t('canvas.hud.zoomOut')}
+        title={t('canvas.hud.zoomOut.tooltip')}
+        aria-label={t('canvas.hud.zoomOut.tooltip')}
       >
         <ZoomOut size={12} strokeWidth={2} />
       </button>
       <button
         type="button"
         onClick={() => zoomIn({ duration: 200 })}
-        title={t('canvas.hud.zoomIn')}
+        title={t('canvas.hud.zoomIn.tooltip')}
+        aria-label={t('canvas.hud.zoomIn.tooltip')}
       >
         <ZoomIn size={12} strokeWidth={2} />
       </button>
@@ -100,7 +119,8 @@ export function StageHud(): JSX.Element {
           type="button"
           className={arrangeOpen ? 'is-active' : ''}
           onClick={() => setArrangeOpen((v) => !v)}
-          title={t('canvas.hud.arrange.open')}
+          title={t('canvas.hud.arrange.open.tooltip')}
+          aria-label={t('canvas.hud.arrange.open.tooltip')}
           aria-haspopup="menu"
           aria-expanded={arrangeOpen}
         >

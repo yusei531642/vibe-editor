@@ -256,7 +256,7 @@ export const useCanvasStore = create<CanvasState>()(
             };
           })
         }),
-      pulseEdge: (edge, ttlMs = 1500) => {
+      pulseEdge: (edge, ttlMs = 10000) => {
         set({ edges: [...get().edges.filter((e) => e.id !== edge.id), edge] });
         // Issue #156: 同 id の前回 pulse タイマーを clear してから新規張り直し
         const prev = pulseTimers.get(edge.id);

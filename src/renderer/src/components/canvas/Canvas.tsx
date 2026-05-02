@@ -3,7 +3,7 @@
  *
  * Phase 3: AgentNodeCard + HandoffEdge + Workspace Preset 対応。
  * Rust 側 TeamHub から `team:handoff` event が来たら、from→to エッジを
- * 一時的に追加して 1.5 秒で自動 fade。
+ * 一時的に追加して 10 秒で自動 fade (#379)。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 // Controls (zoom/+/-、fit、lock 4 ボタン) はデフォルトで白くアプリのテーマと合わないため import しない。
