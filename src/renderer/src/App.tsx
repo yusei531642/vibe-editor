@@ -18,9 +18,6 @@ import type {
   GitFileChange,
   GitStatus,
   SessionInfo,
-  Team,
-  TeamHistoryEntry,
-  TeamRole,
   TerminalAgent,
   ThemeName
 } from '../../types/shared';
@@ -54,7 +51,6 @@ import {
 import { useToast } from './lib/toast-context';
 import { useUiStore } from './stores/ui';
 import { webviewZoom } from './lib/webview-zoom';
-import { parseShellArgs } from './lib/parse-args';
 import { dedupPrepend, listContainsPath } from './lib/path-norm';
 import { useProjectLoader } from './lib/hooks/use-project-loader';
 import { useFileTabs } from './lib/hooks/use-file-tabs';
@@ -66,6 +62,7 @@ import {
   useTerminalTabs
 } from './lib/hooks/use-terminal-tabs';
 import type { TerminalTab } from './lib/hooks/use-terminal-tabs';
+import { useTeamManagement } from './lib/hooks/use-team-management';
 import type { Command } from './lib/commands';
 
 const THEMES_FOR_PALETTE: ThemeName[] = [
@@ -81,89 +78,8 @@ const THEMES_FOR_PALETTE: ThemeName[] = [
 
 // MAX_TERMINALS / TERMINAL_WARN_THRESHOLD / TerminalTab 型 / getRoleDisplayLabel は
 // use-terminal-tabs.ts に移管済み (Issue #373 Phase 1-3)。
-
-/** ロール別の短い説明（チームプロンプト内で使用、leader 以外は動的ロール由来）。 */
-const ROLE_DESC: Record<TeamRole, string> = {
-  leader: '全体の調整・指示・タスク割り振り'
-};
-
-/**
- * ロスター表示用の固定順。leader を最優先に、それ以外は登場順。
- * vibe-team のロールは Leader が動的に作成するため、固定リスト化はしない。
- */
-const ROLE_ORDER: Record<string, number> = {
-  leader: 0
-};
-
-/** チームのシステムプロンプト（--append-system-prompt 用） */
-function generateTeamSystemPrompt(
-  tab: TerminalTab,
-  allTabs: TerminalTab[],
-  team: Team | null
-): string | undefined {
-  if (!tab.role || !tab.teamId || !team) return undefined;
-
-  const teamTabs = allTabs
-    .filter((t) => t.teamId === tab.teamId)
-    .slice()
-    .sort((a, b) => {
-      const ra = ROLE_ORDER[a.role ?? ''] ?? 99;
-      const rb = ROLE_ORDER[b.role ?? ''] ?? 99;
-      if (ra !== rb) return ra - rb;
-      return a.agentId.localeCompare(b.agentId);
-    });
-  const roster = teamTabs
-    .map((t) => {
-      const agent = t.agent === 'claude' ? 'Claude Code' : 'Codex';
-      const you = t.id === tab.id ? ' ← あなた' : '';
-      const roleLabel = getRoleDisplayLabel(t, allTabs);
-      return `${roleLabel || 'member'}(${agent})${you}`;
-    })
-    .join(', ');
-
-  const mcpTools =
-    'MCP vibe-team ツール: team_recruit(role_id,engine,label?,description?,instructions?) / team_dismiss / team_send(to,message) / team_read / team_info / team_status / team_assign_task(assignee,description) / team_get_tasks / team_update_task / team_list_role_profiles。' +
-    'team_send/team_assign_task は相手のプロンプトにリアルタイム注入される。受信時は [Team ← <role>] プレフィックス付きで届く。';
-
-  if (tab.role === 'leader') {
-    return (
-      `あなたはチーム「${team.name}」のLeader。構成: ${roster}。${mcpTools}\n` +
-      `【絶対遵守ルール — 外部ファイルを読む前に先に従うこと】\n` +
-      `1. ユーザーから最初の指示が来るまで何もせず待機する。自分からプロジェクト調査やファイル読みを開始しない。\n` +
-      `2. ユーザー指示が届いたら、計画して委譲する。Read / Edit / Write / Bash / Grep / Glob などの作業系ツールを Leader 自身が呼んで実作業をしてはいけない。Leader の仕事は計画・委譲・レビュー。\n` +
-      `【チーム編成とタスク委譲の使い分け】\n` +
-      `(a) vibe-team (基本・可視化): team_recruit + team_assign_task を使うとキャンバス上にメンバーが視覚的に配置される。「チームを作って」「採用して」と言われたときや、通常のタスク委譲はこれを既定で使う。\n` +
-      `(b) Claude Code Native Agent Teams (Task / dispatch_agent / general-purpose / Explore): ユーザーから「裏で Agent Teams を使って」「サブエージェントに任せて」と明示指示されたとき、またはキャンバスに表示するまでもない大量ファイル検索 / 裏側の単純並列タスクを Leader 自身の判断で行うときのみ使用。通常の委譲を勝手にこっちに振り替えない。\n` +
-      `3. team_recruit は「ロール設計＋採用」を 1 コールで行う。新規ロール作成時の必須引数: role_id (snake_case), label, description, instructions, engine。` +
-      `既存ロール (hr や自分が作成済みの role_id) の再採用は role_id + engine だけで OK。\n` +
-      `4. 3 名以上必要なときは、まず team_recruit({role_id:"hr", engine:"claude"}) で HR を採用し、team_send("hr", "採用してほしい: ...") で一括採用を委譲する。\n` +
-      `5. チームが揃ったら team_assign_task で割り振り、結果は [Team ← <role>] で届くので都度レビュー、追指示は team_send で行う。\n` +
-      `6. 【長文ペイロード・ルール】team_recruit.instructions / team_send.message / team_assign_task.description は bracketed paste で配送されるので改行入り YAML / code / リストも ~32 KiB まではそのままインラインで OK。32 KiB を超える本文のみ Write で .vibe-team/tmp/<short_id>.md に書き出してから引数には「サマリ + パス」を渡す (Hub が 32 KiB 超を拒否)。\n` +
-      `設計思想や応用パターンの詳細は .claude/skills/vibe-team/SKILL.md を Read ツールで参照可 (補助情報、必須ではない)。`
-    );
-  }
-
-  // leader 以外: 役割の詳細はロールプロファイル (動的生成可能) 側で管理されるため、
-  // ここでは固定の汎用文だけを返す。IDE 旧仕様の fallback。Canvas 側は AgentNodeCard が
-  // renderSystemPrompt() で動的ロール instructions を含むプロンプトを組み立てる。
-  const roleDesc = ROLE_DESC[tab.role] ?? `${tab.role}としての担当作業`;
-  return (
-    `あなたはチーム「${team.name}」の${tab.role}。役割:${roleDesc}。構成: ${roster}。${mcpTools}\n` +
-    `【絶対ルール】\n` +
-    `1. 指示が [Team ← leader] (または [Team ← <role>]) で届くまで何もしない。自発的な調査・コード変更は禁止。\n` +
-    `2. 指示が届いたら作業を完遂し、直後に team_send('leader', "完了報告: ...") で簡潔に結果を返す。\n` +
-    `3. 報告後は静かなアイドル状態に戻る。ポーリング・「承認待ち」表示・自発的な追加質問は禁止。次の指示は [Team ← ...] で自動的に届く。\n` +
-    `4. 自分から他メンバーにタスクを割り振ってはいけない (それは Leader の仕事)。\n` +
-    `5. 【長文ペイロード・ルール】team_send は bracketed paste で配送されるので改行入りの内容も ~32 KiB まではそのまま OK。それを超える場合のみ Write で .vibe-team/tmp/<short_id>.md に書き出してパスを渡す。`
-  );
-}
-
-/** 短いアクション指示（initialMessage 用）。
- *  チーム所属タブは全員「待機」が基本方針なので何も送らない。
- *  Leader はユーザーからの最初の指示を待ち、メンバーは Leader からの注入を待つ。 */
-function generateTeamAction(_tab: TerminalTab): string | undefined {
-  return undefined;
-}
+// ROLE_DESC / ROLE_ORDER / generateTeamSystemPrompt / generateTeamAction は
+// src/renderer/src/lib/team-prompts.ts に移管済み (Issue #373 Phase 1-4)。
 
 export function App(): JSX.Element {
   // Issue #307: Windows 11 フレームレス最大化時の不可視リサイズ境界を CSS 変数で補正
@@ -260,65 +176,16 @@ export function App(): JSX.Element {
   const [sessionsLoading, setSessionsLoading] = useState<boolean>(false);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
-  // team history（プロジェクト単位で永続化）
-  const [teamHistoryEntries, setTeamHistoryEntries] = useState<TeamHistoryEntry[]>([]);
-
-  /** チーム作成時のメンバースポーン遅延タイマー。破棄時にクリアできるよう保持 */
-  const spawnStaggerTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const clearSpawnTimers = useCallback(() => {
-    for (const t of spawnStaggerTimers.current) clearTimeout(t);
-    spawnStaggerTimers.current = [];
-  }, []);
-  /**
-   * team history save のデバウンス。sessionId が順次取れてくるときに
-   * N 回ファイルに書き出すのを避ける。entryId ごとに最新値を 500ms 後に flush。
-   */
-  const teamHistoryPending = useRef(new Map<string, TeamHistoryEntry>());
-  const teamHistoryFlushTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const flushTeamHistoryNow = useCallback((): void => {
-    if (teamHistoryFlushTimer.current) {
-      clearTimeout(teamHistoryFlushTimer.current);
-      teamHistoryFlushTimer.current = null;
-    }
-    if (!window.api.teamHistory) {
-      teamHistoryPending.current.clear();
-      return;
-    }
-    const entries = Array.from(teamHistoryPending.current.values());
-    teamHistoryPending.current.clear();
-    for (const e of entries) {
-      void window.api.teamHistory.save(e);
-    }
-  }, []);
-  const saveTeamHistory = useCallback((entry: TeamHistoryEntry) => {
-    if (!window.api.teamHistory) return;
-    teamHistoryPending.current.set(entry.id, entry);
-    if (teamHistoryFlushTimer.current) return;
-    teamHistoryFlushTimer.current = setTimeout(() => {
-      teamHistoryFlushTimer.current = null;
-      const entries = Array.from(teamHistoryPending.current.values());
-      teamHistoryPending.current.clear();
-      for (const e of entries) {
-        void window.api.teamHistory.save(e);
-      }
-    }, 500);
-  }, []);
-  // アンマウント(アプリ終了直前)で pending を即 flush
-  useEffect(() => {
-    return () => {
-      flushTeamHistoryNow();
-    };
-  }, [flushTeamHistoryNow]);
+  // teams / teamHistoryEntries / spawnStaggerTimers / teamHistory debounce / アンマウント
+  // flush effect は use-team-management.ts に移管済み (Issue #373 Phase 1-4)。
 
   // tabs (editor / diff / recentlyClosed) は useFileTabs で集中管理する。
   const [sideBySide, setSideBySide] = useState<boolean>(true);
 
-  // teams は Phase 1-3 では App.tsx 残置。Phase 1-4 (use-team-management) で hook 化予定。
-  const [teams, setTeams] = useState<Team[]>([]);
-
-  // Phase 1-3 (Issue #373): terminal tabs の state container を hook に外出し。
-  // doCloseTeam は teams setter / clearSpawnTimers / cleanupTeamMcp に依存するため
-  // App.tsx に残し、ref ブリッジで hook の opts.closeTeam に注入する (循環解消)。
+  // Phase 1-4 (Issue #373): teams / team-history / TeamHub 接続情報・doCloseTeam・
+  // handleResumeTeam・get*Args 系は use-team-management.ts に集約。
+  // useTerminalTabs ↔ useTeamManagement の唯一の逆方向参照 (closeTeam) を
+  // ref ブリッジで解消する。
   const closeTeamRef = useRef<(teamId: string) => void>(() => {});
   const stableCloseTeam = useCallback(
     (teamId: string) => closeTeamRef.current(teamId),
@@ -326,7 +193,7 @@ export function App(): JSX.Element {
   );
 
   // <TerminalView> ref は hook 化対象外: TerminalView の JSX 配線が App.tsx 側に
-  // 残るため (props が teams / TeamHub / role profile 系に依存)。Phase 1-4 で再検討。
+  // 残るため。
   const terminalRefs = useRef(new Map<number, TerminalViewHandle>());
 
   // Claude CLI 検査状態
@@ -364,8 +231,6 @@ export function App(): JSX.Element {
     getDnDProps,
     editingLabelTabId,
     setEditingLabelTabId,
-    standaloneTabList,
-    teamGroupList,
     nextTerminalIdRef,
     resetForProjectSwitch: resetTerminalsForProjectSwitch
   } = useTerminalTabs({
@@ -373,60 +238,34 @@ export function App(): JSX.Element {
     claudeReady: claudeCheck.state === 'ok',
     projectRoot,
     showToast,
-    teams,
     closeTeam: stableCloseTeam
   });
 
-  // doCloseTeam は teams setter / clearSpawnTimers / cleanupTeamMcp に依存するため
-  // Phase 1-3 では App.tsx 残置。useTerminalTabs には ref ブリッジ経由で注入する。
-  const doCloseTeam = useCallback(
-    (teamId: string) => {
-      // チーム作成進行中ならスタガー spawn を止める（同じチームかは問わない）
-      clearSpawnTimers();
-      setTerminalTabs((prev) => {
-        const next = prev.filter((t) => t.teamId !== teamId);
-        if (next.length === 0) {
-          // チーム全員しかいない場合 → 新しいスタンドアロンタブを自動生成
-          const newId = nextTerminalIdRef.current++;
-          const fresh: TerminalTab = {
-            id: newId,
-            version: 1,
-            agent: 'claude',
-            role: null,
-            teamId: null,
-            agentId: `agent-${newId}`,
-            status: '',
-            exited: false,
-            resumeSessionId: null,
-            teamHistoryMemberIdx: null,
-            label: 'Claude #1',
-            customLabel: null
-          };
-          setActiveTerminalTabId(newId);
-          return [fresh];
-        }
-        setActiveTerminalTabId((active) => {
-          if (next.some((t) => t.id === active)) return active;
-          return next[next.length - 1].id;
-        });
-        return next;
-      });
-      setTeams((prev) => prev.filter((t) => t.id !== teamId));
-      // MCP クリーンアップ(失敗しても UI 側は続行。catch で unhandled rejection を抑止)
-      if (projectRoot) {
-        window.api.app
-          .cleanupTeamMcp(projectRoot, teamId)
-          .catch((err) => console.warn('[team] cleanupTeamMcp failed:', err));
-      }
-    },
-    [
-      projectRoot,
-      clearSpawnTimers,
-      setTerminalTabs,
-      setActiveTerminalTabId,
-      nextTerminalIdRef
-    ]
-  );
+  // Phase 1-4 (Issue #373): teams / team-history / launch helpers を hook に集約。
+  const {
+    teams,
+    teamHistoryEntries,
+    doCloseTeam,
+    handleCloseLeaderOnly,
+    handleResumeTeam,
+    handleDeleteTeamHistory,
+    handleTerminalSessionId,
+    persistTerminalCustomLabel,
+    getTerminalArgs,
+    getCodexInstructions,
+    getRolePrompt,
+    getTerminalEnv,
+    resetForProjectSwitch: resetTeamsForProjectSwitch
+  } = useTeamManagement({
+    projectRoot,
+    showToast,
+    terminalTabs,
+    setTerminalTabs,
+    setActiveTerminalTabId,
+    nextTerminalIdRef,
+    addTerminalTab,
+    doCloseTab
+  });
   closeTeamRef.current = doCloseTeam;
 
   // ---------- Claude CLI 検査 ----------
@@ -634,15 +473,15 @@ export function App(): JSX.Element {
 
   // Phase 1-1 / 1-2 / 1-3 (Issue #373): loadProject / 初回ロード effect / タイトルバー
   // effect / refreshGit は use-project-loader.ts、editor/diff tab 関連は use-file-tabs.ts、
-  // terminal tab 関連は use-terminal-tabs.ts に移管済み。confirmDiscardEditorTabs /
-  // onProjectSwitched / onLoaded を hook に橋渡しする。
+  // terminal tab 関連は use-terminal-tabs.ts、teams / team-history は
+  // use-team-management.ts に移管済み。confirmDiscardEditorTabs / onProjectSwitched /
+  // onLoaded を hook に橋渡しする。
   confirmDiscardRef.current = confirmDiscardEditorTabs;
   projectSwitchedRef.current = (root: string): void => {
-    // editor/diff/terminal タブのリセットはそれぞれの hook に委譲。
+    // editor/diff/terminal/teams のリセットはそれぞれの hook に委譲。
     resetTabsForProjectSwitch();
     setActiveSessionId(null);
-    // teams は Phase 1-4 まで App.tsx で持つので個別にリセット。
-    setTeams([]);
+    resetTeamsForProjectSwitch();
     resetTerminalsForProjectSwitch();
     void root; // root は現状未使用 (将来の拡張余地として残す)
   };
@@ -666,21 +505,8 @@ export function App(): JSX.Element {
 
   // ---------- データ更新 ----------
 
-  const refreshTeamHistory = useCallback(async () => {
-    if (!projectRoot) return;
-    if (!window.api.teamHistory) return; // preload が古い場合はスキップ
-    try {
-      const entries = await window.api.teamHistory.list(projectRoot);
-      setTeamHistoryEntries(entries);
-    } catch (err) {
-      console.warn('[teamHistory] list failed:', err);
-    }
-  }, [projectRoot]);
-
-  // プロジェクト変更時にチーム履歴もロード
-  useEffect(() => {
-    void refreshTeamHistory();
-  }, [refreshTeamHistory]);
+  // refreshTeamHistory + projectRoot 変更時の自動ロードは use-team-management.ts
+  // に移管済み (Issue #373 Phase 1-4)。
 
   const refreshSessions = useCallback(async () => {
     if (!projectRoot) return;
@@ -1172,287 +998,10 @@ export function App(): JSX.Element {
     return () => window.removeEventListener('keydown', handler, true);
   }, [paletteOpen, settingsOpen, activeTabId, cycleTab, closeTab, reopenLastClosed, saveEditorTab]);
 
-  // ---------- 起動引数合成 ----------
-
-  const getTerminalArgs = useCallback(
-    (tab: TerminalTab) => {
-      const isCodex = tab.agent === 'codex';
-      const base = parseShellArgs(
-        isCodex ? settings.codexArgs || '' : settings.claudeArgs || ''
-      );
-      if (tab.resumeSessionId && !isCodex) {
-        base.push('--resume', tab.resumeSessionId);
-      }
-      // Claude のチーム指示は --append-system-prompt で直接渡す。
-      if (!isCodex && tab.teamId) {
-        const team = teams.find((t) => t.id === tab.teamId) ?? null;
-        const sysPrompt = generateTeamSystemPrompt(tab, terminalTabs, team);
-        if (sysPrompt) {
-          base.push('--append-system-prompt', sysPrompt);
-        }
-      }
-      // Codex の paste_burst 検出を無効化する。
-      // チーム通信では team_send が chat_composer に文字列を直接流し込むが、
-      // Codex は高速連続入力を「ペースト扱い」にバッファしてしまい、
-      // 末尾の Enter が送信ではなく確定として飲み込まれて返信できなくなる。
-      // ユーザが codexArgs で明示的に設定している場合はそちらを尊重する。
-      const userCodexArgs = settings.codexArgs || '';
-      if (isCodex && tab.teamId && !userCodexArgs.includes('disable_paste_burst')) {
-        base.push('-c', 'disable_paste_burst=true');
-      }
-      return base;
-    },
-    [settings.claudeArgs, settings.codexArgs, teams, terminalTabs]
-  );
-
-  /**
-   * Codex 向けのシステム指示。main 側で一時ファイルに書き出されて
-   * `-c model_instructions_file=<path>` として渡される。
-   */
-  const getCodexInstructions = useCallback(
-    (tab: TerminalTab): string | undefined => {
-      if (tab.agent !== 'codex' || !tab.teamId) return undefined;
-      const team = teams.find((t) => t.id === tab.teamId) ?? null;
-      return generateTeamSystemPrompt(tab, terminalTabs, team);
-    },
-    [teams, terminalTabs]
-  );
-
-  /** TeamHub 接続情報（アプリ起動時に1回だけ解決） */
-  const [teamHubInfo, setTeamHubInfo] = useState<{ socket: string; token: string } | null>(null);
-  useEffect(() => {
-    void window.api.app.getTeamHubInfo().then((info) => setTeamHubInfo(info));
-  }, []);
-
-  const getTerminalEnv = useCallback(
-    (tab: TerminalTab): Record<string, string> | undefined => {
-      if (!tab.teamId || !tab.role) return undefined;
-      if (!teamHubInfo) return undefined;
-      return {
-        VIBE_TEAM_ID: tab.teamId,
-        VIBE_TEAM_ROLE: tab.role,
-        VIBE_AGENT_ID: tab.agentId,
-        VIBE_TEAM_SOCKET: teamHubInfo.socket,
-        VIBE_TEAM_TOKEN: teamHubInfo.token
-      };
-    },
-    [teamHubInfo]
-  );
-
-  /** タブのロールに対応する初期メッセージ（短いアクション指示のみ） */
-  const getRolePrompt = useCallback(
-    (tab: TerminalTab): string | undefined => {
-      if (!tab.role) return undefined;
-      // スタンドアロン（チーム無し）
-      if (!tab.teamId) {
-        if (tab.role === 'leader') return undefined;
-        return `${ROLE_DESC[tab.role]}に集中してください。`;
-      }
-      return generateTeamAction(tab);
-    },
-    []
-  );
-
-  // 初回タブ作成 effect は use-terminal-tabs.ts に移管済み (Issue #373 Phase 1-3)。
-
-  // ---------- チーム履歴の resume / 削除 ----------
-
-  const handleResumeTeam = useCallback(
-    async (entry: TeamHistoryEntry) => {
-      if (!projectRoot) return;
-      if (!entry.members || entry.members.length === 0) {
-        showToast('チームメンバー情報が空のため復元できません', { tone: 'warning' });
-        return;
-      }
-      if (entry.projectRoot && entry.projectRoot !== projectRoot) {
-        showToast(
-          `このチームは別プロジェクト(${entry.projectRoot.split(/[\\/]/).pop()})の履歴です`,
-          { tone: 'warning' }
-        );
-        return;
-      }
-      // 容量チェック: 既存タブ + メンバー数 が上限を超えるなら断念
-      if (terminalTabs.length + entry.members.length > MAX_TERMINALS) {
-        showToast(`ターミナル上限(${MAX_TERMINALS})を超えるため復元できません`, {
-          tone: 'warning'
-        });
-        return;
-      }
-
-      // 再利用時刻を更新
-      const updated: TeamHistoryEntry = {
-        ...entry,
-        lastUsedAt: new Date().toISOString()
-      };
-      setTeamHistoryEntries((prev) => [
-        updated,
-        ...prev.filter((e) => e.id !== entry.id)
-      ]);
-      saveTeamHistory(updated);
-
-      // ランタイム Team として登録（既に同じ teamId があればそのまま）
-      setTeams((prev) =>
-        prev.some((t) => t.id === entry.id)
-          ? prev
-          : [...prev, { id: entry.id, name: entry.name }]
-      );
-
-      // MCP は現行の TeamHub 情報で確実に再登録する
-      const allMembers = entry.members.map((m, i) => ({
-        agentId: `${entry.id}-${m.role}-${i}`,
-        role: m.role,
-        agent: m.agent
-      }));
-      let mcpChanged = false;
-      if (settings.mcpAutoSetup !== false) {
-        try {
-          const res = await window.api.app.setupTeamMcp(projectRoot, entry.id, entry.name, allMembers);
-          mcpChanged = res.changed === true;
-        } catch (err) {
-          console.warn('[resume team] setupTeamMcp failed:', err);
-        }
-      }
-      if (mcpChanged) {
-        setTerminalTabs((prev) =>
-          prev.map((tab) =>
-            tab.agent === 'claude' && !tab.exited
-              ? { ...tab, version: tab.version + 1, status: '' }
-              : tab
-          )
-        );
-      }
-
-      // 各メンバーをタブとしてスポーン（sessionId があれば --resume 付き、customLabel があれば復元）
-      for (let i = 0; i < entry.members.length; i++) {
-        const m = entry.members[i];
-        addTerminalTab({
-          agent: m.agent,
-          role: m.role,
-          teamId: entry.id,
-          agentId: allMembers[i].agentId,
-          resumeSessionId: m.sessionId ?? null,
-          teamHistoryMemberIdx: i,
-          customLabel: m.customLabel ?? null
-        });
-      }
-
-      showToast(t('teamHistory.resumed', { name: entry.name }), { tone: 'info' });
-    },
-    [projectRoot, terminalTabs.length, addTerminalTab, showToast, t, saveTeamHistory]
-  );
-
-  const handleDeleteTeamHistory = useCallback(
-    async (entryId: string) => {
-      setTeamHistoryEntries((prev) => prev.filter((e) => e.id !== entryId));
-      if (!window.api.teamHistory) return;
-      try {
-        await window.api.teamHistory.delete(entryId);
-      } catch (err) {
-        console.warn('[teamHistory] delete failed:', err);
-      }
-    },
-    []
-  );
-
-  /**
-   * Leader だけ閉じる(メンバーはチーム無しタブとして残す)パス。
-   * doCloseTeam() と違って tabs は保持するが、"チームは終了" という意味で
-   * MCP の参照カウントは減らす必要がある。
-   */
-  const handleCloseLeaderOnly = useCallback(
-    (tabId: number, teamId: string) => {
-      // 1) Leader タブだけ閉じる
-      doCloseTab(tabId);
-      // 2) 残りメンバーは通常タブへ降格(teamId/role を外す)
-      setTerminalTabs((prev) =>
-        prev.map((tab) =>
-          tab.teamId === teamId
-            ? { ...tab, teamId: null, role: null, teamHistoryMemberIdx: null }
-            : tab
-        )
-      );
-      // 3) runtime チームを削除
-      setTeams((prev) => prev.filter((x) => x.id !== teamId));
-      // 4) MCP 参照カウントを減らす(doCloseTeam 相当だが spawnStaggerTimers は触らない)
-      if (projectRoot) {
-        void window.api.app
-          .cleanupTeamMcp(projectRoot, teamId)
-          .catch((err) => console.warn('[team] cleanup after closeLeaderOnly failed:', err));
-      }
-    },
-    [doCloseTab, projectRoot]
-  );
-
-  /**
-   * Claude Code 起動ログから session id が取れたときに該当タブのチーム履歴を更新。
-   * NOTE: このコールバックは watcher 由来の非同期で、タブが既に閉じられた後に
-   * 発火することがある。その場合 tab.teamId は残っているが entry 側は削除済みで
-   * findIndex が -1 を返すので no-op。setEditorTabs などに波及しない。
-   */
-  const handleTerminalSessionId = useCallback(
-    (tab: TerminalTab, sessionId: string) => {
-      if (!tab.teamId || tab.teamHistoryMemberIdx == null) return;
-      if (!sessionId) return;
-      setTeamHistoryEntries((prev) => {
-        const idx = prev.findIndex((e) => e.id === tab.teamId);
-        if (idx < 0) return prev;
-        const entry = prev[idx];
-        const memberIdx = tab.teamHistoryMemberIdx!;
-        if (memberIdx < 0 || memberIdx >= entry.members.length) return prev;
-        if (entry.members[memberIdx].sessionId === sessionId) return prev;
-        const nextMembers = entry.members.map((m, i) =>
-          i === memberIdx ? { ...m, sessionId } : m
-        );
-        const nextEntry: TeamHistoryEntry = {
-          ...entry,
-          members: nextMembers,
-          lastUsedAt: new Date().toISOString()
-        };
-        saveTeamHistory(nextEntry);
-        const copy = [...prev];
-        copy[idx] = nextEntry;
-        return copy;
-      });
-    },
-    [saveTeamHistory]
-  );
-
-  /**
-   * タブの手動リネーム結果を team-history に反映する。
-   * チーム所属タブのみ対象。スタンドアロンタブはメモリ揮発なのでスキップ。
-   * trimmed が空文字なら customLabel = null (= 自動生成名へ復帰) として保存。
-   */
-  const persistTerminalCustomLabel = useCallback(
-    (tab: TerminalTab, trimmed: string) => {
-      if (!tab.teamId || tab.teamHistoryMemberIdx == null) return;
-      const next: string | null = trimmed === '' ? null : trimmed;
-      setTeamHistoryEntries((prev) => {
-        const idx = prev.findIndex((e) => e.id === tab.teamId);
-        if (idx < 0) return prev;
-        const entry = prev[idx];
-        const memberIdx = tab.teamHistoryMemberIdx!;
-        if (memberIdx < 0 || memberIdx >= entry.members.length) return prev;
-        if ((entry.members[memberIdx].customLabel ?? null) === next) return prev;
-        const nextMembers = entry.members.map((m, i) =>
-          i === memberIdx ? { ...m, customLabel: next } : m
-        );
-        const nextEntry: TeamHistoryEntry = {
-          ...entry,
-          members: nextMembers,
-          lastUsedAt: new Date().toISOString()
-        };
-        saveTeamHistory(nextEntry);
-        const copy = [...prev];
-        copy[idx] = nextEntry;
-        return copy;
-      });
-    },
-    [saveTeamHistory]
-  );
-
-  // standaloneTabList / teamGroupList は use-terminal-tabs.ts の useMemo で計算済み
-  // (Issue #373 Phase 1-3)。
-
+  // 起動引数合成 (getTerminalArgs / getCodexInstructions / getTerminalEnv /
+  // getRolePrompt) と チーム履歴 resume/削除 / Leader-only close /
+  // 各種 team-history sync は use-team-management.ts に移管済み
+  // (Issue #373 Phase 1-4)。
   // ---------- タブリスト ----------
 
   const tabs: TabItem[] = [
