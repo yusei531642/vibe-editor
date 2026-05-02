@@ -622,6 +622,20 @@
   top: 0;
   z-index: 1;
 }
+.status-mascot--variant-spark {
+  --mascot-body: var(--success);
+  --mascot-body-shade: color-mix(in srgb, var(--success) 68%, var(--bg-sidebar));
+  --mascot-eye: color-mix(in srgb, var(--bg-sidebar) 84%, black);
+  --mascot-shine: color-mix(in srgb, var(--warning) 75%, white);
+  --mascot-tool: var(--accent);
+}
+.status-mascot--variant-mono {
+  --mascot-body: color-mix(in srgb, var(--text-dim) 78%, var(--bg-panel));
+  --mascot-body-shade: color-mix(in srgb, var(--border-strong) 72%, var(--bg-panel));
+  --mascot-eye: var(--accent);
+  --mascot-shine: color-mix(in srgb, var(--accent) 72%, var(--text));
+  --mascot-tool: var(--claude-accent-blue, #3886e5);
+}
 .status-mascot--idle {
   --mascot-offset: 0px;
 }
@@ -681,6 +695,12 @@
 }
 .status-mascot__body-shade {
   fill: var(--mascot-body-shade);
+}
+.status-mascot__panel {
+  fill: color-mix(in srgb, var(--bg-sidebar) 84%, black);
+}
+.status-mascot__antenna {
+  fill: var(--mascot-tool);
 }
 .status-mascot__eye {
   fill: var(--mascot-eye);

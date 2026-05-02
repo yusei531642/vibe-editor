@@ -94,6 +94,7 @@ export function App(): JSX.Element {
     language: useSettingsValue('language'),
     theme: useSettingsValue('theme'),
     density: useSettingsValue('density'),
+    statusMascotVariant: useSettingsValue('statusMascotVariant'),
     hasCompletedOnboarding: useSettingsValue('hasCompletedOnboarding'),
     mcpAutoSetup: useSettingsValue('mcpAutoSetup')
   };

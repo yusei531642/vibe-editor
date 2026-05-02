@@ -1,18 +1,25 @@
+import type { StatusMascotVariant } from '../../../../types/shared';
 import type { StatusMascotState } from '../../lib/status-mascot';
 
 interface StatusMascotProps {
   state: StatusMascotState;
   label: string;
+  variant?: StatusMascotVariant;
 }
 
-export function StatusMascot({ state, label }: StatusMascotProps): JSX.Element {
+export function StatusMascot({
+  state,
+  label,
+  variant = 'vibe'
+}: StatusMascotProps): JSX.Element {
   return (
     <span
-      className={`status-mascot status-mascot--${state}`}
+      className={`status-mascot status-mascot--${state} status-mascot--variant-${variant}`}
       role="img"
       aria-label={label}
       title={label}
       data-state={state}
+      data-variant={variant}
     >
       <span className="status-mascot__motion" aria-hidden="true">
         <span className="status-mascot__viewport">
@@ -24,12 +31,12 @@ export function StatusMascot({ state, label }: StatusMascotProps): JSX.Element {
             focusable="false"
             shapeRendering="crispEdges"
           >
-            <MascotFrame x={0} />
-            <MascotFrame x={16} tool="pencil" arm="up" />
-            <MascotFrame x={32} tool="paper" sparkle />
-            <MascotFrame x={48} arm="run" legs="run" sparkle />
-            <MascotFrame x={64} tool="lens" arm="up" />
-            <MascotFrame x={80} alert legs="flat" />
+            <MascotFrame x={0} variant={variant} />
+            <MascotFrame x={16} variant={variant} tool="pencil" arm="up" />
+            <MascotFrame x={32} variant={variant} tool="paper" sparkle />
+            <MascotFrame x={48} variant={variant} arm="run" legs="run" sparkle />
+            <MascotFrame x={64} variant={variant} tool="lens" arm="up" />
+            <MascotFrame x={80} variant={variant} alert legs="flat" />
           </svg>
         </span>
       </span>
@@ -41,6 +48,7 @@ type Tool = 'pencil' | 'paper' | 'lens';
 
 interface MascotFrameProps {
   x: number;
+  variant: StatusMascotVariant;
   tool?: Tool;
   arm?: 'up' | 'run';
   legs?: 'run' | 'flat';
@@ -50,6 +58,7 @@ interface MascotFrameProps {
 
 function MascotFrame({
   x,
+  variant,
   tool,
   arm,
   legs,
@@ -71,14 +80,39 @@ function MascotFrame({
         </>
       ) : null}
 
-      <rect className={bodyClass} x="7" y="3" width="3" height="1" />
-      <rect className={bodyClass} x="6" y="4" width="5" height="1" />
-      <rect className={bodyClass} x="5" y="5" width="7" height="1" />
-      <rect className={bodyClass} x="4" y="6" width="9" height="1" />
-      <rect className={bodyClass} x="5" y="7" width="7" height="1" />
-      <rect className={bodyClass} x="6" y="8" width="5" height="2" />
-      <rect className={bodyClass} x="7" y="10" width="3" height="1" />
-      <rect className="status-mascot__body-shade" x="6" y="9" width="5" height="1" />
+      {variant === 'mono' ? (
+        <>
+          <rect className={bodyClass} x="4" y="3" width="9" height="8" />
+          <rect className="status-mascot__panel" x="5" y="4" width="7" height="4" />
+          <rect className="status-mascot__body-shade" x="5" y="9" width="7" height="1" />
+          <rect className="status-mascot__antenna" x="8" y="1" width="1" height="2" />
+          <rect className="status-mascot__antenna" x="7" y="0" width="3" height="1" />
+        </>
+      ) : variant === 'spark' ? (
+        <>
+          <rect className="status-mascot__antenna" x="8" y="1" width="1" height="1" />
+          <rect className={bodyClass} x="7" y="2" width="3" height="1" />
+          <rect className={bodyClass} x="5" y="3" width="7" height="1" />
+          <rect className={bodyClass} x="4" y="4" width="9" height="1" />
+          <rect className={bodyClass} x="3" y="5" width="11" height="2" />
+          <rect className={bodyClass} x="4" y="7" width="9" height="1" />
+          <rect className={bodyClass} x="5" y="8" width="7" height="1" />
+          <rect className={bodyClass} x="6" y="9" width="5" height="1" />
+          <rect className={bodyClass} x="7" y="10" width="3" height="1" />
+          <rect className="status-mascot__body-shade" x="5" y="8" width="7" height="1" />
+        </>
+      ) : (
+        <>
+          <rect className={bodyClass} x="7" y="3" width="3" height="1" />
+          <rect className={bodyClass} x="6" y="4" width="5" height="1" />
+          <rect className={bodyClass} x="5" y="5" width="7" height="1" />
+          <rect className={bodyClass} x="4" y="6" width="9" height="1" />
+          <rect className={bodyClass} x="5" y="7" width="7" height="1" />
+          <rect className={bodyClass} x="6" y="8" width="5" height="2" />
+          <rect className={bodyClass} x="7" y="10" width="3" height="1" />
+          <rect className="status-mascot__body-shade" x="6" y="9" width="5" height="1" />
+        </>
+      )}
 
       {tool === 'lens' ? (
         <>
@@ -86,6 +120,18 @@ function MascotFrame({
           <rect className="status-mascot__review" x="9" y="5" width="2" height="1" />
           <rect className="status-mascot__eye" x="8" y="6" width="1" height="1" />
           <rect className="status-mascot__eye" x="11" y="7" width="1" height="1" />
+        </>
+      ) : variant === 'mono' ? (
+        <>
+          <rect className="status-mascot__eye" x="6" y="5" width="1" height="1" />
+          <rect className="status-mascot__eye" x="10" y="5" width="1" height="1" />
+          <rect className="status-mascot__shine" x="7" y="7" width="3" height="1" />
+        </>
+      ) : variant === 'spark' ? (
+        <>
+          <rect className="status-mascot__eye" x="6" y="5" width="2" height="1" />
+          <rect className="status-mascot__eye" x="10" y="5" width="2" height="1" />
+          <rect className="status-mascot__shine" x="8" y="7" width="2" height="1" />
         </>
       ) : (
         <>

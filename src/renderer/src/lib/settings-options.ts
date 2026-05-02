@@ -1,4 +1,4 @@
-import type { Density, ThemeName } from '../../../types/shared';
+import type { Density, StatusMascotVariant, ThemeName } from '../../../types/shared';
 
 export const THEME_OPTIONS: { value: ThemeName; label: string; desc: string }[] = [
   {
@@ -15,6 +15,32 @@ export const THEME_OPTIONS: { value: ThemeName; label: string; desc: string }[] 
   { value: 'midnight', label: 'Midnight', desc: '深い青紫ベース、紫アクセント' },
   { value: 'glass', label: 'Glass', desc: 'すりガラス風 — 半透明パネル + ブラー' },
   { value: 'light', label: 'Light', desc: '明るい背景、暗い文字' }
+];
+
+export const STATUS_MASCOT_OPTIONS: {
+  value: StatusMascotVariant;
+  label: string;
+  descJa: string;
+  descEn: string;
+}[] = [
+  {
+    value: 'vibe',
+    label: 'Vibe',
+    descJa: '既定の小さな相棒',
+    descEn: 'Default tiny companion'
+  },
+  {
+    value: 'spark',
+    label: 'Spark',
+    descJa: '明るめで軽い印象',
+    descEn: 'Brighter and lighter'
+  },
+  {
+    value: 'mono',
+    label: 'Mono',
+    descJa: '端末になじむ角ばった見た目',
+    descEn: 'A terminal-friendly angular look'
+  }
 ];
 
 /* ★ = アプリに同梱 (variable webfont)。OS 未インストールでも常に同じルックで描画される。 */

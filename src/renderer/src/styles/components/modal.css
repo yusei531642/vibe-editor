@@ -610,7 +610,8 @@
 
 .modal--settings .modal__theme-grid,
 .modal--settings .lang-grid,
-.modal--settings .density-grid {
+.modal--settings .density-grid,
+.modal--settings .mascot-grid {
   gap: 10px;
 }
 
@@ -625,7 +626,8 @@
  */
 .modal--settings .theme-card,
 .modal--settings .lang-card,
-.modal--settings .density-card {
+.modal--settings .density-card,
+.modal--settings .mascot-card {
   position: relative;
   padding: 12px 14px;
   border: 1px solid var(--border);
@@ -644,7 +646,8 @@
 @media (hover: hover) {
   .modal--settings .theme-card:hover,
   .modal--settings .lang-card:hover,
-  .modal--settings .density-card:hover {
+  .modal--settings .density-card:hover,
+  .modal--settings .mascot-card:hover {
     background: var(--bg-elev);
     border-color: var(--border-strong);
     transform: translateY(-1px);
@@ -661,14 +664,16 @@
    tap 後の sticky transform を確実にリセットする保険として役立つ。 */
 .modal--settings .theme-card:active,
 .modal--settings .lang-card:active,
-.modal--settings .density-card:active {
+.modal--settings .density-card:active,
+.modal--settings .mascot-card:active {
   transform: translateY(0);
   box-shadow: none;
 }
 
 .modal--settings .theme-card.is-selected,
 .modal--settings .lang-card.is-selected,
-.modal--settings .density-card.is-selected {
+.modal--settings .density-card.is-selected,
+.modal--settings .mascot-card.is-selected {
   /* 選択は「ほんの少し明るい背景 + やや強い境界」だけで示し、
      accent はカード右上の dot にのみ用いる */
   background: var(--bg-elev);
@@ -679,7 +684,8 @@
 /* 選択カード右上の accent dot (アクセント色を 1 ヶ所に集約) */
 .modal--settings .theme-card.is-selected::after,
 .modal--settings .lang-card.is-selected::after,
-.modal--settings .density-card.is-selected::after {
+.modal--settings .density-card.is-selected::after,
+.modal--settings .mascot-card.is-selected::after {
   content: '';
   position: absolute;
   top: 10px;
@@ -694,15 +700,61 @@
 /* タイポグラフィ階層: ラベル (主表記) を 1px 強く、補足はより dim に。
    モーダル内のカード共通 (lang / density) で揃える */
 .modal--settings .lang-card strong,
-.modal--settings .density-card strong {
+.modal--settings .density-card strong,
+.modal--settings .mascot-card__meta strong {
   font-weight: 600;
   letter-spacing: -0.005em;
 }
 
 .modal--settings .lang-card span,
-.modal--settings .density-card span {
+.modal--settings .density-card span,
+.modal--settings .mascot-card__meta span {
   color: var(--text-mute);
   opacity: 0.85;
+}
+
+.modal--settings .mascot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.modal--settings .mascot-card {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.modal--settings .mascot-card input[type='radio'] {
+  display: none;
+}
+
+.modal--settings .mascot-card__preview {
+  --mascot-size: 32px;
+  --mascot-track-width: 32px;
+  --mascot-run-distance: 0px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  position: relative;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-sidebar) 74%, transparent);
+  border: 1px solid var(--border);
+}
+
+.modal--settings .mascot-card__preview .status-mascot {
+  position: relative;
+  left: auto;
+  top: auto;
+}
+
+.modal--settings .mascot-card__meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
 }
 
 /* 「適用して保存」ボタン: 押下時の ✓ フィードバック幅をチラつかせない */
