@@ -195,6 +195,7 @@ pub async fn team_assign_task(
 ///   2) team_update_task(task_id, "in_progress") に変える
 ///   3) 長時間タスクでは team_status で進捗を残す
 ///   4) 完了時に team_send + team_update_task("done"/"blocked") を呼ぶ
+///
 /// ことで、Leader が `team_read` 0 件だけで「無応答」と誤判定するのを防ぐ。
 pub(super) fn build_task_notification(task_id: u32, description: &str) -> String {
     format!(

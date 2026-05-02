@@ -232,7 +232,7 @@ pub fn spawn_watcher(
                     }
                     // まだ自分の番が来ていない → snapshot を更新して次イベントを待つ。
                     // (他の watcher が claim した id は snapshot に足し、次回の difference から除外する)
-                    snapshot.extend(current.into_iter());
+                    snapshot.extend(current);
                 }
                 Ok(Err(_)) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
                 Err(_) => break,

@@ -39,9 +39,7 @@ pub fn safe_join(root: &str, rel: &str) -> Option<PathBuf> {
             Component::CurDir => { /* "." は無視 */ }
             Component::ParentDir => {
                 // root 直下で ".." が来たら脱出なので拒否
-                if stack.pop().is_none() {
-                    return None;
-                }
+                stack.pop()?;
             }
             // RootDir / Prefix / ... は絶対パス要素 → 既に (1) で弾いているが念のため拒否
             _ => return None,

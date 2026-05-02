@@ -62,10 +62,7 @@ pub async fn setup(bridge_path: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).await?;
     }
-    let mut content = match fs::read_to_string(&path).await {
-        Ok(s) => s,
-        Err(_) => String::new(),
-    };
+    let mut content: String = fs::read_to_string(&path).await.unwrap_or_default();
     content = remove_toml_section(&content, SECTION);
     content = remove_toml_section(&content, LEGACY_SECTION);
     // Issue #44: bridge_path を TOML basic string 用に正規 escape。

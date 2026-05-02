@@ -217,6 +217,7 @@ fn reduce_home_prefix(s: &str) -> String {
 ///   - env var `VIBE_TEAM_LOG_PATH` が空でなければそれを優先 (絶対パス想定、空白 trim)
 ///   - そうでなければ起動時に記録したファイルパス
 ///   - どちらも無ければ `"<stderr>"` (= stderr-only モード)
+///
 /// 戻り値は home prefix を `~` に reduce 済み (Reviewer D Major 反映)。
 pub fn server_log_path_for_diagnostics() -> String {
     if let Ok(v) = std::env::var("VIBE_TEAM_LOG_PATH") {
@@ -553,6 +554,7 @@ impl TeamHub {
     /// Issue #183: client が送ってきた role が
     ///   1. pending recruit の予約 role と一致するか (新規 recruit 経路)
     ///   2. 既存 agent_role_bindings に bind 済み role と一致するか (再接続経路)
+    ///
     /// を照合する。どちらも不一致なら false を返してハンドラ側で接続切断。
     /// 初回 handshake が成功したら agent_id → role を bind する。
     ///
@@ -840,7 +842,7 @@ impl TeamHub {
             });
             tracing::info!("[teamhub] listening on local named pipe");
             tracing::debug!("[teamhub] endpoint={endpoint}");
-            return Ok(());
+            Ok(())
         }
     }
 
