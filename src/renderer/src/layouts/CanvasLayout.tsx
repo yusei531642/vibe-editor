@@ -564,7 +564,8 @@ export function CanvasLayout(): JSX.Element {
             type="button"
             className="canvas-btn"
             onClick={() => setAddCardOpen((v) => !v)}
-            aria-label={t('canvas.add')}
+            aria-label={t('canvas.add.tooltip')}
+            title={t('canvas.add.tooltip')}
           >
             <Plus size={13} strokeWidth={1.8} />
             {t('canvas.add')}
@@ -609,7 +610,8 @@ export function CanvasLayout(): JSX.Element {
               type="button"
               className="canvas-btn canvas-btn--primary canvas-btn-split__main"
               onClick={() => void applyPreset(DEFAULT_SPAWN_PRESET)}
-              aria-label={t('canvas.spawnTeam')}
+              aria-label={t('canvas.spawnTeam.tooltip')}
+              title={t('canvas.spawnTeam.tooltip')}
             >
               <Sparkles size={13} strokeWidth={1.8} />
               {t('canvas.spawnTeam')}
@@ -618,7 +620,8 @@ export function CanvasLayout(): JSX.Element {
               type="button"
               className="canvas-btn canvas-btn--primary canvas-btn-split__caret"
               onClick={() => setSpawnOpen((v) => !v)}
-              aria-label={t('canvas.spawnTeamMore')}
+              aria-label={t('canvas.spawnTeamMore.tooltip')}
+              title={t('canvas.spawnTeamMore.tooltip')}
               aria-expanded={spawnOpen}
             >
               <ChevronDown size={12} strokeWidth={2} />
@@ -680,6 +683,8 @@ export function CanvasLayout(): JSX.Element {
             onClick={() => {
               if (window.confirm(t('canvas.clearConfirm'))) clear();
             }}
+            title={t('canvas.clear.tooltip')}
+            aria-label={t('canvas.clear.tooltip')}
           >
             {t('canvas.clear')}
           </button>
@@ -709,8 +714,8 @@ export function CanvasLayout(): JSX.Element {
           type="button"
           className="canvas-btn"
           onClick={() => setViewMode('ide')}
-          title={t('canvas.switchToIde')}
-          aria-label={t('canvas.switchToIde')}
+          title={t('canvas.switchToIde.tooltip')}
+          aria-label={t('canvas.switchToIde.tooltip')}
         >
           <Layout size={13} strokeWidth={1.8} />
           IDE
