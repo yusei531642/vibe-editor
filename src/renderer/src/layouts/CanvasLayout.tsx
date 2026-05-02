@@ -265,9 +265,15 @@ export function CanvasLayout(): JSX.Element {
     const cards = entry.members.map((m, i) => {
       const agentId = `${m.role}-${i}-${entry.id}`;
       const saved = entry.canvasState?.nodes.find((s) => s.agentId === agentId);
-      const pos = saved
-        ? { x: saved.x, y: saved.y }
-        : presetPosition(i % 3, Math.floor(i / 3));
+      // Issue #385: 旧 team-history.json に NaN / Infinity / undefined な座標が残っていると、
+      // 復元直後に React Flow が render 例外を出して Canvas 全体が黒画面になる。
+      // 数値として有効でない場合は preset 配置にフォールバックする。
+      const savedX = typeof saved?.x === 'number' && Number.isFinite(saved.x) ? saved.x : null;
+      const savedY = typeof saved?.y === 'number' && Number.isFinite(saved.y) ? saved.y : null;
+      const pos =
+        savedX !== null && savedY !== null
+          ? { x: savedX, y: savedY }
+          : presetPosition(i % 3, Math.floor(i / 3));
       // Issue #69: 未知 role でも落ちないよう optional chain
       const label = ROLE_META[m.role]?.label ?? m.role ?? 'Agent';
       return {
