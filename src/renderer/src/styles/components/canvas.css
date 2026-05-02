@@ -544,6 +544,27 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.canvas-agent-card__tool {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--fg-subtle);
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 100ms ease, color 100ms ease;
+}
+.canvas-agent-card__tool:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--agent-accent, var(--accent)) 16%, transparent);
+  color: var(--fg);
+}
+.canvas-agent-card__tool:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
 .canvas-agent-card__close {
   /* 旧 20x20/14px は Fitts 的に小さすぎ (右クリックメニュー追加前は ×が唯一の閉じ手段)。
      28x28 + 18px グリフへ拡大。ヘッダ高 (34px) を超えない範囲で最大化。 */

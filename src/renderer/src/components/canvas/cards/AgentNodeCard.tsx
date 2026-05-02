@@ -10,10 +10,11 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
+import { ClipboardCheck, RefreshCw } from 'lucide-react';
 import { TerminalView, type TerminalViewHandle } from '../../TerminalView';
 import { useT } from '../../../lib/i18n';
 import { useSettings } from '../../../lib/settings-context';
-import { useCanvasStore, NODE_MIN_W, NODE_MIN_H } from '../../../stores/canvas';
+import { useCanvasStore, NODE_MIN_W, NODE_MIN_H, NODE_W } from '../../../stores/canvas';
 import { useCanvasTerminalFit } from '../../../lib/use-canvas-terminal-fit';
 import { useConfirmRemoveCard } from '../../../lib/use-confirm-remove-card';
 import { useXtermScrollToBottomOnResize } from '../../../lib/use-xterm-scroll-on-resize';
@@ -21,6 +22,9 @@ import { fallbackProfile, profileText, renderSystemPrompt, useRoleProfiles } fro
 import { parseShellArgs } from '../../../lib/parse-args';
 import { resolveAgentConfig } from '../../../lib/agent-resolver';
 import { useRecruitSpawnAck } from '../../../lib/use-terminal-spawn';
+import { useTeamHandoff } from '../../../lib/use-team-handoff';
+import { useToast } from '../../../lib/toast-context';
+import type { HandoffCheckpoint, HandoffReference } from '../../../../../types/shared';
 
 interface AgentPayload {
   agent?: 'claude' | 'codex';
@@ -47,6 +51,10 @@ interface AgentPayload {
   customInstructions?: string;
   /** @deprecated `customInstructions` の旧名。互換のため受理だけする (後方互換)。 */
   codexInstructions?: string;
+  /** Issue #359: handoff から新セッションを起動するときに初手で送るプロンプト。 */
+  initialMessage?: string;
+  /** Issue #359: 本文はファイル保存し、payload には最新 handoff 参照だけ残す。 */
+  latestHandoff?: HandoffReference;
 }
 
 type AgentStatus = 'idle' | 'thinking' | 'typing';
@@ -85,6 +93,47 @@ function summarizeInput(text: string): string {
   return punct > 4 ? cut.slice(0, punct) : cut;
 }
 
+function handoffReferenceOf(handoff: HandoffCheckpoint | HandoffReference): HandoffReference {
+  return {
+    id: handoff.id,
+    kind: handoff.kind,
+    status: handoff.status,
+    createdAt: handoff.createdAt,
+    updatedAt: handoff.updatedAt,
+    jsonPath: handoff.jsonPath,
+    markdownPath: handoff.markdownPath,
+    fromAgentId: handoff.fromAgentId,
+    toAgentId: handoff.toAgentId,
+    replacementForAgentId: handoff.replacementForAgentId
+  };
+}
+
+function buildHandoffInitialMessage(params: {
+  handoff: HandoffCheckpoint | HandoffReference;
+  oldAgentId?: string;
+  roleProfileId: string;
+  isLeader: boolean;
+}): string {
+  const ackTarget = params.oldAgentId ? ` to agentId "${params.oldAgentId}"` : '';
+  return [
+    'You are starting a fresh Canvas session from a saved handoff.',
+    '',
+    `Handoff id: ${params.handoff.id}`,
+    `Handoff file: ${params.handoff.markdownPath}`,
+    `Role: ${params.roleProfileId}`,
+    '',
+    'Read the handoff file first. Use it as the authoritative continuity note, then continue the work in this new session.',
+    params.isLeader
+      ? 'You are the replacement leader for the same teamId. Coordinate existing workers by agentId when necessary.'
+      : 'You are the replacement worker for the same teamId. Report back to the leader after you understand the handoff.',
+    '',
+    `After you have read and accepted the handoff, send an acknowledgement${ackTarget} with this exact prefix at the beginning of the message:`,
+    `handoff_ack:${params.handoff.id}`,
+    '',
+    'Keep the acknowledgement short, then continue from the Next Actions section.'
+  ].join('\n');
+}
+
 function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const ref = useRef<TerminalViewHandle | null>(null);
   // Issue #261: NodeResizer でカードを縮めたあと再度広げたとき、内部 `.xterm-viewport`
@@ -98,6 +147,9 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const confirmRemoveCard = useConfirmRemoveCard();
   const setCardTitle = useCanvasStore((s) => s.setCardTitle);
   const setCardPayload = useCanvasStore((s) => s.setCardPayload);
+  const addCard = useCanvasStore((s) => s.addCard);
+  const removeCard = useCanvasStore((s) => s.removeCard);
+  const { showToast } = useToast();
   // Issue #253: Canvas zoom 下でも論理 px ベースで cols/rows を確定させる
   const fit = useCanvasTerminalFit(settings);
   const payload = (data?.payload ?? {}) as AgentPayload;
@@ -109,6 +161,7 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const accent = profile.visual.color;
   const meta = profileText(profile, settings.language);
   const title = (data?.title as string) ?? meta.label;
+  const [handoffBusy, setHandoffBusy] = useState(false);
   // Issue #342 Phase 1: recruit 経路の spawn 失敗を Hub に ack するためのコールバック。
   // payload.agentId / payload.teamId が揃っているとき (= 通常の AgentNode は常に揃う)
   // のみ実体化し、それ以外は no-op を返す。
@@ -296,6 +349,162 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
 
   const codexInstructions = isCodex ? sysPrompt : undefined;
 
+  const createHandoff = useCallback(async (): Promise<HandoffCheckpoint | null> => {
+    const projectRoot = cwd || payload.cwd || '';
+    if (!projectRoot) {
+      showToast(t('handoff.error.noProject'), { tone: 'error' });
+      return null;
+    }
+    const snapshot = ref.current?.getBufferText(120) ?? '';
+    const kind = roleProfileId === 'leader' ? 'leader' : 'worker';
+    const result = await window.api.handoffs.create({
+      projectRoot,
+      teamId: payload.teamId ?? null,
+      kind,
+      fromAgentId: payload.agentId ?? null,
+      fromRole: roleProfileId,
+      fromAgent: payload.agent ?? 'claude',
+      fromTitle: title,
+      sourceSessionId: payload.resumeSessionId ?? null,
+      replacementForAgentId: payload.agentId ?? null,
+      retireAfterAck: true,
+      trigger: 'manual',
+      content: {
+        summary: `${title} (${meta.label}) の Canvas handoff。保存時点の terminal snapshot と次アクションを含みます。`,
+        decisions: ['この handoff は既存セッションを --resume せず、新しいセッションへ注入するための継続メモとして保存されました。'],
+        filesTouched: [],
+        openTasks: ['handoff markdown を読み、現在の作業目的・未完了タスク・次アクションを確認する。'],
+        risks: ['terminal snapshot は直近の表示内容ベースのため、完全な会話履歴ではありません。必要なら旧 agent / team history を確認してください。'],
+        nextActions: ['handoff を読んだら ack を返し、Next Actions に沿って作業を継続する。'],
+        verification: ['handoff 作成時点では自動検証は未実行です。'],
+        notes: [`Canvas card: ${id}`, payload.teamId ? `Team: ${payload.teamId}` : 'Standalone agent'],
+        terminalSnapshot: snapshot.slice(-16_000) || null
+      }
+    });
+    if (!result.ok || !result.handoff) {
+      throw new Error(result.error ?? 'handoff create failed');
+    }
+    setCardPayload(id, { latestHandoff: handoffReferenceOf(result.handoff) });
+    showToast(t('handoff.created'), { tone: 'success' });
+    return result.handoff;
+  }, [
+    cwd,
+    id,
+    meta.label,
+    payload.agent,
+    payload.agentId,
+    payload.cwd,
+    payload.resumeSessionId,
+    payload.teamId,
+    roleProfileId,
+    setCardPayload,
+    showToast,
+    t,
+    title
+  ]);
+
+  const startFreshFromHandoff = useCallback(async (): Promise<void> => {
+    if (handoffBusy) return;
+    setHandoffBusy(true);
+    try {
+      const projectRoot = cwd || payload.cwd || '';
+      const existing = payload.latestHandoff;
+      let handoff: HandoffCheckpoint | HandoffReference | null = null;
+      if (existing) {
+        const full = await window.api.handoffs.read(projectRoot, payload.teamId ?? null, existing.id);
+        handoff = full ?? existing;
+      } else {
+        handoff = await createHandoff();
+      }
+      if (!handoff) return;
+      const newAgentId = `${roleProfileId}-handoff-${crypto.randomUUID().slice(0, 8)}`;
+      const isLeader = roleProfileId === 'leader';
+      const initialMessage = buildHandoffInitialMessage({
+        handoff,
+        oldAgentId: payload.agentId,
+        roleProfileId,
+        isLeader
+      });
+      const currentNode = useCanvasStore.getState().nodes.find((n) => n.id === id);
+      const position = currentNode
+        ? { x: currentNode.position.x + NODE_W + 48, y: currentNode.position.y }
+        : undefined;
+      const nextRef: HandoffReference = {
+        ...handoffReferenceOf(handoff),
+        status: 'started',
+        toAgentId: newAgentId,
+        replacementForAgentId: payload.agentId ?? null
+      };
+      const nextPayload: AgentPayload = {
+        ...payload,
+        agentId: newAgentId,
+        resumeSessionId: null,
+        initialMessage,
+        latestHandoff: nextRef
+      };
+      addCard({
+        type: 'agent',
+        title: `${title} handoff`,
+        position,
+        payload: nextPayload
+      });
+      setCardPayload(id, { latestHandoff: nextRef });
+      await window.api.handoffs.updateStatus(
+        projectRoot,
+        payload.teamId ?? null,
+        handoff.id,
+        'started',
+        newAgentId
+      );
+      if (isLeader && payload.teamId) {
+        await window.api.app.setActiveLeader(payload.teamId, newAgentId);
+      }
+      showToast(t('handoff.started'), { tone: 'success' });
+    } catch (err) {
+      console.warn('[handoff] start fresh failed:', err);
+      showToast(t('handoff.error.startFailed'), { tone: 'error' });
+    } finally {
+      setHandoffBusy(false);
+    }
+  }, [
+    addCard,
+    createHandoff,
+    cwd,
+    handoffBusy,
+    id,
+    payload,
+    roleProfileId,
+    setCardPayload,
+    showToast,
+    t,
+    title
+  ]);
+
+  const handleCreateHandoffClick = useCallback(() => {
+    if (handoffBusy) return;
+    setHandoffBusy(true);
+    void createHandoff()
+      .catch((err) => {
+        console.warn('[handoff] create failed:', err);
+        showToast(t('handoff.error.createFailed'), { tone: 'error' });
+      })
+      .finally(() => setHandoffBusy(false));
+  }, [createHandoff, handoffBusy, showToast, t]);
+
+  useTeamHandoff((event) => {
+    const handoff = payload.latestHandoff;
+    if (!handoff || !payload.teamId || !payload.agentId) return;
+    if (!handoff.toAgentId) return;
+    if (event.teamId !== payload.teamId) return;
+    if (event.fromAgentId !== handoff.toAgentId || event.toAgentId !== payload.agentId) return;
+    if (!event.preview.startsWith(`handoff_ack:${handoff.id}`)) return;
+    void window.api.handoffs
+      .updateStatus(cwd || payload.cwd || '', payload.teamId, handoff.id, 'acknowledged', handoff.toAgentId)
+      .catch((err) => console.warn('[handoff] acknowledge status update failed:', err));
+    removeCard(id, { cascadeTeam: false });
+    showToast(t('handoff.acknowledged'), { tone: 'success' });
+  });
+
   // accent は CSS 変数 --agent-accent として子孫で参照する
   const cardStyle = useMemo(
     () => ({ ['--agent-accent' as string]: accent } as React.CSSProperties),
@@ -344,6 +553,26 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
             )}
             <button
               type="button"
+              className="nodrag canvas-agent-card__tool"
+              onClick={handleCreateHandoffClick}
+              disabled={handoffBusy}
+              title={t('handoff.create')}
+              aria-label={t('handoff.create')}
+            >
+              <ClipboardCheck size={13} strokeWidth={1.9} />
+            </button>
+            <button
+              type="button"
+              className="nodrag canvas-agent-card__tool"
+              onClick={() => void startFreshFromHandoff()}
+              disabled={handoffBusy}
+              title={t('handoff.startFresh')}
+              aria-label={t('handoff.startFresh')}
+            >
+              <RefreshCw size={13} strokeWidth={1.9} />
+            </button>
+            <button
+              type="button"
               className="nodrag canvas-agent-card__close"
               onClick={() => confirmRemoveCard(id)}
               title={t('agentCard.close')}
@@ -374,6 +603,7 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
             teamId={payload.teamId}
             agentId={payload.agentId}
             role={roleProfileId}
+            initialMessage={payload.initialMessage}
             onStatus={setStatus}
             onActivity={handleActivity}
             onUserInput={handleUserInput}

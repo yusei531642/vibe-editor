@@ -471,3 +471,39 @@ _(未着手)_
 ### Next Tasks
 - 手動 smoke で worker -> leader の `team_send` / `team_read({ unread_only: false })` と dismiss -> re-recruit の挙動を確認する
 - PR 作成後に CodeRabbit と人間レビューを待つ
+
+---
+
+## Issue #359 リーダー軸ハンドオフ実装計画
+
+### 計画
+- [x] `feature/issue-359` で作業し、Issue コメント v2 の「同じ teamId に新リーダーを参加させる」方針に合わせる
+- [x] ハンドオフ本文を Canvas localStorage へ入れず、Rust 側 `~/.vibe-editor/handoffs/...` に JSON / Markdown として保存する
+- [x] `TeamHistoryEntry` と Canvas card payload には最新 handoff の参照だけを保持する
+- [x] Agent card に `Create handoff` と `Start fresh from handoff` を追加し、新リーダー / 新ワーカーへ handoff summary + path を初期指示として注入する
+- [x] 交代中の `team_send("leader")` 二重配送を避けるため、TeamHub に active leader 指定を追加し、leader 宛先は active leader を優先する
+- [x] 新 agent から `handoff_ack:<handoffId>` が届いたら旧 agent card を `cascadeTeam: false` で退役させる
+- [x] `npm run typecheck`、`cargo check --manifest-path src-tauri/Cargo.toml`、関連テストで検証する
+
+### Next Steps
+- Rust command / shared types / renderer API の順に永続化基盤を追加する
+- Agent card UI と handoff ack listener を実装する
+- 最後に TeamHistory 同期、型チェック、Rust check、差分確認を実施する
+
+### 進捗 (2026-05-02)
+- Rust command `handoffs_create/list/read/update_status` を追加し、handoff を JSON / Markdown で保存するようにした
+- TeamHub に `active_leader_agent_id` を追加し、role 宛先解決と task assign で active leader を優先するようにした
+- Agent card から handoff 作成、新規 agent 起動、ack 受信後の旧 card 退役までの UI flow を追加した
+- Recent restore / TeamHistory に最新 handoff 参照を保存し、本文はファイル参照だけにした
+
+### 検証
+- `cargo check --manifest-path src-tauri\Cargo.toml`: PASS
+- `npm run typecheck`: PASS
+- `npm run test`: PASS (12 files / 83 tests、既存の jsdom canvas warning あり)
+- `npm run build:vite`: PASS (既存の chunk size / dynamic import warning あり)
+- `cargo test --manifest-path src-tauri\Cargo.toml handoffs -- --no-capture`: PASS (2 tests)
+- `git diff --check`: PASS
+
+### Next Tasks
+- Tauri 実機で Agent card の handoff 作成、新規セッション起動、`handoff_ack:<handoffId>` による旧 card 自動退役を smoke 確認する
+- PR 作成後に CodeRabbit と人間レビューを待つ。自動マージは禁止

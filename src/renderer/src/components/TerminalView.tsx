@@ -24,6 +24,8 @@ export interface TerminalViewHandle {
   focus(): void;
   /** xterm の scroll model に基づき末尾までスクロールする (Issue #272 v3) */
   scrollToBottom(): void;
+  /** 現在の xterm buffer 末尾をプレーンテキストで返す (handoff 用) */
+  getBufferText(maxLines?: number): string;
 }
 
 interface TerminalViewProps {
@@ -337,6 +339,17 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         },
         scrollToBottom(): void {
           termRef.current?.scrollToBottom();
+        },
+        getBufferText(maxLines = 80): string {
+          const term = termRef.current;
+          if (!term) return '';
+          const buffer = term.buffer.active;
+          const start = Math.max(0, buffer.length - maxLines);
+          const lines: string[] = [];
+          for (let i = start; i < buffer.length; i++) {
+            lines.push(buffer.getLine(i)?.translateToString(true) ?? '');
+          }
+          return lines.join('\n').trim();
         }
       }),
       // ptyIdRef / termRef は stable な ref なので deps 不要

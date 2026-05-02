@@ -334,6 +334,8 @@ export interface TeamHistoryEntry {
    * IDE モードからは無視される (後方互換)。
    */
   canvasState?: TeamCanvasState;
+  /** Issue #359: 最新 handoff の参照。本体は ~/.vibe-editor/handoffs/ に保存する。 */
+  latestHandoff?: HandoffReference;
 }
 
 export interface TeamCanvasNode {
@@ -347,6 +349,74 @@ export interface TeamCanvasNode {
 export interface TeamCanvasState {
   nodes: TeamCanvasNode[];
   viewport: { x: number; y: number; zoom: number };
+}
+
+export type HandoffKind = 'leader' | 'worker' | 'terminal';
+export type HandoffStatus = 'created' | 'started' | 'acknowledged' | 'retired' | 'failed';
+
+export interface HandoffReference {
+  id: string;
+  kind: HandoffKind | string;
+  status: HandoffStatus | string;
+  createdAt: string;
+  updatedAt?: string;
+  jsonPath: string;
+  markdownPath: string;
+  fromAgentId?: string | null;
+  toAgentId?: string | null;
+  replacementForAgentId?: string | null;
+}
+
+export interface HandoffContent {
+  summary: string;
+  decisions: string[];
+  filesTouched: string[];
+  openTasks: string[];
+  risks: string[];
+  nextActions: string[];
+  verification: string[];
+  notes: string[];
+  terminalSnapshot?: string | null;
+}
+
+export interface HandoffCreateRequest {
+  projectRoot: string;
+  teamId?: string | null;
+  kind: HandoffKind | string;
+  fromAgentId?: string | null;
+  fromRole?: string | null;
+  fromAgent?: string | null;
+  fromTitle?: string | null;
+  sourceSessionId?: string | null;
+  replacementForAgentId?: string | null;
+  retireAfterAck: boolean;
+  trigger: string;
+  content: HandoffContent;
+}
+
+export interface HandoffCheckpoint extends HandoffReference {
+  schemaVersion: number;
+  projectRoot: string;
+  teamId?: string | null;
+  fromRole?: string | null;
+  fromAgent?: string | null;
+  fromTitle?: string | null;
+  sourceSessionId?: string | null;
+  retireAfterAck: boolean;
+  trigger: string;
+  content: HandoffContent;
+}
+
+export interface HandoffCreateResult {
+  ok: boolean;
+  handoff?: HandoffCheckpoint | null;
+  error?: string | null;
+}
+
+export interface HandoffMutationResult {
+  ok: boolean;
+  handoff?: HandoffCheckpoint | null;
+  error?: string | null;
 }
 
 // ---------- ファイルツリー / 簡易エディタ ----------

@@ -60,6 +60,25 @@ pub struct TeamCanvasState {
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct HandoffReference {
+    pub id: String,
+    pub kind: String,
+    pub status: String,
+    pub created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    pub json_path: String,
+    pub markdown_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub from_agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub to_agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replacement_for_agent_id: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct TeamHistoryEntry {
     pub id: String,
     pub name: String,
@@ -70,6 +89,9 @@ pub struct TeamHistoryEntry {
     /// Phase 5: Canvas モードの配置状態 (optional, 後方互換)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub canvas_state: Option<TeamCanvasState>,
+    /// Issue #359: 最新 handoff の参照のみ。本文は handoffs store に置く。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_handoff: Option<HandoffReference>,
 }
 
 #[derive(Serialize, Default)]

@@ -102,6 +102,7 @@ pub fn run() {
             commands::app::app_set_window_effects,
             commands::app::app_setup_team_mcp,
             commands::app::app_cleanup_team_mcp,
+            commands::app::app_set_active_leader,
             commands::app::app_get_team_file_path,
             commands::app::app_get_mcp_server_path,
             commands::app::app_get_team_hub_info,
@@ -125,6 +126,11 @@ pub fn run() {
             commands::team_history::team_history_save,
             commands::team_history::team_history_save_batch,
             commands::team_history::team_history_delete,
+            // ---- handoffs ----
+            commands::handoffs::handoffs_create,
+            commands::handoffs::handoffs_list,
+            commands::handoffs::handoffs_read,
+            commands::handoffs::handoffs_update_status,
             // ---- dialog ----
             commands::dialog::dialog_open_folder,
             commands::dialog::dialog_open_file,
