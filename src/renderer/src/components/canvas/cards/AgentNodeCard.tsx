@@ -24,7 +24,11 @@ import { resolveAgentConfig } from '../../../lib/agent-resolver';
 import { useRecruitSpawnAck } from '../../../lib/use-terminal-spawn';
 import { useTeamHandoff } from '../../../lib/use-team-handoff';
 import { useToast } from '../../../lib/toast-context';
-import type { HandoffCheckpoint, HandoffReference } from '../../../../../types/shared';
+import type {
+  HandoffCheckpoint,
+  HandoffReference,
+  TeamOrganizationMeta
+} from '../../../../../types/shared';
 
 interface AgentPayload {
   agent?: 'claude' | 'codex';
@@ -53,6 +57,8 @@ interface AgentPayload {
   codexInstructions?: string;
   /** Issue #359: handoff から新セッションを起動するときに初手で送るプロンプト。 */
   initialMessage?: string;
+  /** Issue #370: 複数組織同時運用時の所属表示・履歴復元用情報。 */
+  organization?: TeamOrganizationMeta;
   /** Issue #359: 本文はファイル保存し、payload には最新 handoff 参照だけ残す。 */
   latestHandoff?: HandoffReference;
 }
@@ -169,6 +175,7 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const globalPreamble = useRoleProfiles().file.globalPreamble;
   const profile = profilesById[roleProfileId] ?? fallbackProfile(roleProfileId);
   const accent = profile.visual.color;
+  const organizationAccent = payload.organization?.color;
   const meta = profileText(profile, settings.language);
   const title = (data?.title as string) ?? meta.label;
   const [handoffBusy, setHandoffBusy] = useState(false);
@@ -545,8 +552,12 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
 
   // accent は CSS 変数 --agent-accent として子孫で参照する
   const cardStyle = useMemo(
-    () => ({ ['--agent-accent' as string]: accent } as React.CSSProperties),
-    [accent]
+    () =>
+      ({
+        ['--agent-accent' as string]: accent,
+        ['--organization-accent' as string]: organizationAccent ?? accent
+      }) as React.CSSProperties,
+    [accent, organizationAccent]
   );
 
   // Issue #261 / #272 / #272 v3: termContainer のサイズ変化時に xterm 自前の
@@ -580,6 +591,11 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
               {profile.visual.glyph}
             </span>
             <span className="canvas-agent-card__title">{title}</span>
+            {payload.organization && (
+              <span className="canvas-agent-card__organization">
+                {payload.organization.name}
+              </span>
+            )}
             <span className="canvas-agent-card__role">{meta.label}</span>
           </span>
           <span className="canvas-agent-card__actions">

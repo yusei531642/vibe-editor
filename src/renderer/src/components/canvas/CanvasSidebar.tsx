@@ -189,7 +189,8 @@ export function CanvasSidebar({
             role: m.role,
             teamId: entry.id,
             agentId,
-            cwd
+            cwd,
+            organization: entry.organization
           }
         };
       });

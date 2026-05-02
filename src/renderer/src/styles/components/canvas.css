@@ -408,6 +408,27 @@
   gap: 4px;
   margin-top: 2px;
 }
+.canvas-popover__preset-org {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px;
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--org-color, var(--border)) 45%, transparent);
+}
+.canvas-popover__org-badge {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--org-color, var(--fg)) 78%, var(--fg));
+  background: color-mix(in srgb, var(--org-color, var(--accent)) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--org-color, var(--border)) 35%, transparent);
+}
 
 /* 役割アバター (ドット) */
 .canvas-role-dot {
@@ -456,12 +477,12 @@
   left: 0;
   top: 0;
   bottom: 0;
-  width: 2px;
-  background: var(--agent-accent, var(--accent));
+  width: 3px;
+  background: var(--organization-accent, var(--agent-accent, var(--accent)));
   opacity: 0.75;
 }
 .canvas-agent-card:hover {
-  border-color: color-mix(in srgb, var(--agent-accent, var(--accent)) 35%, var(--border));
+  border-color: color-mix(in srgb, var(--organization-accent, var(--agent-accent, var(--accent))) 35%, var(--border));
 }
 
 .canvas-agent-card__header {
@@ -529,6 +550,21 @@
   text-transform: uppercase;
   letter-spacing: 0.6px;
   flex-shrink: 0;
+}
+.canvas-agent-card__organization {
+  max-width: 120px;
+  min-width: 0;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--organization-accent, var(--fg)) 82%, var(--fg));
+  background: color-mix(in srgb, var(--organization-accent, var(--accent)) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--organization-accent, var(--border)) 35%, transparent);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
 }
 .canvas-agent-card__actions {
   display: flex;

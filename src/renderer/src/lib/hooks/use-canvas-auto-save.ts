@@ -5,6 +5,7 @@ import type { CardData } from '../../stores/canvas';
 import type {
   HandoffReference,
   TeamHistoryEntry,
+  TeamOrganizationMeta,
   TeamRole,
   TerminalAgent
 } from '../../../../types/shared';
@@ -58,6 +59,7 @@ export function useCanvasAutoSave(opts: UseCanvasAutoSaveOptions): void {
     if (nodes.length === 0) return null;
     interface TeamEntryInfo {
       name: string;
+      organization?: TeamOrganizationMeta;
       members: { role: TeamRole; agent: TerminalAgent }[];
       canvasNodes: { agentId: string; x: number; y: number; width?: number; height?: number }[];
       latestHandoff?: HandoffReference;
@@ -68,14 +70,22 @@ export function useCanvasAutoSave(opts: UseCanvasAutoSaveOptions): void {
         teamId?: string;
         agentId?: string;
         role?: string;
+        roleProfileId?: string;
         agent?: string;
+        organization?: TeamOrganizationMeta;
         latestHandoff?: HandoffReference;
       };
       if (!p.teamId || !p.agentId) continue;
       const title = String(n.data?.title ?? 'Team');
-      const entry = byTeam.get(p.teamId) ?? { name: title, members: [], canvasNodes: [] };
+      const entry = byTeam.get(p.teamId) ?? {
+        name: p.organization?.name ?? title,
+        organization: p.organization,
+        members: [],
+        canvasNodes: []
+      };
+      if (!entry.organization && p.organization) entry.organization = p.organization;
       entry.members.push({
-        role: (p.role ?? 'leader') as TeamRole,
+        role: (p.roleProfileId ?? p.role ?? 'leader') as TeamRole,
         agent: (p.agent ?? 'claude') as TerminalAgent
       });
       entry.canvasNodes.push({
@@ -118,6 +128,7 @@ export function useCanvasAutoSave(opts: UseCanvasAutoSaveOptions): void {
           createdAt: existing?.createdAt ?? nowIso,
           lastUsedAt: nowIso,
           members: mergeCanvasMembers(info.members, existing),
+          organization: info.organization ?? existing?.organization,
           canvasState: { nodes: info.canvasNodes, viewport: autoSavePayload.viewport },
           latestHandoff: info.latestHandoff ?? existing?.latestHandoff
         };

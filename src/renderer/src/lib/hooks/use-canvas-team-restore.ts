@@ -48,13 +48,16 @@ export function useCanvasTeamRestore(opts: UseCanvasTeamRestoreOptions): void {
       const p = (n.data?.payload ?? {}) as {
         teamId?: string;
         agentId?: string;
+        organization?: { name?: string };
+        roleProfileId?: string;
         role?: string;
         agent?: string;
       };
-      if (!p.teamId || !p.agentId || !p.role || !p.agent) continue;
+      const role = p.roleProfileId ?? p.role;
+      if (!p.teamId || !p.agentId || !role || !p.agent) continue;
       const title = String(n.data?.title ?? 'Team');
-      const tm = byTeam.get(p.teamId) ?? { name: title, members: [] };
-      tm.members.push({ agentId: p.agentId, role: p.role, agent: p.agent });
+      const tm = byTeam.get(p.teamId) ?? { name: p.organization?.name ?? title, members: [] };
+      tm.members.push({ agentId: p.agentId, role, agent: p.agent });
       byTeam.set(p.teamId, tm);
     }
     const now = Date.now();

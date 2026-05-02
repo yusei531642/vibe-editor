@@ -310,6 +310,19 @@ export interface TeamMember {
   role: TeamRole;
 }
 
+/** Canvas 上で同時運用する「組織」の表示・復元用メタデータ。 */
+export interface TeamOrganizationMeta {
+  /** 組織単位の識別子。通常は teamId と同じ。 */
+  id: string;
+  name: string;
+  /** #rrggbb */
+  color: string;
+  /** 同時起動プリセット内での表示順。 */
+  index?: number;
+  /** どのプリセットから作られたか。手動作成や旧履歴では未設定。 */
+  presetId?: string;
+}
+
 /** 保存されるチーム履歴メンバー。sessionId は Claude Code の --resume に渡す */
 export interface TeamHistoryMember {
   role: TeamRole;
@@ -328,6 +341,8 @@ export interface TeamHistoryEntry {
   createdAt: string;
   lastUsedAt: string;
   members: TeamHistoryMember[];
+  /** Issue #370: Canvas で複数組織を同時運用したときの所属表示・復元用情報。 */
+  organization?: TeamOrganizationMeta;
   /**
    * Phase 5: Canvas モードで使う配置状態。
    * 各メンバーの { agentId, x, y, width, height } と viewport を保持。

@@ -206,6 +206,9 @@ export function useRecruitListener(): void {
           });
         }
         const store = useCanvasStore.getState();
+        const requesterPayload = (requester.data?.payload ?? {}) as {
+          organization?: unknown;
+        };
         const teamNodes = store.nodes.filter((n) => {
           const data = n.data?.payload as { teamId?: string } | undefined;
           return data?.teamId === p.teamId;
@@ -223,6 +226,7 @@ export function useRecruitListener(): void {
             role: p.roleProfileId,
             teamId: p.teamId,
             agentId: p.newAgentId,
+            organization: requesterPayload.organization,
             // Issue #117: AgentNodeCard が拾って Claude(--append-system-prompt) /
             // Codex(model_instructions_file) 両方の経路に注入する正本フィールド。
             customInstructions: p.customInstructions || undefined
