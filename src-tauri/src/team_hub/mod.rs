@@ -171,6 +171,11 @@ pub struct MemberDiagnostics {
     pub messages_in_count: u64,
     pub messages_out_count: u64,
     pub tasks_claimed_count: u64,
+    /// Issue #409: `team_status(status)` で agent が自己申告した最新ステータス文字列。
+    /// Leader が `team_diagnostics` で「直近で生きているか / 何をしているか」を判断するために使う。
+    pub current_status: Option<String>,
+    /// Issue #409: `current_status` を更新した最終時刻 (RFC3339)。
+    pub last_status_at: Option<String>,
 }
 
 /// Issue #342 Phase 3 (3.11): tracing-appender が書き出すログファイルの絶対パスを

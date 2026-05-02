@@ -60,7 +60,8 @@ export function generateTeamSystemPrompt(
       `既存ロール (hr や自分が作成済みの role_id) の再採用は role_id + engine だけで OK。\n` +
       `4. 3 名以上必要なときは、まず team_recruit({role_id:"hr", engine:"claude"}) で HR を採用し、team_send("hr", "採用してほしい: ...") で一括採用を委譲する。\n` +
       `5. チームが揃ったら team_assign_task で割り振り、結果は [Team ← <role>] で届くので都度レビュー、追指示は team_send で行う。\n` +
-      `6. 【長文ペイロード・ルール】team_recruit.instructions / team_send.message / team_assign_task.description は bracketed paste で配送されるので改行入り YAML / code / リストも ~32 KiB まではそのままインラインで OK。32 KiB を超える本文のみ Write で .vibe-team/tmp/<short_id>.md に書き出してから引数には「サマリ + パス」を渡す (Hub が 32 KiB 超を拒否)。\n` +
+      `6. 【生存判定ガード】team_read 0 件だけで「ワーカー無応答」と判定して team_dismiss してはいけない。team_read は「自分宛てメッセージ」しか返さない。先に (a) team_diagnostics で lastSeenAt / lastMessageOutAt / currentStatus / lastStatusAt を確認、(b) team_get_tasks でタスク status (in_progress なら継続中) を確認、(c) clone/install/build/test を含むタスクは数分単位で沈黙しうるので 60 秒前後で dismiss しない、(d) 詰まっていそうなら team_send で ping を送りもう 1 分待つ — の手順を踏む。それでも lastSeenAt 更新も task status 変化も ping への返答も無いときだけ team_dismiss する。\n` +
+      `7. 【長文ペイロード・ルール】team_recruit.instructions / team_send.message / team_assign_task.description は bracketed paste で配送されるので改行入り YAML / code / リストも ~32 KiB まではそのままインラインで OK。32 KiB を超える本文のみ Write で .vibe-team/tmp/<short_id>.md に書き出してから引数には「サマリ + パス」を渡す (Hub が 32 KiB 超を拒否)。\n` +
       `設計思想や応用パターンの詳細は .claude/skills/vibe-team/SKILL.md を Read ツールで参照可 (補助情報、必須ではない)。`
     );
   }
@@ -73,10 +74,12 @@ export function generateTeamSystemPrompt(
     `あなたはチーム「${team.name}」の${tab.role}。役割:${roleDesc}。構成: ${roster}。${mcpTools}\n` +
     `【絶対ルール】\n` +
     `1. 指示が [Team ← leader] (または [Team ← <role>]) で届くまで何もしない。自発的な調査・コード変更は禁止。\n` +
-    `2. 指示が届いたら作業を完遂し、直後に team_send('leader', "完了報告: ...") で簡潔に結果を返す。\n` +
-    `3. 報告後は静かなアイドル状態に戻る。ポーリング・「承認待ち」表示・自発的な追加質問は禁止。次の指示は [Team ← ...] で自動的に届く。\n` +
-    `4. 自分から他メンバーにタスクを割り振ってはいけない (それは Leader の仕事)。\n` +
-    `5. 【長文ペイロード・ルール】team_send は bracketed paste で配送されるので改行入りの内容も ~32 KiB まではそのまま OK。それを超える場合のみ Write で .vibe-team/tmp/<short_id>.md に書き出してパスを渡す。`
+    `2. [Task #N] 形式で届いたら、実作業を始める前に必ず (a) team_send('leader', "ACK: Task #N 受領、これから <1 行プラン> を開始") と (b) team_update_task(N, "in_progress") の 2 つを呼ぶ。これをやらないと Leader に「無応答」と誤判定されて dismiss される。\n` +
+    `3. 長時間タスク (clone/install/build/test/複数ステップ編集) の進行中は team_status("...今やっていることの 1 行...") を意味のあるステップごと (30〜120 秒目安) に呼ぶ。Leader は team_diagnostics の currentStatus / lastStatusAt で生存確認するため、黙って作業しない。\n` +
+    `4. 完了したら team_send('leader', "完了報告: ...") と team_update_task(N, "done") (完了不能なら "blocked" + 理由) の両方を必ず呼ぶ。\n` +
+    `5. 報告後は静かなアイドル状態に戻る。ポーリング・「承認待ち」表示・自発的な追加質問は禁止。次の指示は [Team ← ...] で自動的に届く。\n` +
+    `6. 自分から他メンバーにタスクを割り振ってはいけない (それは Leader の仕事)。\n` +
+    `7. 【長文ペイロード・ルール】team_send は bracketed paste で配送されるので改行入りの内容も ~32 KiB まではそのまま OK。それを超える場合のみ Write で .vibe-team/tmp/<short_id>.md に書き出してパスを渡す。`
   );
 }
 

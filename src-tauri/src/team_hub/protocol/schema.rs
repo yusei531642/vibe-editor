@@ -36,10 +36,20 @@ pub(super) fn tool_defs() -> Value {
         },
         {
             "name": "team_status",
-            "description": "Report your current status (informational).",
+            "description":
+                "Record your current status so the Leader can tell you are alive and what you are doing. \
+                 Stored on the Hub and surfaced via team_diagnostics (currentStatus / lastStatusAt). \
+                 Send a short 1-line update on every meaningful step (e.g. \"ACK: starting clone\", \
+                 \"running cargo test\", \"waiting on review\") — call frequently for long-running work \
+                 so the Leader does not mistake silence for a hang.",
             "inputSchema": {
                 "type": "object",
-                "properties": { "status": { "type": "string" } },
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "One short line describing what you are currently doing (non-empty)."
+                    }
+                },
                 "required": ["status"]
             }
         },

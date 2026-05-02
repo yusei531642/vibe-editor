@@ -23,7 +23,8 @@ use super::super::permissions::caller_has_permission;
 ///   "serverLogPath": "~/.vibe-editor/logs/vibe-editor.log" or "<stderr>",
 ///   "members": [{ agentId, role, online, inconsistent, recruitedAt,
 ///                 lastHandshakeAt, lastSeenAt, lastMessageInAt, lastMessageOutAt,
-///                 messagesInCount, messagesOutCount, tasksClaimedCount }]
+///                 messagesInCount, messagesOutCount, tasksClaimedCount,
+///                 currentStatus, lastStatusAt }]
 /// }
 /// ```
 ///
@@ -66,6 +67,9 @@ pub async fn team_diagnostics(hub: &TeamHub, ctx: &CallContext) -> Result<Value,
                 "messagesInCount": d.messages_in_count,
                 "messagesOutCount": d.messages_out_count,
                 "tasksClaimedCount": d.tasks_claimed_count,
+                // Issue #409: 自己申告ステータス。team_status を呼んでいなければ null。
+                "currentStatus": d.current_status,
+                "lastStatusAt": d.last_status_at,
             })
         })
         .collect();
