@@ -10,11 +10,11 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
-import { ClipboardCheck, RefreshCw } from 'lucide-react';
+import { ClipboardCheck } from 'lucide-react';
 import { TerminalView, type TerminalViewHandle } from '../../TerminalView';
 import { useT } from '../../../lib/i18n';
 import { useSettings } from '../../../lib/settings-context';
-import { useCanvasStore, NODE_MIN_W, NODE_MIN_H, NODE_W } from '../../../stores/canvas';
+import { useCanvasStore, NODE_MIN_W, NODE_MIN_H } from '../../../stores/canvas';
 import { useCanvasTerminalFit } from '../../../lib/use-canvas-terminal-fit';
 import { useConfirmRemoveCard } from '../../../lib/use-confirm-remove-card';
 import { useXtermScrollToBottomOnResize } from '../../../lib/use-xterm-scroll-on-resize';
@@ -22,7 +22,6 @@ import { fallbackProfile, profileText, renderSystemPrompt, useRoleProfiles } fro
 import { parseShellArgs } from '../../../lib/parse-args';
 import { resolveAgentConfig } from '../../../lib/agent-resolver';
 import { useRecruitSpawnAck } from '../../../lib/use-terminal-spawn';
-import { useTeamHandoff } from '../../../lib/use-team-handoff';
 import { useToast } from '../../../lib/toast-context';
 import type {
   HandoffCheckpoint,
@@ -124,30 +123,36 @@ function handoffReferenceOf(handoff: HandoffCheckpoint | HandoffReference): Hand
   };
 }
 
-function buildHandoffInitialMessage(params: {
-  handoff: HandoffCheckpoint | HandoffReference;
-  oldAgentId?: string;
-  roleProfileId: string;
-  isLeader: boolean;
-}): string {
-  const ackTarget = params.oldAgentId ? ` to agentId "${params.oldAgentId}"` : '';
+/**
+ * Issue #423: Leader 自身に「引き継ぎ手順」を伝える PTY 注入用プロンプトを組み立てる。
+ * UI 側で handoff document を保存した直後、保存先パスをこのプロンプトに埋めて Leader の
+ * PTY に bracketed paste で注入する。Leader は MCP `team_create_leader` → `team_switch_leader`
+ * を呼び、自律的に新 Leader へ交代する。
+ */
+function buildLeaderHandoffPrompt(markdownPath: string, handoffId: string): string {
   return [
-    'You are starting a fresh Canvas session from a saved handoff.',
+    '【引き継ぎ手順】',
     '',
-    `Handoff id: ${params.handoff.id}`,
-    `Handoff file: ${params.handoff.markdownPath}`,
-    `Role: ${params.roleProfileId}`,
+    `引き継ぎ書を保存しました: ${markdownPath}`,
+    `Handoff id: ${handoffId}`,
     '',
-    'Read the handoff file first. Use it as the authoritative continuity note, then continue the work in this new session.',
-    params.isLeader
-      ? 'You are the replacement leader for the same teamId. Coordinate existing workers by agentId when necessary.'
-      : 'You are the replacement worker for the same teamId. Report back to the leader after you understand the handoff.',
+    '次の手順で引き継ぎを完了してください:',
+    '1. 上記 handoff markdown を Read tool で読み、現在の作業状況・未完了タスク・次アクションを確認する。',
+    '2. 必要なら handoff の Notes / Next Actions を補強する追加メモを書き足す。',
+    '3. MCP tool `team_create_leader` を呼び、新しい Leader を採用する (引数なしで OK)。',
+    '   返り値の `agentId` を控えること。',
+    '4. 新 Leader が起動したら、`team_send` で agentId 宛にこの handoff のパスと「お前が新 Leader だ」という旨を伝える。',
+    '5. 新 Leader が ack を返したら、MCP tool `team_switch_leader` を呼ぶ:',
+    '     team_switch_leader({ new_leader_agent_id: "<上で得た agentId>" })',
+    '   呼び出し成功後、約 2 秒で自分のカードが自動的に閉じられる。',
     '',
-    `After you have read and accepted the handoff, send an acknowledgement${ackTarget} with this exact prefix at the beginning of the message:`,
-    `handoff_ack:${params.handoff.id}`,
-    '',
-    'Keep the acknowledgement short, then continue from the Next Actions section.'
+    '上記を順に実行してください。'
   ].join('\n');
+}
+
+/** 文字列を bracketed paste マーカーで包む。Claude/Codex TUI に「1 件のペースト」として渡る。 */
+function wrapBracketedPaste(text: string): string {
+  return `\x1b[200~${text}\x1b[201~`;
 }
 
 function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
@@ -163,8 +168,6 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const confirmRemoveCard = useConfirmRemoveCard();
   const setCardTitle = useCanvasStore((s) => s.setCardTitle);
   const setCardPayload = useCanvasStore((s) => s.setCardPayload);
-  const addCard = useCanvasStore((s) => s.addCard);
-  const removeCard = useCanvasStore((s) => s.removeCard);
   const { showToast } = useToast();
   // Issue #253: Canvas zoom 下でも論理 px ベースで cols/rows を確定させる
   const fit = useCanvasTerminalFit(settings);
@@ -366,10 +369,9 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
 
   const codexInstructions = isCodex ? sysPrompt : undefined;
 
-  // Issue #375: createHandoff は副作用 (handoff の保存 + payload.latestHandoff 更新) のみ
-  // 行い、success toast は呼び出し側 (handleCreateHandoffClick / startFreshFromHandoff) に
-  // 任せる。両者で表示したい内容 (保存ファイル名 + reveal action / 起動メッセージ) が
-  // 異なるため、ここで toast を出すと caller 側で二重表示されてしまう。
+  // Issue #375 / #423: createHandoff は副作用 (handoff の保存 + payload.latestHandoff 更新) のみ
+  // 行い、success toast は呼び出し側 (handleCreateHandoffClick) に任せる。
+  // 呼び出し側で「保存先のパス」を PTY 注入用に取り出すため、戻り値の HandoffCheckpoint は必須。
   const createHandoff = useCallback(async (): Promise<HandoffCheckpoint | null> => {
     const projectRoot = cwd || payload.cwd || '';
     if (!projectRoot) {
@@ -423,95 +425,41 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     title
   ]);
 
-  const startFreshFromHandoff = useCallback(async (): Promise<void> => {
-    if (handoffBusy) return;
-    setHandoffBusy(true);
-    try {
-      const projectRoot = cwd || payload.cwd || '';
-      const existing = payload.latestHandoff;
-      let handoff: HandoffCheckpoint | HandoffReference | null = null;
-      if (existing) {
-        const full = await window.api.handoffs.read(projectRoot, payload.teamId ?? null, existing.id);
-        handoff = full ?? existing;
-      } else {
-        handoff = await createHandoff();
-      }
-      if (!handoff) return;
-      const newAgentId = `${roleProfileId}-handoff-${crypto.randomUUID().slice(0, 8)}`;
-      const isLeader = roleProfileId === 'leader';
-      const initialMessage = buildHandoffInitialMessage({
-        handoff,
-        oldAgentId: payload.agentId,
-        roleProfileId,
-        isLeader
-      });
-      const currentNode = useCanvasStore.getState().nodes.find((n) => n.id === id);
-      const position = currentNode
-        ? { x: currentNode.position.x + NODE_W + 48, y: currentNode.position.y }
-        : undefined;
-      const nextRef: HandoffReference = {
-        ...handoffReferenceOf(handoff),
-        status: 'started',
-        toAgentId: newAgentId,
-        replacementForAgentId: payload.agentId ?? null
-      };
-      const nextPayload: AgentPayload = {
-        ...payload,
-        agentId: newAgentId,
-        resumeSessionId: null,
-        initialMessage,
-        latestHandoff: nextRef
-      };
-      addCard({
-        type: 'agent',
-        title: `${title} handoff`,
-        position,
-        payload: nextPayload
-      });
-      setCardPayload(id, { latestHandoff: nextRef });
-      await window.api.handoffs.updateStatus(
-        projectRoot,
-        payload.teamId ?? null,
-        handoff.id,
-        'started',
-        newAgentId
-      );
-      if (isLeader && payload.teamId) {
-        await window.api.app.setActiveLeader(payload.teamId, newAgentId);
-      }
-      showToast(t('handoff.started'), { tone: 'success' });
-    } catch (err) {
-      console.warn('[handoff] start fresh failed:', err);
-      showToast(t('handoff.error.startFailed'), { tone: 'error' });
-    } finally {
-      setHandoffBusy(false);
-    }
-  }, [
-    addCard,
-    createHandoff,
-    cwd,
-    handoffBusy,
-    id,
-    payload,
-    roleProfileId,
-    setCardPayload,
-    showToast,
-    t,
-    title
-  ]);
+  // Issue #423: 旧 `startFreshFromHandoff` (UI が直接新カードを生やす) は廃止し、
+  // 「Leader 自身が MCP 経由で交代する」フローへ移行。ボタンは下記 1 本に統合。
 
-  // Issue #375: 旧実装は success 時に "引き継ぎ書を保存しました" の短い toast (4s) を出すだけで、
-  // ファイルの場所や追加アクションが無く、Canvas に集中しているユーザーには「ボタンが反応していない」
-  // ように見える、という報告だった。保存ファイル名 + 「保存先を開く」 action を toast に載せ、
-  // duration を伸ばして気付ける時間を確保する。
+  // Issue #423: ボタン押下時のフロー
+  //   1. Rust 側 `handoffs.create` で handoff JSON / Markdown を確実に保存
+  //   2. 保存先パス + MCP 手順を Leader 自身の PTY に bracketed paste で注入
+  //   3. Leader (Claude/Codex) が `team_create_leader` → `team_send` → `team_switch_leader`
+  //      を順に叩き、自律的に新 Leader へ交代する
+  // Leader 以外のカードでは押せない (worker の引き継ぎは将来の別 issue で対応)。
   const handleCreateHandoffClick = useCallback(() => {
     if (handoffBusy) return;
+    if (roleProfileId !== 'leader') {
+      showToast(t('handoff.error.notLeader'), { tone: 'error', duration: 6000 });
+      return;
+    }
     setHandoffBusy(true);
     void createHandoff()
       .then((handoff) => {
         if (!handoff) return; // noProject 等は createHandoff 側で error toast を出している
         const fileName = basenameOf(handoff.markdownPath);
         const markdownPath = handoff.markdownPath;
+        // Leader の PTY に「引き継ぎ手順」プロンプトを bracketed paste で注入。
+        // sendCommand(text, submit=true) は末尾に \r を付けて送信するため、
+        // 全文が 1 つの paste として確定 → Claude/Codex が読み取って MCP を叩き始める。
+        try {
+          const prompt = buildLeaderHandoffPrompt(markdownPath, handoff.id);
+          ref.current?.sendCommand(wrapBracketedPaste(prompt), true);
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err);
+          showToast(t('handoff.error.injectFailed', { detail }), {
+            tone: 'error',
+            duration: 8000
+          });
+          return;
+        }
         showToast(t('handoff.created', { file: fileName }), {
           tone: 'success',
           duration: 8000,
@@ -534,21 +482,11 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
         });
       })
       .finally(() => setHandoffBusy(false));
-  }, [createHandoff, handoffBusy, showToast, t]);
+  }, [createHandoff, handoffBusy, roleProfileId, showToast, t]);
 
-  useTeamHandoff((event) => {
-    const handoff = payload.latestHandoff;
-    if (!handoff || !payload.teamId || !payload.agentId) return;
-    if (!handoff.toAgentId) return;
-    if (event.teamId !== payload.teamId) return;
-    if (event.fromAgentId !== handoff.toAgentId || event.toAgentId !== payload.agentId) return;
-    if (!event.preview.startsWith(`handoff_ack:${handoff.id}`)) return;
-    void window.api.handoffs
-      .updateStatus(cwd || payload.cwd || '', payload.teamId, handoff.id, 'acknowledged', handoff.toAgentId)
-      .catch((err) => console.warn('[handoff] acknowledge status update failed:', err));
-    removeCard(id, { cascadeTeam: false });
-    showToast(t('handoff.acknowledged'), { tone: 'success' });
-  });
+  // Issue #423: 旧 `startFreshFromHandoff` 経路で使っていた `handoff_ack:` 監視は撤去。
+  // 新フローでは `team_switch_leader` MCP tool が active leader 切替 + 旧カード retire を
+  // 行うため、renderer 側で ack を listen する必要は無い。
 
   // accent は CSS 変数 --agent-accent として子孫で参照する
   const cardStyle = useMemo(
@@ -605,26 +543,18 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
                 {shortStatus(status)}
               </span>
             )}
-            <button
-              type="button"
-              className="nodrag canvas-agent-card__tool"
-              onClick={handleCreateHandoffClick}
-              disabled={handoffBusy}
-              title={t('handoff.create')}
-              aria-label={t('handoff.create')}
-            >
-              <ClipboardCheck size={13} strokeWidth={1.9} />
-            </button>
-            <button
-              type="button"
-              className="nodrag canvas-agent-card__tool"
-              onClick={() => void startFreshFromHandoff()}
-              disabled={handoffBusy}
-              title={t('handoff.startFresh')}
-              aria-label={t('handoff.startFresh')}
-            >
-              <RefreshCw size={13} strokeWidth={1.9} />
-            </button>
+            {roleProfileId === 'leader' && (
+              <button
+                type="button"
+                className="nodrag canvas-agent-card__tool"
+                onClick={handleCreateHandoffClick}
+                disabled={handoffBusy}
+                title={t('handoff.createTooltip')}
+                aria-label={t('handoff.create')}
+              >
+                <ClipboardCheck size={13} strokeWidth={1.9} />
+              </button>
+            )}
             <button
               type="button"
               className="nodrag canvas-agent-card__close"

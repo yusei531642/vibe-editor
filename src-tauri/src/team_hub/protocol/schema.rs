@@ -126,6 +126,52 @@ pub(super) fn tool_defs() -> Value {
             }
         },
         {
+            "name": "team_create_leader",
+            "description":
+                "(leader only) Create a NEW leader on the same team for a handoff transition. \
+                 Bypasses the normal singleton-leader constraint so the old and new leaders coexist briefly. \
+                 Used by the canvas \"引き継ぎ\" button: 1) save handoff document, 2) call team_create_leader, \
+                 3) wait for the new leader to read the handoff, 4) call team_switch_leader to retire yourself. \
+                 Returns the new leader's agentId once it has handshaked.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "engine": {
+                        "type": "string",
+                        "enum": ["claude", "codex"],
+                        "description": "Engine to run the new leader on. Defaults to the leader profile's default (claude)."
+                    },
+                    "agent_label_hint": {
+                        "type": "string",
+                        "description": "Optional canvas card title override for the new leader."
+                    }
+                }
+            }
+        },
+        {
+            "name": "team_switch_leader",
+            "description":
+                "(leader only) Promote a previously-spawned leader (see team_create_leader) to active leader, \
+                 then retire yourself. The Hub routes role-targeted leader messages to new_leader_agent_id from \
+                 this point on. Your card is scheduled to close ~2 seconds later so this MCP response can be \
+                 delivered first. Pass close_old_card=false if you want to keep your card open (e.g. for review).",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "new_leader_agent_id": {
+                        "type": "string",
+                        "description": "agentId returned by team_create_leader. Must be in the same team and have role=leader."
+                    },
+                    "close_old_card": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "If true (default), the caller's canvas card is retired ~2s after this call returns."
+                    }
+                },
+                "required": ["new_leader_agent_id"]
+            }
+        },
+        {
             "name": "team_diagnostics",
             "description":
                 "(leader / hr only) Return per-member diagnostic timestamps (recruitedAt, lastHandshakeAt, lastSeenAt, lastMessageInAt/OutAt) and counters (messagesIn/Out, tasksClaimed) plus the server log file path. Use this to debug 'online but silent' members and to reconstruct incident timelines.",

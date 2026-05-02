@@ -5,6 +5,7 @@
 //! 親 `protocol/mod.rs` の `dispatch_tool` から呼び出される。
 
 mod assign_task;
+mod create_leader;
 mod diagnostics;
 mod dismiss;
 mod get_tasks;
@@ -14,9 +15,11 @@ mod read;
 mod recruit;
 mod send;
 mod status;
+mod switch_leader;
 mod update_task;
 
 pub use assign_task::team_assign_task;
+pub use create_leader::team_create_leader;
 pub use diagnostics::team_diagnostics;
 pub use dismiss::team_dismiss;
 pub use get_tasks::team_get_tasks;
@@ -26,4 +29,5 @@ pub use read::team_read;
 pub use recruit::team_recruit;
 pub use send::team_send;
 pub use status::team_status;
+pub use switch_leader::team_switch_leader;
 pub use update_task::team_update_task;
