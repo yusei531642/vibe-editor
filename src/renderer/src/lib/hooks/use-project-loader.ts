@@ -6,6 +6,7 @@ import {
   useSettingsLoading,
   useSettingsValue
 } from '../settings-context';
+import { useUiStore } from '../../stores/ui';
 import { dedupPrepend } from '../path-norm';
 
 export interface UseProjectLoaderOptions {
@@ -19,8 +20,6 @@ export interface UseProjectLoaderOptions {
   /** loadProject / 初回ロード effect で取得した snapshot を上に流す。
    *  hook が責務外として保持しない state (sessions など) を親に伝える橋渡し。 */
   onLoaded: (snapshot: { gitStatus: GitStatus; sessions: SessionInfo[] }) => void;
-  /** ステータスバー文字列を更新する callback (App.tsx の setStatus を渡す)。 */
-  setStatus: (msg: string) => void;
 }
 
 export interface UseProjectLoaderResult {
@@ -63,7 +62,7 @@ export function useProjectLoader(
         return false;
       }
       setProjectRoot(root);
-      optsRef.current.setStatus('プロジェクト読み込み中…');
+      useUiStore.getState().setStatus('プロジェクト読み込み中…');
       setGitLoading(true);
 
       try {
@@ -85,7 +84,7 @@ export function useProjectLoader(
         optsRef.current.onLoaded({ gitStatus: gs, sessions: sess });
         // タブ・セッション・チーム・ターミナル等の reset は親に外注。
         optsRef.current.onProjectSwitched(root);
-        optsRef.current.setStatus(`${root.split(/[\\/]/).pop()}`);
+        useUiStore.getState().setStatus(`${root.split(/[\\/]/).pop()}`);
         // ここでは runtime の「最後に開いたルート」のみ永続化する。
         // `claudeCwd` は SettingsModal で設定されるユーザー設定のため上書き厳禁。
         if (options.addToRecent !== false) {
@@ -99,7 +98,7 @@ export function useProjectLoader(
         }
         return true;
       } catch (err) {
-        optsRef.current.setStatus(`読み込みエラー: ${String(err)}`);
+        useUiStore.getState().setStatus(`読み込みエラー: ${String(err)}`);
         return false;
       } finally {
         setGitLoading(false);
@@ -131,7 +130,7 @@ export function useProjectLoader(
           if (!picked) {
             // ユーザーがキャンセルした場合は projectRoot 未設定のまま空状態を維持。
             // 上部の AppMenu / コマンドパレットから後で開けるようにしておく。
-            optsRef.current.setStatus(t('status.noProject'));
+            useUiStore.getState().setStatus(t('status.noProject'));
             setGitLoading(false);
             return;
           }
@@ -158,9 +157,9 @@ export function useProjectLoader(
         setGitStatus(gs);
         setGitLoading(false);
         optsRef.current.onLoaded({ gitStatus: gs, sessions: sess });
-        optsRef.current.setStatus(root.split(/[\\/]/).pop() ?? root);
+        useUiStore.getState().setStatus(root.split(/[\\/]/).pop() ?? root);
       } catch (err) {
-        optsRef.current.setStatus(`初期化エラー: ${String(err)}`);
+        useUiStore.getState().setStatus(`初期化エラー: ${String(err)}`);
         setGitLoading(false);
       }
     })();

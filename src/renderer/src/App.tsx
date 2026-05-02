@@ -110,9 +110,14 @@ export function App(): JSX.Element {
   // Canvas モードでは App が裏で常時マウントされるが、下の初回タブ生成
   // useEffect を抑制して "迷子ターミナル" が裏で起動しないようにする。
   const viewMode = useUiStore((s) => s.viewMode);
-  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
-  const [paletteOpen, setPaletteOpen] = useState<boolean>(false);
-  const [status, setStatus] = useState<string>('');
+  // Phase 1-8 (Issue #373): UI 系 state を useUiStore に集約。
+  // settingsOpen は元々 zustand に存在 (Rail からも開ける用)、
+  // paletteOpen / status は Phase 1-8 で追加。
+  const settingsOpen = useUiStore((s) => s.settingsOpen);
+  const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
+  const paletteOpen = useUiStore((s) => s.paletteOpen);
+  const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
+  const status = useUiStore((s) => s.status);
 
   // sidebar
   const [sidebarView, setSidebarView] = useState<SidebarView>('changes');
@@ -145,8 +150,7 @@ export function App(): JSX.Element {
   } = useProjectLoader({
     confirmDiscardEditorTabs: stableConfirmDiscard,
     onProjectSwitched: stableProjectSwitched,
-    onLoaded: stableProjectLoaded,
-    setStatus
+    onLoaded: stableProjectLoaded
   });
 
   // Phase 1-2 (Issue #373): editor / diff tab + recentlyClosed を hook に外出し。
@@ -760,11 +764,8 @@ export function App(): JSX.Element {
   ]);
 
   // Phase 1-6 (Issue #373): グローバルショートカット + Shift+wheel zoom を hook に集約。
+  // Phase 1-8: paletteOpen / settingsOpen は useUiStore に集約済みなので opts 不要。
   useAppShortcuts({
-    paletteOpen,
-    setPaletteOpen,
-    settingsOpen,
-    setSettingsOpen,
     activeTabId,
     cycleTab,
     closeTab,
