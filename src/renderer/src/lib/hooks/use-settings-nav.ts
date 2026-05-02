@@ -17,7 +17,9 @@ export interface SettingsNavGroup {
 export interface UseSettingsNavOptions {
   draft: AppSettings;
   navQuery: string;
-  activeSection: SectionId;
+  // activeSection は受け取らない: 同期 effect 内で setActiveSection((prev) => ...) の
+  // 関数型更新を使うため最新値は state 側から直接読む。caller 側で activeSection を別途
+  // useState で持つ前提に変更はない。
   setActiveSection: Dispatch<SetStateAction<SectionId>>;
 }
 

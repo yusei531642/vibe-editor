@@ -172,7 +172,7 @@ export function SettingsModal({
   const customAgents = draft.customAgents ?? [];
 
   // Phase 4-2: nav state (groupsRaw / groups / activeSection 同期) を hook 化
-  const { groups } = useSettingsNav({ draft, navQuery, activeSection, setActiveSection });
+  const { groups } = useSettingsNav({ draft, navQuery, setActiveSection });
 
   // Phase 4-2: focus trap + Escape を hook 化
   const handleDialogKeyDown = useSettingsKeydown({ dialogRef, onClose });
