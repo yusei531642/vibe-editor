@@ -10,6 +10,7 @@ import {
 import { useTerminalClipboard } from '../lib/use-terminal-clipboard';
 import { useAutoInitialMessage } from '../lib/use-auto-initial-message';
 import { useFitToContainer } from '../lib/use-fit-to-container';
+import { useCanvasTerminalPointerNormalizer } from '../lib/use-canvas-terminal-pointer-normalizer';
 import type { CellSize } from '../lib/measure-cell-size';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu';
 
@@ -331,6 +332,15 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         window.requestAnimationFrame(() => term.focus());
       }
     }, []);
+
+    // Issue #397: Canvas zoom (transform: scale) 下では xterm の範囲選択座標がずれて
+    // 4 行ほど上を選択してしまうため、capture phase で MouseEvent を論理座標へ補正する。
+    // IDE モード (unscaledFit !== true) では何もしない。
+    useCanvasTerminalPointerNormalizer({
+      containerRef,
+      unscaledFit,
+      getZoom
+    });
 
     // --- 外部操作用ハンドル (public API は不変) ---
     useImperativeHandle(
