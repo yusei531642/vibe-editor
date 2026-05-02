@@ -196,7 +196,21 @@ pub async fn inject(
     }
     sleep(Duration::from_millis(CHUNK_DELAY_MS)).await;
     let s = session.clone();
-    let _ = tokio::task::spawn_blocking(move || s.write(b"\r")).await;
+    // Issue #378: 最終 Enter (`\r`) の書き込み結果を必ず検証する。
+    // 旧実装は結果を捨てており、本文 paste は成功しても Enter 送信だけ失敗したケースを
+    // delivered と扱ってしまっていた。Leader から見ると「届いたつもり」だが worker は
+    // bracketed paste の入力欄表示のままで confirm されず、再送指示でようやく実行される。
+    match tokio::task::spawn_blocking(move || s.write(b"\r")).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            tracing::warn!("[inject] write(\\r) failed for agent {agent_id}: {e}");
+            return false;
+        }
+        Err(e) => {
+            tracing::warn!("[inject] spawn_blocking(\\r) failed for agent {agent_id}: {e}");
+            return false;
+        }
+    }
     tracing::debug!("[inject] -> agent {agent_id} delivered");
     true
 }

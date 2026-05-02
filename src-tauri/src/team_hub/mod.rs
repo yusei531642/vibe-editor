@@ -387,9 +387,21 @@ pub struct TeamMessage {
     pub timestamp: String,
     pub read_by: Vec<String>,
     /// Issue #342 Phase 3 (3.7 / 3.8): 各 agent_id が `read_by` に追加された ISO8601 時刻。
-    /// `team_read` 戻り値の `receivedAt` と `team_send` 戻り値の `receivedAtPerRecipient`
-    /// で参照される。in-memory only (TeamMessage 自体が永続化対象でないため)。
+    /// `team_read` 戻り値の `receivedAt` で参照される。
+    /// Issue #378 以降、`team_send` の `receivedAtPerRecipient` / `deliveredAtPerRecipient` は
+    /// `delivered_at` を正本とするため、ここから直接参照されることはなくなった。
+    /// in-memory only (TeamMessage 自体が永続化対象でないため)。
     pub read_at: HashMap<String, String>,
+    /// Issue #378: 「PTY への inject (= 配達) が成功した」事実を `read_by` (= 受信側
+    /// agent が認識して `team_read` を呼んだ) と分離して保持する。
+    /// 旧実装は inject 成功で sender に加えて recipient まで `read_by` に追加していたため、
+    /// worker が実際には Enter を確認していない 1 回目の指示を「既読」として扱い、
+    /// `team_read({unread_only: true})` でも 0 件しか返さなかった (= 再送指示までユーザーが
+    /// 異変に気付けない)。delivered_to / delivered_at を別 channel として持ち、`read_by` は
+    /// sender 自己印 + `team_read` 実行のときだけ更新する。
+    /// in-memory only (永続化対象ではないため migration 不要)。
+    pub delivered_to: Vec<String>,
+    pub delivered_at: HashMap<String, String>,
 }
 
 #[derive(Clone)]
