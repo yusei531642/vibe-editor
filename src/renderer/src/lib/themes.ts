@@ -129,22 +129,27 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
   },
   glass: {
     /*
-     * Issue #16: アクリル風テーマ。OS 側 (Windows acrylic / macOS vibrancy) が
-     * 背後のぼかしを担い、アプリ側は半透明の黒系サーフェスを重ねる。
-     * 青くせず、claude-dark と同じテラコッタ accent に揃える。
+     * Issue #16 / #367: アクリル風テーマ。OS 側 (Windows Acrylic / macOS vibrancy)
+     * が背後のぼかしを担い、アプリ側はそのブラーを「邪魔しない」最小限の半透明
+     * 黒サーフェスを重ねる。青くせず、claude-dark と同じテラコッタ accent に揃える。
      *
-     * 「深みのあるダークガラス」を出すための原則:
-     *   1. パネル/サイドバー/ツールバーの黒オパシティを 60〜78% まで上げる。
-     *      旧値 (34〜58%) だと OS 背景の明るい画素が透けて milky に見える。
-     *   2. 枠線は純白 5% 以下に抑える。10〜18% だと黒の上で白くギラつき "milky" を助長する。
-     *   3. hover も白フラッシュを抑える (4% 以下)。
-     *   4. saturate(180%) は別途 tokens.css の `[data-theme='glass']` で 120% に下げる。
+     * 「背景がうっすらぼやけて映る」(= ユーザーが Glass に求めた本来の挙動) を
+     * 出すための原則 (#367 で再調整):
+     *   1. 主要 surface のオパシティを **40〜55% に下げる**。旧値 (60〜78%) だと
+     *      パネルが固定面になり、Win11 Acrylic の light-tint と相まって
+     *      「背景に関係なく白っぽい固定面」に見えた (#367 報告)。
+     *   2. 純黒 (0,0,0) ベースで Win11 Acrylic の白 tint を打ち消す方向に倒す。
+     *      旧値の (15,15,15) や (26,26,26) は dark gray で、Acrylic の白 tint と
+     *      混じって「milky」化していた。
+     *   3. 枠線・hover の白成分は引き続き 5% 以下に抑える。
+     *   4. saturate(180%) は tokens.css の `[data-theme='glass']` で 120% に下げ、
+     *      index.css の主要パネル backdrop も 110% まで下げる (#367)。
      */
     bg: 'rgba(0, 0, 0, 0)',
-    bgPanel: 'rgba(15, 15, 15, 0.72)',
-    bgSidebar: 'rgba(10, 10, 10, 0.70)',
-    bgToolbar: 'rgba(8, 8, 8, 0.66)',
-    bgElev: 'rgba(26, 26, 26, 0.78)',
+    bgPanel: 'rgba(0, 0, 0, 0.45)',
+    bgSidebar: 'rgba(0, 0, 0, 0.42)',
+    bgToolbar: 'rgba(0, 0, 0, 0.38)',
+    bgElev: 'rgba(0, 0, 0, 0.55)',
     border: 'rgba(255, 255, 255, 0.05)',
     borderStrong: 'rgba(255, 255, 255, 0.10)',
     bgHover: 'rgba(255, 255, 255, 0.04)',
@@ -158,7 +163,7 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
     text: '#f6f6f5',
     textDim: '#c3c2b7',
     textMute: '#97958c',
-    surfaceGlass: 'rgba(8, 8, 8, 0.62)',
+    surfaceGlass: 'rgba(0, 0, 0, 0.40)',
     focusRing: '0 0 0 3px rgba(217, 119, 87, 0.30)',
     monacoTheme: 'vs-dark'
   },

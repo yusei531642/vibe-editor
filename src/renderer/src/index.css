@@ -101,7 +101,11 @@ body,
   background: transparent;
 }
 
-/* Glass 時は panel / sidebar / toolbar に backdrop-blur を乗せてアクリル感を強化 */
+/* Glass 時は panel / sidebar / toolbar に backdrop-blur を乗せてアクリル感を強化。
+   #367: saturate(140%) は OS Acrylic の light tint を増幅して「白っぽい固定面」の主因
+   になっていたため 110% へ下げる。blur も 18px は overblur 気味なので 14px に整える。
+   テーマ palette 側 (themes.ts) の surface alpha を 0.38〜0.55 へ下げているため、
+   blur 強度を下げてもデスクトップ背景のぼかしは十分視認できる。 */
 :root[data-theme='glass'] .sidebar,
 :root[data-theme='glass'] .filetree,
 :root[data-theme='glass'] .rail,
@@ -110,8 +114,8 @@ body,
 :root[data-theme='glass'] .canvas-header,
 :root[data-theme='glass'] .main,
 :root[data-theme='glass'] .claude-code-panel {
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(14px) saturate(110%);
+  -webkit-backdrop-filter: blur(14px) saturate(110%);
 }
 
 /* ノイズオーバーレイは glass では控えめに (アクリル質感を邪魔しない) */
