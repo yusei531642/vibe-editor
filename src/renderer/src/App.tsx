@@ -63,6 +63,7 @@ import {
 } from './lib/hooks/use-terminal-tabs';
 import type { TerminalTab } from './lib/hooks/use-terminal-tabs';
 import { useTeamManagement } from './lib/hooks/use-team-management';
+import { useLayoutResize } from './lib/hooks/use-layout-resize';
 import type { Command } from './lib/commands';
 
 const THEMES_FOR_PALETTE: ThemeName[] = [
@@ -341,135 +342,13 @@ export function App(): JSX.Element {
     };
   }, []);
 
-  // ---------- Claude Code パネル リサイズ ----------
-  const MIN_PANEL = 320;
-  const MAX_PANEL = 900;
-  const resizeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
-
-  // ---------- サイドバー リサイズ (Issue #337) ----------
-  const MIN_SIDEBAR = 200;
-  const MAX_SIDEBAR = 600;
-  const DEFAULT_SIDEBAR = 272;
-  const sidebarResizeDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
-
-  // 設定からの初期幅を CSS 変数に反映
-  useEffect(() => {
-    const w = Math.max(
-      MIN_PANEL,
-      Math.min(MAX_PANEL, settings.claudeCodePanelWidth ?? 460)
-    );
-    document.documentElement.style.setProperty('--claude-code-width', `${w}px`);
-  }, [settings.claudeCodePanelWidth]);
-
-  // Issue #337: サイドバー幅を CSS 変数に反映
-  useEffect(() => {
-    const w = Math.max(
-      MIN_SIDEBAR,
-      Math.min(MAX_SIDEBAR, settings.sidebarWidth ?? DEFAULT_SIDEBAR)
-    );
-    document.documentElement.style.setProperty('--shell-sidebar-w', `${w}px`);
-  }, [settings.sidebarWidth]);
-
-  const handleResizeStart = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      const currentWidth = Math.max(
-        MIN_PANEL,
-        Math.min(MAX_PANEL, settings.claudeCodePanelWidth ?? 460)
-      );
-      resizeDragRef.current = {
-        startX: e.clientX,
-        startWidth: currentWidth
-      };
-      document.body.classList.add('is-resizing');
-      const handleEl = e.currentTarget;
-      handleEl.classList.add('is-dragging');
-
-      let latestWidth = currentWidth;
-
-      const onMove = (ev: MouseEvent): void => {
-        const drag = resizeDragRef.current;
-        if (!drag) return;
-        const dx = drag.startX - ev.clientX; // 左へドラッグ = width 増える
-        const next = Math.max(
-          MIN_PANEL,
-          Math.min(MAX_PANEL, drag.startWidth + dx)
-        );
-        latestWidth = next;
-        // ドラッグ中は CSS 変数を直接書き換え（React 再レンダリング回避）
-        document.documentElement.style.setProperty(
-          '--claude-code-width',
-          `${next}px`
-        );
-      };
-
-      const onUp = (): void => {
-        resizeDragRef.current = null;
-        document.body.classList.remove('is-resizing');
-        handleEl.classList.remove('is-dragging');
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-        // 確定値を設定に保存
-        void updateSettings({ claudeCodePanelWidth: latestWidth });
-      };
-
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    },
-    [settings.claudeCodePanelWidth, updateSettings]
-  );
-
-  // Issue #337: サイドバーと main の境界をドラッグして幅を調整する
-  const handleSidebarResizeStart = useCallback(
-    (e: React.MouseEvent<HTMLDivElement>) => {
-      e.preventDefault();
-      const currentWidth = Math.max(
-        MIN_SIDEBAR,
-        Math.min(MAX_SIDEBAR, settings.sidebarWidth ?? DEFAULT_SIDEBAR)
-      );
-      sidebarResizeDragRef.current = {
-        startX: e.clientX,
-        startWidth: currentWidth
-      };
-      document.body.classList.add('is-resizing');
-      const handleEl = e.currentTarget;
-      handleEl.classList.add('is-dragging');
-
-      let latestWidth = currentWidth;
-
-      const onMove = (ev: MouseEvent): void => {
-        const drag = sidebarResizeDragRef.current;
-        if (!drag) return;
-        // 右へドラッグ = width 増える (claude-code-panel と方向が逆)
-        const dx = ev.clientX - drag.startX;
-        const next = Math.max(
-          MIN_SIDEBAR,
-          Math.min(MAX_SIDEBAR, drag.startWidth + dx)
-        );
-        latestWidth = next;
-        document.documentElement.style.setProperty('--shell-sidebar-w', `${next}px`);
-      };
-
-      const onUp = (): void => {
-        sidebarResizeDragRef.current = null;
-        document.body.classList.remove('is-resizing');
-        handleEl.classList.remove('is-dragging');
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-        void updateSettings({ sidebarWidth: latestWidth });
-      };
-
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    },
-    [settings.sidebarWidth, updateSettings]
-  );
-
-  // Issue #337: ダブルクリックで default 幅にリセット
-  const handleSidebarResizeDouble = useCallback(() => {
-    document.documentElement.style.setProperty('--shell-sidebar-w', `${DEFAULT_SIDEBAR}px`);
-    void updateSettings({ sidebarWidth: DEFAULT_SIDEBAR });
-  }, [updateSettings]);
+  // Phase 1-5 (Issue #373): Claude Code パネル / サイドバーの drag リサイズと
+  // CSS 変数同期は use-layout-resize.ts に集約。
+  const {
+    onClaudePanelResizeStart,
+    onSidebarResizeStart,
+    onSidebarResizeDouble
+  } = useLayoutResize();
 
   // Phase 1-1 / 1-2 / 1-3 (Issue #373): loadProject / 初回ロード effect / タイトルバー
   // effect / refreshGit は use-project-loader.ts、editor/diff tab 関連は use-file-tabs.ts、
@@ -1269,8 +1148,8 @@ export function App(): JSX.Element {
       {/* Issue #337: サイドバー幅調整ハンドル */}
       <div
         className="resize-handle resize-handle--sidebar"
-        onMouseDown={handleSidebarResizeStart}
-        onDoubleClick={handleSidebarResizeDouble}
+        onMouseDown={onSidebarResizeStart}
+        onDoubleClick={onSidebarResizeDouble}
         title="ドラッグでサイドバー幅を調整 / ダブルクリックでリセット"
         role="separator"
         aria-orientation="vertical"
@@ -1324,7 +1203,7 @@ export function App(): JSX.Element {
       {hasActiveContent && (
         <div
           className="resize-handle"
-          onMouseDown={handleResizeStart}
+          onMouseDown={onClaudePanelResizeStart}
           title="ドラッグで Claude Code パネルの幅を調整"
           role="separator"
           aria-orientation="vertical"
