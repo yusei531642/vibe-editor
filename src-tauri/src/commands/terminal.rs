@@ -230,13 +230,14 @@ pub async fn terminal_create(
         crate::pty::codex_broker::cleanup_stale_for_cwd(&cwd);
     }
 
-    // Issue #99 / Codex stability: codex かつ instructions ありなら、
-    // (1) 一時ファイル化して `--config model_instructions_file=<path>` を args 末尾に追加 (古い経路)。
-    // (2) さらに、起動後に PTY 直接注入する fallback 経路もセットしておく。
-    //     Codex CLI のバージョンによっては (1) の config キーが効かないことが報告されており、
-    //     その場合でもプロンプトが「最初の user input」としては必ず届くようにする。
-    //     team_hub::inject::build_chunks を共有して ConPTY-safe (64B / 15ms チャンク + UTF-8 境界保護) な
-    //     注入を行う。同じロジックでチームメッセージの注入と挙動を揃えることで、xterm 表示の崩れも避けられる。
+    // Issue #413: codex かつ instructions ありの場合は、
+    // (A) 一時ファイル化して `--config model_instructions_file=<path>` を args に追加する経路を最優先で使う。
+    //     最新 Codex CLI はこれだけで system prompt が反映される。
+    // (B) 一時ファイル作成に失敗したときだけ、起動後の PTY 直接注入 fallback に回す。
+    //     旧実装は (A) と (B) を常に同時実行していたため、最新 CLI で system prompt が
+    //     入力欄に文字列として流れ込む二重発動バグが発生していた (Issue #413)。
+    //     team_hub::inject::build_chunks を共有することで、注入が必要な経路でも
+    //     ConPTY-safe (64B / 15ms チャンク + UTF-8 境界保護) な書き込み挙動を維持する。
     let codex_instructions_for_inject: Option<String> = if is_codex_command {
         if let Some(instr) = opts
             .codex_instructions
@@ -244,13 +245,23 @@ pub async fn terminal_create(
             .map(str::trim)
             .filter(|s| !s.is_empty())
         {
-            if let Some(path) = codex_instructions::prepare_codex_instructions_file(instr).await {
-                let path_str = path.to_string_lossy().into_owned();
-                tracing::info!("[terminal] codex model_instructions_file={path_str}");
-                args.push("--config".to_string());
-                args.push(format!("model_instructions_file={path_str}"));
+            match codex_instructions::prepare_codex_instructions_file(instr).await {
+                Some(path) => {
+                    let path_str = path.to_string_lossy().into_owned();
+                    tracing::info!(
+                        "[terminal] codex system prompt route=cli_args path={path_str}"
+                    );
+                    args.push("--config".to_string());
+                    args.push(format!("model_instructions_file={path_str}"));
+                    None
+                }
+                None => {
+                    tracing::warn!(
+                        "[terminal] codex system prompt route=pty_inject (model_instructions_file temp write failed, falling back to direct PTY injection)"
+                    );
+                    Some(instr.to_string())
+                }
             }
-            Some(instr.to_string())
         } else {
             None
         }
@@ -366,16 +377,15 @@ pub async fn terminal_create(
             // 後続処理: spawn_session の Ok 分岐内で行っていた処理を保持
             // (id は registry に登録済み、retry を経た場合も Ok(()) 後の状態は insert と等価)。
 
-            // Codex stability: 起動した PTY に「最初の user メッセージ」として instructions を注入する。
-            // - 1.8 秒待ってから注入 (TUI の初期化 / banner 描画完了を待つ目安)。早すぎると Codex の入力欄が
-            //   まだ準備できておらず文字が捨てられる。実機計測でこの値は十分。
+            // Issue #413: Fallback 経路として PTY 直接注入する。
+            // 通常は CLI args 経路 (--config model_instructions_file=) で system prompt が届くため
+            // ここに到達するのは prepare_codex_instructions_file が None を返したケース (temp file
+            // 作成失敗) のみ。Some の場合は既に args に追加済みで codex_instructions_for_inject は
+            // None になっており、この block はスキップされる。
+            // - 1.8 秒待ってから注入 (TUI の初期化 / banner 描画完了を待つ目安)。早すぎると Codex の
+            //   入力欄がまだ準備できておらず文字が捨てられる。
             // - 注入は非同期 task で行い terminal_create のレスポンスはブロックしない。
             // - チームメッセージと同じ build_chunks (64B/15ms, UTF-8 境界保護) を使う。
-            // - チーム所属端末 (team_hub) では Hub 側でメッセージを別途注入する設計なので、
-            //   チーム所属の場合 (team_id ありかつ role が leader/hr 等) は重複注入を避けるため、
-            //   AgentNodeCard 側が --append-system-prompt を渡す Claude と同じく、
-            //   Codex でも sysPrompt を `codex_instructions` で渡す経路を Hub 注入と分離している。
-            //   ここでは「ユーザーが最初に伝えたい一言」相当を直接落とすだけで充分動く。
             if let Some(instr) = codex_instructions_for_inject {
                 let registry = state.pty_registry.clone();
                 let term_id = id.clone();
