@@ -55,6 +55,7 @@ pub struct SpawnOptions {
     pub command: String,
     pub args: Vec<String>,
     pub cwd: String,
+    pub is_codex: bool,
     pub cols: u16,
     pub rows: u16,
     pub env: HashMap<String, String>,
@@ -80,6 +81,8 @@ pub struct SessionHandle {
     pub session_key: Option<String>,
     pub team_id: Option<String>,
     pub role: Option<String>,
+    pub cwd: String,
+    pub is_codex: bool,
     /// Issue #153: prompt injection 中はユーザー入力を抑止する。
     /// `inject_codex_prompt_to_pty` 等が begin/end で立て下げる。
     /// renderer 側からの terminal_write は user_write 経由でこのフラグを見る。
@@ -220,6 +223,23 @@ impl SessionHandle {
         let _ = k.kill();
         Ok(())
     }
+
+    pub fn cleanup_codex_broker_if_stale(&self) {
+        if self.is_codex {
+            crate::pty::codex_broker::cleanup_stale_for_cwd(&self.cwd);
+        }
+    }
+
+    pub fn cleanup_codex_broker_after_kill(&self) {
+        if !self.is_codex {
+            return;
+        }
+        let summary = crate::pty::codex_broker::cleanup_stale_for_cwd(&self.cwd);
+        if summary.skipped_live > 0 {
+            std::thread::sleep(Duration::from_millis(250));
+            crate::pty::codex_broker::cleanup_stale_for_cwd(&self.cwd);
+        }
+    }
 }
 
 /// Issue #144: SessionHandle が drop されたタイミングで child プロセスを必ず kill する。
@@ -239,10 +259,7 @@ impl Drop for SessionHandle {
 
 /// `cwd` の検証 (旧 resolveValidCwd と同等)。
 /// 無効なら fallback → カレントディレクトリ。warning メッセージも返す。
-pub fn resolve_valid_cwd(
-    requested: &str,
-    fallback: Option<&str>,
-) -> (String, Option<String>) {
+pub fn resolve_valid_cwd(requested: &str, fallback: Option<&str>) -> (String, Option<String>) {
     let is_dir = |p: &str| !p.is_empty() && Path::new(p).is_dir();
     if is_dir(requested) {
         return (requested.to_string(), None);
@@ -253,7 +270,11 @@ pub fn resolve_valid_cwd(
                 fb.to_string(),
                 Some(format!(
                     "指定された作業ディレクトリが無効です: {} → {} で起動します",
-                    if requested.is_empty() { "(未設定)" } else { requested },
+                    if requested.is_empty() {
+                        "(未設定)"
+                    } else {
+                        requested
+                    },
                     fb
                 )),
             );
@@ -266,7 +287,11 @@ pub fn resolve_valid_cwd(
         cwd.clone(),
         Some(format!(
             "作業ディレクトリが無効です: {} → プロセス既定の {} で起動します",
-            if requested.is_empty() { "(未設定)" } else { requested },
+            if requested.is_empty() {
+                "(未設定)"
+            } else {
+                requested
+            },
             cwd
         )),
     )
@@ -594,6 +619,8 @@ pub fn spawn_session(
         session_key: opts.session_key,
         team_id: opts.team_id,
         role: opts.role,
+        cwd: opts.cwd,
+        is_codex: opts.is_codex,
         injecting: std::sync::atomic::AtomicBool::new(false),
         write_budget: Mutex::new(WriteBudget {
             window_started_at: Instant::now(),

@@ -164,11 +164,7 @@ impl SessionRegistry {
     ///   - `Ok(())`: 採用された (id は registry に登録済み)
     ///   - `Err(handle)`: 既存 PTY と id が衝突。caller の handle はそのまま返却される
     ///     ので、caller 側で `handle.kill()` してから別 id で retry する責務がある。
-    pub fn insert_if_absent(
-        &self,
-        id: String,
-        handle: SessionHandle,
-    ) -> Result<(), SessionHandle> {
+    pub fn insert_if_absent(&self, id: String, handle: SessionHandle) -> Result<(), SessionHandle> {
         let mut g = recover(self.inner.lock());
         if g.by_id.contains_key(&id) {
             return Err(handle);
@@ -201,6 +197,7 @@ impl SessionRegistry {
                             "[registry] replacing session {prev_sid} with {id} — killing old PTY"
                         );
                         let _ = old.kill();
+                        old.cleanup_codex_broker_if_stale();
                     }
                 }
             }
@@ -281,40 +278,49 @@ impl SessionRegistry {
     }
 
     pub fn remove(&self, id: &str) -> Option<Arc<SessionHandle>> {
-        let mut g = recover(self.inner.lock());
-        if let Some(handle) = g.by_id.remove(id) {
-            if let Some(aid) = &handle.agent_id {
-                if g.by_agent.get(aid).map(String::as_str) == Some(id) {
-                    g.by_agent.remove(aid);
+        let removed = {
+            let mut g = recover(self.inner.lock());
+            if let Some(handle) = g.by_id.remove(id) {
+                if let Some(aid) = &handle.agent_id {
+                    if g.by_agent.get(aid).map(String::as_str) == Some(id) {
+                        g.by_agent.remove(aid);
+                    }
                 }
-            }
-            // Issue #271: session_key index も同期して掃除する。
-            if let Some(skey) = &handle.session_key {
-                if g.by_session_key.get(skey).map(String::as_str) == Some(id) {
-                    g.by_session_key.remove(skey);
+                // Issue #271: session_key index も同期して掃除する。
+                if let Some(skey) = &handle.session_key {
+                    if g.by_session_key.get(skey).map(String::as_str) == Some(id) {
+                        g.by_session_key.remove(skey);
+                    }
                 }
+                Some(handle)
+            } else {
+                None
             }
+        };
+        if let Some(handle) = &removed {
             // Issue #144: registry から外しただけだと、Arc の参照が他所に残っているとき
             // 子プロセス / reader thread が永久に生き続ける。明示的に kill を要求して、
             // PTY master 経由の read を EOF にし、reader thread を自然終了させる。
             // ※ Drop impl も kill するが「最後の Arc が drop されるまで」遅れるため、
             //   ここで早期 kill しておく。
             let _ = handle.kill();
-            Some(handle)
-        } else {
-            None
+            handle.cleanup_codex_broker_after_kill();
         }
+        removed
     }
 
     pub fn kill_all(&self) {
-        let mut g = recover(self.inner.lock());
-        g.by_agent.clear();
-        g.by_session_key.clear();
-        for (_, s) in g.by_id.drain() {
+        let sessions: Vec<Arc<SessionHandle>> = {
+            let mut g = recover(self.inner.lock());
+            g.by_agent.clear();
+            g.by_session_key.clear();
+            g.by_id.drain().map(|(_, s)| s).collect()
+        };
+        for s in sessions {
             let _ = s.kill();
+            s.cleanup_codex_broker_after_kill();
         }
     }
-
 }
 
 #[cfg(test)]
@@ -460,15 +466,14 @@ mod attach_lookup_tests {
         by_session_key.insert("k1".to_string(), "sid-dead".to_string());
         let by_agent = HashMap::new();
 
-        let (result, orphan_skey, orphan_agent) = lookup_attach_target_pure(
-            &by_id,
-            &by_session_key,
-            &by_agent,
-            Some("k1"),
-            None,
-        );
+        let (result, orphan_skey, orphan_agent) =
+            lookup_attach_target_pure(&by_id, &by_session_key, &by_agent, Some("k1"), None);
         assert!(result.is_none(), "by_id 空なら attach 不能");
-        assert_eq!(orphan_skey.as_deref(), Some("k1"), "孤立 session_key を返す");
+        assert_eq!(
+            orphan_skey.as_deref(),
+            Some("k1"),
+            "孤立 session_key を返す"
+        );
         assert!(orphan_agent.is_none());
     }
 
@@ -479,13 +484,8 @@ mod attach_lookup_tests {
         let mut by_agent = HashMap::new();
         by_agent.insert("a1".to_string(), "sid-dead".to_string());
 
-        let (result, orphan_skey, orphan_agent) = lookup_attach_target_pure(
-            &by_id,
-            &by_session_key,
-            &by_agent,
-            None,
-            Some("a1"),
-        );
+        let (result, orphan_skey, orphan_agent) =
+            lookup_attach_target_pure(&by_id, &by_session_key, &by_agent, None, Some("a1"));
         assert!(result.is_none());
         assert!(orphan_skey.is_none());
         assert_eq!(orphan_agent.as_deref(), Some("a1"));
@@ -509,13 +509,8 @@ mod attach_lookup_tests {
         let by_id = by_id_with(&[]);
         let by_session_key = HashMap::new();
         let by_agent = HashMap::new();
-        let (result, orphan_skey, orphan_agent) = lookup_attach_target_pure(
-            &by_id,
-            &by_session_key,
-            &by_agent,
-            Some("k1"),
-            Some("a1"),
-        );
+        let (result, orphan_skey, orphan_agent) =
+            lookup_attach_target_pure(&by_id, &by_session_key, &by_agent, Some("k1"), Some("a1"));
         assert!(result.is_none());
         assert!(orphan_skey.is_none());
         assert!(orphan_agent.is_none());
@@ -532,13 +527,8 @@ mod attach_lookup_tests {
         let mut by_agent = HashMap::new();
         by_agent.insert("a1".to_string(), "sid-dead-2".to_string());
 
-        let (result, orphan_skey, orphan_agent) = lookup_attach_target_pure(
-            &by_id,
-            &by_session_key,
-            &by_agent,
-            Some("k1"),
-            Some("a1"),
-        );
+        let (result, orphan_skey, orphan_agent) =
+            lookup_attach_target_pure(&by_id, &by_session_key, &by_agent, Some("k1"), Some("a1"));
         assert!(result.is_none());
         assert_eq!(orphan_skey.as_deref(), Some("k1"));
         assert_eq!(orphan_agent.as_deref(), Some("a1"));
