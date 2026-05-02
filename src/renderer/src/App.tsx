@@ -59,6 +59,13 @@ import { dedupPrepend, listContainsPath } from './lib/path-norm';
 import { useProjectLoader } from './lib/hooks/use-project-loader';
 import { useFileTabs } from './lib/hooks/use-file-tabs';
 import type { DiffTab, EditorTab } from './lib/hooks/use-file-tabs';
+import {
+  MAX_TERMINALS,
+  TERMINAL_WARN_THRESHOLD,
+  getRoleDisplayLabel,
+  useTerminalTabs
+} from './lib/hooks/use-terminal-tabs';
+import type { TerminalTab } from './lib/hooks/use-terminal-tabs';
 import type { Command } from './lib/commands';
 
 const THEMES_FOR_PALETTE: ThemeName[] = [
@@ -72,29 +79,8 @@ const THEMES_FOR_PALETTE: ThemeName[] = [
 
 // DiffTab / EditorTab の型定義は use-file-tabs.ts に移管済み (Issue #373 Phase 1-2)。
 
-/** 同時に立てられるターミナルの上限。メモリ/レイアウト保護の安全弁 */
-const MAX_TERMINALS = 30;
-/** この数を超えたら警告トーストを出す */
-const TERMINAL_WARN_THRESHOLD = 25;
-
-interface TerminalTab {
-  id: number;
-  version: number;
-  agent: TerminalAgent;
-  role: TeamRole | null;
-  teamId: string | null;
-  /** MCP チーム通信用のエージェント識別子 */
-  agentId: string;
-  status: string;
-  exited: boolean;
-  resumeSessionId: string | null;
-  /** チーム履歴で使う member インデックス。未所属タブは null */
-  teamHistoryMemberIdx: number | null;
-  /** 自動生成されたデフォルトラベル（"Claude #1" / "Programmer A" など） */
-  label: string;
-  /** ユーザーが手動でリネームした値。空入力で blur すると null に戻り label が表示される */
-  customLabel: string | null;
-}
+// MAX_TERMINALS / TERMINAL_WARN_THRESHOLD / TerminalTab 型 / getRoleDisplayLabel は
+// use-terminal-tabs.ts に移管済み (Issue #373 Phase 1-3)。
 
 /** ロール別の短い説明（チームプロンプト内で使用、leader 以外は動的ロール由来）。 */
 const ROLE_DESC: Record<TeamRole, string> = {
@@ -108,18 +94,6 @@ const ROLE_DESC: Record<TeamRole, string> = {
 const ROLE_ORDER: Record<string, number> = {
   leader: 0
 };
-
-/** 重複ロールにレター接尾辞を付けた表示名を返す (例: "programmer A") */
-function getRoleDisplayLabel(tab: TerminalTab, allTabs: TerminalTab[]): string {
-  if (!tab.role) return '';
-  if (!tab.teamId) return tab.role;
-  const sameRole = allTabs
-    .filter((t) => t.teamId === tab.teamId && t.role === tab.role)
-    .sort((a, b) => a.agentId.localeCompare(b.agentId));
-  if (sameRole.length <= 1) return tab.role;
-  const idx = sameRole.findIndex((t) => t.id === tab.id);
-  return `${tab.role} ${String.fromCharCode(65 + idx)}`;
-}
 
 /** チームのシステムプロンプト（--append-system-prompt 用） */
 function generateTeamSystemPrompt(
@@ -339,59 +313,21 @@ export function App(): JSX.Element {
   // tabs (editor / diff / recentlyClosed) は useFileTabs で集中管理する。
   const [sideBySide, setSideBySide] = useState<boolean>(true);
 
-  // Claude Code / Codex terminal tabs (最大10個の同時実行をサポート)
-  const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
-  const [activeTerminalTabId, setActiveTerminalTabId] = useState<number>(0);
-  const nextTerminalIdRef = useRef(1);
-  const terminalRefs = useRef(new Map<number, TerminalViewHandle>());
-  // Issue #363: hasActivity を terminalTabs に持たせると PTY data 受信ごとに
-  // setTerminalTabs が走り、TerminalView の親 App 全体が ~16ms 周期で再レンダーする。
-  // mascot 表示のためだけに 60Hz で App を回すのは IDE モード xterm の初期化と
-  // 衝突するので、activity フラグは別 Set state として TerminalView の props と
-  // 完全に切り離す (Set 更新は mascot の StatusBar 経路のみに伝搬)。
-  const terminalActivityTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
-  const [activeTerminalIds, setActiveTerminalIds] = useState<ReadonlySet<number>>(
-    () => new Set()
-  );
-  const [tabCreateMenuOpen, setTabCreateMenuOpen] = useState(false);
+  // teams は Phase 1-3 では App.tsx 残置。Phase 1-4 (use-team-management) で hook 化予定。
   const [teams, setTeams] = useState<Team[]>([]);
-  const [pendingTeamClose, setPendingTeamClose] = useState<{
-    tabId: number;
-    teamId: string;
-  } | null>(null);
-  const [dragTabId, setDragTabId] = useState<number | null>(null);
-  const [dragOverTabId, setDragOverTabId] = useState<number | null>(null);
-  const [editingLabelTabId, setEditingLabelTabId] = useState<number | null>(null);
-  const markTerminalActivity = useCallback((tabId: number) => {
-    const existing = terminalActivityTimers.current.get(tabId);
-    if (existing) window.clearTimeout(existing);
 
-    setActiveTerminalIds((prev) => {
-      if (prev.has(tabId)) return prev;
-      const next = new Set(prev);
-      next.add(tabId);
-      return next;
-    });
+  // Phase 1-3 (Issue #373): terminal tabs の state container を hook に外出し。
+  // doCloseTeam は teams setter / clearSpawnTimers / cleanupTeamMcp に依存するため
+  // App.tsx に残し、ref ブリッジで hook の opts.closeTeam に注入する (循環解消)。
+  const closeTeamRef = useRef<(teamId: string) => void>(() => {});
+  const stableCloseTeam = useCallback(
+    (teamId: string) => closeTeamRef.current(teamId),
+    []
+  );
 
-    const timer = window.setTimeout(() => {
-      terminalActivityTimers.current.delete(tabId);
-      setActiveTerminalIds((prev) => {
-        if (!prev.has(tabId)) return prev;
-        const next = new Set(prev);
-        next.delete(tabId);
-        return next;
-      });
-    }, 900);
-    terminalActivityTimers.current.set(tabId, timer);
-  }, []);
-  useEffect(() => {
-    return () => {
-      for (const timer of terminalActivityTimers.current.values()) {
-        window.clearTimeout(timer);
-      }
-      terminalActivityTimers.current.clear();
-    };
-  }, []);
+  // <TerminalView> ref は hook 化対象外: TerminalView の JSX 配線が App.tsx 側に
+  // 残るため (props が teams / TeamHub / role profile 系に依存)。Phase 1-4 で再検討。
+  const terminalRefs = useRef(new Map<number, TerminalViewHandle>());
 
   // Claude CLI 検査状態
   const [claudeCheck, setClaudeCheck] = useState<{
@@ -406,102 +342,43 @@ export function App(): JSX.Element {
     items: ContextMenuItem[];
   } | null>(null);
 
-  const addTerminalTab = useCallback(
-    (opts?: {
-      agent?: TerminalAgent;
-      role?: TeamRole | null;
-      teamId?: string | null;
-      resumeSessionId?: string | null;
-      agentId?: string;
-      teamHistoryMemberIdx?: number | null;
-      /** team-history からの resume 時に復元する手動リネーム名 */
-      customLabel?: string | null;
-    }): number | null => {
-      const id = nextTerminalIdRef.current++;
-      const agentType = opts?.agent ?? 'claude';
-      let accepted = false;
-      setTerminalTabs((prev) => {
-        // ラベル自動生成: チームロール or 連番
-        let label: string;
-        if (opts?.role) {
-          const sameRole = prev.filter(
-            (t) => t.teamId === opts.teamId && t.role === opts.role
-          );
-          const roleName = opts.role.charAt(0).toUpperCase() + opts.role.slice(1);
-          label = sameRole.length > 0 ? `${roleName} ${String.fromCharCode(65 + sameRole.length)}` : roleName;
-        } else {
-          const agentLabel = agentType === 'claude' ? 'Claude' : 'Codex';
-          const sameAgent = prev.filter((t) => t.agent === agentType && !t.role);
-          label = `${agentLabel} #${sameAgent.length + 1}`;
-        }
-        const tab: TerminalTab = {
-          id,
-          version: 0,
-          agent: agentType,
-          role: opts?.role ?? null,
-          teamId: opts?.teamId ?? null,
-          agentId: opts?.agentId ?? `agent-${id}`,
-          status: '',
-          exited: false,
-          resumeSessionId: opts?.resumeSessionId ?? null,
-          teamHistoryMemberIdx: opts?.teamHistoryMemberIdx ?? null,
-          label,
-          customLabel: opts?.customLabel ?? null
-        };
-        if (prev.length >= MAX_TERMINALS) {
-          showToast(`ターミナル上限（${MAX_TERMINALS}）に達しました`, { tone: 'warning' });
-          return prev;
-        }
-        // 閾値を超えそうなら軽く警告
-        if (prev.length + 1 === TERMINAL_WARN_THRESHOLD) {
-          showToast(
-            `ターミナル数が ${TERMINAL_WARN_THRESHOLD} に達しました（上限 ${MAX_TERMINALS}）`,
-            { tone: 'info' }
-          );
-        }
-        accepted = true;
-        return [...prev, tab];
-      });
-      if (!accepted) return null;
-      setActiveTerminalTabId(id);
-      return id;
-    },
-    [showToast]
-  );
+  // Phase 1-3 (Issue #373): terminal tabs の state / handler を hook に集約。
+  const {
+    terminalTabs,
+    setTerminalTabs,
+    activeTerminalTabId,
+    setActiveTerminalTabId,
+    activeTerminalIds,
+    markTerminalActivity,
+    addTerminalTab,
+    closeTerminalTab,
+    doCloseTab,
+    restartTerminalTab,
+    restartTerminal,
+    tabCreateMenuOpen,
+    setTabCreateMenuOpen,
+    pendingTeamClose,
+    setPendingTeamClose,
+    dragTabId,
+    dragOverTabId,
+    getDnDProps,
+    editingLabelTabId,
+    setEditingLabelTabId,
+    standaloneTabList,
+    teamGroupList,
+    nextTerminalIdRef,
+    resetForProjectSwitch: resetTerminalsForProjectSwitch
+  } = useTerminalTabs({
+    viewMode,
+    claudeReady: claudeCheck.state === 'ok',
+    projectRoot,
+    showToast,
+    teams,
+    closeTeam: stableCloseTeam
+  });
 
-  const doCloseTab = useCallback((tabId: number) => {
-    setTerminalTabs((prev) => {
-      const next = prev.filter((t) => t.id !== tabId);
-      if (next.length === 0) {
-        // 最後の1個 → 新しいスタンドアロンタブを自動生成
-        const newId = nextTerminalIdRef.current++;
-        const fresh: TerminalTab = {
-          id: newId,
-          version: 1,
-          agent: 'claude',
-          role: null,
-          teamId: null,
-          agentId: `agent-${newId}`,
-          status: '',
-          exited: false,
-          resumeSessionId: null,
-          teamHistoryMemberIdx: null,
-          label: 'Claude #1',
-          customLabel: null
-        };
-        setActiveTerminalTabId(newId);
-        return [fresh];
-      }
-      setActiveTerminalTabId((active) => {
-        if (active !== tabId) return active;
-        const idx = prev.findIndex((t) => t.id === tabId);
-        const neighbor = next[Math.min(idx, next.length - 1)];
-        return neighbor?.id ?? next[0]?.id ?? 0;
-      });
-      return next;
-    });
-  }, []);
-
+  // doCloseTeam は teams setter / clearSpawnTimers / cleanupTeamMcp に依存するため
+  // Phase 1-3 では App.tsx 残置。useTerminalTabs には ref ブリッジ経由で注入する。
   const doCloseTeam = useCallback(
     (teamId: string) => {
       // チーム作成進行中ならスタガー spawn を止める（同じチームかは問わない）
@@ -542,42 +419,15 @@ export function App(): JSX.Element {
           .catch((err) => console.warn('[team] cleanupTeamMcp failed:', err));
       }
     },
-    [projectRoot, clearSpawnTimers]
+    [
+      projectRoot,
+      clearSpawnTimers,
+      setTerminalTabs,
+      setActiveTerminalTabId,
+      nextTerminalIdRef
+    ]
   );
-
-  const closeTerminalTab = useCallback(
-    (tabId: number) => {
-      const tab = terminalTabs.find((t) => t.id === tabId);
-      if (tab?.role === 'leader' && tab.teamId) {
-        // Leader 1 人しか居ない "empty team" は確認ダイアログ不要。即チーム終了。
-        const otherMembers = terminalTabs.filter(
-          (t) => t.teamId === tab.teamId && t.id !== tabId
-        );
-        if (otherMembers.length === 0) {
-          doCloseTeam(tab.teamId);
-          return;
-        }
-        setPendingTeamClose({ tabId, teamId: tab.teamId });
-        return;
-      }
-      doCloseTab(tabId);
-    },
-    [terminalTabs, doCloseTab, doCloseTeam]
-  );
-
-  const restartTerminalTab = useCallback((tabId: number) => {
-    setTerminalTabs((prev) =>
-      prev.map((t) =>
-        t.id === tabId
-          ? { ...t, version: t.version + 1, exited: false, status: '' }
-          : t
-      )
-    );
-  }, []);
-
-  const restartTerminal = useCallback(() => {
-    restartTerminalTab(activeTerminalTabId);
-  }, [activeTerminalTabId, restartTerminalTab]);
+  closeTeamRef.current = doCloseTeam;
 
   // ---------- Claude CLI 検査 ----------
   const runClaudeCheck = useCallback(async () => {
@@ -782,34 +632,18 @@ export function App(): JSX.Element {
     void updateSettings({ sidebarWidth: DEFAULT_SIDEBAR });
   }, [updateSettings]);
 
-  // Phase 1-1 / 1-2 (Issue #373): loadProject / 初回ロード effect / タイトルバー effect /
-  // refreshGit は use-project-loader.ts、editor/diff tab 関連は use-file-tabs.ts に移管済み。
-  // confirmDiscardEditorTabs / onProjectSwitched / onLoaded を hook に橋渡しする。
+  // Phase 1-1 / 1-2 / 1-3 (Issue #373): loadProject / 初回ロード effect / タイトルバー
+  // effect / refreshGit は use-project-loader.ts、editor/diff tab 関連は use-file-tabs.ts、
+  // terminal tab 関連は use-terminal-tabs.ts に移管済み。confirmDiscardEditorTabs /
+  // onProjectSwitched / onLoaded を hook に橋渡しする。
   confirmDiscardRef.current = confirmDiscardEditorTabs;
   projectSwitchedRef.current = (root: string): void => {
-    // タブのリセットは use-file-tabs に委譲。
+    // editor/diff/terminal タブのリセットはそれぞれの hook に委譲。
     resetTabsForProjectSwitch();
     setActiveSessionId(null);
-    // ターミナル＆チームをリセット（全タブ閉じて新規1つ）
+    // teams は Phase 1-4 まで App.tsx で持つので個別にリセット。
     setTeams([]);
-    const newId = nextTerminalIdRef.current++;
-    setTerminalTabs([
-      {
-        id: newId,
-        version: 0,
-        agent: 'claude',
-        role: null,
-        teamId: null,
-        agentId: `agent-${newId}`,
-        status: '起動中…',
-        exited: false,
-        resumeSessionId: null,
-        teamHistoryMemberIdx: null,
-        label: 'Claude #1',
-        customLabel: null
-      }
-    ]);
-    setActiveTerminalTabId(newId);
+    resetTerminalsForProjectSwitch();
     void root; // root は現状未使用 (将来の拡張余地として残す)
   };
   projectLoadedRef.current = ({ sessions: sess }) => {
@@ -1419,20 +1253,7 @@ export function App(): JSX.Element {
     []
   );
 
-  // 初回タブ作成: Claude OK かつ projectRoot 設定済みでタブなし。
-  // Canvas モードでは App は不可視の裏マウントなので、ここでターミナルを生やすと
-  // Rust 側で無駄な PTY が常駐し、IDE へ切り替えたときにも "迷子ターミナル" として現れる。
-  // → viewMode === 'ide' のときだけ自動生成する。
-  useEffect(() => {
-    if (
-      claudeCheck.state === 'ok' &&
-      projectRoot &&
-      terminalTabs.length === 0 &&
-      viewMode === 'ide'
-    ) {
-      addTerminalTab();
-    }
-  }, [claudeCheck.state, projectRoot, terminalTabs.length, addTerminalTab, viewMode]);
+  // 初回タブ作成 effect は use-terminal-tabs.ts に移管済み (Issue #373 Phase 1-3)。
 
   // ---------- チーム履歴の resume / 削除 ----------
 
@@ -1629,28 +1450,8 @@ export function App(): JSX.Element {
     [saveTeamHistory]
   );
 
-  // ---------- ターミナルタブのグループ化 ----------
-
-  const { standaloneTabList, teamGroupList } = useMemo(() => {
-    const standalone = terminalTabs.filter((t) => !t.teamId);
-    const teamMap = new Map<string, TerminalTab[]>();
-    for (const t of terminalTabs) {
-      if (t.teamId) {
-        const arr = teamMap.get(t.teamId) || [];
-        arr.push(t);
-        teamMap.set(t.teamId, arr);
-      }
-    }
-    const teamGroups = [...teamMap.entries()].map(([teamId, tabs]) => ({
-      team: teams.find((t) => t.id === teamId) ?? { id: teamId, name: 'Team' },
-      tabs: tabs.sort((a, b) => {
-        if (a.role === 'leader') return -1;
-        if (b.role === 'leader') return 1;
-        return a.id - b.id;
-      })
-    }));
-    return { standaloneTabList: standalone, teamGroupList: teamGroups };
-  }, [terminalTabs, teams]);
+  // standaloneTabList / teamGroupList は use-terminal-tabs.ts の useMemo で計算済み
+  // (Issue #373 Phase 1-3)。
 
   // ---------- タブリスト ----------
 
@@ -2107,42 +1908,7 @@ export function App(): JSX.Element {
                     設定されている場合は隠すと編集手段 (double-click) を失うので常に表示する。
                     Issue #91 */}
                 {(terminalTabs.length > 1 || tab.teamId || tab.customLabel) && (
-                  <div
-                    className="terminal-pane__header"
-                    draggable
-                    onDragStart={(e) => {
-                      setDragTabId(tab.id);
-                      e.dataTransfer.effectAllowed = 'move';
-                    }}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      e.dataTransfer.dropEffect = 'move';
-                      setDragOverTabId(tab.id);
-                    }}
-                    onDragLeave={() => {
-                      if (dragOverTabId === tab.id) setDragOverTabId(null);
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      if (dragTabId !== null && dragTabId !== tab.id) {
-                        setTerminalTabs((prev) => {
-                          const fromIdx = prev.findIndex((t) => t.id === dragTabId);
-                          const toIdx = prev.findIndex((t) => t.id === tab.id);
-                          if (fromIdx === -1 || toIdx === -1) return prev;
-                          const next = [...prev];
-                          const [moved] = next.splice(fromIdx, 1);
-                          next.splice(toIdx, 0, moved);
-                          return next;
-                        });
-                      }
-                      setDragTabId(null);
-                      setDragOverTabId(null);
-                    }}
-                    onDragEnd={() => {
-                      setDragTabId(null);
-                      setDragOverTabId(null);
-                    }}
-                  >
+                  <div className="terminal-pane__header" {...getDnDProps(tab.id)}>
                     <span className={`terminal-tab__agent terminal-tab__agent--${tab.agent}`}>
                       {tab.agent === 'claude' ? 'C' : 'X'}
                     </span>
