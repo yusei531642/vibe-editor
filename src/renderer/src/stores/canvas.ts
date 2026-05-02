@@ -119,6 +119,132 @@ function finiteOr(value: unknown, fallback: number): number {
 }
 
 /**
+ * Issue #385: Canvas viewport の `zoom` を可視範囲にクランプし、
+ * `x` / `y` が極端な値 (= 全カードが viewport 外) のときは復帰用の値に戻す。
+ * これらは render 中に React Flow が黒画面化する/カードが見えなくなる主要因。
+ */
+const VIEWPORT_MIN_ZOOM = 0.1;
+const VIEWPORT_MAX_ZOOM = 4;
+/** nodes ありで viewport がここまで離れていたら「外れすぎ」と判定して復帰用 viewport にする */
+const VIEWPORT_RESCUE_DISTANCE = 1_000_000;
+
+function clampZoom(zoom: number): number {
+  // NaN は単位が無いので 1 (= 等倍) にフォールバック。±Infinity は Math.min/max で
+  // それぞれ MAX_ZOOM / MIN_ZOOM にクランプされる。
+  if (Number.isNaN(zoom)) return 1;
+  return Math.min(Math.max(zoom, VIEWPORT_MIN_ZOOM), VIEWPORT_MAX_ZOOM);
+}
+
+interface NormalizedCanvasState {
+  nodes: Node<CardData>[];
+  viewport: Viewport;
+  stageView: StageView;
+  teamLocks: Record<string, boolean>;
+  arrangeGap: ArrangeGap;
+}
+
+/**
+ * 永続化データ / merge 入力を React Flow が安全に描画できる形へ正規化する。
+ * - nodes: 必須プロパティの欠損 / 不正値を補い、type 不明な要素は捨てる
+ * - viewport.zoom: [VIEWPORT_MIN_ZOOM, VIEWPORT_MAX_ZOOM] にクランプ
+ * - viewport.x/y: 非有限なら 0、極端な値で nodes が完全に外れていれば nodes 中心へ復帰
+ * - stageView / teamLocks / arrangeGap: 不正な値ならデフォルトに戻す
+ */
+function normalizeCanvasState(input: unknown): NormalizedCanvasState {
+  const p = isRecord(input) ? input : {};
+  const nodes = Array.isArray(p.nodes)
+    ? p.nodes
+        .map((raw, index): Node<CardData> | null => {
+          if (!isRecord(raw)) return null;
+          const data = isRecord(raw.data) ? raw.data : {};
+          const type = isCardType(raw.type)
+            ? raw.type
+            : isCardType(data.cardType)
+              ? data.cardType
+              : null;
+          if (!type) return null;
+          const positionRaw = isRecord(raw.position) ? raw.position : {};
+          const styleRaw = isRecord(raw.style) ? raw.style : {};
+          const title =
+            typeof data.title === 'string' && data.title.trim()
+              ? data.title
+              : 'Card';
+          // Issue #385 (codex review #3): node.position が有限値でも極端 (|x|>1M 等)
+          // だと viewport が正常でもカードが viewport 外で見えず実質黒画面になる。
+          // rescue 距離を超える座標は fallback grid に戻して可視性を担保する。
+          const rawX = finiteOr(positionRaw.x, (index % 6) * (NODE_W + 32));
+          const rawY = finiteOr(positionRaw.y, Math.floor(index / 6) * (NODE_H + 32));
+          const safeX =
+            Math.abs(rawX) > VIEWPORT_RESCUE_DISTANCE
+              ? (index % 6) * (NODE_W + 32)
+              : rawX;
+          const safeY =
+            Math.abs(rawY) > VIEWPORT_RESCUE_DISTANCE
+              ? Math.floor(index / 6) * (NODE_H + 32)
+              : rawY;
+          return {
+            ...(raw as Partial<Node<CardData>>),
+            id: typeof raw.id === 'string' && raw.id ? raw.id : newId(type),
+            type,
+            position: { x: safeX, y: safeY },
+            data: {
+              ...data,
+              cardType: type,
+              title,
+              payload: data.payload
+            },
+            style: {
+              ...styleRaw,
+              width: finiteOr(styleRaw.width, NODE_W),
+              height: finiteOr(styleRaw.height, NODE_H)
+            }
+          };
+        })
+        .filter((n): n is Node<CardData> => n !== null)
+    : [];
+  const viewportRaw = isRecord(p.viewport) ? p.viewport : {};
+  let vpX = finiteOr(viewportRaw.x, 0);
+  let vpY = finiteOr(viewportRaw.y, 0);
+  // viewport.zoom は clampZoom 側で NaN→1 / ±Infinity→MAX/MIN を吸収する。
+  // finiteOr で潰すと Infinity が 1 にフォールバックされて clamp 仕様が崩れるので注意。
+  const vpZoom = clampZoom(
+    typeof viewportRaw.zoom === 'number' ? viewportRaw.zoom : 1
+  );
+  // nodes があるのに viewport がカード群から大きく外れていたら、nodes の中心 (= 0,0 周辺の代表点)
+  // へ寄せる。React Flow は座標を pan で表現するので、x/y が ±VIEWPORT_RESCUE_DISTANCE を
+  // 超えていたら現実的な操作で戻れない位置と判定。
+  if (
+    nodes.length > 0 &&
+    (Math.abs(vpX) > VIEWPORT_RESCUE_DISTANCE ||
+      Math.abs(vpY) > VIEWPORT_RESCUE_DISTANCE)
+  ) {
+    vpX = 0;
+    vpY = 0;
+  }
+  const teamLocks = isRecord(p.teamLocks)
+    ? Object.fromEntries(
+        Object.entries(p.teamLocks).filter(([, v]) => typeof v === 'boolean')
+      )
+    : {};
+  const stageView = STAGE_VIEWS.includes(p.stageView as StageView)
+    ? (p.stageView as StageView)
+    : 'stage';
+  const arrangeGap = ((): ArrangeGap => {
+    const gap = p.arrangeGap;
+    return gap === 'tight' || gap === 'normal' || gap === 'roomy'
+      ? gap
+      : 'normal';
+  })();
+  return {
+    nodes,
+    viewport: { x: vpX, y: vpY, zoom: vpZoom },
+    stageView,
+    teamLocks,
+    arrangeGap
+  };
+}
+
+/**
  * Issue #157: 旧 `Date.now() + counter` 方式は zustand persist 復元 + リロード後の
  * counter リセットで稀に衝突しうる。crypto.randomUUID() で衝突確率を実質ゼロに。
  * (Tauri WebView2 / 主要ブラウザでサポート済み。fallback 環境では Math.random ベースで補う)。
@@ -139,6 +265,16 @@ function newId(prefix: string): string {
  *  - 大量 handoff 時の保留 timer 蓄積を抑える
  */
 const pulseTimers = new Map<string, number>();
+
+/** Issue #385: テストから直接 normalize の挙動を検証するための export。
+ *  本体は zustand persist の migrate / merge から間接呼出しされるが、unit test では
+ *  この export を使って壊れた localStorage 入力 / 極端な viewport などの境界条件を確認する。 */
+export const __testables = {
+  normalizeCanvasState,
+  VIEWPORT_MIN_ZOOM,
+  VIEWPORT_MAX_ZOOM,
+  VIEWPORT_RESCUE_DISTANCE
+};
 
 export const useCanvasStore = create<CanvasState>()(
   /**
@@ -302,19 +438,16 @@ export const useCanvasStore = create<CanvasState>()(
     }),
     {
       name: 'vibe-editor:canvas',
-      version: 3,
+      // Issue #385: v4 へ bump し、persisted state は必ず normalizeCanvasState を経由
+      // させる。同 version の rehydrate でも `merge` で再正規化するため、runtime で
+      // 紛れ込んだ NaN viewport / 範囲外 zoom / 壊れた node も次回起動時には掃除される。
+      version: 4,
       migrate: (persisted, fromVersion) => {
         if (!isRecord(persisted)) {
-          return {
-            nodes: [],
-            viewport: { x: 0, y: 0, zoom: 1 },
-            stageView: 'stage',
-            teamLocks: {}
-          } as Partial<CanvasState>;
+          return normalizeCanvasState({}) as Partial<CanvasState>;
         }
+        const p: Record<string, unknown> = { ...persisted };
         // v1 → v2: payload.role を payload.roleProfileId にリネーム
-        // (role と roleProfileId 双方で参照される過渡期があるので、両方残す)
-        const p = { ...persisted } as Record<string, unknown>;
         if (fromVersion < 2 && Array.isArray(p.nodes)) {
           p.nodes = p.nodes.map((n) => {
             if (!isRecord(n)) return n;
@@ -326,11 +459,8 @@ export const useCanvasStore = create<CanvasState>()(
             return { ...n, data: { ...data, payload } };
           });
         }
-
-        // v2 → v3 (Issue #253): 旧 NODE_W/H (480x320) で永続化された小さいカードを
-        // NODE_W/H (640x400) に拡大する。ユーザーが手動でそれより大きくリサイズした
-        // 値は尊重するため、`<= LEGACY_*_THRESHOLD` のときだけ引き上げる。
-        // width/height は style に乗っているため style を直接書き換える。
+        // v2 → v3 (Issue #253): 旧 NODE_W/H (480x320) → 640x400。ユーザーが手動拡大した
+        // 値は尊重するため <= LEGACY_*_THRESHOLD のときだけ引き上げ。
         if (fromVersion < 3 && Array.isArray(p.nodes)) {
           p.nodes = p.nodes.map((n) => {
             if (!isRecord(n)) return n;
@@ -350,64 +480,17 @@ export const useCanvasStore = create<CanvasState>()(
             };
           });
         }
-
-        // 壊れた localStorage で ReactFlow が render 例外を出すと黒画面になるため、
-        // 永続化データはバージョンに関係なく最低限の形へ正規化してから復元する。
-        const nodes = Array.isArray(p.nodes)
-          ? p.nodes
-              .map((raw, index): Node<CardData> | null => {
-                if (!isRecord(raw)) return null;
-                const data = isRecord(raw.data) ? raw.data : {};
-                const type = isCardType(raw.type)
-                  ? raw.type
-                  : isCardType(data.cardType)
-                    ? data.cardType
-                    : null;
-                if (!type) return null;
-                const positionRaw = isRecord(raw.position) ? raw.position : {};
-                const styleRaw = isRecord(raw.style) ? raw.style : {};
-                const title = typeof data.title === 'string' && data.title.trim()
-                  ? data.title
-                  : 'Card';
-                return {
-                  ...(raw as Partial<Node<CardData>>),
-                  id: typeof raw.id === 'string' && raw.id ? raw.id : newId(type),
-                  type,
-                  position: {
-                    x: finiteOr(positionRaw.x, (index % 6) * (NODE_W + 32)),
-                    y: finiteOr(positionRaw.y, Math.floor(index / 6) * (NODE_H + 32))
-                  },
-                  data: {
-                    ...data,
-                    cardType: type,
-                    title,
-                    payload: data.payload
-                  },
-                  style: {
-                    ...styleRaw,
-                    width: finiteOr(styleRaw.width, NODE_W),
-                    height: finiteOr(styleRaw.height, NODE_H)
-                  }
-                };
-              })
-              .filter((n): n is Node<CardData> => n !== null)
-          : [];
-        const viewportRaw = isRecord(p.viewport) ? p.viewport : {};
-        return {
-          ...p,
-          nodes,
-          viewport: {
-            x: finiteOr(viewportRaw.x, 0),
-            y: finiteOr(viewportRaw.y, 0),
-            zoom: finiteOr(viewportRaw.zoom, 1)
-          },
-          stageView: STAGE_VIEWS.includes(p.stageView as StageView)
-            ? (p.stageView as StageView)
-            : 'stage',
-          teamLocks: isRecord(p.teamLocks) ? p.teamLocks : {}
-        } as Partial<CanvasState>;
+        // v3 → v4 (Issue #385): 構造変換は不要 (normalize で吸収する)。
+        return normalizeCanvasState(p) as Partial<CanvasState>;
       },
-      // 永続化: nodes / viewport / stageView / teamLocks。
+      // Issue #385: 同 version でも rehydrate のたびに normalize を走らせる。
+      // 旧実装は migrate 経由の正規化だけだったため、現バージョンで保存された
+      // 不正値 (極端な viewport 等) を起動時に拾えず、Canvas 真っ黒の症状を引き起こしていた。
+      merge: (persisted, current) => {
+        const normalized = normalizeCanvasState(persisted);
+        return { ...current, ...normalized };
+      },
+      // 永続化: nodes / viewport / stageView / teamLocks / arrangeGap。
       // edges は一時的な hand-off アニメに使うので含めない。
       partialize: (s) => ({
         nodes: s.nodes,
