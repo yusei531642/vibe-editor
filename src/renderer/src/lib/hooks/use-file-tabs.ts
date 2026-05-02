@@ -32,12 +32,12 @@ export interface EditorTab {
   lossyEncoding: boolean;
   /**
    * Issue #102: read 時に検出した encoding。save 時にこの encoding で再エンコードして
-   * 書き戻すことで UTF-16/UTF-32/UTF-8 BOM が UTF-8 にロスっと変換されるのを防ぐ。
+   * 書き戻すことで UTF-16/UTF-32/UTF-8 BOM が UTF-8 にロスして変換されるのを防ぐ。
    */
   encoding: string;
   /** Issue #65: 開いた時点の mtime (ms since epoch)。save 時の external-change 検出に使う */
   mtimeMs?: number;
-  /** Issue #104: 開いた時点の size。mtime 解像度の粗い FS 用に併用検出する */
+  /** Issue #104: 開いた時点の size。mtime 解像度の粗い FS 用に併用して検出する */
   sizeBytes?: number;
   /** Issue #119: 開いた時点の SHA-256 (hex)。同サイズ・1 秒以内の外部変更を検出するのに使う */
   contentHash?: string;
@@ -314,7 +314,7 @@ export function useFileTabs(opts: UseFileTabsOptions): UseFileTabsResult {
       if (tab.content === tab.originalContent) return;
       try {
         // Issue #65 / #104 / #102 / #119: mtime + size + encoding + content_hash を渡して、
-        // 同サイズかつ秒精度で見逃す外部変更も内容ハッシュで検出する。
+        // 同サイズかつ秒精度では見落とされる可能性がある外部変更も内容ハッシュで検出する。
         let res = await window.api.files.write(
           targetRoot,
           tab.relPath,
@@ -325,7 +325,7 @@ export function useFileTabs(opts: UseFileTabsOptions): UseFileTabsResult {
           tab.contentHash
         );
         if (res.conflict) {
-          // ユーザーに確認 → OK なら再度 mtime/size/hash チェック無しで書き込む
+          // ユーザーに確認 → OK なら再度 mtime/size/hash チェックなしで書き込む
           const overwrite = window.confirm(
             t('editor.externalChangeConfirm', { path: tab.relPath })
           );
