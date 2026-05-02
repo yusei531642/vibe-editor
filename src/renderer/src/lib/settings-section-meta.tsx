@@ -13,7 +13,7 @@ import {
 
 /**
  * SectionId はカスタムエージェント対応のため動的な文字列。
- * 固定セクション: 'general' | 'appearance' | 'fonts' | 'claude' | 'codex' | 'mcp'
+ * 固定セクション: 'general' | 'appearance' | 'fonts' | 'claude' | 'codex' | 'roles' | 'mcp' | 'logs'
  * カスタムエージェント: `custom:${agentId}`
  */
 export type SectionId = string;
