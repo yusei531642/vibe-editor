@@ -1,14 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { webviewZoom } from '../webview-zoom';
+import { useUiStore } from '../../stores/ui';
 
 export interface UseAppShortcutsOptions {
-  /** コマンドパレットの開閉状態。Escape / Ctrl+Shift+P で参照・更新する。 */
-  paletteOpen: boolean;
-  setPaletteOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  /** 設定モーダルの開閉状態。Escape / Ctrl+, で参照・更新する。 */
-  settingsOpen: boolean;
-  setSettingsOpen: React.Dispatch<React.SetStateAction<boolean>>;
-
   /** Phase 1-2 (use-file-tabs) hook 戻り値ブリッジ。 */
   activeTabId: string | null;
   cycleTab: (direction: 1 | -1) => void;
@@ -59,27 +53,30 @@ export function useAppShortcuts(opts: UseAppShortcutsOptions): void {
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
       const o = optsRef.current;
+      // Phase 1-8: paletteOpen / settingsOpen は useUiStore で一元管理。
+      // handler 起動時に getState() でスナップショットを読む (subscribe 不要)。
+      const ui = useUiStore.getState();
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) {
         if (e.key === 'Escape') {
-          if (o.paletteOpen) o.setPaletteOpen(false);
-          else if (o.settingsOpen) o.setSettingsOpen(false);
+          if (ui.paletteOpen) ui.setPaletteOpen(false);
+          else if (ui.settingsOpen) ui.setSettingsOpen(false);
         }
         return;
       }
       // Issue #162: Ctrl+Shift+P (パレット toggle) と Ctrl+, (設定) は modal open 中でも
       // 反応してよい (toggle 用途のため)。それ以外のショートカット (Ctrl+S / Ctrl+Tab /
       // Ctrl+W / Ctrl+Shift+T) は modal/palette open 中はブロックする。
-      const modalIsOpen = o.paletteOpen || o.settingsOpen;
+      const modalIsOpen = ui.paletteOpen || ui.settingsOpen;
       if (e.shiftKey && (e.key === 'P' || e.key === 'p')) {
         e.preventDefault();
         e.stopPropagation();
-        o.setPaletteOpen((v) => !v);
+        ui.togglePalette();
         return;
       }
       if (e.key === ',') {
         e.preventDefault();
-        o.setSettingsOpen(true);
+        ui.setSettingsOpen(true);
         return;
       }
       if (modalIsOpen) {

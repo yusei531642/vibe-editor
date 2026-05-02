@@ -18,6 +18,10 @@ interface UiState {
   /** 共通サイドバーから「設定」を開くためのグローバルフラグ */
   settingsOpen: boolean;
   setSettingsOpen: (open: boolean) => void;
+  /** Phase 1-8 (Issue #373): コマンドパレット表示フラグ。Ctrl+Shift+P で toggle。 */
+  paletteOpen: boolean;
+  setPaletteOpen: (open: boolean) => void;
+  togglePalette: () => void;
   /** Redesign: 右ドロワーの Activity (handoff feed) 表示フラグ */
   activityOpen: boolean;
   setActivityOpen: (open: boolean) => void;
@@ -36,6 +40,10 @@ interface UiState {
    *  null = 更新なし or 未チェック。永続化しない (再起動時に再検出する)。 */
   availableUpdate: AvailableUpdateInfo | null;
   setAvailableUpdate: (info: AvailableUpdateInfo | null) => void;
+  /** Phase 1-8 (Issue #373): ステータスバーに流す文字列。プロジェクト読み込み等で
+   *  use-project-loader.ts が直接更新する。永続化しない。 */
+  status: string;
+  setStatus: (s: string) => void;
 }
 
 export const useUiStore = create<UiState>()(
@@ -46,6 +54,9 @@ export const useUiStore = create<UiState>()(
       toggleViewMode: () => set({ viewMode: get().viewMode === 'ide' ? 'canvas' : 'ide' }),
       settingsOpen: false,
       setSettingsOpen: (open) => set({ settingsOpen: open }),
+      paletteOpen: false,
+      setPaletteOpen: (open) => set({ paletteOpen: open }),
+      togglePalette: () => set({ paletteOpen: !get().paletteOpen }),
       activityOpen: false,
       setActivityOpen: (open) => set({ activityOpen: open }),
       toggleActivity: () => set({ activityOpen: !get().activityOpen }),
@@ -56,7 +67,9 @@ export const useUiStore = create<UiState>()(
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
       toggleSidebar: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
       availableUpdate: null,
-      setAvailableUpdate: (info) => set({ availableUpdate: info })
+      setAvailableUpdate: (info) => set({ availableUpdate: info }),
+      status: '',
+      setStatus: (s) => set({ status: s })
     }),
     {
       name: 'vibe-editor:ui',
