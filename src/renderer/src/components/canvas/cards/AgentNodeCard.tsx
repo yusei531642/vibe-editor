@@ -93,6 +93,16 @@ function summarizeInput(text: string): string {
   return punct > 4 ? cut.slice(0, punct) : cut;
 }
 
+/**
+ * 絶対パスからファイル名だけを返す。Windows (`\`) と POSIX (`/`) の両方に対応するため
+ * path モジュールを使わず手元で処理する (renderer 側に node:path は無い)。
+ */
+function basenameOf(absPath: string): string {
+  const normalized = absPath.replace(/\\/g, '/');
+  const idx = normalized.lastIndexOf('/');
+  return idx >= 0 ? normalized.slice(idx + 1) : normalized;
+}
+
 function handoffReferenceOf(handoff: HandoffCheckpoint | HandoffReference): HandoffReference {
   return {
     id: handoff.id,
@@ -349,10 +359,14 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
 
   const codexInstructions = isCodex ? sysPrompt : undefined;
 
+  // Issue #375: createHandoff は副作用 (handoff の保存 + payload.latestHandoff 更新) のみ
+  // 行い、success toast は呼び出し側 (handleCreateHandoffClick / startFreshFromHandoff) に
+  // 任せる。両者で表示したい内容 (保存ファイル名 + reveal action / 起動メッセージ) が
+  // 異なるため、ここで toast を出すと caller 側で二重表示されてしまう。
   const createHandoff = useCallback(async (): Promise<HandoffCheckpoint | null> => {
     const projectRoot = cwd || payload.cwd || '';
     if (!projectRoot) {
-      showToast(t('handoff.error.noProject'), { tone: 'error' });
+      showToast(t('handoff.error.noProject'), { tone: 'error', duration: 8000 });
       return null;
     }
     const snapshot = ref.current?.getBufferText(120) ?? '';
@@ -385,7 +399,6 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
       throw new Error(result.error ?? 'handoff create failed');
     }
     setCardPayload(id, { latestHandoff: handoffReferenceOf(result.handoff) });
-    showToast(t('handoff.created'), { tone: 'success' });
     return result.handoff;
   }, [
     cwd,
@@ -480,13 +493,38 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     title
   ]);
 
+  // Issue #375: 旧実装は success 時に "引き継ぎ書を保存しました" の短い toast (4s) を出すだけで、
+  // ファイルの場所や追加アクションが無く、Canvas に集中しているユーザーには「ボタンが反応していない」
+  // ように見える、という報告だった。保存ファイル名 + 「保存先を開く」 action を toast に載せ、
+  // duration を伸ばして気付ける時間を確保する。
   const handleCreateHandoffClick = useCallback(() => {
     if (handoffBusy) return;
     setHandoffBusy(true);
     void createHandoff()
+      .then((handoff) => {
+        if (!handoff) return; // noProject 等は createHandoff 側で error toast を出している
+        const fileName = basenameOf(handoff.markdownPath);
+        const markdownPath = handoff.markdownPath;
+        showToast(t('handoff.created', { file: fileName }), {
+          tone: 'success',
+          duration: 8000,
+          action: {
+            label: t('handoff.action.reveal'),
+            onClick: () => {
+              void window.api.app.revealInFileManager(markdownPath).catch((err) => {
+                console.warn('[handoff] reveal failed:', err);
+              });
+            }
+          }
+        });
+      })
       .catch((err) => {
         console.warn('[handoff] create failed:', err);
-        showToast(t('handoff.error.createFailed'), { tone: 'error' });
+        const detail = err instanceof Error ? err.message : String(err);
+        showToast(t('handoff.error.createFailed', { detail }), {
+          tone: 'error',
+          duration: 8000
+        });
       })
       .finally(() => setHandoffBusy(false));
   }, [createHandoff, handoffBusy, showToast, t]);
