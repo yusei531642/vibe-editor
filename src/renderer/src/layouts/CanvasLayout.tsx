@@ -26,7 +26,6 @@ import {
 } from 'lucide-react';
 import type { CardData, CardType } from '../stores/canvas';
 import type {
-  Language,
   HandoffReference,
   TeamHistoryEntry,
   TeamRole,
@@ -50,71 +49,11 @@ import {
 import { ROLE_META, roleMetaFor } from '../lib/team-roles';
 import { useSettings } from '../lib/settings-context';
 import { useToast } from '../lib/toast-context';
+import { localeOf, formatCardCount, formatAgentCount } from '../lib/canvas-layout-helpers';
+import { useCanvasTeamRestore } from '../lib/hooks/use-canvas-team-restore';
+import { useCanvasAutoSave } from '../lib/hooks/use-canvas-auto-save';
 
 type Tab = 'preset' | 'recent';
-
-function localeOf(language: Language): string {
-  return language === 'ja' ? 'ja-JP' : 'en-US';
-}
-
-function formatCardCount(count: number, language: Language): string {
-  return language === 'ja'
-    ? `${count} 枚のカード`
-    : `${count} ${count === 1 ? 'card' : 'cards'}`;
-}
-
-function formatAgentCount(count: number, language: Language): string {
-  return language === 'ja' ? `${count} エージェント` : `${count} agents`;
-}
-
-function mergeCanvasMembers(
-  currentMembers: { role: TeamRole; agent: TerminalAgent }[],
-  existingEntry?: TeamHistoryEntry
-): TeamHistoryEntry['members'] {
-  const sessionQueues = new Map<string, Array<string | null>>();
-  for (const member of existingEntry?.members ?? []) {
-    const key = `${member.role}:${member.agent}`;
-    const queue = sessionQueues.get(key) ?? [];
-    queue.push(member.sessionId ?? null);
-    sessionQueues.set(key, queue);
-  }
-
-  return currentMembers.map((member) => {
-    const key = `${member.role}:${member.agent}`;
-    const queue = sessionQueues.get(key);
-    const sessionId = queue && queue.length > 0 ? queue.shift() ?? null : null;
-    return { ...member, sessionId };
-  });
-}
-
-function serializeAutoSavePayload(payload: {
-  byTeam: Map<
-    string,
-    {
-      name: string;
-      canvasNodes: { agentId: string; x: number; y: number; width?: number; height?: number }[];
-      latestHandoff?: HandoffReference;
-    }
-  >;
-  viewport: { x: number; y: number; zoom: number };
-}): string {
-  const parts: string[] = [];
-  for (const [teamId, info] of payload.byTeam) {
-    parts.push(
-      `${teamId}|${info.name}|` +
-        info.canvasNodes
-          .map((c) => `${c.agentId}@${c.x},${c.y}:${c.width}x${c.height}`)
-          .sort()
-          .join(',') +
-        `|handoff:${info.latestHandoff?.id ?? ''}:${info.latestHandoff?.status ?? ''}`
-    );
-  }
-  parts.sort();
-  return (
-    parts.join('##') +
-    `##vp:${Math.round(payload.viewport.x)},${Math.round(payload.viewport.y)}:${payload.viewport.zoom.toFixed(2)}`
-  );
-}
 
 export function CanvasLayout(): JSX.Element {
   const setViewMode = useUiStore((s) => s.setViewMode);
@@ -222,175 +161,15 @@ export function CanvasLayout(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectRoot]);
 
-  // 起動時のチーム復元 — canvas store は zustand persist で localStorage から
-  // nodes/viewport が復元されるが、Rust 側 TeamHub は再起動でリセットされるため
-  // active_teams が空のまま。各 nodes が持つ teamId をユニーク化して setupTeamMcp を
-  // 1 度だけ呼び直し、TeamHub に再登録する。これがないと team_send 等の MCP ツールが
-  // 「unregistered team_id」で弾かれ「resume されず新しい状態に見える」原因になる。
-  // Issue #159: 旧実装は「成功 / 未試行」の 2 状態しか持たず、失敗 → ref から削除 →
-  //   次レンダーで再試行 → 失敗、を毎フレーム繰り返して .claude.json が連射書込される
-  //   無限再試行ループに入っていた。in_flight / failed (backoff 中) / done の 3 状態に拡張する。
-  type RestoreState = 'in_flight' | 'failed' | 'done';
-  const restoredTeamsRef = useRef<Map<string, { state: RestoreState; nextRetryAt?: number }>>(
-    new Map()
-  );
-  useEffect(() => {
-    if (nodes.length === 0) {
-      // Clear 後は次のチームでまた setup したいので ref をリセット
-      restoredTeamsRef.current.clear();
-    }
-  }, [nodes.length]);
-  useEffect(() => {
-    if (!projectRoot) return;
-    if (settings.mcpAutoSetup === false) return;
-    interface TeamRestoreInfo {
-      name: string;
-      members: { agentId: string; role: string; agent: string }[];
-    }
-    const byTeam = new Map<string, TeamRestoreInfo>();
-    for (const n of nodes) {
-      const p = (n.data?.payload ?? {}) as {
-        teamId?: string;
-        agentId?: string;
-        role?: string;
-        agent?: string;
-      };
-      if (!p.teamId || !p.agentId || !p.role || !p.agent) continue;
-      const title = String(n.data?.title ?? 'Team');
-      const tm = byTeam.get(p.teamId) ?? { name: title, members: [] };
-      tm.members.push({ agentId: p.agentId, role: p.role, agent: p.agent });
-      byTeam.set(p.teamId, tm);
-    }
-    const now = Date.now();
-    for (const [teamId, info] of byTeam) {
-      const cur = restoredTeamsRef.current.get(teamId);
-      if (cur?.state === 'in_flight' || cur?.state === 'done') continue;
-      // failed バックオフ中なら待機
-      if (cur?.state === 'failed' && cur.nextRetryAt && now < cur.nextRetryAt) continue;
-      // 進行中状態に登録してから IPC 発射 (重複発火防止)
-      restoredTeamsRef.current.set(teamId, { state: 'in_flight' });
-      void window.api.app
-        .setupTeamMcp(projectRoot, teamId, info.name, info.members)
-        .then(() => {
-          restoredTeamsRef.current.set(teamId, { state: 'done' });
-        })
-        .catch((err) => {
-          // 30 秒バックオフ。連続失敗時に毎レンダー再投入されるのを防ぐ。
-          restoredTeamsRef.current.set(teamId, {
-            state: 'failed',
-            nextRetryAt: Date.now() + 30_000
-          });
-          console.warn('[restore] setupTeamMcp failed:', err);
-        });
-    }
-  }, [projectRoot, nodes, settings.mcpAutoSetup]);
+  // Phase 4-3: 起動時の Canvas チーム復元 (Issue #159) を hook 化
+  useCanvasTeamRestore({
+    projectRoot,
+    nodes,
+    mcpAutoSetup: settings.mcpAutoSetup !== false
+  });
 
-  // Phase 5: Canvas state が変わったら、active な team について team-history へ自動保存。
-  //
-  // パフォーマンス注意:
-  //   nodes は zustand で position 変化のたび (drag 中毎フレーム) 参照が変わるため、
-  //   この useEffect を [nodes, viewport] に依存させると毎フレーム clearTimeout/setTimeout
-  //   が走り、800ms 無操作が続かない限り保存されない (drag 中は永遠に保存されない)。
-  //
-  // 対策:
-  //   1. 保存対象のエントリを JSON stringify で stable key 化し、deps に渡す (string 比較で
-  //      早期 bailout)。
-  //   2. debounce を 1500ms に延長。
-  //   3. 直前保存値を ref に保持し、同一内容なら fs 書き込みをスキップ。
-  const lastSavedKeyRef = useRef<string>('');
-  // Issue #167: recent を deps に含むと setRecent → effect 再走 → clearTimeout で
-  // debounce が永遠に flush されない問題があった。ref 経由で参照することで deps から外す。
-  const recentRef = useRef(recent);
-  recentRef.current = recent;
-  const autoSavePayload = useMemo(() => {
-    if (nodes.length === 0) return null;
-    interface TeamEntryInfo {
-      name: string;
-      members: { role: TeamRole; agent: TerminalAgent }[];
-      canvasNodes: { agentId: string; x: number; y: number; width?: number; height?: number }[];
-      latestHandoff?: HandoffReference;
-    }
-    const byTeam = new Map<string, TeamEntryInfo>();
-    for (const n of nodes) {
-      const p = (n.data?.payload ?? {}) as {
-        teamId?: string;
-        agentId?: string;
-        role?: string;
-        agent?: string;
-        latestHandoff?: HandoffReference;
-      };
-      if (!p.teamId || !p.agentId) continue;
-      const title = String(n.data?.title ?? 'Team');
-      const entry = byTeam.get(p.teamId) ?? { name: title, members: [], canvasNodes: [] };
-      entry.members.push({
-        role: (p.role ?? 'leader') as TeamRole,
-        agent: (p.agent ?? 'claude') as TerminalAgent
-      });
-      entry.canvasNodes.push({
-        agentId: p.agentId,
-        // 位置は整数に丸めて key の微動を抑える (サブピクセル更新で再保存しない)
-        x: Math.round(n.position.x),
-        y: Math.round(n.position.y),
-        width: typeof n.style?.width === 'number' ? Math.round(n.style.width as number) : undefined,
-        height: typeof n.style?.height === 'number' ? Math.round(n.style.height as number) : undefined
-      });
-      if (p.latestHandoff) {
-        const prev = entry.latestHandoff;
-        const prevTime = prev?.updatedAt ?? prev?.createdAt ?? '';
-        const nextTime = p.latestHandoff.updatedAt ?? p.latestHandoff.createdAt ?? '';
-        if (!prev || nextTime >= prevTime) {
-          entry.latestHandoff = p.latestHandoff;
-        }
-      }
-      byTeam.set(p.teamId, entry);
-    }
-    return { byTeam, viewport };
-  }, [nodes, viewport]);
-
-  useEffect(() => {
-    if (!autoSavePayload) return;
-    const autoSaveKey = serializeAutoSavePayload(autoSavePayload);
-    if (autoSaveKey === lastSavedKeyRef.current) return;
-    const handle = window.setTimeout(() => {
-      // debounce タイマー発火時点でも最新 key が変わらなければ保存
-      lastSavedKeyRef.current = autoSaveKey;
-      const nowIso = new Date().toISOString();
-      const nextEntries: TeamHistoryEntry[] = [];
-      for (const [teamId, info] of autoSavePayload.byTeam) {
-        // Issue #167: recent を ref 経由で参照し effect deps から外す
-        const existing = recentRef.current.find((entry) => entry.id === teamId);
-        const entry: TeamHistoryEntry = {
-          id: teamId,
-          name: info.members.length > 0 ? `${info.name} (${info.members.length})` : info.name,
-          projectRoot: existing?.projectRoot ?? projectRoot,
-          createdAt: existing?.createdAt ?? nowIso,
-          lastUsedAt: nowIso,
-          members: mergeCanvasMembers(info.members, existing),
-          canvasState: { nodes: info.canvasNodes, viewport: autoSavePayload.viewport },
-          latestHandoff: info.latestHandoff ?? existing?.latestHandoff
-        };
-        nextEntries.push(entry);
-      }
-      // Issue #132: チームごとに save IPC を撃つと N チーム分 N 回 atomic_write が走る。
-      // saveBatch で 1 IPC + 1 disk write にまとめる。
-      if (nextEntries.length > 0) {
-        void window.api.teamHistory.saveBatch(nextEntries).catch((err) => {
-          console.warn('[recent] saveBatch failed:', err);
-        });
-      }
-      if (nextEntries.length > 0) {
-        setRecent((prev) => {
-          const merged = new Map(prev.map((entry) => [entry.id, entry]));
-          for (const entry of nextEntries) merged.set(entry.id, entry);
-          return Array.from(merged.values()).sort((a, b) =>
-            b.lastUsedAt.localeCompare(a.lastUsedAt)
-          );
-        });
-      }
-    }, 1500);
-    return () => window.clearTimeout(handle);
-    // Issue #167: recent を deps から除外。recentRef 経由で読むことで debounce flush を保証する。
-  }, [autoSavePayload, projectRoot]);
+  // Phase 4-3: Canvas state を team-history へ自動保存する hook (Issue #167 / #132 / #124)
+  useCanvasAutoSave({ projectRoot, nodes, viewport, recent, setRecent });
 
   const applyPreset = async (preset: WorkspacePreset): Promise<void> => {
     const teamId = `team-${crypto.randomUUID()}`;
