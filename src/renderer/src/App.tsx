@@ -124,7 +124,6 @@ interface TerminalTab {
   status: string;
   exited: boolean;
   resumeSessionId: string | null;
-  hasActivity: boolean;
   /** チーム履歴で使う member インデックス。未所属タブは null */
   teamHistoryMemberIdx: number | null;
   /** 自動生成されたデフォルトラベル（"Claude #1" / "Programmer A" など） */
@@ -334,7 +333,15 @@ export function App(): JSX.Element {
   const [activeTerminalTabId, setActiveTerminalTabId] = useState<number>(0);
   const nextTerminalIdRef = useRef(1);
   const terminalRefs = useRef(new Map<number, TerminalViewHandle>());
+  // Issue #363: hasActivity を terminalTabs に持たせると PTY data 受信ごとに
+  // setTerminalTabs が走り、TerminalView の親 App 全体が ~16ms 周期で再レンダーする。
+  // mascot 表示のためだけに 60Hz で App を回すのは IDE モード xterm の初期化と
+  // 衝突するので、activity フラグは別 Set state として TerminalView の props と
+  // 完全に切り離す (Set 更新は mascot の StatusBar 経路のみに伝搬)。
   const terminalActivityTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  const [activeTerminalIds, setActiveTerminalIds] = useState<ReadonlySet<number>>(
+    () => new Set()
+  );
   const [tabCreateMenuOpen, setTabCreateMenuOpen] = useState(false);
   const [teams, setTeams] = useState<Team[]>([]);
   const [pendingTeamClose, setPendingTeamClose] = useState<{
@@ -348,17 +355,21 @@ export function App(): JSX.Element {
     const existing = terminalActivityTimers.current.get(tabId);
     if (existing) window.clearTimeout(existing);
 
-    setTerminalTabs((prev) =>
-      prev.map((tab) =>
-        tab.id === tabId && !tab.hasActivity ? { ...tab, hasActivity: true } : tab
-      )
-    );
+    setActiveTerminalIds((prev) => {
+      if (prev.has(tabId)) return prev;
+      const next = new Set(prev);
+      next.add(tabId);
+      return next;
+    });
 
     const timer = window.setTimeout(() => {
       terminalActivityTimers.current.delete(tabId);
-      setTerminalTabs((prev) =>
-        prev.map((tab) => (tab.id === tabId ? { ...tab, hasActivity: false } : tab))
-      );
+      setActiveTerminalIds((prev) => {
+        if (!prev.has(tabId)) return prev;
+        const next = new Set(prev);
+        next.delete(tabId);
+        return next;
+      });
     }, 900);
     terminalActivityTimers.current.set(tabId, timer);
   }, []);
@@ -422,7 +433,6 @@ export function App(): JSX.Element {
           status: '',
           exited: false,
           resumeSessionId: opts?.resumeSessionId ?? null,
-          hasActivity: false,
           teamHistoryMemberIdx: opts?.teamHistoryMemberIdx ?? null,
           label,
           customLabel: opts?.customLabel ?? null
@@ -464,7 +474,6 @@ export function App(): JSX.Element {
           status: '',
           exited: false,
           resumeSessionId: null,
-          hasActivity: false,
           teamHistoryMemberIdx: null,
           label: 'Claude #1',
           customLabel: null
@@ -501,7 +510,6 @@ export function App(): JSX.Element {
             status: '',
             exited: false,
             resumeSessionId: null,
-            hasActivity: false,
             teamHistoryMemberIdx: null,
             label: 'Claude #1',
             customLabel: null
@@ -550,7 +558,7 @@ export function App(): JSX.Element {
     setTerminalTabs((prev) =>
       prev.map((t) =>
         t.id === tabId
-          ? { ...t, version: t.version + 1, exited: false, status: '', hasActivity: false }
+          ? { ...t, version: t.version + 1, exited: false, status: '' }
           : t
       )
     );
@@ -830,7 +838,6 @@ export function App(): JSX.Element {
             status: '起動中…',
             exited: false,
             resumeSessionId: null,
-            hasActivity: false,
             teamHistoryMemberIdx: null,
             label: 'Claude #1',
             customLabel: null
@@ -1923,7 +1930,7 @@ export function App(): JSX.Element {
         setTerminalTabs((prev) =>
           prev.map((tab) =>
             tab.agent === 'claude' && !tab.exited
-              ? { ...tab, version: tab.version + 1, status: '', hasActivity: false }
+              ? { ...tab, version: tab.version + 1, status: '' }
               : tab
           )
         );
@@ -2116,10 +2123,18 @@ export function App(): JSX.Element {
         terminals: terminalTabs.map((tab) => ({
           status: tab.status,
           exited: tab.exited,
-          hasActivity: tab.hasActivity
+          hasActivity: activeTerminalIds.has(tab.id)
         }))
       }),
-    [activeDiffTab, activeEditorTab, activeFilePath, gitStatus, terminalTabs, viewMode]
+    [
+      activeDiffTab,
+      activeEditorTab,
+      activeFilePath,
+      activeTerminalIds,
+      gitStatus,
+      terminalTabs,
+      viewMode
+    ]
   );
 
   const projectName = projectRoot.split(/[\\/]/).pop() || 'no project';
