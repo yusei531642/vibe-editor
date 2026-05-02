@@ -64,6 +64,7 @@ import type { TerminalTab } from './lib/hooks/use-terminal-tabs';
 import { useTeamManagement } from './lib/hooks/use-team-management';
 import { useLayoutResize } from './lib/hooks/use-layout-resize';
 import { useAppShortcuts } from './lib/hooks/use-app-shortcuts';
+import { useClaudeCheck } from './lib/hooks/use-claude-check';
 import type { Command } from './lib/commands';
 
 const THEMES_FOR_PALETTE: ThemeName[] = [
@@ -197,11 +198,9 @@ export function App(): JSX.Element {
   // 残るため。
   const terminalRefs = useRef(new Map<number, TerminalViewHandle>());
 
-  // Claude CLI 検査状態
-  const [claudeCheck, setClaudeCheck] = useState<{
-    state: 'checking' | 'ok' | 'missing';
-    error?: string;
-  }>({ state: 'checking' });
+  // Phase 1-7 (Issue #373): Claude CLI 検査と起動時アップデーター遅延 effect を
+  // hook に集約。
+  const { claudeCheck, runClaudeCheck } = useClaudeCheck();
 
   // コンテキストメニュー
   const [contextMenu, setContextMenu] = useState<{
@@ -269,45 +268,8 @@ export function App(): JSX.Element {
   });
   closeTeamRef.current = doCloseTeam;
 
-  // ---------- Claude CLI 検査 ----------
-  const runClaudeCheck = useCallback(async () => {
-    setClaudeCheck({ state: 'checking' });
-    try {
-      const res = await window.api.app.checkClaude(settings.claudeCommand || 'claude');
-      setClaudeCheck(
-        res.ok
-          ? { state: 'ok' }
-          : { state: 'missing', error: res.error }
-      );
-    } catch (err) {
-      setClaudeCheck({ state: 'missing', error: String(err) });
-    }
-  }, [settings.claudeCommand]);
-
-  // 設定の claudeCommand が変わるたびに再検査
-  useEffect(() => {
-    void runClaudeCheck();
-  }, [runClaudeCheck]);
-
-  // 起動時に GitHub Release の latest.json を「確認だけ」する (prod のみ)。
-  // 旧仕様の「ask → 即 install → relaunch」は撤廃。代わりに silentCheckForUpdate で
-  // 更新の有無を検出して useUiStore.availableUpdate に書き、Topbar / CanvasLayout の
-  // 「Update」ボタンを点灯させる。実 install はユーザーがボタンを押したときだけ走る。
-  // 起動直後の負荷を避けるため少し遅延させる (5 秒)。
-  useEffect(() => {
-    let cancelled = false;
-    const handle = window.setTimeout(() => {
-      void import('./lib/updater-check').then(async (m) => {
-        const info = await m.silentCheckForUpdate();
-        if (cancelled) return;
-        useUiStore.getState().setAvailableUpdate(info);
-      });
-    }, 5_000);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(handle);
-    };
-  }, []);
+  // Claude CLI 検査 / 起動時アップデーター遅延 effect は use-claude-check.ts に
+  // 移管済み (Issue #373 Phase 1-7)。
 
   // Issue #66: project_root の外部変更 (git pull / Claude 編集 / 他エディタ) を検知して
   //           UI を更新する。Rust 側 fs_watch が debounce した `project:files-changed` を emit。
