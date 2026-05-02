@@ -45,7 +45,11 @@ export function StatusBar({
     <div className="status" role="contentinfo">
       <span className="status__item status__item--mode">
         <span className="status__mascot-track">
-          <StatusMascot state={mascotState} label={t(`status.mascot.${mascotState}`)} />
+          <StatusMascot
+            state={mascotState}
+            label={t(`status.mascot.${mascotState}`)}
+            variant={settings.statusMascotVariant ?? 'vibe'}
+          />
         </span>
         <span className="status__mode-label">{viewMode === 'canvas' ? 'canvas' : 'ide'}</span>
       </span>

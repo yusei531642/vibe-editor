@@ -11,6 +11,7 @@ import { useSettingsKeydown } from '../lib/hooks/use-settings-keydown';
 import { useSettingsNav } from '../lib/hooks/use-settings-nav';
 import { LanguageSection } from './settings/LanguageSection';
 import { ThemeSection } from './settings/ThemeSection';
+import { MascotSection } from './settings/MascotSection';
 import { FontFamilySection } from './settings/FontFamilySection';
 import { TerminalSection } from './settings/TerminalSection';
 import { RoleProfilesSection } from './settings/RoleProfilesSection';
@@ -220,7 +221,12 @@ export function SettingsModal({
           </>
         );
       case 'appearance':
-        return <ThemeSection draft={draft} update={update} />;
+        return (
+          <>
+            <ThemeSection draft={draft} update={update} />
+            <MascotSection draft={draft} update={update} />
+          </>
+        );
       case 'fonts':
         return (
           <>

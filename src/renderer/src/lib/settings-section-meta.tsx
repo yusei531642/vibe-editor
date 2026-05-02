@@ -53,7 +53,7 @@ export function iconFor(id: SectionId): JSX.Element {
 export type FixedLabelEntry = { label: string; title: string; desc: string };
 export const FIXED_LABELS_JA: Record<string, FixedLabelEntry> = {
   general: { label: '一般', title: '一般', desc: '言語と密度設定' },
-  appearance: { label: '表示', title: '表示', desc: 'テーマと配色' },
+  appearance: { label: '表示', title: '表示', desc: 'テーマ、配色、キャラクター' },
   fonts: { label: 'フォント', title: 'フォント', desc: 'UI / エディタ / ターミナルのフォント' },
   claude: { label: 'Claude Code', title: 'Claude Code', desc: '起動コマンドと引数' },
   codex: { label: 'Codex', title: 'Codex', desc: '起動コマンドと引数' },
@@ -63,7 +63,7 @@ export const FIXED_LABELS_JA: Record<string, FixedLabelEntry> = {
 };
 export const FIXED_LABELS_EN: Record<string, FixedLabelEntry> = {
   general: { label: 'General', title: 'General', desc: 'Language and density' },
-  appearance: { label: 'Appearance', title: 'Appearance', desc: 'Theme and surfaces' },
+  appearance: { label: 'Appearance', title: 'Appearance', desc: 'Theme, surfaces, and character' },
   fonts: { label: 'Fonts', title: 'Typography', desc: 'UI / editor / terminal fonts' },
   claude: { label: 'Claude Code', title: 'Claude Code', desc: 'Launch command and args' },
   codex: { label: 'Codex', title: 'Codex', desc: 'Launch command and args' },

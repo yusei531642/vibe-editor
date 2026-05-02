@@ -16,6 +16,7 @@ import {
   DEFAULT_SETTINGS,
   type AppSettings,
   type Language,
+  type StatusMascotVariant,
   type ThemeName
 } from '../../../types/shared';
 
@@ -159,6 +160,15 @@ export function migrateSettings(raw: unknown): AppSettings {
     if (data.terminalFontFamily === OLD_TERMINAL_FONT_DEFAULT_V7) {
       data.terminalFontFamily = DEFAULT_SETTINGS.terminalFontFamily;
     }
+  }
+
+  // --- Version 8 → 9: ステータスバー mascot の選択設定を追加 (Issue #422) ---
+  const validMascots: StatusMascotVariant[] = ['vibe', 'spark', 'mono'];
+  if (
+    version < 9 ||
+    !validMascots.includes(data.statusMascotVariant as StatusMascotVariant)
+  ) {
+    data.statusMascotVariant = DEFAULT_SETTINGS.statusMascotVariant;
   }
 
   data.schemaVersion = APP_SETTINGS_SCHEMA_VERSION;

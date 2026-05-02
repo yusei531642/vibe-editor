@@ -12,8 +12,10 @@ export type Density = 'compact' | 'normal' | 'comfortable';
 
 export type Language = 'ja' | 'en';
 
+export type StatusMascotVariant = 'vibe' | 'spark' | 'mono';
+
 /** Issue #75: AppSettings の現在スキーマ。破壊変更時に上げる。 */
-export const APP_SETTINGS_SCHEMA_VERSION = 8;
+export const APP_SETTINGS_SCHEMA_VERSION = 9;
 
 /**
  * ユーザーが自由に追加できるエージェントの設定。
@@ -49,6 +51,8 @@ export interface AppSettings {
   terminalFontFamily?: string;
   terminalFontSize: number;
   density: Density;
+  /** ステータスバー左側に表示するキャラクターの見た目 */
+  statusMascotVariant?: StatusMascotVariant;
   // ---------- Claude Code 起動オプション ----------
   claudeCommand: string;
   claudeArgs: string;
@@ -162,6 +166,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     "'JetBrainsMono Nerd Font Mono', 'JetBrains Mono Variable', 'Cascadia Mono', 'Cascadia Code', Consolas, 'Lucida Console', 'Segoe UI Symbol', monospace",
   terminalFontSize: 13,
   density: 'normal',
+  statusMascotVariant: 'vibe',
   claudeCommand: 'claude',
   claudeArgs: '',
   claudeCwd: '',
