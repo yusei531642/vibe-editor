@@ -115,8 +115,13 @@ pub async fn team_send(
         resolved_recipient_ids: resolved_recipient_ids.clone(),
         message: message.to_string(),
         timestamp: timestamp.clone(),
+        // Issue #378: sender 自身は送信時点で既読扱いを継続。recipient は inject が成功
+        // しても自動で read_by に入れない (= worker が `team_read` を実行する経路でしか
+        // 既読印が付かない) ことで、未確認指示を unread fallback で再取得できるようにする。
         read_by: vec![ctx.agent_id.clone()],
         read_at: initial_read_at,
+        delivered_to: Vec::new(),
+        delivered_at: HashMap::new(),
     });
     // Issue #107 / #216: 上限超過分は古い順に破棄してメモリ青天井を防ぐ。
     // VecDeque::pop_front() で O(1) eviction にする。
@@ -175,10 +180,12 @@ pub async fn team_send(
         });
     }
 
-    // Issue #342 Phase 3 (3.7): 受領時刻を recipient agent_id ごとに追跡。
-    // 全 target は最初 None で初期化し、inject 成功した瞬間に Some(now) を入れる。
-    // 未配信 (inject 失敗) の target はそのまま None で戻り値に乗る。
-    let mut received_at_per_recipient: HashMap<String, Option<String>> = targets
+    // Issue #342 Phase 3 (3.7) / Issue #378:
+    // - `delivered_at_per_recipient` は inject (= PTY 配達) が成功した瞬間の timestamp を持つ。
+    //   旧 `receivedAtPerRecipient` は意味的に「PTY に届いた」≒「読まれた」を混同させていたため、
+    //   Issue #378 では `deliveredAtPerRecipient` を新設して payload の正本にする。
+    //   `receivedAtPerRecipient` は legacy alias として同じ値を残し、外部 UI / 解析ツールの後方互換を保つ。
+    let mut delivered_at_per_recipient: HashMap<String, Option<String>> = targets
         .iter()
         .map(|(aid, _)| (aid.clone(), None))
         .collect();
@@ -193,15 +200,23 @@ pub async fn team_send(
             } else {
                 target_role.clone()
             });
-            let received_at = Utc::now().to_rfc3339();
-            received_at_per_recipient.insert(target_aid.clone(), Some(received_at.clone()));
-            // read_by / read_at に追加 + 受信側 diagnostics 更新
+            let delivered_at = Utc::now().to_rfc3339();
+            delivered_at_per_recipient
+                .insert(target_aid.clone(), Some(delivered_at.clone()));
+            // Issue #378: read_by/read_at は触らない。delivered_to/delivered_at だけを更新する。
+            // (旧実装は inject 成功で recipient まで read_by に入れていたため、worker が実際に
+            //  Enter を確認していない 1 回目の指示も「既読」扱いになり、`team_read({unread_only: true})`
+            //  fallback で再取得できなかった。delivered/read を分離することで、worker が処理した
+            //  ことの真の証拠 (= team_read 呼び出し) でしか read_by に印が付かなくなる。)
             {
                 let mut state = hub.state.lock().await;
                 if let Some(t) = state.teams.get_mut(&ctx.team_id) {
                     if let Some(m) = t.messages.iter_mut().find(|m| m.id == msg_id) {
-                        m.read_by.push(target_aid.clone());
-                        m.read_at.insert(target_aid.clone(), received_at.clone());
+                        if !m.delivered_to.iter().any(|id| id == &target_aid) {
+                            m.delivered_to.push(target_aid.clone());
+                        }
+                        m.delivered_at
+                            .insert(target_aid.clone(), delivered_at.clone());
                     }
                 }
                 // Issue #342 Phase 3 (3.3): 受信側 diagnostics 更新
@@ -209,8 +224,8 @@ pub async fn team_send(
                     .member_diagnostics
                     .entry(target_aid.clone())
                     .or_default();
-                recipient_diag.last_message_in_at = Some(received_at.clone());
-                recipient_diag.last_seen_at = Some(received_at.clone());
+                recipient_diag.last_message_in_at = Some(delivered_at.clone());
+                recipient_diag.last_seen_at = Some(delivered_at.clone());
                 recipient_diag.messages_in_count =
                     recipient_diag.messages_in_count.saturating_add(1);
             }
@@ -262,6 +277,11 @@ pub async fn team_send(
         "delivered": delivered,
         "note": note,
         "sentAt": timestamp,
-        "receivedAtPerRecipient": received_at_per_recipient,
+        // Issue #378: delivered と read を分離した正本フィールド。inject (= PTY 配達) 成功時刻だけを持つ。
+        "deliveredAtPerRecipient": delivered_at_per_recipient,
+        // legacy alias: 旧 UI / 診断ツールが `receivedAtPerRecipient` を読むため同値を残す。
+        // 名前が「受信して読まれた時刻」を連想させやすいが、現行は `deliveredAtPerRecipient` と同義
+        // (= inject 成功時刻)。読了印は `team_read` が呼ばれた瞬間に message.read_at に書かれる別経路。
+        "receivedAtPerRecipient": delivered_at_per_recipient,
     }))
 }
