@@ -3,14 +3,16 @@
 // portable-pty 経由で PTY を spawn、SessionRegistry に登録、
 // terminal:data:{id} / terminal:exit:{id} イベントを emit する。
 
+mod paste_image;
+mod codex_instructions;
+mod command_validation;
+
 use crate::pty::{spawn_session, SpawnOptions, UserWriteOutcome};
 use crate::state::AppState;
 use crate::team_hub::inject::build_chunks;
 use crate::util::log_redact::redact_home;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, State};
@@ -76,166 +78,12 @@ pub struct SavePastedImageResult {
     pub error: Option<String>,
 }
 
-/// Issue #285: renderer から渡される terminal id を検証。
-/// `terminal:data:{id}` 等のイベント名に乗るので、衝突や偽装防止のため
-/// `[A-Za-z0-9_-]{1,64}` のみ許可する (UUID v4 は 36 chars で収まる)。
-fn is_valid_terminal_id(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 64
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-}
-
 /// 旧 resolveCommand 相当の最小実装。Phase 1 では「未指定なら 'claude'」だけ。
 fn resolve_command(command: Option<String>, args: Option<Vec<String>>) -> (String, Vec<String>) {
     let cmd = command
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "claude".to_string());
     (cmd, args.unwrap_or_default())
-}
-
-fn command_basename(command: &str) -> String {
-    let lower = command.trim().to_ascii_lowercase().replace('\\', "/");
-    std::path::Path::new(&lower)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(lower.as_str())
-        .to_string()
-}
-
-fn configured_terminal_commands() -> HashSet<String> {
-    let mut out = HashSet::new();
-    let Some(home) = dirs::home_dir() else {
-        return out;
-    };
-    let path = home.join(".vibe-editor").join("settings.json");
-    let Ok(bytes) = std::fs::read(path) else {
-        return out;
-    };
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-        return out;
-    };
-    let mut push = |raw: Option<&str>| {
-        if let Some(cmd) = raw.map(str::trim).filter(|s| !s.is_empty()) {
-            out.insert(cmd.to_ascii_lowercase());
-        }
-    };
-    push(value.get("claudeCommand").and_then(|v| v.as_str()));
-    push(value.get("codexCommand").and_then(|v| v.as_str()));
-    if let Some(custom) = value.get("customAgents").and_then(|v| v.as_array()) {
-        for agent in custom {
-            push(agent.get("command").and_then(|v| v.as_str()));
-        }
-    }
-    out
-}
-
-/// Issue #201:
-/// renderer 由来の任意コマンド実行を避けるため、起動できるバイナリを
-/// 1. 組み込み allowlist (Claude / Codex / 代表的な対話シェル)
-/// 2. ユーザーが settings.json に保存した既知の command
-/// に限定する。
-fn is_allowed_terminal_command(command: &str) -> bool {
-    const SAFE_BASENAMES: &[&str] = &[
-        "claude",
-        "codex",
-        "bash",
-        "sh",
-        "zsh",
-        "fish",
-        "pwsh",
-        "powershell",
-        "cmd",
-        "nu",
-    ];
-    let trimmed = command.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let basename = command_basename(trimmed);
-    if SAFE_BASENAMES.contains(&basename.as_str()) {
-        return true;
-    }
-    configured_terminal_commands().contains(&trimmed.to_ascii_lowercase())
-}
-
-fn reject_immediate_exec_args(command: &str, args: &[String]) -> Option<&'static str> {
-    let basename = command_basename(command);
-    let lower_args: Vec<String> = args.iter().map(|a| a.trim().to_ascii_lowercase()).collect();
-    let has_any = |candidates: &[&str]| lower_args.iter().any(|arg| candidates.contains(&arg.as_str()));
-    match basename.as_str() {
-        "bash" | "sh" | "zsh" | "fish" => {
-            if has_any(&["-c", "-lc"]) {
-                Some("shell immediate-exec flags (-c / -lc) are blocked")
-            } else {
-                None
-            }
-        }
-        "pwsh" | "powershell" => {
-            if has_any(&["-c", "-command", "/command", "-encodedcommand", "-file"]) {
-                Some("PowerShell immediate-exec flags (-Command / -EncodedCommand / -File) are blocked")
-            } else {
-                None
-            }
-        }
-        "cmd" => {
-            if has_any(&["/c", "/k"]) {
-                Some("cmd immediate-exec flags (/c /k) are blocked")
-            } else {
-                None
-            }
-        }
-        "nu" => {
-            if has_any(&["-c", "--commands"]) {
-                Some("nushell immediate-exec flags (-c / --commands) are blocked")
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-}
-
-/// Issue #99: Codex の system prompt を一時ファイルに書き、`--config model_instructions_file=...`
-/// を args 末尾に追加する。書き出し先は `~/.vibe-editor/codex-instructions/`。
-/// ディレクトリは起動時に best-effort で TTL=7日 のクリーンアップを掛ける。
-async fn prepare_codex_instructions_file(instructions: &str) -> Option<PathBuf> {
-    if instructions.trim().is_empty() {
-        return None;
-    }
-    let dir = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".vibe-editor")
-        .join("codex-instructions");
-    if let Err(e) = tokio::fs::create_dir_all(&dir).await {
-        tracing::warn!("[terminal] codex-instructions dir create failed: {e}");
-        return None;
-    }
-    cleanup_old_codex_instructions(&dir).await;
-    let path = dir.join(format!("instr-{}.md", Uuid::new_v4()));
-    if let Err(e) = tokio::fs::write(&path, instructions).await {
-        tracing::warn!("[terminal] codex-instructions write failed: {e}");
-        return None;
-    }
-    Some(path)
-}
-
-/// Issue #99: 古い codex 指示ファイルを TTL で掃除 (paste-images と同じ best-effort)。
-async fn cleanup_old_codex_instructions(dir: &std::path::Path) {
-    // Issue #138: 旧 7 日 → 24h に短縮。情報残存リスクを下げる
-    const TTL_SECS: u64 = 24 * 60 * 60;
-    let mut rd = match tokio::fs::read_dir(dir).await {
-        Ok(r) => r,
-        Err(_) => return,
-    };
-    let now = std::time::SystemTime::now();
-    while let Ok(Some(entry)) = rd.next_entry().await {
-        let Ok(meta) = entry.metadata().await else { continue };
-        let Ok(modified) = meta.modified() else { continue };
-        let age = now.duration_since(modified).unwrap_or_default();
-        if age.as_secs() > TTL_SECS {
-            let _ = tokio::fs::remove_file(entry.path()).await;
-        }
-    }
 }
 
 /// Codex の system prompt を、PTY (TUI) に直接「最初の入力」として注入する fallback 経路。
@@ -295,103 +143,6 @@ async fn inject_codex_prompt_to_pty(
     );
 }
 
-/// command が codex 系か判定 (パス形式や *.exe も拾う)
-///
-/// Path::new は OS のセパレータしか認識しない (Linux では `\` が単なる文字扱い) ので、
-/// Windows-style な `C:\tools\codex.exe` も Linux CI で正しく判定できるよう、
-/// 先に `/` `\` 双方をスラッシュに正規化してから basename を取り出す。
-fn is_codex_command(command: &str) -> bool {
-    let lower = command.to_ascii_lowercase().replace('\\', "/");
-    let basename = std::path::Path::new(&lower)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or(&lower);
-    basename == "codex" || basename.ends_with("-codex") || basename.starts_with("codex-")
-}
-
-#[cfg(test)]
-mod terminal_id_validation_tests {
-    use super::is_valid_terminal_id;
-
-    #[test]
-    fn accepts_uuid_v4() {
-        assert!(is_valid_terminal_id("550e8400-e29b-41d4-a716-446655440000"));
-    }
-
-    #[test]
-    fn accepts_alphanumeric_and_separators() {
-        assert!(is_valid_terminal_id("abc_123-XYZ"));
-        assert!(is_valid_terminal_id("term-1761800000000-abcd1234"));
-        assert!(is_valid_terminal_id("a"));
-        assert!(is_valid_terminal_id("0"));
-    }
-
-    #[test]
-    fn accepts_max_length() {
-        let s = "a".repeat(64);
-        assert!(is_valid_terminal_id(&s));
-    }
-
-    #[test]
-    fn rejects_empty() {
-        assert!(!is_valid_terminal_id(""));
-    }
-
-    #[test]
-    fn rejects_overlength() {
-        let s = "a".repeat(65);
-        assert!(!is_valid_terminal_id(&s));
-    }
-
-    #[test]
-    fn rejects_path_traversal() {
-        assert!(!is_valid_terminal_id("../etc/passwd"));
-        assert!(!is_valid_terminal_id("./id"));
-    }
-
-    #[test]
-    fn rejects_event_name_injection() {
-        // ":" を入れると `terminal:data:foo:bar` のように Tauri event 名前空間を細工される懸念
-        assert!(!is_valid_terminal_id("foo:bar"));
-        assert!(!is_valid_terminal_id("data:malicious"));
-    }
-
-    #[test]
-    fn rejects_whitespace_and_shell_metachars() {
-        assert!(!is_valid_terminal_id("abc def"));
-        assert!(!is_valid_terminal_id("abc;rm"));
-        assert!(!is_valid_terminal_id("abc|true"));
-        assert!(!is_valid_terminal_id("abc$VAR"));
-        assert!(!is_valid_terminal_id("abc`whoami`"));
-    }
-
-    #[test]
-    fn rejects_non_ascii() {
-        assert!(!is_valid_terminal_id("日本語"));
-        assert!(!is_valid_terminal_id("café"));
-    }
-}
-
-#[cfg(test)]
-mod codex_command_tests {
-    use super::is_codex_command;
-
-    #[test]
-    fn detects_basic_codex() {
-        assert!(is_codex_command("codex"));
-        assert!(is_codex_command("CODEX"));
-        assert!(is_codex_command("/usr/local/bin/codex"));
-        assert!(is_codex_command(r"C:\tools\codex.exe"));
-    }
-
-    #[test]
-    fn rejects_non_codex() {
-        assert!(!is_codex_command("claude"));
-        assert!(!is_codex_command("bash"));
-        assert!(!is_codex_command(""));
-    }
-}
-
 #[tauri::command]
 pub async fn terminal_create(
     app: AppHandle,
@@ -399,14 +150,14 @@ pub async fn terminal_create(
     opts: TerminalCreateOptions,
 ) -> Result<TerminalCreateResult, String> {
     let (command, mut args) = resolve_command(opts.command, opts.args);
-    if !is_allowed_terminal_command(&command) {
+    if !command_validation::is_allowed_terminal_command(&command) {
         return Ok(TerminalCreateResult {
             ok: false,
             error: Some(format!("command is not allowed: {command}")),
             ..Default::default()
         });
     }
-    if let Some(reason) = reject_immediate_exec_args(&command, &args) {
+    if let Some(reason) = command_validation::reject_immediate_exec_args(&command, &args) {
         return Ok(TerminalCreateResult {
             ok: false,
             error: Some(reason.to_string()),
@@ -482,14 +233,14 @@ pub async fn terminal_create(
     //     その場合でもプロンプトが「最初の user input」としては必ず届くようにする。
     //     team_hub::inject::build_chunks を共有して ConPTY-safe (64B / 15ms チャンク + UTF-8 境界保護) な
     //     注入を行う。同じロジックでチームメッセージの注入と挙動を揃えることで、xterm 表示の崩れも避けられる。
-    let codex_instructions_for_inject: Option<String> = if is_codex_command(&command) {
+    let codex_instructions_for_inject: Option<String> = if command_validation::is_codex_command(&command) {
         if let Some(instr) = opts
             .codex_instructions
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
         {
-            if let Some(path) = prepare_codex_instructions_file(instr).await {
+            if let Some(path) = codex_instructions::prepare_codex_instructions_file(instr).await {
                 let path_str = path.to_string_lossy().into_owned();
                 tracing::info!(
                     "[terminal] codex model_instructions_file={path_str}"
@@ -534,7 +285,7 @@ pub async fn terminal_create(
     // 122-bit エントロピーで実発生確率はほぼ 0 だが構造的に穴)。renderer-supplied id の
     // 形式バリデーションのみここで行い、registry 衝突確認は spawn 後の atomic 検出に任せる。
     let initial_id = match opts.id.as_deref() {
-        Some(s) if !is_valid_terminal_id(s) => {
+        Some(s) if !command_validation::is_valid_terminal_id(s) => {
             tracing::warn!(
                 "[terminal] renderer-supplied id rejected (invalid charset/length), falling back to UUID v4"
             );
@@ -724,143 +475,12 @@ pub async fn terminal_kill(state: State<'_, AppState>, id: String) -> Result<(),
     Ok(())
 }
 
-/// Issue #40: mime_type から拡張子を決める。未知 mime は .png にフォールバック。
-/// Issue #138: SVG はスクリプト埋め込み可能な XML 形式で、AI agent が paste image
-/// path を読みに行ったときにプロンプトインジェクション / XSS の足掛かりになる。
-/// SVG は Option::None を返して保存自体を拒否させる。
-fn extension_for_mime(mime: &str) -> Option<&'static str> {
-    match mime.trim().to_ascii_lowercase().as_str() {
-        "image/png" => Some("png"),
-        "image/jpeg" | "image/jpg" => Some("jpg"),
-        "image/webp" => Some("webp"),
-        "image/gif" => Some("gif"),
-        "image/bmp" => Some("bmp"),
-        "image/tiff" => Some("tiff"),
-        // image/svg+xml は除外 (上記 issue 参照)
-        // 未知 mime も拒否 (旧 fallback="png" は MIME 検証ザル経路だった)
-        _ => None,
-    }
-}
-
-/// Issue #41: paste-images/ 配下のうち mtime が 7 日以上古いファイルを削除。
-/// paste の度に best-effort で呼ばれ、長期利用時のゴミ蓄積を防ぐ。
-async fn cleanup_old_paste_images(dir: &std::path::Path) {
-    // Issue #138: 旧 7 日 → 24h に短縮。情報残存リスクを下げる
-    const TTL_SECS: u64 = 24 * 60 * 60;
-    let mut rd = match tokio::fs::read_dir(dir).await {
-        Ok(r) => r,
-        Err(_) => return,
-    };
-    let now = std::time::SystemTime::now();
-    while let Ok(Some(entry)) = rd.next_entry().await {
-        let path = entry.path();
-        let Ok(meta) = entry.metadata().await else {
-            continue;
-        };
-        let Ok(modified) = meta.modified() else {
-            continue;
-        };
-        let age = now.duration_since(modified).unwrap_or_default();
-        if age.as_secs() > TTL_SECS {
-            let _ = tokio::fs::remove_file(&path).await;
-        }
-    }
-}
-
-/// Issue #138: paste image の最大サイズ。base64 decoded で 32 MB を超える payload は拒否。
-/// 一般的なクリップボード画像 (4K スクショ PNG) は 5〜15 MB 程度なので余裕を持った上限。
-const MAX_PASTED_IMAGE_BYTES: usize = 32 * 1024 * 1024;
-
+/// Issue #40 / #138: paste image を `~/.vibe-editor/paste-images/` に保存する Tauri IPC。
+/// 本体は `paste_image::save` に委譲 (Phase 3 / Issue #373)。
 #[tauri::command]
 pub async fn terminal_save_pasted_image(
     base64: String,
     mime_type: String,
 ) -> SavePastedImageResult {
-    // Issue #138 (Security):
-    //   1. base64 文字列の段階で max を超えるなら decode せずに reject (DoS / disk full 防止)
-    //   2. MIME を allowlist (image/png|jpeg|webp|gif|bmp|tiff) に限定。SVG は禁止
-    //   3. decoded size も二重に check (base64 padding 崩しを通った場合に備える)
-    if base64.len() > MAX_PASTED_IMAGE_BYTES * 4 / 3 + 64 {
-        return SavePastedImageResult {
-            ok: false,
-            path: None,
-            error: Some("pasted image exceeds size limit (32 MB)".into()),
-        };
-    }
-    let ext = match extension_for_mime(&mime_type) {
-        Some(e) => e,
-        None => {
-            return SavePastedImageResult {
-                ok: false,
-                path: None,
-                error: Some(format!(
-                    "unsupported MIME type for pasted image: {mime_type}"
-                )),
-            };
-        }
-    };
-    use base64::Engine;
-    let bytes = match base64::engine::general_purpose::STANDARD.decode(base64.as_bytes()) {
-        Ok(b) => b,
-        Err(e) => {
-            return SavePastedImageResult {
-                ok: false,
-                path: None,
-                error: Some(e.to_string()),
-            };
-        }
-    };
-    if bytes.len() > MAX_PASTED_IMAGE_BYTES {
-        return SavePastedImageResult {
-            ok: false,
-            path: None,
-            error: Some("pasted image exceeds size limit (32 MB)".into()),
-        };
-    }
-    let dir = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".vibe-editor")
-        .join("paste-images");
-    if let Err(e) = tokio::fs::create_dir_all(&dir).await {
-        return SavePastedImageResult {
-            ok: false,
-            path: None,
-            error: Some(e.to_string()),
-        };
-    }
-
-    // Issue #41: 古い画像を best-effort cleanup
-    cleanup_old_paste_images(&dir).await;
-
-    let name = format!("paste-{}.{ext}", uuid::Uuid::new_v4());
-    let path = dir.join(&name);
-    if let Err(e) = tokio::fs::write(&path, bytes).await {
-        return SavePastedImageResult {
-            ok: false,
-            path: None,
-            error: Some(e.to_string()),
-        };
-    }
-    SavePastedImageResult {
-        ok: true,
-        path: Some(path.to_string_lossy().into_owned()),
-        error: None,
-    }
-}
-
-#[cfg(test)]
-mod mime_ext_tests {
-    use super::extension_for_mime;
-    #[test]
-    fn maps_common_image_mimes() {
-        assert_eq!(extension_for_mime("image/png"), Some("png"));
-        assert_eq!(extension_for_mime("image/jpeg"), Some("jpg"));
-        assert_eq!(extension_for_mime("image/jpg"), Some("jpg"));
-        assert_eq!(extension_for_mime("image/webp"), Some("webp"));
-        assert_eq!(extension_for_mime("image/gif"), Some("gif"));
-        assert_eq!(extension_for_mime("IMAGE/JPEG"), Some("jpg"));
-        // Issue #138: SVG and unknown MIME are now rejected
-        assert_eq!(extension_for_mime("image/svg+xml"), None);
-        assert_eq!(extension_for_mime("application/x-mystery"), None);
-    }
+    paste_image::save(base64, mime_type).await
 }
