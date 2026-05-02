@@ -139,6 +139,39 @@ fn handoff_dir(project_root: &str, team_id: Option<&str>) -> PathBuf {
     handoff_root().join(project_key(project_root)).join(team)
 }
 
+async fn ensure_private_handoff_dir(dir: &Path) -> Result<(), String> {
+    fs::create_dir_all(dir).await.map_err(|e| e.to_string())?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = handoff_root();
+        let mut dirs = vec![root.as_path()];
+        if let Some(project_dir) = dir.parent() {
+            dirs.push(project_dir);
+        }
+        dirs.push(dir);
+
+        for path in dirs {
+            fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+async fn restrict_private_file(_path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(_path, std::fs::Permissions::from_mode(0o600))
+            .await
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 fn normalize_status(status: &str) -> Option<&'static str> {
     match status {
         "created" => Some("created"),
@@ -212,15 +245,21 @@ fn render_markdown(h: &HandoffCheckpoint) -> String {
     out
 }
 
-async fn write_handoff(handoff: &HandoffCheckpoint, json_path: &Path, md_path: &Path) -> Result<(), String> {
+async fn write_handoff(
+    handoff: &HandoffCheckpoint,
+    json_path: &Path,
+    md_path: &Path,
+) -> Result<(), String> {
     let json = serde_json::to_vec_pretty(handoff).map_err(|e| e.to_string())?;
     crate::commands::atomic_write::atomic_write(json_path, &json)
         .await
         .map_err(|e| e.to_string())?;
+    restrict_private_file(json_path).await?;
     let markdown = render_markdown(handoff);
     crate::commands::atomic_write::atomic_write(md_path, markdown.as_bytes())
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    restrict_private_file(md_path).await
 }
 
 #[tauri::command]
@@ -233,10 +272,10 @@ pub async fn handoffs_create(req: HandoffCreateRequest) -> HandoffCreateResult {
         };
     }
     let dir = handoff_dir(&req.project_root, req.team_id.as_deref());
-    if let Err(e) = fs::create_dir_all(&dir).await {
+    if let Err(e) = ensure_private_handoff_dir(&dir).await {
         return HandoffCreateResult {
             ok: false,
-            error: Some(e.to_string()),
+            error: Some(e),
             handoff: None,
         };
     }
@@ -282,7 +321,10 @@ pub async fn handoffs_create(req: HandoffCreateRequest) -> HandoffCreateResult {
 }
 
 #[tauri::command]
-pub async fn handoffs_list(project_root: String, team_id: Option<String>) -> Vec<HandoffCheckpoint> {
+pub async fn handoffs_list(
+    project_root: String,
+    team_id: Option<String>,
+) -> Vec<HandoffCheckpoint> {
     let dir = handoff_dir(&project_root, team_id.as_deref());
     let mut out = Vec::new();
     let mut rd = match fs::read_dir(&dir).await {
@@ -294,7 +336,9 @@ pub async fn handoffs_list(project_root: String, team_id: Option<String>) -> Vec
         if path.extension().and_then(|s| s.to_str()) != Some("json") {
             continue;
         }
-        let Ok(bytes) = fs::read(&path).await else { continue };
+        let Ok(bytes) = fs::read(&path).await else {
+            continue;
+        };
         let Ok(handoff) = serde_json::from_slice::<HandoffCheckpoint>(&bytes) else {
             continue;
         };
