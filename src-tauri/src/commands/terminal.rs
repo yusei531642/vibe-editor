@@ -7,7 +7,7 @@ mod codex_instructions;
 mod command_validation;
 mod paste_image;
 
-use crate::pty::{spawn_session, SpawnOptions, UserWriteOutcome};
+use crate::pty::{SpawnOptions, UserWriteOutcome, spawn_session};
 use crate::state::AppState;
 use crate::team_hub::inject::build_chunks;
 use crate::util::log_redact::redact_home;
@@ -149,6 +149,7 @@ pub async fn terminal_create(
     state: State<'_, AppState>,
     opts: TerminalCreateOptions,
 ) -> Result<TerminalCreateResult, String> {
+    let spawned_at = std::time::SystemTime::now();
     let (command, mut args) = resolve_command(opts.command, opts.args);
     if !command_validation::is_allowed_terminal_command(&command) {
         return Ok(TerminalCreateResult {
@@ -248,9 +249,7 @@ pub async fn terminal_create(
             match codex_instructions::prepare_codex_instructions_file(instr).await {
                 Some(path) => {
                     let path_str = path.to_string_lossy().into_owned();
-                    tracing::info!(
-                        "[terminal] codex system prompt route=cli_args path={path_str}"
-                    );
+                    tracing::info!("[terminal] codex system prompt route=cli_args path={path_str}");
                     args.push("--config".to_string());
                     args.push(format!("model_instructions_file={path_str}"));
                     None
@@ -413,6 +412,7 @@ pub async fn terminal_create(
                     app.clone(),
                     watcher_id.clone(),
                     actual_root,
+                    spawned_at,
                     move || registry.get(&watcher_id).is_some(),
                 );
             }
