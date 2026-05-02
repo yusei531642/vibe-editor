@@ -41,10 +41,10 @@ cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
 | カテゴリ | 件数 | コメント |
 |---|---|---|
-| `doc_lazy_continuation` (日本語 doc) | 6 | 機械的修正可。挙動には無関係 |
+| `doc_lazy_continuation` (日本語 doc) | 7 | 機械的修正可。挙動には無関係 |
 | イディオム (`len_zero` / `manual_range_contains` / `question_mark` / `manual_unwrap_or_default` / `useless_conversion` / `needless_return`) | 6 | 機械的修正可 |
 | 構造変更が必要 (`result_large_err`, `too_many_arguments`) | 2 | API 変更を伴うのでリファクタ Phase で扱う |
-| その他 | 1 | — |
+| **合計** | **15** | — |
 
 ---
 
