@@ -18,8 +18,7 @@ import type {
   GitFileChange,
   GitStatus,
   SessionInfo,
-  TerminalAgent,
-  ThemeName
+  TerminalAgent
 } from '../../types/shared';
 import { Sidebar, type SidebarView } from './components/Sidebar';
 import { TabBar, type TabItem } from './components/TabBar';
@@ -66,15 +65,7 @@ import { useLayoutResize } from './lib/hooks/use-layout-resize';
 import { useAppShortcuts } from './lib/hooks/use-app-shortcuts';
 import { useClaudeCheck } from './lib/hooks/use-claude-check';
 import type { Command } from './lib/commands';
-
-const THEMES_FOR_PALETTE: ThemeName[] = [
-  'claude-dark',
-  'claude-light',
-  'dark',
-  'midnight',
-  'glass',
-  'light'
-];
+import { buildAppCommands } from './lib/app-commands';
 
 // DiffTab / EditorTab の型定義は use-file-tabs.ts に移管済み (Issue #373 Phase 1-2)。
 
@@ -543,225 +534,78 @@ export function App(): JSX.Element {
     ]
   );
 
-  // ---------- コマンドパレット ----------
-
-  const commands = useMemo<Command[]>(() => {
-    // Issue #57: タイトル / カテゴリ / subtitle を i18n キー経由に置換
-    const CAT = {
-      project: t('cmd.cat.project'),
-      workspace: t('cmd.cat.workspace'),
-      view: t('cmd.cat.view'),
-      tab: t('cmd.cat.tab'),
-      git: t('cmd.cat.git'),
-      sessions: t('cmd.cat.sessions'),
-      terminal: t('cmd.cat.terminal'),
-      settings: t('cmd.cat.settings'),
-      theme: t('cmd.cat.theme')
-    };
-    const list: Command[] = [
-      {
-        id: 'project.new',
-        title: t('cmd.project.new'),
-        category: CAT.project,
-        run: () => void handleNewProject()
-      },
-      {
-        id: 'project.openFolder',
-        title: t('cmd.project.openFolder'),
-        category: CAT.project,
-        run: () => void handleOpenFolder()
-      },
-      {
-        id: 'project.openFile',
-        title: t('cmd.project.openFile'),
-        category: CAT.project,
-        run: () => void handleOpenFile()
-      },
-      {
-        id: 'workspace.addFolder',
-        title: t('cmd.workspace.addFolder'),
-        category: CAT.workspace,
-        run: () => void handleAddWorkspaceFolder()
-      },
-      ...(settings.recentProjects ?? []).slice(0, 5).map<Command>((p) => ({
-        id: `project.recent.${p}`,
-        title: t('cmd.project.recent', { name: p.split(/[\\/]/).pop() ?? p }),
-        subtitle: p,
-        category: CAT.project,
-        run: () => void handleOpenRecent(p)
-      })),
-      {
-        id: 'view.sidebar.changes',
-        title: t('cmd.view.sidebarChanges'),
-        category: CAT.view,
-        run: () => setSidebarView('changes')
-      },
-      {
-        id: 'view.sidebar.sessions',
-        title: t('cmd.view.sidebarSessions'),
-        category: CAT.view,
-        run: () => setSidebarView('sessions')
-      },
-      {
-        id: 'view.nextTab',
-        title: t('cmd.view.nextTab'),
-        subtitle: 'Ctrl+Tab',
-        category: CAT.view,
-        when: () => diffTabs.length > 0,
-        run: () => cycleTab(1)
-      },
-      {
-        id: 'view.prevTab',
-        title: t('cmd.view.prevTab'),
-        subtitle: 'Ctrl+Shift+Tab',
-        category: CAT.view,
-        when: () => diffTabs.length > 0,
-        run: () => cycleTab(-1)
-      },
-      {
-        id: 'tab.close',
-        title: t('cmd.tab.close'),
-        subtitle: 'Ctrl+W',
-        category: CAT.tab,
-        when: () => !!activeTabId,
-        run: () => { if (activeTabId) closeTab(activeTabId); }
-      },
-      {
-        id: 'tab.reopen',
-        title: t('cmd.tab.reopen'),
-        subtitle: 'Ctrl+Shift+T',
-        category: CAT.tab,
-        when: () => recentlyClosed.length > 0,
-        run: () => reopenLastClosed()
-      },
-      {
-        id: 'tab.togglePin',
-        title: t('cmd.tab.togglePin'),
-        category: CAT.tab,
-        when: () => !!activeTabId,
-        run: () => { if (activeTabId) togglePin(activeTabId); }
-      },
-      {
-        id: 'git.refresh',
-        title: t('cmd.git.refresh'),
-        category: CAT.git,
-        run: () => refreshGit()
-      },
-      {
-        id: 'sessions.refresh',
-        title: t('cmd.sessions.refresh'),
-        category: CAT.sessions,
-        run: () => refreshSessions()
-      },
-      {
-        id: 'terminal.addClaude',
-        title: t('cmd.terminal.addClaude'),
-        subtitle: `${terminalTabs.length}/${MAX_TERMINALS}`,
-        category: CAT.terminal,
-        when: () => terminalTabs.length < MAX_TERMINALS,
-        run: () => { addTerminalTab({ agent: 'claude' }); }
-      },
-      {
-        id: 'terminal.addCodex',
-        title: t('cmd.terminal.addCodex'),
-        subtitle: `${terminalTabs.length}/${MAX_TERMINALS}`,
-        category: CAT.terminal,
-        when: () => terminalTabs.length < MAX_TERMINALS,
-        run: () => { addTerminalTab({ agent: 'codex' }); }
-      },
-      {
-        id: 'terminal.closeTab',
-        title: t('cmd.terminal.closeTab'),
-        category: CAT.terminal,
-        when: () => terminalTabs.length > 1,
-        run: () => closeTerminalTab(activeTerminalTabId)
-      },
-      {
-        id: 'terminal.restart',
-        title: t('cmd.terminal.restart'),
-        category: CAT.terminal,
-        run: () => restartTerminal()
-      },
-      {
-        id: 'settings.open',
-        title: t('cmd.settings.open'),
-        subtitle: 'Ctrl+,',
-        category: CAT.settings,
-        run: () => setSettingsOpen(true)
-      },
-      {
-        id: 'settings.cycleDensity',
-        title: t('cmd.settings.cycleDensity'),
-        subtitle: t('cmd.settings.cycleDensitySub', { density: settings.density }),
-        category: CAT.settings,
-        run: () => {
-          const order: typeof settings.density[] = ['compact', 'normal', 'comfortable'];
-          const nextDensity = order[(order.indexOf(settings.density) + 1) % order.length];
-          void updateSettings({ density: nextDensity });
-        }
-      },
-      ...THEMES_FOR_PALETTE.map<Command>((tn) => ({
-        id: `theme.${tn}`,
-        title: t('cmd.theme.title', { name: tn }),
-        subtitle: tn === settings.theme ? t('cmd.theme.current') : undefined,
-        category: CAT.theme,
-        run: () => void updateSettings({ theme: tn })
-      })),
-      {
-        id: 'app.restart',
-        title: t('cmd.app.restart'),
-        category: t('cmd.cat.app'),
-        run: () => void handleRestart()
-      },
-      {
-        id: 'app.checkForUpdates',
-        title: t('updater.checkNow'),
-        category: t('cmd.cat.app'),
-        run: () => {
-          void import('./lib/updater-check').then((m) => {
-            // manual=true: didCheck を無視して再試行可能 + 「最新です」も明示通知
-            void m.checkForUpdates({
-              language: settings.language,
-              showToast,
-              dismissToast,
-              manual: true,
-              runningTaskCount: terminalTabs.length
-            });
-          });
-        }
-      }
-    ];
-    return list;
-  }, [
-    t,
-    handleNewProject,
-    handleOpenFolder,
-    handleOpenFile,
-    handleOpenRecent,
-    handleAddWorkspaceFolder,
-    cycleTab,
-    activeTabId,
-    closeTab,
-    recentlyClosed,
-    reopenLastClosed,
-    togglePin,
-    refreshGit,
-    refreshSessions,
-    settings.theme,
-    settings.density,
-    settings.recentProjects,
-    settings.language,
-    updateSettings,
-    handleRestart,
-    restartTerminal,
-    addTerminalTab,
-    closeTerminalTab,
-    activeTerminalTabId,
-    terminalTabs.length,
-    diffTabs.length,
-    showToast,
-    dismissToast
-  ]);
+  // Phase 1-9 (Issue #373): コマンドパレット用 Command[] 構築は lib/app-commands.ts に集約。
+  // useMemo の deps 配列は呼び出し側に残し、react-hooks/exhaustive-deps が機能する形を維持。
+  const commands = useMemo<Command[]>(
+    () =>
+      buildAppCommands({
+        t,
+        handleNewProject,
+        handleOpenFolder,
+        handleOpenFile,
+        handleOpenRecent,
+        handleAddWorkspaceFolder,
+        setSidebarView,
+        activeTabId,
+        cycleTab,
+        closeTab,
+        togglePin,
+        reopenLastClosed,
+        diffTabsLength: diffTabs.length,
+        recentlyClosedLength: recentlyClosed.length,
+        refreshGit,
+        refreshSessions,
+        terminalTabsLength: terminalTabs.length,
+        maxTerminals: MAX_TERMINALS,
+        activeTerminalTabId,
+        addTerminalTab,
+        closeTerminalTab,
+        restartTerminal,
+        settings: {
+          theme: settings.theme,
+          density: settings.density,
+          recentProjects: settings.recentProjects,
+          language: settings.language
+        },
+        updateSettings,
+        setSettingsOpen,
+        handleRestart,
+        showToast,
+        dismissToast
+      }),
+    [
+      t,
+      handleNewProject,
+      handleOpenFolder,
+      handleOpenFile,
+      handleOpenRecent,
+      handleAddWorkspaceFolder,
+      setSidebarView,
+      activeTabId,
+      cycleTab,
+      closeTab,
+      togglePin,
+      reopenLastClosed,
+      diffTabs.length,
+      recentlyClosed.length,
+      refreshGit,
+      refreshSessions,
+      terminalTabs.length,
+      activeTerminalTabId,
+      addTerminalTab,
+      closeTerminalTab,
+      restartTerminal,
+      settings.theme,
+      settings.density,
+      settings.recentProjects,
+      settings.language,
+      updateSettings,
+      setSettingsOpen,
+      handleRestart,
+      showToast,
+      dismissToast
+    ]
+  );
 
   // Phase 1-6 (Issue #373): グローバルショートカット + Shift+wheel zoom を hook に集約。
   // Phase 1-8: paletteOpen / settingsOpen は useUiStore に集約済みなので opts 不要。
