@@ -18,7 +18,6 @@ const RECRUIT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Issue #342 Phase 1: renderer 側 `app_recruit_ack` invoke 受領を待つ短期タイムアウト。
 /// 「addCard / spawn 開始の受領通知」だけを待つので 5s で十分 (handshake 完了までは待たない)。
 const RECRUIT_ACK_TIMEOUT: Duration = Duration::from_secs(5);
-const MAX_MEMBERS_PER_TEAM: usize = 12;
 /// 動的ロール instructions の最大長。Leader が暴走して巨大プロンプトを投げてくるのを抑える。
 const MAX_DYNAMIC_INSTRUCTIONS_LEN: usize = 16 * 1024; // 16 KiB
 /// 動的ロール label / description の最大長
@@ -559,9 +558,11 @@ async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<
     // 新 agentId を採番 (vc- prefix で他システムと区別)
     let new_agent_id = format!("vc-{}", Uuid::new_v4());
 
-    // Issue #122: 「singleton / 人数上限チェック」と「pending 登録」を同じクリティカルセクションで実行。
-    // pending recruit も人数 / role 重複の判定対象に含めることで、並行 team_recruit が
-    // 両方 pass して上限超過 / singleton 重複が発生する競合を防ぐ。
+    // Issue #122: 「singleton 重複チェック」と「pending 登録」を同じクリティカルセクションで実行。
+    // pending recruit も singleton の判定対象に含めることで、並行 team_recruit が
+    // 両方 pass して singleton 重複が発生する競合を防ぐ。
+    //
+    // Issue #386: 1 チームあたりのメンバー人数上限 (旧 MAX_MEMBERS_PER_TEAM=12) は撤廃済み。
     //
     // Issue #342 Phase 1: ack 駆動への移行に伴い、handshake 用の `rx` に加えて renderer 側
     // `app_recruit_ack` invoke を待つ `ack_rx` も同時に生成する。
@@ -575,7 +576,6 @@ async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<
             ctx.agent_id.clone(),
             is_singleton,
             &current_members,
-            MAX_MEMBERS_PER_TEAM,
         )
         .await
     {

@@ -479,11 +479,13 @@ impl TeamHub {
         self.state.lock().await.role_profile_summary.clone()
     }
 
-    /// recruit を pending に登録する。Issue #122: 「人数 / singleton 判定」と「pending 登録」を
-    /// 同じクリティカルセクションで行うことで並行 recruit による上限超過や singleton 重複を防ぐ。
+    /// recruit を pending に登録する。Issue #122: 「singleton 判定」と「pending 登録」を
+    /// 同じクリティカルセクションで行うことで並行 recruit による singleton 重複を防ぐ。
+    ///
+    /// Issue #386: 1 チームあたりのメンバー人数上限は撤廃済み。
     ///
     /// `current_members` は呼び出し側で先に取得した「handshake 済みメンバー (agent_id, role) の一覧」。
-    /// クリティカルセクション内で pending と合わせて人数 / 役職重複をチェックし、
+    /// クリティカルセクション内で pending と合わせて役職重複をチェックし、
     /// パスしたらこの場で pending に挿入して Receiver を返す。
     pub async fn try_register_pending_recruit(
         &self,
@@ -493,7 +495,6 @@ impl TeamHub {
         requester_agent_id: String,
         is_singleton: bool,
         current_members: &[(String, String)],
-        max_members: usize,
     ) -> Result<PendingRecruitChannels, String> {
         let (tx, rx) = oneshot::channel();
         let (ack_tx, ack_rx) = oneshot::channel();
@@ -504,13 +505,6 @@ impl TeamHub {
             .values()
             .filter(|p| p.team_id == team_id)
             .collect();
-        // 人数上限チェック (handshake 済み + pending)
-        let total = current_members.len() + pending_for_team.len();
-        if total >= max_members {
-            return Err(format!(
-                "team is full ({total}/{max_members} members; including pending recruits)"
-            ));
-        }
         // singleton チェック (handshake 済み + pending を両方見る)
         if is_singleton {
             let already = current_members.iter().any(|(_, r)| r == &role_profile_id)
