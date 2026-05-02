@@ -1,0 +1,52 @@
+//! tool: `team_info` — return current team roster + caller's identity.
+//!
+//! Issue #373 Phase 2 で `protocol.rs` から切り出し。
+
+use crate::team_hub::{CallContext, TeamHub};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+
+pub async fn team_info(hub: &TeamHub, ctx: &CallContext) -> Result<Value, String> {
+    // Issue #342 Phase 2: identity 分離検出のため `agent_role_bindings` を一緒に取る。
+    // member の registry 上 role と handshake 時に bind した role が乖離している (= 別
+    // プロセスが同 agent_id で違う role を主張した / context が古い) なら
+    // `inconsistent: true` を返す。`bindingTeamId` 等の cross-member 機微情報は伏字化し、
+    // 自分自身の binding (`myBoundRole`) のみフル表示する。
+    let state = hub.state.lock().await;
+    let name = state
+        .teams
+        .get(&ctx.team_id)
+        .map(|t| t.name.clone())
+        .unwrap_or_default();
+    let bindings_snapshot: HashMap<String, String> = state.agent_role_bindings.clone();
+    drop(state);
+    let members: Vec<_> = hub
+        .registry
+        .list_team_members(&ctx.team_id)
+        .into_iter()
+        .map(|(aid, role)| {
+            // role 比較は case-insensitive (resolve_targets と同じ流儀)。
+            // bind 未登録 (handshake 未完など) の member は inconsistent=false 扱い
+            // (まだ bind 機会が無いだけで矛盾とは言えないため)。
+            let inconsistent = match bindings_snapshot.get(&aid) {
+                Some(bound) => !bound.eq_ignore_ascii_case(&role),
+                None => false,
+            };
+            json!({
+                "role": role,
+                "agentId": aid,
+                "online": true,
+                "inconsistent": inconsistent,
+            })
+        })
+        .collect();
+    let my_bound_role = bindings_snapshot.get(&ctx.agent_id).cloned();
+    Ok(json!({
+        "teamId": ctx.team_id,
+        "teamName": name,
+        "myRole": ctx.role,
+        "myAgentId": ctx.agent_id,
+        "myBoundRole": my_bound_role,
+        "members": members,
+    }))
+}
