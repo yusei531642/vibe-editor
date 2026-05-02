@@ -63,14 +63,17 @@ interface CanvasState {
   setTeamLock: (teamId: string, locked: boolean) => void;
   isTeamLocked: (teamId: string) => boolean;
   /**
-   * Issue #253: recruit イベント (新規メンバー追加) で fitView を発火させるためのトリガー。
-   * use-recruit-listener が card 追加後に Date.now() を書き、Canvas component が
-   * useEffect で監視して `useReactFlow().fitView({ padding: 0.15, duration: 300 })` を呼ぶ。
-   * RECRUIT_RADIUS = NODE_W + 80 により論理幅 2080 px 超を要求する 6 名同心円配置でも、
-   * fitView で全員が viewport に収まるよう自動調整する。
+   * Issue #253 / #372: recruit イベント (新規メンバー追加) で viewport を新規 worker
+   * 中心へ寄せるためのトリガー。use-recruit-listener が card 追加後に
+   * `notifyRecruit(nodeId)` を呼び、Canvas component が useEffect でこの変化を検知して
+   * `useReactFlow().setCenter(...)` で対象ノードを中央に置く。
+   *
+   * `nodeId` を含めることで、HR から worker を増やすケース等でも「Leader ではなく
+   * 直前に追加された worker」を中心に置けるようにする (#372)。連続 recruit のうち
+   * 最後の 1 件だけが effect で消費される (古い trigger は debounce 内で上書き)。
    */
-  lastRecruitAt: number | null;
-  notifyRecruit: () => void;
+  lastRecruitFocus: { nodeId: string; requestedAt: number } | null;
+  notifyRecruit: (nodeId: string) => void;
   /**
    * Issue #369: Canvas 内の terminal / agent カードを一括整理整頓する。
    * 既存 PTY を維持するため node id / data / payload は触らず、
@@ -286,9 +289,11 @@ export const useCanvasStore = create<CanvasState>()(
         const v = get().teamLocks[teamId];
         return v === undefined ? true : v;
       },
-      // Issue #253: recruit 後の fitView トリガー (use-recruit-listener が書き、Canvas が監視)
-      lastRecruitAt: null,
-      notifyRecruit: () => set({ lastRecruitAt: Date.now() }),
+      // Issue #253 / #372: recruit 後の viewport 寄せトリガー
+      // (use-recruit-listener が書き、Canvas が監視して setCenter する)
+      lastRecruitFocus: null,
+      notifyRecruit: (nodeId) =>
+        set({ lastRecruitFocus: { nodeId, requestedAt: Date.now() } }),
       // Issue #369: terminal/agent カードの一括整理整頓
       arrangeGap: 'normal',
       setArrangeGap: (gap) => set({ arrangeGap: gap }),

@@ -36,6 +36,7 @@ import { LeaderGlow } from './LeaderGlow';
 import { StageHud } from './StageHud';
 import { useCanvasStore, NODE_W, NODE_H, type CardData } from '../../stores/canvas';
 import { colorOf } from '../../lib/team-roles';
+import { computeRecruitFocus } from '../../lib/canvas-recruit-focus';
 import { KEYS, useKeybinding } from '../../lib/keybindings';
 import { useUiStore } from '../../stores/ui';
 import { ContextMenu, type ContextMenuItem } from '../ContextMenu';
@@ -291,45 +292,45 @@ function FlowApp(): JSX.Element {
 
   const stageView = useCanvasStore((s) => s.stageView);
 
-  // Issue #253 review (#2 + #7): recruit 後に fitView({ padding, duration }) を発火させて、
-  // RECRUIT_RADIUS=NODE_W+80 で 6 名同心円配置時に端メンバーが viewport から外れる
-  // UX 退行を吸収する。lastRecruitAt は use-recruit-listener が card 追加直後に
-  // notifyRecruit() で書き、本 effect が変化を検知する。
-  // 200ms debounce: team_recruit が短時間に複数名 (Leader+5 等) を追加するケースで、
-  // fitView アニメーションが連続発火してカクつく問題を回避。最後の更新から 200ms 経過後に
-  // 1 回だけ fitView を呼ぶ。debounce 時間は新ノードのレンダー完了 (~16ms) より十分長く、
-  // ユーザーの体感遅延 (300ms 程度の許容) より短い実用値。
-  // Issue #259: fitView 後に zoom が極端に下がるとターミナル文字が判読困難になる UX 退行を防ぐ。
-  // 結果 zoom が MIN_RECRUIT_ZOOM を下回った場合は Leader (= recruit 直近の中心ノード) で
-  // setCenter のみ実行し zoom を確保する。一部メンバーは viewport 外になるが、ユーザーは pan で閲覧可能。
+  // Issue #253 / #372: recruit 後に viewport を「新規 worker カード」中心へ寄せる。
+  // lastRecruitFocus は use-recruit-listener が `notifyRecruit(newNodeId)` で書き、
+  // 本 effect が変化を検知して `setCenter` する。HR が worker を増やすケースでも
+  // Leader ではなく追加された worker を中心にできる。
+  //
+  // 200ms debounce: 新ノードの DOM 計測完了 (~16ms) を待ちつつ、連続 recruit (Leader+5 等)
+  // でアニメーションがカクつくのを回避。
+  //
+  // Issue #259 (継承): zoom が MIN_RECRUIT_ZOOM を下回ると TUI が読めなくなるため、
+  // 現在の zoom がそれより大きければ尊重し、下回っていれば minZoom にクランプして寄せる。
   const MIN_RECRUIT_ZOOM = 0.7;
-  const lastRecruitAt = useCanvasStore((s) => s.lastRecruitAt);
+  const lastRecruitFocus = useCanvasStore((s) => s.lastRecruitFocus);
   const reactFlow = useReactFlow();
   useEffect(() => {
-    if (!lastRecruitAt) return;
+    if (!lastRecruitFocus) return;
     const timer = window.setTimeout(() => {
       try {
-        // minZoom オプションで fitView 自体が極端に縮小しないようガード (@xyflow/react v12)
-        reactFlow.fitView({ padding: 0.15, duration: 300, minZoom: MIN_RECRUIT_ZOOM });
-        // 防衛的フォールバック: minZoom が反映されない paths があった場合に備えて、
-        // 結果 zoom を確認し閾値未満なら Leader を中心に setCenter で zoom を強制する。
+        const targetNode = reactFlow.getNode(lastRecruitFocus.nodeId);
+        // recruit cancel 等で対象ノードが消えていれば no-op
+        if (!targetNode) return;
         const vp = reactFlow.getViewport();
-        if (vp.zoom < MIN_RECRUIT_ZOOM) {
-          const leader = reactFlow.getNodes()[0];
-          if (leader) {
-            reactFlow.setCenter(
-              leader.position.x + NODE_W / 2,
-              leader.position.y + NODE_H / 2,
-              { zoom: MIN_RECRUIT_ZOOM, duration: 300 }
-            );
-          }
-        }
+        const focus = computeRecruitFocus({
+          node: targetNode,
+          currentZoom: vp.zoom,
+          minZoom: MIN_RECRUIT_ZOOM,
+          fallbackWidth: NODE_W,
+          fallbackHeight: NODE_H
+        });
+        if (!focus) return;
+        reactFlow.setCenter(focus.centerX, focus.centerY, {
+          zoom: focus.zoom,
+          duration: 300
+        });
       } catch {
         /* viewport 計算に失敗するレアケースは無視 */
       }
     }, 200);
     return () => window.clearTimeout(timer);
-  }, [lastRecruitAt, reactFlow]);
+  }, [lastRecruitFocus, reactFlow]);
 
   return (
     <div
