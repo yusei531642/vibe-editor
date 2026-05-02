@@ -26,8 +26,8 @@ import {
 } from 'lucide-react';
 import type { CardData, CardType } from '../stores/canvas';
 import type {
-  HandoffReference,
   TeamHistoryEntry,
+  TeamOrganizationMeta,
   TeamRole,
   TerminalAgent
 } from '../../../types/shared';
@@ -43,13 +43,20 @@ import { useCanvasStore } from '../stores/canvas';
 import {
   BUILTIN_PRESETS,
   DEFAULT_SPAWN_PRESET,
+  expandPresetOrganizations,
+  presetMemberCount,
+  presetOrganizationCount,
   presetPosition,
   type WorkspacePreset
 } from '../lib/workspace-presets';
 import { ROLE_META, roleMetaFor } from '../lib/team-roles';
 import { useSettings } from '../lib/settings-context';
 import { useToast } from '../lib/toast-context';
-import { localeOf, formatCardCount, formatAgentCount } from '../lib/canvas-layout-helpers';
+import {
+  localeOf,
+  formatCardCount,
+  formatOrganizationAgentCount
+} from '../lib/canvas-layout-helpers';
 import { useCanvasTeamRestore } from '../lib/hooks/use-canvas-team-restore';
 import { useCanvasAutoSave } from '../lib/hooks/use-canvas-auto-save';
 
@@ -172,43 +179,57 @@ export function CanvasLayout(): JSX.Element {
   useCanvasAutoSave({ projectRoot, nodes, viewport, recent, setRecent });
 
   const applyPreset = async (preset: WorkspacePreset): Promise<void> => {
-    const teamId = `team-${crypto.randomUUID()}`;
     const cwd = projectRoot;
     const presetName = t(preset.i18nKey);
+    const organizations = expandPresetOrganizations(preset, t, presetName);
+    const plannedOrganizations = organizations.map((org) => {
+      const teamId = `team-${crypto.randomUUID()}`;
+      const organization: TeamOrganizationMeta = {
+        id: teamId,
+        ...org.meta
+      };
+      return { teamId, organization, members: org.members };
+    });
     // Issue #72: setupTeamMcp を addCards より前に完了させる
     if (settings.mcpAutoSetup !== false) {
-      try {
-        await window.api.app.setupTeamMcp(
-          cwd,
-          teamId,
-          presetName,
-          preset.members.map((m, i) => ({
-            agentId: `${m.role}-${i}-${teamId}`,
-            role: m.role,
-            agent: m.agent
-          }))
-        );
-      } catch (err) {
-        console.warn('[preset] setupTeamMcp failed:', err);
+      for (const org of plannedOrganizations) {
+        try {
+          await window.api.app.setupTeamMcp(
+            cwd,
+            org.teamId,
+            org.organization.name,
+            org.members.map((m, i) => ({
+              agentId: `${m.role}-${i}-${org.teamId}`,
+              role: m.role,
+              agent: m.agent
+            }))
+          );
+        } catch (err) {
+          console.warn('[preset] setupTeamMcp failed:', err);
+        }
       }
     }
-    const cards = preset.members.map((m, i) => {
-      const agentId = `${m.role}-${i}-${teamId}`;
-      // Issue #69: 未知 role でもクラッシュしないよう fallback
-      const label = ROLE_META[m.role]?.label ?? m.role ?? 'Agent';
-      return {
-        type: 'agent' as const,
-        title: label,
-        position: presetPosition(m.col, m.row),
-        payload: {
-          agent: m.agent,
-          role: m.role,
-          teamId,
-          agentId,
-          cwd
-        }
-      };
-    });
+    const cards = plannedOrganizations.flatMap((org) =>
+      org.members.map((m, i) => {
+        const agentId = `${m.role}-${i}-${org.teamId}`;
+        // Issue #69: 未知 role でもクラッシュしないよう fallback
+        const label = ROLE_META[m.role]?.label ?? m.role ?? 'Agent';
+        return {
+          type: 'agent' as const,
+          title: label,
+          position: presetPosition(m.col, m.row),
+          payload: {
+            agent: m.agent,
+            roleProfileId: m.role,
+            role: m.role,
+            teamId: org.teamId,
+            agentId,
+            cwd,
+            organization: org.organization
+          }
+        };
+      })
+    );
     addCards(cards);
     setSpawnOpen(false);
     void loadRecent();
@@ -247,10 +268,12 @@ export function CanvasLayout(): JSX.Element {
         position: pos,
         payload: {
           agent: m.agent,
+          roleProfileId: m.role,
           role: m.role,
           teamId: entry.id,
           agentId,
           cwd,
+          organization: entry.organization,
           latestHandoff: entry.latestHandoff
         }
       };
@@ -426,7 +449,11 @@ export function CanvasLayout(): JSX.Element {
                       key={preset.id}
                       preset={preset}
                       label={t(preset.i18nKey)}
-                      agentCountLabel={formatAgentCount(preset.members.length, settings.language)}
+                      agentCountLabel={formatOrganizationAgentCount(
+                        presetOrganizationCount(preset),
+                        presetMemberCount(preset),
+                        settings.language
+                      )}
                       onClick={() => void applyPreset(preset)}
                     />
                   ))}
@@ -442,7 +469,11 @@ export function CanvasLayout(): JSX.Element {
                       key={entry.id}
                       entry={entry}
                       fallbackName={t('team.defaultName')}
-                      agentCountLabel={formatAgentCount(entry.members.length, settings.language)}
+                      agentCountLabel={formatOrganizationAgentCount(
+                        entry.organization ? 1 : 0,
+                        entry.members.length,
+                        settings.language
+                      )}
                       lastUsedLabel={t('canvas.lastUsed', {
                         value: dateTimeFormatter.format(new Date(entry.lastUsedAt))
                       })}
@@ -579,9 +610,23 @@ function BuiltinPresetItem({
         <span className="canvas-popover__preset-sub">{agentCountLabel}</span>
       </span>
       <span className="canvas-popover__preset-roles">
-        {preset.members.map((m, i) => (
-          <RoleDot key={i} role={m.role} agent={m.agent} />
-        ))}
+        {(preset.organizations ?? [{ id: 'primary', color: '', members: preset.members }]).map(
+          (org, orgIndex) => (
+            <span
+              key={org.id}
+              className="canvas-popover__preset-org"
+              style={
+                org.color
+                  ? ({ ['--org-color' as string]: org.color } as React.CSSProperties)
+                  : undefined
+              }
+            >
+              {org.members.map((m, i) => (
+                <RoleDot key={`${orgIndex}-${i}`} role={m.role} agent={m.agent} />
+              ))}
+            </span>
+          )
+        )}
       </span>
     </button>
   );
@@ -665,6 +710,14 @@ function RecentItem({
         <span className="canvas-popover__preset-sub">{agentCountLabel}</span>
       </span>
       <span className="canvas-popover__preset-sub">{lastUsedLabel}</span>
+      {entry.organization && (
+        <span
+          className="canvas-popover__org-badge"
+          style={{ ['--org-color' as string]: entry.organization.color } as React.CSSProperties}
+        >
+          {entry.organization.name}
+        </span>
+      )}
       <span className="canvas-popover__preset-roles">
         {entry.members.map((m, i) => (
           <RoleDot key={i} role={m.role} agent={m.agent} />

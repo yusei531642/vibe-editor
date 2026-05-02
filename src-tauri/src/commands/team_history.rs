@@ -60,6 +60,18 @@ pub struct TeamCanvasState {
 
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
+pub struct TeamOrganizationMeta {
+    pub id: String,
+    pub name: String,
+    pub color: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preset_id: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct HandoffReference {
     pub id: String,
     pub kind: String,
@@ -86,6 +98,9 @@ pub struct TeamHistoryEntry {
     pub created_at: String,
     pub last_used_at: String,
     pub members: Vec<TeamHistoryMember>,
+    /// Issue #370: Canvas 複数組織の表示・復元用メタデータ (optional, 後方互換)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub organization: Option<TeamOrganizationMeta>,
     /// Phase 5: Canvas モードの配置状態 (optional, 後方互換)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub canvas_state: Option<TeamCanvasState>,

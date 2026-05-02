@@ -2,7 +2,14 @@
 //
 // CanvasLayout.tsx から move された pure 関数群 (Phase 4-3 / Issue #373)。
 
-import type { HandoffReference, Language, TeamHistoryEntry, TeamRole, TerminalAgent } from '../../../types/shared';
+import type {
+  HandoffReference,
+  Language,
+  TeamHistoryEntry,
+  TeamOrganizationMeta,
+  TeamRole,
+  TerminalAgent
+} from '../../../types/shared';
 
 export function localeOf(language: Language): string {
   return language === 'ja' ? 'ja-JP' : 'en-US';
@@ -16,6 +23,17 @@ export function formatCardCount(count: number, language: Language): string {
 
 export function formatAgentCount(count: number, language: Language): string {
   return language === 'ja' ? `${count} エージェント` : `${count} agents`;
+}
+
+export function formatOrganizationAgentCount(
+  organizationCount: number,
+  agentCount: number,
+  language: Language
+): string {
+  if (organizationCount <= 1) return formatAgentCount(agentCount, language);
+  return language === 'ja'
+    ? `${organizationCount} 組織 / ${agentCount} エージェント`
+    : `${organizationCount} orgs / ${agentCount} agents`;
 }
 
 export function mergeCanvasMembers(
@@ -43,6 +61,7 @@ export function serializeAutoSavePayload(payload: {
     string,
     {
       name: string;
+      organization?: TeamOrganizationMeta;
       canvasNodes: { agentId: string; x: number; y: number; width?: number; height?: number }[];
       latestHandoff?: HandoffReference;
     }
@@ -53,6 +72,7 @@ export function serializeAutoSavePayload(payload: {
   for (const [teamId, info] of payload.byTeam) {
     parts.push(
       `${teamId}|${info.name}|` +
+        `org:${info.organization?.id ?? ''}:${info.organization?.name ?? ''}:${info.organization?.color ?? ''}|` +
         info.canvasNodes
           .map((c) => `${c.agentId}@${c.x},${c.y}:${c.width}x${c.height}`)
           .sort()
