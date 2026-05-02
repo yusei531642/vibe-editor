@@ -11,6 +11,8 @@ use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use crate::util::log_redact::redact_home;
+
 const PLUGIN_DATA_ENV: &str = "CLAUDE_PLUGIN_DATA";
 const CODEX_PLUGIN_DATA_DIR: &str = "codex-openai-codex";
 const BROKER_STATE_FILE: &str = "broker.json";
@@ -47,7 +49,7 @@ pub fn cleanup_stale_for_cwd(cwd: &str) -> CleanupSummary {
     if summary.removed_files > 0 || summary.removed_dirs > 0 || summary.skipped_live > 0 {
         tracing::info!(
             "[codex_broker] cleanup cwd={} checked={} removed_files={} removed_dirs={} skipped_live={}",
-            cwd,
+            redact_home(cwd),
             summary.checked,
             summary.removed_files,
             summary.removed_dirs,
