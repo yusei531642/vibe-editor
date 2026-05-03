@@ -275,12 +275,15 @@ samp,
  * - glass-border / glass-highlight も白の主張を抑える (テーマ palette 側の border と
  *   合わせて全体の白浮きを断ち切る)。
  * - blur は OS Acrylic 主導なのでアプリ側は控えめ (12px) で十分。重ね過ぎると milky になる。
+ * - Issue #440: brightness(0.7) で背後の明るい壁紙を暗化し、Cyber Neon ベースの
+ *   「黒いすりガラス」質感を作る。非 Glass テーマでは fallback の 1 が効くため no-op。
  */
 :root[data-theme='glass'] {
   --glass-blur: 12px;
   --glass-saturate: 120%;
-  --glass-border: rgba(255, 255, 255, 0.04);
-  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --glass-brightness: 0.7;
+  --glass-border: rgba(0, 255, 255, 0.10);
+  --glass-highlight: inset 0 1px 0 rgba(0, 255, 255, 0.05);
 }
 
 /*
@@ -301,8 +304,14 @@ samp,
  * 場合は親側の overflow と z-index を要確認。
  */
 [data-theme='glass'] .glass-surface {
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
+  /* Issue #440: ネオンシアンの微発光で Cyber Neon 世界観の境界を表現 */
+  box-shadow:
+    0 0 1px rgba(0, 255, 255, 0.20),
+    inset 0 0 1px rgba(0, 255, 255, 0.08);
 }
 
 :root[data-theme='light'],

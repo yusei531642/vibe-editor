@@ -807,8 +807,10 @@
   align-items: center;
   gap: 4px;
   background: var(--surface-glass, rgba(20, 20, 19, 0.62));
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
   border: 1px solid var(--border);
   border-radius: 999px;
   padding: 5px;
@@ -861,8 +863,10 @@
   gap: 2px;
   padding: 6px;
   background: var(--surface-glass, rgba(20, 20, 19, 0.86));
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: var(--shadow-md);

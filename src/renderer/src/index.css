@@ -105,7 +105,10 @@ body,
    #367: saturate(140%) は OS Acrylic の light tint を増幅して「白っぽい固定面」の主因
    になっていたため 110% へ下げる。blur も 18px は overblur 気味なので 14px に整える。
    テーマ palette 側 (themes.ts) の surface alpha を 0.38〜0.55 へ下げているため、
-   blur 強度を下げてもデスクトップ背景のぼかしは十分視認できる。 */
+   blur 強度を下げてもデスクトップ背景のぼかしは十分視認できる。
+   #440: ハードコードを CSS 変数参照に統一。tokens.css の `[data-theme='glass']` で
+   blur=12px / saturate=120% / brightness=0.7 を一元管理。brightness で背後の壁紙を
+   暗化し、Windows Terminal Cyber Neon と同じ「黒いすりガラス」感に揃える。 */
 :root[data-theme='glass'] .sidebar,
 :root[data-theme='glass'] .filetree,
 :root[data-theme='glass'] .rail,
@@ -114,8 +117,10 @@ body,
 :root[data-theme='glass'] .canvas-header,
 :root[data-theme='glass'] .main,
 :root[data-theme='glass'] .claude-code-panel {
-  backdrop-filter: blur(14px) saturate(110%);
-  -webkit-backdrop-filter: blur(14px) saturate(110%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
 }
 
 /* ノイズオーバーレイは glass では控えめに (アクリル質感を邪魔しない) */
@@ -3967,8 +3972,10 @@ body.is-resizing * {
 [data-theme="glass"] .notes-panel,
 [data-theme="glass"] .filetree,
 [data-theme="glass"] .filetree__header {
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
 }
 
 /* glass テーマでは modal-backdrop / cmdp-backdrop の暗幕を弱め、
