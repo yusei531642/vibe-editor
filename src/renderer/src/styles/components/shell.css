@@ -138,8 +138,10 @@
   padding: 0 18px 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-toolbar);
-  backdrop-filter: blur(14px) saturate(160%);
-  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
   position: relative;
   z-index: var(--z-nav);
   -webkit-app-region: drag;
