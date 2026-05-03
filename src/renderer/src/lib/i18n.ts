@@ -444,6 +444,8 @@ const ja: Dict = {
   // ---------- Settings 補助 (Issue #76) ----------
   'settings.command': 'コマンド',
   'settings.argsUnterminatedQuote': 'ダブルクォート (") が閉じていません。引数が誤って解釈される可能性があります。',
+  'settings.argsUnicodeDash':
+    'Unicode ダッシュ (–, — など) が含まれています。実行時に ASCII の "--" に自動変換します。コピペや IME の自動変換が原因の可能性があります。',
 
   // ---------- Custom agents ----------
   'settings.customAgents.title': 'カスタムエージェント',
@@ -970,6 +972,8 @@ const en: Dict = {
   'settings.command': 'Command',
   'settings.argsUnterminatedQuote':
     'Unterminated double quote (") — arguments may be parsed incorrectly.',
+  'settings.argsUnicodeDash':
+    'Contains Unicode dashes (–, — etc.) — they will be normalized to ASCII "--" at runtime. Likely caused by paste or IME autocorrect.',
 
   // ---------- Custom agents ----------
   'settings.customAgents.title': 'Custom agents',

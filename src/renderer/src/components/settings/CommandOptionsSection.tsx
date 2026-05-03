@@ -38,7 +38,9 @@ export function CommandOptionsSection({
 }: Props): JSX.Element {
   const t = useT();
   // Issue #76: 閉じクォート忘れを検出してユーザーに警告する
+  // Issue #449: 先頭が Unicode dash (U+2013 等) の token も警告する
   const argsParse = parseShellArgsStrict(draft[argsKey] as string);
+  const hasParseWarning = argsParse.unterminatedQuote || argsParse.hasUnicodeDash;
   return (
     <section className="modal__section">
       <h3>{title}</h3>
@@ -60,10 +62,13 @@ export function CommandOptionsSection({
           onChange={(e) => update(argsKey, e.target.value)}
           placeholder={argsPlaceholder}
           spellCheck={false}
-          aria-invalid={argsParse.unterminatedQuote}
+          aria-invalid={hasParseWarning}
         />
         {argsParse.unterminatedQuote && (
           <span className="modal__error">{t('settings.argsUnterminatedQuote')}</span>
+        )}
+        {argsParse.hasUnicodeDash && (
+          <span className="modal__error">{t('settings.argsUnicodeDash')}</span>
         )}
       </label>
       {cwdKey && (

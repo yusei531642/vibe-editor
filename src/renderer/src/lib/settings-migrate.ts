@@ -14,17 +14,37 @@
 import {
   APP_SETTINGS_SCHEMA_VERSION,
   DEFAULT_SETTINGS,
+  type AgentConfig,
   type AppSettings,
   type Language,
   type StatusMascotVariant,
   type ThemeName
 } from '../../../types/shared';
+import { parseShellArgsStrict } from './parse-args';
 
 type Raw = Record<string, unknown>;
 
 function isObject(v: unknown): v is Raw {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
+
+/**
+ * Issue #449: 引数文字列をパースして再構築することで、各 token 先頭の Unicode dash を
+ * ASCII '-' に正規化する。空白を含む値は再構築時に `"..."` で囲み直す。
+ *
+ * 注意: 既に ASCII hyphen のみの入力では parseShellArgs が冪等に文字列を返す保証は無く、
+ * 引用符の扱いが微妙に変わるため、Unicode dash を含むときだけ書き換える。
+ */
+function normalizeArgsString(raw: string): string {
+  if (!UNICODE_DASH_PROBE.test(raw)) return raw;
+  const tokens = parseShellArgsStrict(raw).args;
+  return tokens
+    .map((token) => (/[\s"]/.test(token) ? `"${token.replace(/"/g, '\\"')}"` : token))
+    .join(' ');
+}
+
+/** ASCII 比較で Unicode dash 系が含まれるかだけを高速チェックする (parse-args の正本パターンと同期) */
+const UNICODE_DASH_PROBE = /[‐‑‒–—―−﹘﹣－]/;
 
 export function migrateSettings(raw: unknown): AppSettings {
   if (!isObject(raw)) {
@@ -169,6 +189,29 @@ export function migrateSettings(raw: unknown): AppSettings {
     !validMascots.includes(data.statusMascotVariant as StatusMascotVariant)
   ) {
     data.statusMascotVariant = DEFAULT_SETTINGS.statusMascotVariant;
+  }
+
+  // --- Version 9 → 10: claudeArgs / codexArgs / customAgents[].args の Unicode dash 正規化 (Issue #449) ---
+  // U+2013 (en dash) などで保存された option (例: `–dangerously-bypass-approvals-and-sandbox`)
+  // を ASCII '-' に置き換える。Codex / Claude CLI は Unicode dash を option として解釈しないため、
+  // Codex worker でフラグが silent に無視され承認ダイアログが連発する原因になっていた。
+  if (version < 10) {
+    if (typeof data.claudeArgs === 'string') {
+      data.claudeArgs = normalizeArgsString(data.claudeArgs);
+    }
+    if (typeof data.codexArgs === 'string') {
+      data.codexArgs = normalizeArgsString(data.codexArgs);
+    }
+    if (Array.isArray(data.customAgents)) {
+      data.customAgents = (data.customAgents as unknown[]).map((entry) => {
+        if (!isObject(entry)) return entry;
+        const agent = entry as unknown as AgentConfig;
+        if (typeof agent.args === 'string') {
+          return { ...agent, args: normalizeArgsString(agent.args) };
+        }
+        return agent;
+      });
+    }
   }
 
   data.schemaVersion = APP_SETTINGS_SCHEMA_VERSION;

@@ -14,8 +14,12 @@ export type Language = 'ja' | 'en';
 
 export type StatusMascotVariant = 'vibe' | 'spark' | 'mono';
 
-/** Issue #75: AppSettings の現在スキーマ。破壊変更時に上げる。 */
-export const APP_SETTINGS_SCHEMA_VERSION = 9;
+/**
+ * Issue #75: AppSettings の現在スキーマ。
+ * Issue #449 で claudeArgs / codexArgs / customAgents[].args の Unicode dash (U+2013 等)
+ * を ASCII '-' に正規化する migration を追加し v10。スキーマ自体のフィールド構成は v9 と同じ。
+ */
+export const APP_SETTINGS_SCHEMA_VERSION = 10;
 
 /**
  * ユーザーが自由に追加できるエージェントの設定。
