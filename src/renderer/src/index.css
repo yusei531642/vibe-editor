@@ -94,11 +94,19 @@ body,
   visibility: hidden;
 }
 
-/* IDE / Canvas いずれのルートも透過。アプリ内の panel/sidebar/toolbar は
-   各自の rgba 背景を持っているので、下地にだけ OS アクリルが滲む。 */
+/* IDE / Canvas いずれのルートにも Cyber Neon ベースの半透明ダーク tint を載せる。
+   #440: 旧実装は `background: transparent` で OS Acrylic がそのまま壁紙を映し、
+   明るい壁紙だと canvas エリア (panel が無い空白) が白〜紫に濁って見えていた。
+   Windows Terminal Cyber Neon と同じ仕組み — dark bg を ~50% opacity で乗せて
+   acrylic の上から色を引き締める — に揃える。同時に brightness(0.7) を当てて
+   壁紙そのものの明るさも一段下げる。 */
 :root[data-theme='glass'] .layout,
 :root[data-theme='glass'] .canvas-layout {
-  background: transparent;
+  background: rgba(10, 10, 26, 0.55);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
 }
 
 /* Glass 時は panel / sidebar / toolbar に backdrop-blur を乗せてアクリル感を強化。
