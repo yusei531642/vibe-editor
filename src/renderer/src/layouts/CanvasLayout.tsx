@@ -25,6 +25,7 @@ import {
   History
 } from 'lucide-react';
 import type { CardData, CardType } from '../stores/canvas';
+import { NODE_H, NODE_W } from '../stores/canvas';
 import type {
   TeamHistoryEntry,
   TeamOrganizationMeta,
@@ -320,14 +321,16 @@ export function CanvasLayout(): JSX.Element {
   // ほぼ同じ x に積み重なって UI 上「追加されていない」ように見えていた。
   // 既存ノード数 (現在 viewport 内に限らずグローバル) を 6 列グリッドに展開して
   // staggered レイアウトを返す。
-  const stagger = (kind: CardType): { x: number; y: number } => {
+  // Issue #442: 旧実装は agent/terminal を 480+32 / 320+32、その他を 360+32 / 240+32 で
+  // 並べていたが、addCard / addCards は全 type に NODE_W/NODE_H (= 640x400, Issue #253)
+  // を style として付与するため、type 別ピッチは根拠が無くカードが重なっていた。
+  // ピッチを実カードサイズ NODE_W/NODE_H に統一する。
+  const stagger = (_kind: CardType): { x: number; y: number } => {
     const idx = nodes.length; // 全 type 共通の連番でも視覚的に十分散る
     const cols = 6;
-    const wrapTitle = ['agent', 'terminal'].includes(kind) ? 480 + 32 : 360 + 32;
-    const wrapH = ['agent', 'terminal'].includes(kind) ? 320 + 32 : 240 + 32;
     return {
-      x: (idx % cols) * wrapTitle,
-      y: Math.floor(idx / cols) * wrapH
+      x: (idx % cols) * (NODE_W + 32),
+      y: Math.floor(idx / cols) * (NODE_H + 32)
     };
   };
 

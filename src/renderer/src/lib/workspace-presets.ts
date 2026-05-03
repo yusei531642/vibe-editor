@@ -10,6 +10,7 @@
  *   - Leader + HR (claude / codex)
  */
 import type { TeamOrganizationMeta, TeamRole, TerminalAgent } from '../../../types/shared';
+import { NODE_H, NODE_W } from '../stores/canvas';
 
 export interface PresetMember {
   role: TeamRole;
@@ -171,14 +172,15 @@ export const BUILTIN_PRESETS: WorkspacePreset[] = [
 /** 「チーム起動」ボタンのメイン部分が起動する既定プリセット (Leader-only Claude)。 */
 export const DEFAULT_SPAWN_PRESET: WorkspacePreset = BUILTIN_PRESETS[0];
 
-export const CARD_W = 480;
-export const CARD_H = 340;
 export const GAP = 32;
 
+// Issue #442: 実カードサイズ NODE_W/NODE_H (= 640x400, Issue #253) と乖離した
+// 旧定数 (CARD_W=480 / CARD_H=340) で並べていたためカードが重なっていた。
+// プリセット配置は Single Source of Truth として stores/canvas の NODE_W/NODE_H に追随させる。
 export function presetPosition(col: number, row: number): { x: number; y: number } {
   return {
-    x: col * (CARD_W + GAP),
-    y: row * (CARD_H + GAP)
+    x: col * (NODE_W + GAP),
+    y: row * (NODE_H + GAP)
   };
 }
 
