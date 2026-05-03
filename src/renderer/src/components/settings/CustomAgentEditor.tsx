@@ -84,10 +84,13 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
           onChange={(e) => patchAgent({ args: e.target.value })}
           placeholder='--model opus --yes'
           spellCheck={false}
-          aria-invalid={argsParse.unterminatedQuote}
+          aria-invalid={argsParse.unterminatedQuote || argsParse.hasUnicodeDash}
         />
         {argsParse.unterminatedQuote && (
           <span className="modal__error">{t('settings.argsUnterminatedQuote')}</span>
+        )}
+        {argsParse.hasUnicodeDash && (
+          <span className="modal__error">{t('settings.argsUnicodeDash')}</span>
         )}
       </label>
 
