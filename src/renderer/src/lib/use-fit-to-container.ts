@@ -242,9 +242,8 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
   // Issue #253 sub (M2): webfont (JetBrains Mono Variable 等) のロード前に
   // measureCellSize が走ると system monospace のメトリクスを返すため、初回 spawn の
   // cellW がずれた grid で PTY が立つ。document.fonts.ready で全 webfont ロード完了を
-  // 待ち、unscaled モードなら 1 回だけ refit を発火して正しい寸法に上書きする。
+  // 待ち、Canvas / IDE のどちらでも 1 回だけ refit を発火して正しい寸法に上書きする。
   useEffect(() => {
-    if (!unscaledFit) return;
     if (typeof document === 'undefined' || !document.fonts) return;
     let cancelled = false;
     document.fonts.ready

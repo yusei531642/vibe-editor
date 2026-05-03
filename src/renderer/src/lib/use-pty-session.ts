@@ -270,18 +270,24 @@ export function usePtySession(options: UsePtySessionOptions): void {
       return c[skey]?.generation === myGeneration;
     };
 
+    const seedLastScheduledSize = (cols: number, rows: number): void => {
+      const sharedRef = lastScheduledRefRef.current;
+      if (sharedRef) {
+        sharedRef.current = { cols, rows };
+      }
+    };
+
     // === Helper 1: loadInitialMetrics ===
     // Issue #253 review (W#1 + #3 + #4): web font (JetBrains Mono Variable 等) ロード前に
     // measureCellSize が走ると system monospace のメトリクスを返し、誤った cellW で
-    // PTY が立つ。Canvas モードでは fonts.ready を待ってから測ることで、Codex の
-    // banner も初回描画から正しい寸法で描画される。IDE モードでは fit.fit() が DOM
-    // メトリクスベースなので待つ必要なし。
+    // PTY が立つ。Canvas / IDE のどちらでも fonts.ready を待ってから測ることで、Codex の
+    // banner も初回描画から正しい寸法で描画される。
     // タイムアウト 300ms: コールドキャッシュ / 低速 I/O 環境で fonts.ready が秒オーダー
     // で resolve しないとき spawn が体感遅延する問題を回避。300ms 経過時は fallback
     // メトリクスで spawn し、後続の useFitToContainer の fonts.ready effect が ready 後
     // 1 回だけ refit を発火して補正するので、一瞬だけずれた表示も自動回復する。
     const loadInitialMetrics = async (): Promise<void> => {
-      if (unscaledFitRef.current && typeof document !== 'undefined' && document.fonts) {
+      if (typeof document !== 'undefined' && document.fonts) {
         let timedOut = false;
         try {
           await Promise.race([
@@ -329,16 +335,14 @@ export function usePtySession(options: UsePtySessionOptions): void {
               initialRows = grid.rows;
               // useFitToContainer の lastScheduledRef を seed して、30ms 後 visible-effect
               // の二重 IPC 発火を抑止する。
-              const sharedRef = lastScheduledRefRef.current;
-              if (sharedRef) {
-                sharedRef.current = { cols: grid.cols, rows: grid.rows };
-              }
+              seedLastScheduledSize(grid.cols, grid.rows);
             }
           }
         } else {
           fit?.fit();
           initialCols = term.cols;
           initialRows = term.rows;
+          seedLastScheduledSize(term.cols, term.rows);
         }
       } catch {
         /* 非表示マウント時は失敗してもOK */

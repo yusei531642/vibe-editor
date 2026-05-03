@@ -181,12 +181,15 @@ export function useXtermInstance(
   // マウント時の初期値を ref に退避。初回 Terminal 生成に使う。
   // 以後のフォント/テーマ変化はリアクティブ effect 側で反映する。
   const initialSettingsRef = useRef(settings);
+  const latestSettingsRef = useRef(settings);
+  latestSettingsRef.current = settings;
 
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const initial = initialSettingsRef.current;
+    let fontsReadyCancelled = false;
     const term = new Terminal({
       // ターミナル専用フォントを優先、未設定なら editor フォントに fallback。
       // applySafetyFallbacks (Issue #261 + #349): Canvas モードの DOM renderer で罫線/濃淡が
@@ -226,6 +229,37 @@ export function useXtermInstance(
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(container);
+
+    if (typeof document !== 'undefined' && document.fonts) {
+      document.fonts.ready
+        .then(() => {
+          if (fontsReadyCancelled) return;
+          const current = latestSettingsRef.current;
+          term.options.fontFamily = applySafetyFallbacks(
+            current.terminalFontFamily || current.editorFontFamily
+          );
+          term.options.fontSize = current.terminalFontSize;
+          try {
+            webglRef.current?.clearTextureAtlas();
+          } catch {
+            /* WebGL context lost / dispose 済みなら無視 */
+          }
+          requestAnimationFrame(() => {
+            if (fontsReadyCancelled) return;
+            try {
+              if (!disableWebgl) {
+                fit.fit();
+              }
+              term.refresh(0, Math.max(0, term.rows - 1));
+            } catch {
+              /* dispose 直後などの再計測失敗は無視 */
+            }
+          });
+        })
+        .catch(() => {
+          /* fonts.ready は通常 reject しないが、念のため握りつぶす */
+        });
+    }
 
     /*
      * Issue #272 v4: Canvas モード限定で「ホイール → scrollback スクロール」を強制する。
@@ -307,6 +341,7 @@ export function useXtermInstance(
     fitRef.current = fit;
 
     return () => {
+      fontsReadyCancelled = true;
       webglRef.current?.dispose();
       webglRef.current = null;
       if (webglOwned) {
