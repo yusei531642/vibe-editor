@@ -118,6 +118,24 @@ describe('canvas-arrange / tidyTerminals', () => {
     const out = tidyTerminals(nodes);
     expect(out).toBe(nodes);
   });
+
+  // Issue #442: 整頓後に terminal-like カードが矩形上で重ならないこと。
+  // 隣接セル間の dx は (width + gap) >= NODE_W、dy は (height + gap) >= NODE_H を満たす。
+  it('places terminal-like cards without overlap (Issue #442 regression)', () => {
+    const nodes: Node<CardData>[] = [
+      makeNode('t1', 'terminal', { x: 0, y: 0 }),
+      makeNode('t2', 'terminal', { x: 50, y: 0 }),
+      makeNode('t3', 'terminal', { x: 0, y: 50 }),
+      makeNode('t4', 'terminal', { x: 50, y: 50 })
+    ];
+    const out = tidyTerminals(nodes, { gap: 'normal' });
+    const positions = out.map((n) => n.position).sort((a, b) => a.y - b.y || a.x - b.x);
+    expect(positions[1].x - positions[0].x).toBeGreaterThanOrEqual(NODE_W);
+    expect(positions[2].y - positions[0].y).toBeGreaterThanOrEqual(NODE_H);
+    // gap=normal は 32 なので厳密に NODE_W+32, NODE_H+32 と一致するはず
+    expect(positions[1].x - positions[0].x).toBe(NODE_W + ARRANGE_GAP_PX.normal);
+    expect(positions[2].y - positions[0].y).toBe(NODE_H + ARRANGE_GAP_PX.normal);
+  });
 });
 
 describe('canvas-arrange / unifyTerminalSize', () => {
