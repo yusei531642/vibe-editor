@@ -468,6 +468,48 @@ _(未着手)_
 - `cargo test --manifest-path src-tauri\Cargo.toml team_hub -- --no-capture`: PASS（15 tests）
 - `git diff --check`: PASS
 
+---
+
+## Issue #443 IDEモード初期ターミナル表示修正
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/443
+
+### 計画
+- [x] Issue本文・plannedコメントを確認し、症状が IDE モード初期起動時の xterm/PTY サイズ決定レースであることを整理する。
+- [x] `src/renderer/src/lib/use-pty-session.ts` の `loadInitialMetrics` を確認し、IDE モードでは `document.fonts.ready` を待たずに `fit.fit()` と `terminal_create` が走る現状を確認する。
+- [x] `src/renderer/src/lib/use-fit-to-container.ts` の fonts.ready effect を確認し、`unscaledFit` のときだけ後追い refit する現状を確認する。
+- [x] `src/renderer/src/lib/use-xterm-instance.ts` の font/theme 反映経路を確認し、フォント実体ロード完了イベントでは同値再代入・再計測が走らない現状を確認する。
+- [x] `feature/issue-443` ブランチを作成して作業する。
+- [x] `use-pty-session.ts` で IDE モードも 300ms timeout 付き `document.fonts.ready` 待機後に初期 `fit.fit()` を実行する。
+- [x] `use-fit-to-container.ts` で IDE モードにも fonts.ready 後の 1 回 refit を許可し、初期フォントメトリクスずれを補正する。
+- [x] `use-xterm-instance.ts` で fonts.ready 後に `fontFamily` の同値再代入、必要な `fit()` / `refresh()` / WebGL atlas clear を行い、xterm のセル寸法キャッシュを再測定させる。
+- [x] Canvas モード (`unscaledFit=true`) の transform 対応経路は維持し、IDE 向け変更が Canvas の `computeUnscaledGrid` 経路に混入しないことを確認する。
+- [x] `npm run typecheck`、`npm run build:vite`、`git diff --check` を実行する。
+- [ ] 可能なら `npm run dev` で Tauri を起動し、IDE モード初期ターミナルの重複表示・初期崩れ・ドラッグ選択ずれを確認する。
+
+### Next Steps
+- ユーザー確認後、上記計画に沿って実装へ進む。
+- 実装完了後、このセクションへ「進捗」「検証」「Next Tasks」を追記する。
+
+### 進捗
+- `feature/issue-443` で実装。
+- `use-pty-session.ts` の初期サイズ算出で IDE モードも `document.fonts.ready` を最大 300ms 待つように変更。初期 `fit.fit()` 後の cols/rows を `lastScheduledRef` に seed し、初回 visible refit の重複 resize を抑止。
+- `use-fit-to-container.ts` の fonts.ready 後 refit を IDE モードにも展開。
+- `use-xterm-instance.ts` で fonts.ready 後に最新設定の fontFamily/fontSize を再代入し、WebGL atlas clear、IDE 経路の `fit()`、全行 refresh を行う補正パスを追加。
+- `use-pty-session-fonts.test.tsx` を追加し、IDE モードで fonts.ready 前に `terminal.create` が呼ばれないことと、初期サイズ seed が行われることを検証。
+
+### 検証
+- `npm ci`: PASS
+- `npm run typecheck`: PASS
+- `npx vitest run src/renderer/src/lib/__tests__/use-pty-session-fonts.test.tsx src/renderer/src/lib/__tests__/use-pty-session-hmr.test.ts`: PASS (2 files / 9 tests)
+- `npm run test`: PASS (23 files / 143 tests)。既存の jsdom canvas `getContext` 未実装 stderr は継続発生するが、テストは全件 PASS。
+- `npm run build:vite`: PASS。既存の chunk size / dynamic import warning は継続。
+- `git diff --check`: PASS
+
+### Next Tasks
+- Tauri 実機 (`npm run dev`) で IDE モード初期起動の Claude #1 banner が 1 回のみ、Team 作成後の残りペインも 1 回のみ、ドラッグ選択矩形ずれなしを手動 smoke する。
+- PR 作成後に CodeRabbit と人間レビューを待つ。自動マージは禁止。
+
 ### Next Tasks
 - 手動 smoke で worker -> leader の `team_send` / `team_read({ unread_only: false })` と dismiss -> re-recruit の挙動を確認する
 - PR 作成後に CodeRabbit と人間レビューを待つ
