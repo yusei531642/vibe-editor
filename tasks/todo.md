@@ -946,6 +946,12 @@ PR: https://github.com/yusei531642/vibe-editor/pull/459
 - [x] 検証用 Vite port 5177 は停止済み。
 
 ### 完了処理 Next Tasks (2026-05-04)
-- [ ] PR #459 を Ready for review に変更する。
-- [ ] #441 / #453 / #455 / #457 に完了コメントを投稿し、`completed` として close する。
-- [ ] 最終PR/Issue状態を確認する。
+- [x] PR #459 を Ready for review に変更する。
+- [x] 最新push後の GitHub Actions `verify`: PASS。
+- [x] #441 / #453 / #455 / #457 に完了コメントを投稿し、`completed` として close する。
+- [x] 最終PR/Issue状態を確認する。
+
+### 最終状態 (2026-05-04)
+- PR #459: Ready for review / OPEN / MERGEABLE / CI `verify` SUCCESS。
+- Closed: #441, #453, #455, #457。
+- Merge は未実施。CodeRabbit / reviewer / 人間承認 / QA 合意後に人間が判断する。
