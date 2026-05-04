@@ -961,7 +961,7 @@ PR: https://github.com/yusei531642/vibe-editor/pull/459
 
 ### 進捗 (2026-05-04 / Codex)
 
-- [x] #456: Codex-only / same-engine 指示を Leader / HR prompt と vibe-team skill に明示し、HR / worker の `team_recruit` で `engine:"codex"` を保持する回帰テストを追加。
+- [x] #456: Codex-only / same-engine 指示を Leader / HR prompt と vibe-team skill に明示し、HR / worker の `team_recruit` で `engine:"codex"` を省略しない回帰テストを追加。
 - [x] #454: standalone Codex / Claude タブで vibe-team env が未注入でも MCP `initialize` / `tools/list` が no-op で成功し、`tools/call` のみ明示的な tool error を返すように修正。
 - [x] #451: `team_send` の「端末へ配送成功」と recipient の実アクティビティを分離。受信側 `lastSeenAt` は配信だけでは更新せず、`team_read` / `team_status` / `team_update_task` 等の明示操作で更新。
 - [x] #451: `team_diagnostics` に `pendingInbox`, `pendingInboxCount`, `oldestPendingInboxAgeMs`, `stalledInbound`, `lastAgentActivityAt` を追加し、delivered-but-unread を可視化。

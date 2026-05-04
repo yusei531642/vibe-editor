@@ -273,16 +273,14 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         "delivered": delivered,
         "note": note,
         "sentAt": timestamp,
-        "deliveredAtPerRecipient": delivered_at_per_recipient,
-        "receivedAtPerRecipient": delivered_at_per_recipient,
-        "acknowledged": false,
-        "acknowledgedAtPerRecipient": acknowledged_at_per_recipient,
         // Issue #378: delivered と read を分離した正本フィールド。inject (= PTY 配達) 成功時刻だけを持つ。
         "deliveredAtPerRecipient": delivered_at_per_recipient,
         // legacy alias: 旧 UI / 診断ツールが `receivedAtPerRecipient` を読むため同値を残す。
         // 名前が「受信して読まれた時刻」を連想させやすいが、現行は `deliveredAtPerRecipient` と同義
         // (= inject 成功時刻)。読了印は `team_read` が呼ばれた瞬間に message.read_at に書かれる別経路。
         "receivedAtPerRecipient": delivered_at_per_recipient,
+        "acknowledged": false,
+        "acknowledgedAtPerRecipient": acknowledged_at_per_recipient,
     }))
 }
 
