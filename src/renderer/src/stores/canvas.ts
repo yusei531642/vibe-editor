@@ -234,7 +234,7 @@ function normalizeCanvasState(input: unknown): NormalizedCanvasState {
     : 'stage';
   const arrangeGap = ((): ArrangeGap => {
     const gap = p.arrangeGap;
-    return gap === 'tight' || gap === 'normal' || gap === 'roomy'
+    return gap === 'tight' || gap === 'normal' || gap === 'wide'
       ? gap
       : 'normal';
   })();

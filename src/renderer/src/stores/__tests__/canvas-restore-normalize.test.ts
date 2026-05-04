@@ -129,6 +129,8 @@ describe('normalizeCanvasState (Issue #385)', () => {
   it('arrangeGap が不正値なら normal に戻す', () => {
     expect(normalizeCanvasState({ arrangeGap: 999 }).arrangeGap).toBe('normal');
     expect(normalizeCanvasState({ arrangeGap: 'tight' }).arrangeGap).toBe('tight');
+    expect(normalizeCanvasState({ arrangeGap: 'wide' }).arrangeGap).toBe('wide');
+    expect(normalizeCanvasState({ arrangeGap: 'roomy' }).arrangeGap).toBe('normal');
   });
 
   it('node.position が有限でも rescue 距離超なら fallback grid に戻す (codex review #3)', () => {

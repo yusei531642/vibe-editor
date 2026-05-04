@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Search } from 'lucide-react';
 import { filterCommands, type Command } from '../lib/commands';
 import { useT } from '../lib/i18n';
@@ -89,7 +90,7 @@ export function CommandPalette({
       onClose();
     }
   };
-  return (
+  return createPortal(
     <div
       className="cmdp-backdrop"
       data-state={dataState}
@@ -163,6 +164,7 @@ export function CommandPalette({
           )}
         </ul>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }

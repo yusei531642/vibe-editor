@@ -1,4 +1,8 @@
 .cmdp-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-palette);
+  display: flex;
   align-items: flex-start;
   justify-content: center;
   padding: max(12vh, 72px) 20px 24px;
@@ -22,6 +26,7 @@
 
 .cmdp {
   /* Claude 公式風: フラットな bg (gradient 禁止)、radius-lg 相当 */
+  position: relative;
   width: min(640px, calc(100vw - 32px));
   max-height: min(72vh, 760px);
   border-radius: var(--radius-lg, 16px);

@@ -19,11 +19,16 @@ let persistCallback: ((next: number) => void) | null = null;
 
 const clamp = (v: number): number => Math.max(MIN, Math.min(MAX, v));
 
+function applyHostZoom(value: number, label: string): void {
+  if (typeof window === 'undefined' || !window.api?.app?.setZoomLevel) return;
+  void window.api.app.setZoomLevel(value).catch((err) => {
+    console.warn(`[zoom] ${label} setZoomLevel failed:`, err);
+  });
+}
+
 const apply = (next: number): void => {
   current = clamp(next);
-  void window.api.app.setZoomLevel(current).catch((err) => {
-    console.warn('[zoom] setZoomLevel failed:', err);
-  });
+  applyHostZoom(current, 'apply');
   if (persistCallback) {
     try {
       persistCallback(current);
@@ -47,9 +52,7 @@ export const webviewZoom = {
   restoreFromSettings: (savedZoom: number | undefined): void => {
     const v = clamp(typeof savedZoom === 'number' && savedZoom > 0 ? savedZoom : 1.0);
     current = v;
-    void window.api.app.setZoomLevel(v).catch((err) => {
-      console.warn('[zoom] restore setZoomLevel failed:', err);
-    });
+    applyHostZoom(v, 'restore');
   },
   /** 永続化 callback を登録 (apply のたびに呼ばれる)。 */
   setPersistCallback: (cb: ((next: number) => void) | null): void => {

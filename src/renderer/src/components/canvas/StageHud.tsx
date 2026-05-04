@@ -164,7 +164,10 @@ export function StageHud(): JSX.Element {
                   className={
                     'tc__hud-arrange-gap' + (arrangeGap === g.id ? ' is-active' : '')
                   }
-                  onClick={() => setArrangeGap(g.id)}
+                  onClick={() => {
+                    setArrangeGap(g.id);
+                    tidyTerminalCards(g.id);
+                  }}
                 >
                   {g.label}
                 </button>

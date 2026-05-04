@@ -11,12 +11,24 @@ import { Minus, Square, Copy, X } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useT } from '../../lib/i18n';
 
+type TauriWindowHandle = ReturnType<typeof getCurrentWindow>;
+
+function getSafeCurrentWindow(): TauriWindowHandle | null {
+  try {
+    return getCurrentWindow();
+  } catch (err) {
+    console.warn('[window-controls] window API unavailable:', err);
+    return null;
+  }
+}
+
 export function WindowControls(): JSX.Element {
   const t = useT();
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
-    const win = getCurrentWindow();
+    const win = getSafeCurrentWindow();
+    if (!win) return undefined;
     let unlisten: (() => void) | undefined;
     let disposed = false;
     void (async () => {
@@ -45,13 +57,13 @@ export function WindowControls(): JSX.Element {
   }, []);
 
   const handleMinimize = (): void => {
-    void getCurrentWindow().minimize();
+    void getSafeCurrentWindow()?.minimize();
   };
   const handleToggleMaximize = (): void => {
-    void getCurrentWindow().toggleMaximize();
+    void getSafeCurrentWindow()?.toggleMaximize();
   };
   const handleClose = (): void => {
-    void getCurrentWindow().close();
+    void getSafeCurrentWindow()?.close();
   };
 
   return (

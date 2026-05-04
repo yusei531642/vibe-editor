@@ -13,6 +13,16 @@ import { useEffect } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
 const isWindows = /Windows/i.test(navigator.userAgent);
+type TauriWindowHandle = ReturnType<typeof getCurrentWindow>;
+
+function getSafeCurrentWindow(): TauriWindowHandle | null {
+  try {
+    return getCurrentWindow();
+  } catch (err) {
+    console.warn('[use-window-frame-insets] window API unavailable:', err);
+    return null;
+  }
+}
 
 export function useWindowFrameInsets(): void {
   useEffect(() => {
@@ -21,7 +31,8 @@ export function useWindowFrameInsets(): void {
     root.dataset.platform = 'windows';
     // 初期値を即時セットして flash を最小化
     root.dataset.windowMaximized = 'false';
-    const win = getCurrentWindow();
+    const win = getSafeCurrentWindow();
+    if (!win) return undefined;
     let unlisten: (() => void) | undefined;
     let disposed = false;
     void (async () => {
