@@ -11,7 +11,7 @@ pub(super) fn tool_defs() -> Value {
     json!([
         {
             "name": "team_send",
-            "description": "Send a message directly into another team member's terminal.",
+            "description": "Send a message directly into another team member's terminal. The response reports delivery to the terminal (deliveredAtPerRecipient), not that the recipient read or acknowledged it; use team_read / team_update_task / team_status and team_diagnostics pendingInbox fields to confirm agent activity.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -100,7 +100,7 @@ pub(super) fn tool_defs() -> Value {
                     "engine": {
                         "type": "string",
                         "enum": ["claude", "codex"],
-                        "description": "Engine to run this member on. Pick based on the role's strengths (claude is strongest at coding/long reasoning)."
+                        "description": "Engine to run this member on. Pick based on the role's strengths. If the user requested Codex-only, multiple Codex, or a same-engine organization, do not omit this field: pass codex for HR and every recruited worker unless the user explicitly asks to mix Claude."
                     },
                     "label": { "type": "string", "description": "Display name (e.g. \"Marketing Chief\"). Required when role_id is new." },
                     "description": { "type": "string", "description": "One-sentence summary of the role. Required when role_id is new." },
@@ -174,7 +174,7 @@ pub(super) fn tool_defs() -> Value {
         {
             "name": "team_diagnostics",
             "description":
-                "(leader / hr only) Return per-member diagnostic timestamps (recruitedAt, lastHandshakeAt, lastSeenAt, lastMessageInAt/OutAt) and counters (messagesIn/Out, tasksClaimed) plus the server log file path. Use this to debug 'online but silent' members and to reconstruct incident timelines.",
+                "(leader / hr only) Return per-member diagnostic timestamps (recruitedAt, lastHandshakeAt, lastSeenAt/lastAgentActivityAt, lastMessageInAt/OutAt), counters (messagesIn/Out, tasksClaimed), pendingInbox IDs, pendingInboxCount, oldestPendingInboxAgeMs, stalledInbound, and the server log file path. Use this to debug delivered-but-unread messages and 'online but silent' members.",
             "inputSchema": { "type": "object", "properties": {} }
         },
         {

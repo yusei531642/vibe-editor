@@ -3,7 +3,7 @@
 //! Issue #373 Phase 2 で `protocol.rs` から切り出し。
 
 use crate::team_hub::error::SendError;
-use crate::team_hub::{inject, CallContext, TeamHub, TeamMessage};
+use crate::team_hub::{inject, CallContext, MemberDiagnostics, TeamHub, TeamMessage};
 use chrono::Utc;
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -12,11 +12,12 @@ use tauri::Emitter;
 use super::super::consts::{MAX_MESSAGES_PER_TEAM, MAX_MESSAGE_LEN, SOFT_PAYLOAD_LIMIT};
 use super::super::helpers::resolve_targets;
 
-pub async fn team_send(
-    hub: &TeamHub,
-    ctx: &CallContext,
-    args: &Value,
-) -> Result<Value, String> {
+fn record_recipient_delivery_diagnostics(diagnostics: &mut MemberDiagnostics, delivered_at: &str) {
+    diagnostics.last_message_in_at = Some(delivered_at.to_string());
+    diagnostics.messages_in_count = diagnostics.messages_in_count.saturating_add(1);
+}
+
+pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
     // trim は resolve_targets 内で行うので、ここでは生文字列を保持して履歴 / 検証に使う。
     let to = args
         .get("to")
@@ -90,8 +91,7 @@ pub async fn team_send(
         &to,
         active_leader_agent_id.as_deref(),
     );
-    let resolved_recipient_ids: Vec<String> =
-        targets.iter().map(|(aid, _)| aid.clone()).collect();
+    let resolved_recipient_ids: Vec<String> = targets.iter().map(|(aid, _)| aid.clone()).collect();
 
     // メッセージ履歴に追加
     let timestamp = Utc::now().to_rfc3339();
@@ -185,10 +185,10 @@ pub async fn team_send(
     //   旧 `receivedAtPerRecipient` は意味的に「PTY に届いた」≒「読まれた」を混同させていたため、
     //   Issue #378 では `deliveredAtPerRecipient` を新設して payload の正本にする。
     //   `receivedAtPerRecipient` は legacy alias として同じ値を残し、外部 UI / 解析ツールの後方互換を保つ。
-    let mut delivered_at_per_recipient: HashMap<String, Option<String>> = targets
-        .iter()
-        .map(|(aid, _)| (aid.clone(), None))
-        .collect();
+    let mut delivered_at_per_recipient: HashMap<String, Option<String>> =
+        targets.iter().map(|(aid, _)| (aid.clone(), None)).collect();
+    let acknowledged_at_per_recipient: HashMap<String, Option<String>> =
+        targets.iter().map(|(aid, _)| (aid.clone(), None)).collect();
     let mut delivered: Vec<String> = Vec::new();
     while let Some(joined) = join_set.join_next().await {
         if let Ok((target_aid, target_role, ok)) = joined {
@@ -201,8 +201,7 @@ pub async fn team_send(
                 target_role.clone()
             });
             let delivered_at = Utc::now().to_rfc3339();
-            delivered_at_per_recipient
-                .insert(target_aid.clone(), Some(delivered_at.clone()));
+            delivered_at_per_recipient.insert(target_aid.clone(), Some(delivered_at.clone()));
             // Issue #378: read_by/read_at は触らない。delivered_to/delivered_at だけを更新する。
             // (旧実装は inject 成功で recipient まで read_by に入れていたため、worker が実際に
             //  Enter を確認していない 1 回目の指示も「既読」扱いになり、`team_read({unread_only: true})`
@@ -224,10 +223,7 @@ pub async fn team_send(
                     .member_diagnostics
                     .entry(target_aid.clone())
                     .or_default();
-                recipient_diag.last_message_in_at = Some(delivered_at.clone());
-                recipient_diag.last_seen_at = Some(delivered_at.clone());
-                recipient_diag.messages_in_count =
-                    recipient_diag.messages_in_count.saturating_add(1);
+                record_recipient_delivery_diagnostics(recipient_diag, &delivered_at);
             }
             // Phase 3: hand-off イベントを Canvas にブロードキャスト
             if let Some(app) = &app {
@@ -277,6 +273,10 @@ pub async fn team_send(
         "delivered": delivered,
         "note": note,
         "sentAt": timestamp,
+        "deliveredAtPerRecipient": delivered_at_per_recipient,
+        "receivedAtPerRecipient": delivered_at_per_recipient,
+        "acknowledged": false,
+        "acknowledgedAtPerRecipient": acknowledged_at_per_recipient,
         // Issue #378: delivered と read を分離した正本フィールド。inject (= PTY 配達) 成功時刻だけを持つ。
         "deliveredAtPerRecipient": delivered_at_per_recipient,
         // legacy alias: 旧 UI / 診断ツールが `receivedAtPerRecipient` を読むため同値を残す。
@@ -284,4 +284,30 @@ pub async fn team_send(
         // (= inject 成功時刻)。読了印は `team_read` が呼ばれた瞬間に message.read_at に書かれる別経路。
         "receivedAtPerRecipient": delivered_at_per_recipient,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::team_hub::MemberDiagnostics;
+
+    #[test]
+    fn recipient_delivery_diagnostics_do_not_touch_last_seen_at() {
+        let mut diagnostics = MemberDiagnostics {
+            last_seen_at: Some("2026-05-04T09:55:00Z".into()),
+            ..MemberDiagnostics::default()
+        };
+
+        record_recipient_delivery_diagnostics(&mut diagnostics, "2026-05-04T10:00:00Z");
+
+        assert_eq!(
+            diagnostics.last_seen_at.as_deref(),
+            Some("2026-05-04T09:55:00Z")
+        );
+        assert_eq!(
+            diagnostics.last_message_in_at.as_deref(),
+            Some("2026-05-04T10:00:00Z")
+        );
+        assert_eq!(diagnostics.messages_in_count, 1);
+    }
 }

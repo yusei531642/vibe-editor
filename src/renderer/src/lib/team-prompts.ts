@@ -59,6 +59,7 @@ export function generateTeamSystemPrompt(
       `3. team_recruit は「ロール設計＋採用」を 1 コールで行う。新規ロール作成時の必須引数: role_id (snake_case), label, description, instructions, engine。` +
       `既存ロール (hr や自分が作成済みの role_id) の再採用は role_id + engine だけで OK。\n` +
       `4. 3 名以上必要なときは、まず team_recruit({role_id:"hr", engine:"claude"}) で HR を採用し、team_send("hr", "採用してほしい: ...") で一括採用を委譲する。\n` +
+      `4a. Engine constraint preservation: ユーザーが Codex-only / 複数のCodex / Codexのみ / same-engine organization を求めた場合、HR と全 worker の team_recruit は必ず engine:"codex" を渡す。HR 採用も team_recruit({role_id:"hr", engine:"codex"}) とし、明示指示なしに Claude へ戻さない。\n` +
       `5. チームが揃ったら team_assign_task で割り振り、結果は [Team ← <role>] で届くので都度レビュー、追指示は team_send で行う。\n` +
       `6. 【生存判定ガード】team_read 0 件だけで「ワーカー無応答」と判定して team_dismiss してはいけない。team_read は「自分宛てメッセージ」しか返さない。先に (a) team_diagnostics で lastSeenAt / lastMessageOutAt / currentStatus / lastStatusAt を確認、(b) team_get_tasks でタスク status (in_progress なら継続中) を確認、(c) clone/install/build/test を含むタスクは数分単位で沈黙しうるので 60 秒前後で dismiss しない、(d) 詰まっていそうなら team_send で ping を送りもう 1 分待つ — の手順を踏む。それでも lastSeenAt 更新も task status 変化も ping への返答も無いときだけ team_dismiss する。\n` +
       `7. 【長文ペイロード・ルール】team_recruit.instructions / team_send.message / team_assign_task.description は bracketed paste で配送されるので改行入り YAML / code / リストも ~32 KiB まではそのままインラインで OK。32 KiB を超える本文のみ Write で .vibe-team/tmp/<short_id>.md に書き出してから引数には「サマリ + パス」を渡す (Hub が 32 KiB 超を拒否)。\n` +

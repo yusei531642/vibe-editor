@@ -31,6 +31,12 @@ const TOOLS_JA =
   '利用可能 MCP ツール: team_recruit / team_dismiss / team_send / team_read / team_info / team_status / team_assign_task / team_get_tasks / team_update_task / team_list_role_profiles。' +
   '詳しい使い方と行動規範は `vibe-team` Skill (`.claude/skills/vibe-team/SKILL.md`) を参照してください。';
 
+const LEADER_ENGINE_CONSTRAINT_RULE =
+  '9. Engine constraint preservation: If the user says Codex-only, multiple Codex, Codex only, or asks for a same-engine organization, every `team_recruit` call MUST carry `engine:"codex"` for HR and workers unless the user explicitly asks to mix Claude. For 3+ Codex-only specialists, recruit HR with `team_recruit({role_id:"hr", engine:"codex"})` and tell HR this is a same-engine Codex-only team.\n';
+
+const HR_ENGINE_CONSTRAINT_RULE =
+  '6. Leader engine constraint: preserve the Leader request exactly. For Codex-only / same-engine hiring, every seat MUST use `engine:"codex"`. Do NOT substitute Claude or omit engine unless the Leader explicitly asks for Claude or mixed engines.\n';
+
 /**
  * 動的に作成されるワーカーロールに使う共通ベーステンプレート (英語版)。
  *
@@ -174,6 +180,7 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         'Read tool AFTER you have already recruited the first member. It is supplementary, not required\n' +
         'for the mandatory rules above.\n' +
         '\n' +
+        LEADER_ENGINE_CONSTRAINT_RULE +
         '{tools}',
       templateJa:
         'あなたはチーム「{teamName}」のLeader。{globalPreamble}\n' +
@@ -227,6 +234,7 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         '設計思想や応用パターンの詳細は `.claude/skills/vibe-team/SKILL.md` を Read ツールで読めば参照できる。' +
         'ただし最初の 1 名を採用した後の補助情報であり、上記の絶対ルールに従うために読む必要はない。\n' +
         '\n' +
+        LEADER_ENGINE_CONSTRAINT_RULE +
         '{tools}'
     },
     permissions: {
@@ -269,6 +277,7 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         'For optional context on bulk-hiring patterns, you may read `.claude/skills/vibe-team/SKILL.md`\n' +
         'with the Read tool, but it is not required.\n' +
         '\n' +
+        HR_ENGINE_CONSTRAINT_RULE +
         '{tools}',
       templateJa:
         'あなたはチーム「{teamName}」の人事担当。{globalPreamble}\n' +
@@ -292,6 +301,7 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         '大量採用の応用パターンや背景は `.claude/skills/vibe-team/SKILL.md` を Read ツールで読めば参照できるが、' +
         '上記ルールに従うために読み込みは必須ではない。\n' +
         '\n' +
+        HR_ENGINE_CONSTRAINT_RULE +
         '{tools}'
     },
     permissions: {

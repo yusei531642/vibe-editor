@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { WORKER_TEMPLATE_EN, WORKER_TEMPLATE_JA, BUILTIN_BY_ID } from '../role-profiles-builtin';
+import { BUILTIN_PRESETS } from '../workspace-presets';
 
 describe('Issue #409: worker template enforces ACK / progress / completion protocol', () => {
   it('English worker template requires ACK + team_update_task on receipt', () => {
@@ -65,5 +66,45 @@ describe('Issue #409: leader template forbids dismiss-on-team_read-zero', () => 
     expect(ja).toMatch(/team_get_tasks/);
     expect(ja).toMatch(/lastSeenAt/);
     expect(ja).toMatch(/60 秒|数分/);
+  });
+});
+
+describe('Issue #456: Codex-only team keeps every recruited seat on Codex', () => {
+  const leader = BUILTIN_BY_ID['leader'];
+  const hr = BUILTIN_BY_ID['hr'];
+
+  it('Codex Leader + HR preset actually starts HR on Codex', () => {
+    const preset = BUILTIN_PRESETS.find((p) => p.id === 'leader-hr-codex');
+    expect(preset).toBeTruthy();
+    expect(preset?.members).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'leader', agent: 'codex' }),
+        expect.objectContaining({ role: 'hr', agent: 'codex' })
+      ])
+    );
+  });
+
+  it('leader prompt requires Codex-only / same-engine constraints to be preserved for HR and workers', () => {
+    const en = leader.prompt.template;
+    const ja = leader.prompt.templateJa ?? '';
+
+    for (const template of [en, ja]) {
+      expect(template).toMatch(/Codex-only/);
+      expect(template).toMatch(/engine:"codex"/);
+      expect(template).toMatch(/same-engine/);
+      expect(template).toMatch(/HR/);
+    }
+  });
+
+  it('HR prompt must not convert a Leader engine constraint back to Claude', () => {
+    const en = hr.prompt.template;
+    const ja = hr.prompt.templateJa ?? '';
+
+    for (const template of [en, ja]) {
+      expect(template).toMatch(/Leader engine constraint/);
+      expect(template).toMatch(/Codex-only/);
+      expect(template).toMatch(/engine:"codex"/);
+      expect(template).toMatch(/Do NOT substitute Claude/);
+    }
   });
 });
