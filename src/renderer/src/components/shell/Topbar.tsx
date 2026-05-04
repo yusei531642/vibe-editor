@@ -53,7 +53,7 @@ export function Topbar({
       : 'var(--success)';
 
   return (
-    <div className="topbar" role="banner">
+    <div className="topbar" role="banner" data-tauri-drag-region>
       <div className="topbar__brand" data-tauri-drag-region title="vibe-editor">
         <img
           className="topbar__brand-logo"

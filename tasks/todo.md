@@ -573,3 +573,240 @@ Issue: #361
 - `npm run build:vite`: PASS (既存の chunk size / dynamic import warning あり)
 - `cargo check --manifest-path src-tauri\Cargo.toml --all-targets`: PASS
 - `git diff --check`: PASS
+
+---
+
+
+## Issue #452 初回PR計画（QA No-Go差戻し修正 / 2026-05-04）
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/452
+Authoritative repo: `C:\Users\zooyo\Documents\GitHub\vibe-editor`
+Branch: `feature/issue-452`
+編集対象（計画タスク）: `tasks/todo.md` のみ
+
+### 調査結果サマリ
+- [x] Issue #452 は OPEN。ラベルは `ui` / `canvas` / `planned` / `refactor`。
+- [x] GitHub 上に Issue #452 紐づき PR / remote `feature/issue-452` は未検出。
+- [x] open PR #431-#439 は dependabot 系で、初回PR主要候補ファイルとの重複は未検出。
+- [x] authoritative repo は `C:\Users\zooyo\Documents\GitHub\vibe-editor`。`HEAD=abfde302ce4350ecfb0e378e748e7106638ff8f9` で `origin/main` と一致。
+- [x] `C:\Users\zooyo\Downloads\vibe-editor-dist` は fetch 後も `main...origin/main [behind 43]` の stale main のため実装対象 No-Go。
+- [x] `main.protected=false` を GitHub API で確認。merge 前ブロッカーとして Owner 確認・Branch Protection 復旧が必要。
+- [x] 既存未追跡 `tasks/*` は `git status --short` 表示で 18 entries、`--untracked-files=all` では 21 leaf files。未操作・PR混入 No-Go。
+
+### 採用スコープ（初回PR = Phase A+B のみ）
+- [x] Phase A: Glass CSS 集約。
+- [x] Phase B: drag-region CSS 集約。
+- [x] `src/renderer/src/index.css` を必須対象に含める。旧 Glass whitelist / root tint / drag-no-drag 残存を見落とすと再発するため No-Go。
+- [x] `tokens.css` は Glass 値、`glass.css` は Glass 効果、`drag-region.css` は drag/no-drag の SSOT とする。
+- [x] `glass.css` import 位置は component CSS 後、`tweaks.css` / `image-preview.css` 前を第一候補にする。
+- [x] `lint` / E2E script 追加や CI lint 導入は初回PRから除外する。
+
+### 明示的に除外する follow-up
+- [ ] `App.tsx` の 600 行以下化 / JSX 巨大分割。
+- [ ] `CanvasLayout.tsx` の header/menu/stage 分割。
+- [ ] `.claude/skills/theme-customization/SKILL.md` 更新、新規 `.claude/skills/drag-region/SKILL.md` など skill/docs 整備。
+- [ ] xterm / terminal 表示・scroll 共通化。
+- [ ] Rust / TeamHub / i18n / CI lint 導入。
+- [ ] 上記は別 PR / 別 Issue として Leader が別途割り当てる。
+
+### 計画
+- [ ] Phase 0: 変更前棚卸し
+  - [ ] `backdrop-filter` / `-webkit-backdrop-filter` / `glass-surface` / `data-theme='glass'` / `app-region` / `-webkit-app-region` / `data-tauri-drag-region` を全検索する。
+  - [ ] `index.css` の旧 Glass whitelist、root tint、drag/no-drag 残存を棚卸し対象に含める。
+  - [ ] `menu.css` / `modal.css` / `palette.css` と `canvas.css` の `.tc__hud-*` / arrange popover blur は意図的例外候補として理由を記録する。
+- [ ] Phase A: Glass CSS 集約（Implementation A）
+  - [ ] `src/renderer/src/styles/components/glass.css` を新設する。
+  - [ ] `tokens.css` に Glass の値を残し、root tint / `.glass-surface` / Glass 効果は `glass.css` に移動する。
+  - [ ] `index.css` の旧 Glass whitelist は撤去または `glass.css` へ移動する。
+  - [ ] `shell.css` / `canvas.css` の Glass 直書き blur は `glass.css` へ集約する。
+  - [ ] `canvas.css` の `.tc__hud-*` / arrange popover blur は非 Glass でも意図された表現の可能性があるため、初回PRでは例外として残すことを優先する。削る場合は理由と手動 smoke を必須にする。
+- [ ] Phase B: drag-region CSS 集約（Implementation A）
+  - [ ] `src/renderer/src/styles/components/drag-region.css` を新設する。
+  - [ ] `[data-tauri-drag-region]` / `.topbar` / `.canvas-header` と no-drag 対象を `drag-region.css` に集約する。
+  - [ ] no-drag は drag より後に置く。
+  - [ ] `button` / `input` / menu / WindowControls / popover trigger / resize handle 等を no-drag に明示登録する。
+  - [ ] `main.tsx` に `glass.css` / `drag-region.css` import を追加し、import 順を説明可能にする。
+  - [ ] `shell.css` / `canvas.css` / `index.css` の `app-region` / `-webkit-app-region` 重複を整理する。
+  - [ ] `Topbar.tsx` は必要最小の属性調整のみ対象にする。
+  - [ ] `CanvasLayout.tsx` は既存 `data-tauri-drag-region` の確認のみを基本とする。変更が必要な場合は理由・対象行・手動確認観点を PR に明記する。
+
+### A/B 分担（QA No-Go修正後の一本化）
+- [ ] Implementation A: production Phase A+B 担当。
+  - [ ] Glass production: `glass.css` 新設、`main.tsx` import、`tokens.css` / `index.css` / `shell.css` / `canvas.css` 整理。
+  - [ ] drag production: `drag-region.css` 新設、drag/no-drag SSOT、`main.tsx` import、`shell.css` / `canvas.css` / `index.css` の app-region 整理、必要最小 `Topbar.tsx` 属性調整。
+- [ ] Implementation B: 静的契約テストのみ担当。
+  - [ ] `src/renderer/src/styles/__tests__/glass-css-contract.test.ts`
+  - [ ] `src/renderer/src/styles/__tests__/drag-region-css-contract.test.ts`
+  - [ ] production CSS/TSX は編集しない。
+- [x] 古い B production 分担案（B が `drag-region.css` / `shell.css` / `canvas.css` / `index.css` / `Topbar.tsx` / `CanvasLayout.tsx` を編集する案）は obsolete。採用しない。
+
+### 変更候補ファイル（初回PR対象）
+- [ ] `src/renderer/src/styles/tokens.css` — Glass 値の SSOT。
+- [ ] `src/renderer/src/styles/components/glass.css` — 新規。Glass 効果の SSOT。
+- [ ] `src/renderer/src/styles/components/drag-region.css` — 新規。drag/no-drag の SSOT。
+- [ ] `src/renderer/src/index.css` — 旧 Glass whitelist、root tint、drag/no-drag 残存の整理対象。
+- [ ] `src/renderer/src/styles/components/shell.css` — topbar / Glass blur / drag 重複撤去対象。
+- [ ] `src/renderer/src/styles/components/canvas.css` — canvas header / Glass blur / drag 重複撤去対象。`.tc__hud-*` / arrange popover blur は例外候補。
+- [ ] `src/renderer/src/main.tsx` — CSS import 順の調整対象。
+- [ ] `src/renderer/src/components/shell/Topbar.tsx` — 必要最小の drag 属性調整が必要な場合のみ。
+- [ ] `src/renderer/src/layouts/CanvasLayout.tsx` — 原則確認のみ。変更が必要なら理由を明記して最小差分。
+- [ ] `src/renderer/src/styles/__tests__/glass-css-contract.test.ts` — B担当の契約テスト新規候補。
+- [ ] `src/renderer/src/styles/__tests__/drag-region-css-contract.test.ts` — B担当の契約テスト新規候補。
+
+### 変更候補ファイル（follow-up / 初回PR対象外）
+- [ ] `src/renderer/src/App.tsx` — JSX巨大分割は別PR。
+- [ ] `src/renderer/src/layouts/CanvasLayout.tsx` の header/menu/stage 分割 — 別PR。初回PRでは分割しない。
+- [ ] `.claude/skills/theme-customization/SKILL.md` — skill更新は別PR。
+- [ ] `.claude/skills/drag-region/SKILL.md` — skill新設は別PR。
+- [ ] `src/renderer/src/lib/themes.ts` — 原則読み取り / 例外判定のみ。最小変更では触らない。
+- [ ] `src/renderer/src/styles/components/menu.css` — 原則読み取り / 例外判定のみ。
+- [ ] `src/renderer/src/styles/components/modal.css` — 原則読み取り / 例外判定のみ。
+- [ ] `src/renderer/src/styles/components/palette.css` — 原則読み取り / 例外判定のみ。
+- [ ] xterm / Rust / TeamHub / i18n / CI lint 関連ファイル — 別Issue。
+
+### 初回PR 受け入れ条件
+- [ ] Glass 値は `tokens.css`、Glass 効果は `glass.css` に集約されている。
+- [ ] `index.css` の旧 Glass whitelist は撤去または `glass.css` へ移動済み。
+- [ ] `shell.css` / `canvas.css` / `index.css` に残る `backdrop-filter` は、`glass.css` または例外理由付きの意図的残存のみ。
+- [ ] `drag-region.css` が drag/no-drag の SSOT になっている。
+- [ ] no-drag が drag より後に定義され、button/input/menu/window controls/popover trigger/resize handle が no-drag 対象になっている。
+- [ ] `src/renderer/src/styles/__tests__/glass-css-contract.test.ts` と `drag-region-css-contract.test.ts` が追加され、SSOT・残存例外・import順の契約を検証している。
+- [ ] Glass smoke: `npm run dev` で IDE / Canvas の白濁・紫濁り・過剰 blur がないことを手動確認する。
+- [ ] Drag smoke: IDE Topbar と Canvas header の空白領域で window drag が効き、ボタン / input / menu / WindowControls / popover / resize handle がクリック可能なことを手動確認する。
+- [ ] 未追跡 `tasks/*` が PR 差分に混入していない。
+- [ ] Branch Protection `main.protected=false` の Owner確認・復旧方針が merge 前ブロッカーとして残っている。
+
+### 検証コマンド候補
+- [ ] `git status --short --branch`
+- [ ] `git diff --check`
+- [ ] `npm run typecheck`
+- [ ] `npm run test`
+- [ ] `npm run build:vite`
+- [ ] `cargo check --locked --manifest-path src-tauri\Cargo.toml --all-targets`
+- [ ] `cargo test --locked --manifest-path src-tauri\Cargo.toml`
+- [ ] `rg -n "backdrop-filter|-webkit-backdrop-filter|glass-surface|data-theme=['\"]glass|app-region|-webkit-app-region|data-tauri-drag-region" src/renderer/src`
+- [ ] `npm run dev`（Windows/Tauri 実機 smoke）
+- [ ] `lint` / E2E は現行 `package.json` に script 未定義のため、未実行を誤報告しない。必要なら別Issue / 別PRで script 整備を扱う。
+
+### No-Go / 安全制約
+- [ ] authoritative path 以外で実装しない: `C:\Users\zooyo\Documents\GitHub\vibe-editor` / `feature/issue-452` のみ。
+- [ ] `C:\Users\zooyo\Downloads\vibe-editor-dist` は stale main のため実装対象 No-Go。
+- [ ] `tasks/todo.md` 以外の計画タスク編集は禁止。
+- [ ] 未追跡 `tasks/*` を add / 編集 / 削除しない。
+- [ ] reset / clean / stash / drop / 削除は禁止。
+- [ ] 初回PRでは App/CanvasLayout分割、skill/docs、xterm/Rust/TeamHub/i18n/CI lint を混ぜない。
+
+### Next Steps
+- [ ] QA にこの修正版計画を再レビュー依頼する。
+- [ ] QA Go 後、Leader が Implementation A に production Phase A+B を割り当てる。
+- [ ] A の production 変更後、Leader が Implementation B に `styles/__tests__/*` の契約テスト追加を割り当てる。
+- [ ] 実装Go前に A/B とも `C:\Users\zooyo\Documents\GitHub\vibe-editor` / `feature/issue-452` であることを `git status --short --branch` で確認する。
+
+### 実装後進捗（最終状態反映 / 2026-05-04）
+- [x] Implementation A: production Phase A+B 実装完了。
+- [x] Implementation B: 静的契約テスト 2 件追加完了。
+- [x] QA A+B 差分レビュー: 条件付き Go。
+- [x] A Task #13: cargo 検証完了。
+- [x] QA Task #14: Tauri 実機 smoke は未実証として判定。
+- [x] QA Task #16: 既存アプリを閉じない前提の代替 smoke 整理完了。
+
+#### 変更ファイル概要
+- production 変更:
+  - `src/renderer/src/components/shell/Topbar.tsx`
+  - `src/renderer/src/index.css`
+  - `src/renderer/src/main.tsx`
+  - `src/renderer/src/styles/components/canvas.css`
+  - `src/renderer/src/styles/components/shell.css`
+  - `src/renderer/src/styles/tokens.css`
+  - `src/renderer/src/styles/components/glass.css`（新規）
+  - `src/renderer/src/styles/components/drag-region.css`（新規）
+- test 追加:
+  - `src/renderer/src/styles/__tests__/glass-css-contract.test.ts`
+  - `src/renderer/src/styles/__tests__/drag-region-css-contract.test.ts`
+
+#### 検証結果（代替で PASS 済み）
+- [x] `git diff --check`: PASS
+- [x] `npm run typecheck`: PASS
+- [x] `npm run build:vite`: PASS（既存警告あり）
+- [x] targeted Vitest: PASS（2 files / 11 tests）
+- [x] `npm run test`: PASS（26 files / 185 tests、既存 jsdom `getContext` stderr あり、exit 0）
+- [x] rg 残存確認: 実行済み（例外あり）
+- [x] `cargo check --locked --manifest-path src-tauri\Cargo.toml --all-targets`: PASS
+- [x] `cargo test --locked --manifest-path src-tauri\Cargo.toml`: PASS（93 passed / 0 failed、他ターゲット 0 tests も PASS）
+
+#### Tauri 実機 smoke の最終扱い
+- [ ] feature branch の Tauri 実機 smoke は未実行扱い。
+- [x] 既存 `vibe-editor  Downloads` が single-instance として稼働中。
+- [x] ユーザーが「閉じられない」と明示。
+- [x] repo 内にコード / config 変更なしで安全に single-instance を回避する既存 script / flag / 別 identifier 手順は確認できず。
+- [x] QA により `npm run dev` は Vite ready / Rust dev build / `target\debug\vibe-editor.exe` 起動試行まで到達。
+- [ ] feature branch window を検出できず、Glass / drag / clickability / PTY smoke は未実証。
+- [x] ユーザー作業中の可能性があるため、既存アプリは停止しない判断。
+
+#### 未実証項目
+- [ ] Native window drag / app-region hit testing。
+- [ ] Glass + WebView2 Acrylic 実視覚。
+- [ ] WindowControls / popover / resize handle clickability。
+- [ ] IDE / Canvas 切替時の PTY 保持。
+
+#### PR判断 / merge前ゲート
+- [x] 未実行理由を PR 本文に明記する条件で、条件付き PR 可能。
+- [ ] 完全 Go ではない。merge 前は Branch Protection 復旧、reviewer / CodeRabbit 相当レビュー、人間承認が必須。
+- [ ] Branch Protection `main.protected=false` は merge 前ブロッカー。Owner 確認・保護設定復旧が必要。
+- [ ] reviewer / CodeRabbit 相当レビュー + 人間承認まで merge 不可。
+- [ ] `lint` / E2E は package.json に script 未定義のため、未実行を誤報告しない。必要なら別Issue / 別PR。
+
+#### ユーザー目視チェックリスト（参考確認）
+- [ ] Glass 見た目。
+- [ ] window drag。
+- [ ] WindowControls / popover / resize handle clickability。
+- [ ] IDE / Canvas 切替時の PTY 保持。
+- [ ] 既存アプリのみ確認する場合は feature 差分の証跡ではなく参考確認として記録する。
+
+#### PR前 add 対象 / 禁止対象
+- [ ] add 対象候補:
+  - production 変更 6 件: `Topbar.tsx`, `index.css`, `main.tsx`, `canvas.css`, `shell.css`, `tokens.css`
+  - 新規 CSS 2 件: `glass.css`, `drag-region.css`
+  - 契約テスト 2 件: `glass-css-contract.test.ts`, `drag-region-css-contract.test.ts`
+  - ドキュメント: `tasks/todo.md`
+- [ ] add 禁止:
+  - 既存未追跡 `tasks/*`
+  - `.env*`
+  - secret / token / private key 類
+
+#### Next Tasks
+- [ ] PR 本文に Tauri 実機 smoke 未実行理由を明記する。
+- [ ] PR 本文に代替 PASS 済み検証（typecheck / build:vite / Vitest / cargo check / cargo test / diff check）を記録する。
+- [ ] PR 作成時に `git add` 対象を上記 add 対象候補に限定する。
+- [ ] 既存アプリで参考確認する場合は、feature 差分の証跡ではないことを明記する。
+- [ ] merge 前に Branch Protection `main.protected=false` の Owner 確認・復旧方針を明記する。
+
+### Issue #452 引き継ぎ対応計画（2026-05-04 / Codex）
+- [ ] `git status --short --branch` で対象が `feature/issue-452` か確認する。
+- [ ] 既存 `AppData\Local\vibe-editor\vibe-editor.exe` は停止せず、Tauri CLI の `--config` で一時 `identifier` / `productName` を差し替えた dev 起動を試す。
+- [ ] 別 identifier の feature branch window を起動できた場合のみ、Glass / drag / clickability / IDE-Canvas 切替 PTY 保持を Tauri 実機 smoke として記録する。
+- [ ] 別 identifier 起動でも実機確認できない場合は、その理由を `tasks/todo.md` と PR 本文に明記し、未実証ゲートとして残す。
+- [ ] `git diff --check` と `git status --short --branch` を再確認し、PR 対象ファイルだけを明示 `git add` する。
+- [ ] PR 作成・レビュー確認まで進める。merge は Branch Protection 復旧、reviewer / CodeRabbit 相当レビュー、actionable 指摘ゼロ、人間承認が揃うまで禁止。
+
+#### Next Steps
+- [ ] 一時 config を repo 外に作成し、`npm run dev -- --config <temp-config>` で起動する。
+- [ ] 起動ログ・window 検出・目視 / 操作確認の結果をこの TODO に追記する。
+- [ ] PR 本文には smoke の実施方法、通過項目、未実証項目、merge 前ブロッカーを明記する。
+
+### Tauri実機smoke結果（2026-05-04 / 既存アプリ非停止）
+- [x] 既存 `C:\Users\zooyo\AppData\Local\vibe-editor\vibe-editor.exe` は停止せず維持。
+- [x] repo 外の一時 config `tauri-issue452-glass-smoke.config.json` で `identifier` / `productName` を差し替え、single-instance を回避。
+- [x] `npm run dev -- --config <temp-config>`: PASS（Vite `http://localhost:5173/` ready、`target\debug\vibe-editor.exe` 起動）。
+- [x] feature branch window 検出: PASS（`target\debug\vibe-editor.exe`, title `vibe-editor — vibe-editor`）。
+- [x] feature UI表示: PASS（Git branch `feature/issue-452` と対象差分一覧が表示されることをスクリーンショットで確認）。
+- [ ] Glass見た目: PARTIAL。Glass透過は確認できるが、既存アプリが最大化され背面に写り込むため、Acrylic / blur の厳密な目視判定は保留。
+- [ ] IDE Topbar / Canvas header の手動 window drag: 未実証。
+- [ ] WindowControls / popover / resize handle clickability: 未実証。
+- [ ] IDE / Canvas 切替時の PTY 保持: 未実証（xterm focus がショートカットを吸う状態があり、確証なし）。
+- [x] 一時的に退避した `C:\Users\zooyo\.vibe-editor\settings.json` は元設定へ復元済み（first bytes `123,10,32`、BOMなし）。
+
+#### Next Tasks
+- [ ] PR 本文に「既存アプリ非停止のため完全な native hit-testing smoke は未実証」と明記する。
+- [ ] merge 前に人間が feature branch window で drag / clickability / PTY保持を確認する。
+- [ ] merge 前に Branch Protection `main.protected=false` の復旧を確認する。

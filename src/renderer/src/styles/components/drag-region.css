@@ -1,0 +1,62 @@
+/* ===========================================================================
+ * Window drag regions
+ *
+ * Single source of truth for Tauri/WebView drag and no-drag hit testing.
+ * Keep no-drag rules after drag rules so interactive controls remain clickable.
+ * =========================================================================== */
+
+*[data-tauri-drag-region],
+.topbar,
+.sidebar__header,
+.toolbar,
+.claude-code-panel__header,
+.canvas-header {
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+
+button,
+input,
+textarea,
+select,
+a,
+[role='button'],
+.menubar,
+.menubar *,
+.app-menu,
+.app-menu__trigger,
+.app-menu__dropdown,
+.user-menu__dropdown,
+.context-menu,
+.topbar__project,
+.topbar__modes,
+.topbar__search,
+.topbar__status,
+.topbar__icons,
+.topbar__update,
+.window-controls,
+.window-controls__btn,
+.toolbar__btn,
+.toolbar__path,
+.toolbar__right,
+.toolbar__left,
+.sidebar__header .app-menu,
+.sidebar__header .app-menu__trigger,
+.sidebar__header .sidebar__brand,
+.sidebar__brand,
+.claude-code-panel__header .app-menu,
+.claude-code-panel__header .app-menu__trigger,
+.claude-code-panel__header-right,
+.claude-code-panel__add-btn,
+.canvas-btn,
+.canvas-btn-split,
+.canvas-btn-split__main,
+.canvas-btn-split__caret,
+.canvas-popover__wrap,
+.canvas-popover,
+.resize-handle,
+.tab-create-menu,
+.tab-create-menu__item {
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}

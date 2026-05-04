@@ -100,11 +100,7 @@
 }
 
 /* ---------- top header ---------- */
-/* #318: IDE Topbar (.topbar) と同じ「親ヘッダー全体を drag、操作要素だけ no-drag」構造に揃える。
-   PR #311 の子要素のみ drag-region 付与は Tauri 公式の「直接ターゲット要件」を満たさず、
-   SVG が pointer target を奪うケースで drag が失敗していた。
-   `position: relative` は `z-index` を有効にするため、`-webkit-app-region` と `app-region`
-   は WebView2 / WebKit 両系統への互換のため両方併記する。 */
+/* Drag/no-drag hit testing is centralized in drag-region.css. */
 .canvas-header {
   display: flex;
   align-items: center;
@@ -115,25 +111,10 @@
   border-bottom: 1px solid var(--border);
   position: relative;
   z-index: 5;
-  app-region: drag;
-  -webkit-app-region: drag;
 }
 
-/* Canvas モードのボタン類はドラッグ領域から除外（#307 と同じパターンを #310 で適用）。
-   #318 で .canvas-header 全体を drag 化したため、操作要素は明示的に no-drag にする必要がある。
-   shell.css:247-345 の IDE Topbar 側の no-drag リストと同じ安全策。
-   `app-region` と `-webkit-app-region` を両方併記して WebView2 / WebKit 両系統に対応。 */
-.canvas-btn,
-.canvas-btn-split,
-.canvas-btn-split__main,
-.canvas-btn-split__caret,
-.canvas-popover__wrap,
-.canvas-popover,
-.window-controls,
-.window-controls__btn {
-  app-region: no-drag;
-  -webkit-app-region: no-drag;
-}
+
+
 
 .canvas-header__brand {
   display: inline-flex;
