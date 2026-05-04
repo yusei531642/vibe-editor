@@ -427,6 +427,100 @@
 }
 
 /* ----------
+ * Shared canvas card frame (TerminalCard / generic cards)
+ * ---------- */
+.canvas-card-frame {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated, var(--bg-panel));
+  border: 1px solid var(--card-accent, var(--border));
+  border-radius: 8px;
+  overflow: hidden;
+  /* box-shadow は付けない。
+     React Flow viewport の `transform: scale()` 配下で
+     `overflow:hidden + border-radius + box-shadow` が揃うと Chromium が
+     合成レイヤを作って xterm DOM テキストごとビットマップ化し、
+     ズーム時にバイリニア補間で滲む。border だけで十分。 */
+}
+
+.canvas-card-frame__header {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px 7px 12px;
+  background: var(--bg-deep, var(--bg-sidebar));
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-md, 14px);
+  font-weight: 600;
+  line-height: var(--leading-snug, 1.3);
+  color: var(--fg);
+  user-select: none;
+  cursor: grab;
+}
+
+.canvas-card-frame__header:active {
+  cursor: grabbing;
+}
+
+.canvas-card-frame__title-row {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+}
+
+.canvas-card-frame__accent-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--card-accent, var(--accent));
+  flex-shrink: 0;
+}
+
+.canvas-card-frame__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-card-frame__close {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.canvas-card-frame__close:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+.canvas-card-frame__body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ----------
  * Agent card — Claude 公式風 (skill: claude-design 準拠)
  *
  *   - フラット (heavy shadow 禁止)、hairline border + 左端 2px ロール色バー
@@ -470,11 +564,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 10px 6px 14px;
-  height: 34px;
+  gap: 10px;
+  padding: 7px 10px 7px 14px;
+  min-height: 42px;
   background: var(--bg-elev, var(--bg-panel));
   border-bottom: 1px solid var(--border);
-  font-size: 12px;
+  font-size: var(--text-md, 14px);
+  line-height: var(--leading-snug, 1.3);
   color: var(--fg);
   user-select: none;
   cursor: grab;
@@ -486,6 +582,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 /*
@@ -493,15 +590,15 @@
  * 円形 + ロール色 + 微弱な glow リング。文字は role glyph (P/R/... 1 文字)。
  */
 .canvas-agent-card__avatar {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
   border-radius: 50%;
   background: var(--agent-accent, var(--accent));
   color: #0a0a0d;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
   flex-shrink: 0;
   box-shadow: 0 0 0 3px
@@ -519,25 +616,31 @@
  */
 .canvas-agent-card__title {
   font-family: var(--font-claude-response, var(--ui-font));
-  font-weight: 500;
-  letter-spacing: var(--tracking-tight);
+  font-weight: 600;
+  letter-spacing: var(--tracking-normal);
+  flex: 1 1 auto;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .canvas-agent-card__role {
-  font-size: 9px;
+  max-width: 96px;
+  font-size: var(--text-xs, 11px);
   color: color-mix(in srgb, var(--agent-accent, var(--fg-muted)) 80%, var(--fg-muted));
   text-transform: uppercase;
-  letter-spacing: 0.6px;
-  flex-shrink: 0;
+  letter-spacing: var(--tracking-wide, 0.02em);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
 }
 .canvas-agent-card__organization {
   max-width: 120px;
   min-width: 0;
-  padding: 1px 6px;
+  padding: 2px 7px;
   border-radius: 999px;
-  font-size: 9px;
+  font-size: var(--text-xs, 11px);
   line-height: 1.4;
   color: color-mix(in srgb, var(--organization-accent, var(--fg)) 82%, var(--fg));
   background: color-mix(in srgb, var(--organization-accent, var(--accent)) 13%, transparent);
@@ -550,20 +653,20 @@
 .canvas-agent-card__actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-shrink: 0;
 }
 .canvas-agent-card__status {
-  font-size: 10px;
+  font-size: var(--text-xs, 11px);
   color: var(--fg-subtle);
-  max-width: 140px;
+  max-width: 120px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .canvas-agent-card__tool {
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -584,9 +687,9 @@
 }
 .canvas-agent-card__close {
   /* 旧 20x20/14px は Fitts 的に小さすぎ (右クリックメニュー追加前は ×が唯一の閉じ手段)。
-     28x28 + 18px グリフへ拡大。ヘッダ高 (34px) を超えない範囲で最大化。 */
-  width: 28px;
-  height: 28px;
+     30x30 + 20px グリフへ拡大。 */
+  width: 30px;
+  height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -595,7 +698,7 @@
   border: 0;
   border-radius: 6px;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 20px;
   line-height: 1;
   transition: background-color 100ms ease, color 100ms ease;
 }
@@ -681,10 +784,11 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  font-size: 9px;
+  flex-shrink: 0;
+  font-size: 10px;
   color: var(--fg-subtle);
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: var(--tracking-wide, 0.02em);
 }
 .canvas-agent-status__dot {
   width: 6px;

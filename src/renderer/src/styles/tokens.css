@@ -327,8 +327,8 @@ samp,
  * 小さな local stacking (1/2/5/10/20) は各コンポーネント内に留め、ここでは
  * "画面全体に対してどの層にいるか" が問題になるものだけを集約する。
  *
- * 9000 台は Canvas モード (常時最前面) とノイズオーバーレイ専用。
- * アプリ全体の最前面 (modal/palette/toast) は 1000〜3500 台。
+ * 9000 台は Canvas モード (常時最前面) と、その上に出る body portal UI 用。
+ * Canvas root より下でよい modal/toast は 1000〜3500 台に留める。
  *
  * Issue #356: ContextMenu は createPortal(document.body) で body 直下に出るため、
  * Canvas モード時は .canvas-layout (z-index: --z-canvas-root = 9200) と body の
@@ -342,7 +342,7 @@ samp,
   --z-nav: 600;
   --z-modal: 1000;
   --z-modal-elevated: 1500;
-  --z-palette: 2000;
+  --z-palette: 9600;
   --z-toast: 3000;
   --z-toast-top: 3200;
   --z-noise-overlay: 9000;

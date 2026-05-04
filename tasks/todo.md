@@ -810,3 +810,72 @@ Branch: `feature/issue-452`
 - [ ] PR 本文に「既存アプリ非停止のため完全な native hit-testing smoke は未実証」と明記する。
 - [ ] merge 前に人間が feature branch window で drag / clickability / PTY保持を確認する。
 - [ ] merge 前に Branch Protection `main.protected=false` の復旧を確認する。
+
+---
+
+## Issue Autopilot Batch: Canvas/UI 低リスクグループ計画（2026-05-04 / Codex）
+
+対象: https://github.com/yusei531642/vibe-editor/issues
+
+### 調査結果
+- [x] `planned` ラベル付き open Issue は 7 件: #457, #456, #455, #454, #453, #451, #441。
+- [x] #451 は `fortress-review-required` 付きの Tier A 相当で初回バッチから除外。
+- [x] #454 は backend / generated bridge / MCP startup を含む Tier B で初回バッチから除外。
+- [x] #456 は prompt / skill / schema を横断する Tier B で、#451 周辺差分との競合注意があるため初回バッチから除外。
+- [x] #455 は Canvas 配置ロジックの Tier C だが、spawn preset / restore / viewport focus まで見るため初回の最小グループからは後続候補にする。
+- [x] open PR は dependabot 系 #431-#439 のみで、Canvas/UI 対象ファイルとの直接競合は現時点で未検出。
+- [x] `vibeeditor` / `pullrequest` skill と `CLAUDE.md` を確認済み。リポジトリ方針に従い `main` 直接 push / 手動 merge はしない。
+
+### 初回バッチ対象
+- [ ] #457: Canvas モード各ターミナル/Agent ヘッダーのフォントサイズ・高さを改善する。
+- [ ] #453: Canvas モードで `Ctrl+Shift+P` の CommandPalette が見えるよう portal / z-index を修正する。
+- [ ] #441: Canvas HUD の「間隔」ボタンを押した直後に再配置し、`arrangeGap: "wide"` の永続化正規化を修正する。
+
+### 採用理由
+- [x] 3 件とも `canvas` / `ui` 中心で、renderer 側の CSS / React / zustand store に閉じる。
+- [x] Issue 計画上は #457, #453 が Tier C / score 4、#441 も小規模な Canvas HUD + store 修正で低リスク。
+- [x] 変更対象が Canvas 表示・HUD・global overlay にまとまり、検証を Canvas 起点で一括化できる。
+- [x] Rust / MCP / TeamHub / 外部プロセス起動の変更を含まないため、初回バッチとして安全。
+
+### 実装計画
+- [ ] ブランチは `feature/issue-441-canvas-ui-batch` を作成し、1 PR にまとめる場合は PR 本文に `Closes #441`, `Closes #453`, `Closes #457` を明記する。
+- [ ] #457: `CardFrame.tsx` の header inline style を CSS クラス化し、`canvas.css` の Agent header / role / status 周辺を `--text-md` / `--text-xs` ベースへ底上げする。
+- [ ] #453: `CommandPalette.tsx` を `createPortal(..., document.body)` で body 直下に描画し、`.cmdp-backdrop` を global overlay として `display:flex`, `position:fixed`, `z-index: var(--z-palette)` に揃える。
+- [ ] #453: `tokens.css` の `--z-palette` が `--z-canvas-root` より上か確認し、不足があれば最小修正する。
+- [ ] #441: `normalizeCanvasState()` の `arrangeGap` 許可値を `tight | normal | wide` に修正する。
+- [ ] #441: `StageHud.tsx` の gap ボタン押下で `setArrangeGap(g.id)` 後に `tidyTerminalCards(g.id)` を呼び、見た目を即時反映する。
+- [ ] #441: 既存 `canvas-arrange.test.ts` / `canvas-restore-normalize.test.ts` へ回帰テストを追加し、必要なら CommandPalette portal の軽量テストを追加する。
+
+### 検証計画
+- [ ] `npx vitest run src/renderer/src/lib/__tests__/canvas-arrange.test.ts src/renderer/src/stores/__tests__/canvas-restore-normalize.test.ts`
+- [ ] 追加した場合: `npx vitest run <CommandPalette portal test>`
+- [ ] `npm run typecheck`
+- [ ] `npm run build:vite`
+- [ ] UI 変更のため `npm run dev` で Canvas モードを起動し、#457/#453/#441 の操作フローを手動確認する。
+- [ ] `git diff --check`
+
+### Next Steps
+- [ ] ユーザー確認後、`feature/issue-441-canvas-ui-batch` を作成して実装する。
+- [ ] 実装完了後、このセクションへ「進捗」「検証結果」「Next Tasks」を追記する。
+- [ ] PR 作成前に差分対象を確認し、未関係の `tasks/*` や secret を混入させない。
+- [ ] PR 作成後はレビュー結果を確認し、人間承認・QA 合意なしに merge しない。
+
+### 進捗 (2026-05-04 / Codex 続き)
+- [x] `feature/issue-441-canvas-ui-batch` を作成。
+- [x] #441: `arrangeGap` 正規化を `tight | normal | wide` に修正し、HUD gap 押下で即時再配置するよう修正。
+- [x] #453: CommandPalette を body portal 化し、Canvas より前面の fixed overlay / z-index に修正。
+- [x] #457: Canvas card header の CSS 化と Terminal / Agent header の可読性改善を実装。
+- [x] dev/browser/custom Tauri smoke で `getCurrentWindow()` が metadata 不在時に render crash しないよう安全化。
+- [x] 検証用プロセス停止と `C:\Users\zooyo\.vibe-editor\settings.json` のバックアップ復元。
+
+### 検証結果 (2026-05-04)
+- [x] `npx vitest run src/renderer/src/lib/__tests__/canvas-arrange.test.ts src/renderer/src/stores/__tests__/canvas-restore-normalize.test.ts src/renderer/src/components/__tests__/CommandPalette.test.tsx`: PASS (3 files / 21 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run build:vite`: PASS。既存の chunk size / ineffective dynamic import warning は継続。
+- [x] `git diff --check`: PASS
+- [ ] UI smoke: PARTIAL。別 identifier Tauri 起動では IPC injection が不完全で settings load が default へ落ちるため、Canvas 操作の完全な手動確認は未完了。
+
+### Next Tasks (2026-05-04 更新)
+- [ ] 通常の `npm run dev` または人間の確認用環境で Canvas を開き、#457/#453/#441 の手動 smoke を実施する。
+- [ ] PR 本文に `Closes #441`, `Closes #453`, `Closes #457` と検証結果、UI smoke 未完了理由を記載する。
+- [ ] CodeRabbit / reviewer / 人間承認 / QA 合意なしに merge しない。
