@@ -1,0 +1,193 @@
+/// <reference types="node" />
+
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+
+const testDir = dirname(fileURLToPath(import.meta.url));
+const stylesDir = dirname(testDir);
+const rendererSrcDir = dirname(stylesDir);
+const componentsDir = join(stylesDir, 'components');
+
+function readRendererFile(pathFromRendererSrc: string): string {
+  return readFileSync(join(rendererSrcDir, pathFromRendererSrc), 'utf8');
+}
+
+function readComponentCss(fileName: string): string {
+  return readFileSync(join(componentsDir, fileName), 'utf8');
+}
+
+function stripCssComments(css: string): string {
+  return css.replace(/\/\*[\s\S]*?\*\//g, '');
+}
+
+function importedCssPaths(mainTsx: string): string[] {
+  return Array.from(mainTsx.matchAll(/^import\s+['"]\.\/([^'"]+\.css)['"];?$/gm), (match) => match[1]);
+}
+
+function cssFilesUnder(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const fullPath = join(dir, entry.name);
+    if (entry.isDirectory()) return cssFilesUnder(fullPath);
+    return entry.isFile() && entry.name.endsWith('.css') ? [fullPath] : [];
+  });
+}
+
+function slashPath(path: string): string {
+  return path.replace(/\\/g, '/');
+}
+
+function cssDeclarationsForProperty(
+  css: string,
+  property: 'backdrop-filter' | '-webkit-backdrop-filter'
+): Array<{ selector: string; property: string }> {
+  const code = stripCssComments(css);
+  const declarations: Array<{ selector: string; property: string }> = [];
+  const pattern = new RegExp(`${property.replace('-', '\\-')}\\s*:`, 'g');
+
+  for (const match of code.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    const openBrace = code.lastIndexOf('{', index);
+    const previousCloseBrace = code.lastIndexOf('}', openBrace);
+    const selector = code.slice(previousCloseBrace + 1, openBrace).trim();
+    declarations.push({ selector, property });
+  }
+
+  return declarations;
+}
+
+describe('Glass CSS contract', () => {
+  it('main.tsx imports glass.css after component CSS and before final tweak/image CSS', () => {
+    const imports = importedCssPaths(readRendererFile('main.tsx'));
+
+    const glassIndex = imports.indexOf('styles/components/glass.css');
+    expect(glassIndex).toBeGreaterThanOrEqual(0);
+
+    // Glass effects must win over component base CSS, but tweaks/image-preview remain final overrides.
+    for (const componentCss of [
+      'styles/components/canvas.css',
+      'styles/components/claude-patterns.css',
+      'styles/components/shell.css'
+    ]) {
+      expect(glassIndex).toBeGreaterThan(imports.indexOf(componentCss));
+    }
+    expect(glassIndex).toBeLessThan(imports.indexOf('styles/components/tweaks.css'));
+    expect(glassIndex).toBeLessThan(imports.indexOf('styles/components/image-preview.css'));
+  });
+
+  it('tokens.css owns --glass-* values, not glass visual effects', () => {
+    const tokens = stripCssComments(readRendererFile('styles/tokens.css'));
+
+    for (const tokenName of [
+      '--glass-blur',
+      '--glass-saturate',
+      '--glass-border',
+      '--glass-highlight'
+    ]) {
+      expect(tokens).toMatch(new RegExp(`${tokenName}\\s*:`));
+    }
+
+    expect(tokens).not.toMatch(/backdrop-filter\s*:/);
+    expect(tokens).not.toMatch(/-webkit-backdrop-filter\s*:/);
+    expect(tokens).not.toMatch(/\[data-theme=['"]glass['"]\]\s+\.glass-surface/);
+  });
+
+  it('glass.css owns root transparency, root tint, glass-surface effects, and major surfaces', () => {
+    const glass = stripCssComments(readComponentCss('glass.css'));
+
+    expect(glass).toMatch(
+      /:root\[data-theme='glass'\][\s\S]*:root\[data-theme='glass'\]\s+body[\s\S]*:root\[data-theme='glass'\]\s+#root\s*\{[\s\S]*background:\s*transparent\s*!important/
+    );
+    expect(glass).toMatch(
+      /:root\[data-theme='glass'\]\s+\.layout,\s*:root\[data-theme='glass'\]\s+\.canvas-layout\s*\{[\s\S]*background:\s*rgba\([\s\S]*backdrop-filter:\s*blur\(var\(--glass-blur\)\)/
+    );
+    expect(glass).toMatch(
+      /:root\[data-theme='glass'\]\s+\.glass-surface[\s\S]*backdrop-filter:\s*blur\(var\(--glass-blur\)\)/
+    );
+
+    for (const selector of [
+      '.glass-surface',
+      '.sidebar',
+      '.filetree',
+      '.rail',
+      '.topbar',
+      '.statusbar',
+      '.canvas-header',
+      '.main',
+      '.toolbar',
+      '.tabbar',
+      '.modal',
+      '.cmdp',
+      '.app-menu__dropdown',
+      '.user-menu__dropdown',
+      '.content-area',
+      '.pane',
+      '.terminal-pane',
+      '.claude-code-panel',
+      '.canvas-agent-card',
+      '.canvas-toolbar'
+    ]) {
+      expect(glass).toContain(`:root[data-theme='glass'] ${selector}`);
+    }
+  });
+
+  it('index.css does not keep the legacy Issue #16 Glass surface whitelist', () => {
+    const indexCss = stripCssComments(readRendererFile('index.css'));
+
+    // A few narrow Glass exceptions may remain in index.css (for example xterm/filetree).
+    // The old regression-prone whitelist for broad surfaces must stay out of index.css.
+    for (const selector of [
+      '.toolbar',
+      '.sidebar',
+      '.topbar',
+      '.canvas-header',
+      '.main',
+      '.content-area',
+      '.pane',
+      '.terminal-pane',
+      '.claude-code-panel',
+      '.canvas-agent-card',
+      '.canvas-toolbar',
+      '.modal',
+      '.cmdp',
+      '.app-menu__dropdown',
+      '.user-menu__dropdown'
+    ]) {
+      expect(indexCss).not.toMatch(
+        new RegExp(`\\[data-theme=["']glass["']\\]\\s+\\${selector.replace('.', '.')}`)
+      );
+    }
+  });
+
+  it('remaining backdrop-filter declarations are limited to the documented allowlist', () => {
+    const cssFiles = cssFilesUnder(rendererSrcDir);
+    const unexpectedDeclarations = cssFiles.flatMap((file) => {
+      const rel = slashPath(relative(rendererSrcDir, file));
+      const css = readFileSync(file, 'utf8');
+      const declarations = [
+        ...cssDeclarationsForProperty(css, 'backdrop-filter'),
+        ...cssDeclarationsForProperty(css, '-webkit-backdrop-filter')
+      ];
+
+      return declarations
+        .filter(({ selector }) => {
+          if (rel === 'styles/components/glass.css') return false;
+          if (rel === 'styles/components/menu.css') return false;
+          if (rel === 'styles/components/modal.css') return false;
+          if (rel === 'styles/components/palette.css') return false;
+          if (rel === 'styles/components/canvas.css') return !selector.includes('.tc__hud');
+          if (rel === 'index.css') {
+            // index.css may keep local UI blur, but not broad Glass surface blur.
+            return /(\.toolbar|\.sidebar|\.topbar|\.canvas-header|\.main|\.claude-code-panel|\.canvas-agent-card|\.canvas-toolbar)/.test(
+              selector
+            );
+          }
+          return true;
+        })
+        .map(({ selector, property }) => `${rel} :: ${selector} :: ${property}`);
+    });
+
+    expect(unexpectedDeclarations).toEqual([]);
+  });
+});

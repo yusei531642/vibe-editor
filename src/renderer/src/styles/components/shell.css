@@ -9,7 +9,6 @@
 
 /* ==================== MENU BAR (Topbar 左側に並べるカスタムメニューバー) ==================== */
 .menubar {
-  -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
   gap: 0;
@@ -138,13 +137,8 @@
   padding: 0 18px 0 16px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-toolbar);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
-    brightness(var(--glass-brightness, 1));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
-    brightness(var(--glass-brightness, 1));
   position: relative;
   z-index: var(--z-nav);
-  -webkit-app-region: drag;
   flex-shrink: 0;
 }
 
@@ -178,7 +172,6 @@
 }
 
 .topbar__project {
-  -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -215,7 +208,6 @@
 }
 
 .topbar__modes {
-  -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
   gap: 2px;
@@ -247,7 +239,6 @@
 }
 
 .topbar__search {
-  -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -289,7 +280,6 @@
 }
 
 .topbar__status {
-  -webkit-app-region: no-drag;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -313,7 +303,6 @@
 }
 
 .topbar__icons {
-  -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
   /* 2px は Fitts's law 的に押しミスが増える。6px まで広げて "ゆとり" を演出 */
@@ -344,7 +333,6 @@
    accent 色のソフトな塗り (alpha) + 細線で「目立つけど押さなくても作業は止まらない」
    ニュアンス。ホバーで accent 強調 + 微小に持ち上がる。 */
 .topbar__update {
-  -webkit-app-region: no-drag;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -373,26 +361,15 @@
   white-space: nowrap;
 }
 
+/* Drag/no-drag hit testing is centralized in drag-region.css. */
+
 /* ==================== WINDOW CONTROLS (Issue #260 PR-2) ==================== */
 /* `decorations: false` でネイティブ chrome を外した代わりのカスタムボタン群。
-   .topbar の右端に座り、`-webkit-app-region: drag` の親領域から自身は no-drag に
    抜けることでクリック可能を保つ。 */
 
-/* Issue #307: Tauri 2 公式推奨の `data-tauri-drag-region` 属性が付いた要素を
-   ドラッグ可能領域として宣言する。Windows WebView2 では `-webkit-app-region` が
-   ほぼ無効なため、新仕様の `app-region` を併用する。 */
-*[data-tauri-drag-region] {
-  app-region: drag;
-  -webkit-app-region: drag;
-}
-.window-controls,
-.window-controls__btn {
-  app-region: no-drag;
-  -webkit-app-region: no-drag;
-}
+
 
 .window-controls {
-  -webkit-app-region: no-drag;
   display: flex;
   align-items: center;
   margin-left: 8px;
@@ -404,7 +381,6 @@
 }
 
 .window-controls__btn {
-  -webkit-app-region: no-drag;
   width: 46px;
   height: 100%;
   display: grid;

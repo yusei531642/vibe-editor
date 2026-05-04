@@ -1,0 +1,73 @@
+/* ===========================================================================
+ * Glass theme effects
+ *
+ * tokens.css owns the --glass-* values. This file owns the visual effects that
+ * should only apply while data-theme='glass' is active.
+ * =========================================================================== */
+
+:root[data-theme='glass'],
+:root[data-theme='glass'] body,
+:root[data-theme='glass'] #root {
+  background: transparent !important;
+}
+
+/* Keep the always-mounted IDE/Canvas roots dark enough over native Acrylic. */
+:root[data-theme='glass'] .layout,
+:root[data-theme='glass'] .canvas-layout {
+  background: rgba(10, 10, 26, 0.55);
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
+}
+
+:root[data-theme='glass'] .layout::before,
+:root[data-theme='glass'] .canvas-layout::before {
+  opacity: 0;
+}
+
+:root[data-theme='glass'] .glass-surface,
+:root[data-theme='glass'] .sidebar,
+:root[data-theme='glass'] .filetree,
+:root[data-theme='glass'] .filetree__header,
+:root[data-theme='glass'] .rail,
+:root[data-theme='glass'] .topbar,
+:root[data-theme='glass'] .statusbar,
+:root[data-theme='glass'] .canvas-header,
+:root[data-theme='glass'] .main,
+:root[data-theme='glass'] .toolbar,
+:root[data-theme='glass'] .tabbar,
+:root[data-theme='glass'] .modal,
+:root[data-theme='glass'] .cmdp,
+:root[data-theme='glass'] .app-menu__dropdown,
+:root[data-theme='glass'] .user-menu__dropdown,
+:root[data-theme='glass'] .content-area,
+:root[data-theme='glass'] .sidebar-view,
+:root[data-theme='glass'] .pane,
+:root[data-theme='glass'] .terminal-pane,
+:root[data-theme='glass'] .terminal-pane__header,
+:root[data-theme='glass'] .claude-code-panel,
+:root[data-theme='glass'] .claude-code-panel__header,
+:root[data-theme='glass'] .claude-code-panel__body,
+:root[data-theme='glass'] .notes-panel,
+:root[data-theme='glass'] .canvas-agent-card,
+:root[data-theme='glass'] .canvas-toolbar {
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
+}
+
+:root[data-theme='glass'] .glass-surface {
+  /* Issue #440: subtle neon edge to keep Cyber Neon glass from looking milky. */
+  box-shadow:
+    0 0 1px rgba(0, 255, 255, 0.20),
+    inset 0 0 1px rgba(0, 255, 255, 0.08);
+}
+
+/* Overlay/backdrop surfaces keep their component CSS behavior. This rule only
+   preserves the legacy Glass dim tint without moving modal/palette/menu CSS. */
+:where(:root[data-theme='glass']) .modal-backdrop,
+:where(:root[data-theme='glass']) .cmdp-backdrop {
+  background: rgba(0, 0, 0, 0.18);
+}

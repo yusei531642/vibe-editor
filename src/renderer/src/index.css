@@ -80,12 +80,6 @@ body,
   background: var(--bg);
 }
 
-/* ---------- Glass テーマ: OS アクリルを透かす ---------- */
-:root[data-theme='glass'],
-:root[data-theme='glass'] body,
-:root[data-theme='glass'] #root {
-  background: transparent !important;
-}
 
 /* Canvas モード時は IDE レイヤを不可視化 (PTY / state は保持したまま)。
    これをやらないと、glass テーマで Canvas の背景が透明になって IDE が透けて見える。
@@ -94,48 +88,6 @@ body,
   visibility: hidden;
 }
 
-/* IDE / Canvas いずれのルートにも Cyber Neon ベースの半透明ダーク tint を載せる。
-   #440: 旧実装は `background: transparent` で OS Acrylic がそのまま壁紙を映し、
-   明るい壁紙だと canvas エリア (panel が無い空白) が白〜紫に濁って見えていた。
-   Windows Terminal Cyber Neon と同じ仕組み — dark bg を ~50% opacity で乗せて
-   acrylic の上から色を引き締める — に揃える。同時に brightness(0.7) を当てて
-   壁紙そのものの明るさも一段下げる。 */
-:root[data-theme='glass'] .layout,
-:root[data-theme='glass'] .canvas-layout {
-  background: rgba(10, 10, 26, 0.55);
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
-    brightness(var(--glass-brightness, 1));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
-    brightness(var(--glass-brightness, 1));
-}
-
-/* Glass 時は panel / sidebar / toolbar に backdrop-blur を乗せてアクリル感を強化。
-   #367: saturate(140%) は OS Acrylic の light tint を増幅して「白っぽい固定面」の主因
-   になっていたため 110% へ下げる。blur も 18px は overblur 気味なので 14px に整える。
-   テーマ palette 側 (themes.ts) の surface alpha を 0.38〜0.55 へ下げているため、
-   blur 強度を下げてもデスクトップ背景のぼかしは十分視認できる。
-   #440: ハードコードを CSS 変数参照に統一。tokens.css の `[data-theme='glass']` で
-   blur=12px / saturate=120% / brightness=0.7 を一元管理。brightness で背後の壁紙を
-   暗化し、Windows Terminal Cyber Neon と同じ「黒いすりガラス」感に揃える。 */
-:root[data-theme='glass'] .sidebar,
-:root[data-theme='glass'] .filetree,
-:root[data-theme='glass'] .rail,
-:root[data-theme='glass'] .topbar,
-:root[data-theme='glass'] .statusbar,
-:root[data-theme='glass'] .canvas-header,
-:root[data-theme='glass'] .main,
-:root[data-theme='glass'] .claude-code-panel {
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
-    brightness(var(--glass-brightness, 1));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
-    brightness(var(--glass-brightness, 1));
-}
-
-/* ノイズオーバーレイは glass では控えめに (アクリル質感を邪魔しない) */
-:root[data-theme='glass'] .layout::before,
-:root[data-theme='glass'] .canvas-layout::before {
-  opacity: 0;
-}
 
 /* ---------- グレイン/ノイズオーバーレイ (Linear / Notion 風) ---------- */
 .layout::before {
@@ -262,8 +214,6 @@ body.is-resizing * {
 
 .sidebar {
   background: var(--surface-glass);
-  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
-  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -285,18 +235,12 @@ body.is-resizing * {
   display: flex;
   align-items: center;
   gap: 10px;
-  -webkit-app-region: drag;
   border-bottom: 1px solid var(--glass-border);
   /* NOTE: ここに overflow: hidden を付けると AppMenu のドロップダウンが
      親の境界で切り取られて表示されなくなる。ブランド文字列の省略は
      .sidebar__header .sidebar__brand の自前の overflow で処理する。 */
 }
 
-.sidebar__header .app-menu,
-.sidebar__header .app-menu__trigger,
-.sidebar__header .sidebar__brand {
-  -webkit-app-region: no-drag;
-}
 
 .sidebar__header .sidebar__brand {
   min-width: 0;
@@ -317,7 +261,6 @@ body.is-resizing * {
   font-weight: 500;
   color: var(--text);
   letter-spacing: -0.01em;
-  -webkit-app-region: no-drag;
 }
 
 .sidebar__brand-project {
@@ -632,8 +575,6 @@ body.is-resizing * {
   justify-content: space-between;
   padding: 0 10px;
   background: var(--surface-glass);
-  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
-  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
   border-bottom: 1px solid var(--glass-border);
   box-shadow: var(--glass-highlight);
   gap: 8px;
@@ -641,18 +582,9 @@ body.is-resizing * {
   height: var(--toolbar-h);
   position: relative;
   z-index: 1;
-  -webkit-app-region: drag;
 }
 
 /* ツールバー内のインタラクティブ要素はドラッグ無効 */
-.toolbar__btn,
-.toolbar__path,
-.toolbar__right,
-.toolbar__left,
-.app-menu,
-.app-menu__trigger {
-  -webkit-app-region: no-drag;
-}
 
 .toolbar__left {
   display: flex;
@@ -1003,8 +935,6 @@ body.is-resizing * {
 .tabbar {
   display: flex;
   background: var(--surface-glass);
-  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
-  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
   padding: 6px 16px 0;
   gap: 2px;
   position: relative;
@@ -1776,8 +1706,6 @@ body.is-resizing * {
   display: flex;
   flex-direction: column;
   background: var(--surface-glass);
-  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
-  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
   min-height: 0;
   min-width: 0;
   box-shadow: inset 1px 0 0 var(--glass-border);
@@ -1797,13 +1725,10 @@ body.is-resizing * {
   justify-content: space-between;
   padding: 0 12px;
   background: var(--surface-glass);
-  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
-  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
   min-height: var(--toolbar-h);
   height: var(--toolbar-h);
   gap: 8px;
   box-shadow: 0 1px 0 var(--glass-border), var(--glass-highlight);
-  -webkit-app-region: drag;
   /* backdrop-filter がスタッキングコンテキストを生成するため、
      +ボタンのドロップダウンがターミナル本体の後ろに隠れる。
      z-index でヘッダーをターミナルより前面にする。 */
@@ -1811,11 +1736,6 @@ body.is-resizing * {
   z-index: 2;
 }
 
-.claude-code-panel__header .app-menu,
-.claude-code-panel__header .app-menu__trigger,
-.claude-code-panel__header-right {
-  -webkit-app-region: no-drag;
-}
 
 .claude-code-panel__title-wrap {
   display: flex;
@@ -3951,47 +3871,6 @@ body.is-resizing * {
 }
 
 
-/* ==========================================================================
-   Issue #16: Glass テーマ — すりガラス風 (半透明 + backdrop-filter)
-   data-theme=glass のときだけ主要パネルにブラーを適用する。
-   テーマ変数 (bg-panel/sidebar/toolbar/elev) は themes.ts 側で半透明に
-   設定済みなので、ここでは backdrop-filter を当てるだけで成立する。
-   ========================================================================== */
-[data-theme="glass"] .toolbar,
-[data-theme="glass"] .sidebar,
-[data-theme="glass"] .tabbar,
-[data-theme="glass"] .modal,
-[data-theme="glass"] .cmdp,
-[data-theme="glass"] .app-menu__dropdown,
-[data-theme="glass"] .user-menu__dropdown,
-[data-theme="glass"] .context-menu,
-[data-theme="glass"] .canvas-agent-card,
-[data-theme="glass"] .canvas-toolbar,
-[data-theme="glass"] .layout,
-[data-theme="glass"] .main,
-[data-theme="glass"] .content-area,
-[data-theme="glass"] .sidebar-view,
-[data-theme="glass"] .pane,
-[data-theme="glass"] .terminal-pane,
-[data-theme="glass"] .terminal-pane__header,
-[data-theme="glass"] .claude-code-panel,
-[data-theme="glass"] .claude-code-panel__header,
-[data-theme="glass"] .claude-code-panel__body,
-[data-theme="glass"] .notes-panel,
-[data-theme="glass"] .filetree,
-[data-theme="glass"] .filetree__header {
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
-    brightness(var(--glass-brightness, 1));
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
-    brightness(var(--glass-brightness, 1));
-}
-
-/* glass テーマでは modal-backdrop / cmdp-backdrop の暗幕を弱め、
-   背後のブラーが活きるようにする */
-[data-theme="glass"] .modal-backdrop,
-[data-theme="glass"] .cmdp-backdrop {
-  background: rgba(0, 0, 0, 0.18);
-}
 
 
 

@@ -41,6 +41,8 @@ import './styles/components/claude-not-found.css';
 import './styles/components/canvas.css';
 import './styles/components/claude-patterns.css';
 import './styles/components/shell.css';
+import './styles/components/glass.css';
+import './styles/components/drag-region.css';
 import './styles/components/tweaks.css';
 import './styles/components/image-preview.css';
 
