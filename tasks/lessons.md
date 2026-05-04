@@ -1,5 +1,12 @@
 # vibe-editor 教訓集
 
+## TeamHub / MCP 再発防止 (2026-05-04)
+
+- `team_send` の成功は「recipient terminal への delivery」であり、recipient が読んだ / 着手した ACK ではない。liveness 判定では `lastSeenAt` を delivery で更新しない。
+- delivered-but-unread は `team_diagnostics.pendingInbox*` と `stalledInbound` で見えるようにし、Leader 側の判断材料にする。
+- standalone Codex / Claude の vibe-team env 未注入は起動失敗にしない。MCP `initialize` と `tools/list` は no-op で返し、session 必須の `tools/call` だけ明示的な tool error にする。
+- Codex-only / same-engine のユーザー制約は HR 採用にも引き継ぐ。HR / worker の `team_recruit` では `engine:"codex"` を省略しない。
+
 ## ツールチェーン
 
 ### winget の Rust パッケージ ID

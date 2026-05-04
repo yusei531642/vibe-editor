@@ -955,3 +955,71 @@ PR: https://github.com/yusei531642/vibe-editor/pull/459
 - PR #459: Ready for review / OPEN / MERGEABLE / CI `verify` SUCCESS。
 - Closed: #441, #453, #455, #457。
 - Merge は未実施。CodeRabbit / reviewer / 人間承認 / QA 合意後に人間が判断する。
+---
+
+## Issue Autopilot Batch: TeamHub / MCP / Codex-only planned issues (2026-05-04 / Codex)
+
+### 進捗 (2026-05-04 / Codex)
+
+- [x] #456: Codex-only / same-engine 指示を Leader / HR prompt と vibe-team skill に明示し、HR / worker の `team_recruit` で `engine:"codex"` を省略しない回帰テストを追加。
+- [x] #454: standalone Codex / Claude タブで vibe-team env が未注入でも MCP `initialize` / `tools/list` が no-op で成功し、`tools/call` のみ明示的な tool error を返すように修正。
+- [x] #451: `team_send` の「端末へ配送成功」と recipient の実アクティビティを分離。受信側 `lastSeenAt` は配信だけでは更新せず、`team_read` / `team_status` / `team_update_task` 等の明示操作で更新。
+- [x] #451: `team_diagnostics` に `pendingInbox`, `pendingInboxCount`, `oldestPendingInboxAgeMs`, `stalledInbound`, `lastAgentActivityAt` を追加し、delivered-but-unread を可視化。
+- [x] #451: `team_send` response に `acknowledged: false` と `acknowledgedAtPerRecipient` を追加し、delivery と ACK を混同しない契約に更新。
+- [x] MCP schema / embedded skill / `.claude/skills/vibe-team/SKILL.md` を、delivery は ACK ではない前提に更新。
+
+### 検証結果 (2026-05-04)
+
+- [x] `npx vitest run src/renderer/src/lib/__tests__/team-prompts-liveness.test.ts`: PASS (12 tests)
+- [x] `cargo test --manifest-path src-tauri/Cargo.toml team_hub::protocol::tools -- --nocapture`: PASS (8 tests)
+- [x] `cargo test --manifest-path src-tauri/Cargo.toml bridge::tests -- --nocapture`: PASS (2 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `cargo check --manifest-path src-tauri/Cargo.toml`: PASS
+- [x] `git diff --check`: PASS
+- [x] `npm run test`: PASS (28 files / 194 tests)。既存の jsdom `HTMLCanvasElement.getContext` stderr は出るが exit 0。
+- [x] `npm run build:vite`: PASS。既存の chunk size / ineffective dynamic import warning は継続。
+- [x] `cargo test --manifest-path src-tauri/Cargo.toml`: PASS (99 tests)
+
+### Next Tasks (2026-05-04)
+
+- [ ] PR を作成する場合は本文に `Closes #451`, `Closes #454`, `Closes #456` と上記検証結果を記載する。
+- [ ] PR 作成後は CodeRabbit / reviewer / 人間承認 / QA 合意を待つ。自動マージしない。
+
+### 計画
+
+- 対象 Issue は open かつ `planned` の 3 件に限定する。
+  - #451: `team_send` 配信成功後に Worker 側でメッセージが処理されず長時間停止する問題。
+  - #454: スタンドアロン Codex / Claude タブで `vibe-team MCP startup failed` が表示される問題。
+  - #456: Codex-only チーム展開指示でも HR が ClaudeCode で採用される問題。
+- 作業ブランチは `feature/issue-451` とする。#451 が Tier A で、#454/#456 も TeamHub / MCP / prompt 周辺に触れるため、重複差分を避けて 1 PR にまとめる。
+- 実装順はリスクの低い順に固定する。
+  1. #456: prompt / skill / schema の engine 制約を補強し、Codex-only 時に `engine:"codex"` を省略しない回帰テストを追加する。
+  2. #454: bridge の env 不足 fallback を no-op MCP handshake に変更し、standalone 起動で startup failure を出さない Node/Rust テストを追加する。
+  3. #451: delivery と recipient activity を分離し、pending / stalled inbound を diagnostics と response に出す。`delivered=true` を処理完了と誤認しない状態モデルに更新する。
+- 変更候補ファイル:
+  - `src/renderer/src/lib/role-profiles-builtin.ts`
+  - `src/renderer/src/lib/team-prompts.ts`
+  - `src/renderer/src/lib/__tests__/team-prompts-liveness.test.ts`
+  - `.claude/skills/vibe-team/SKILL.md`
+  - `src-tauri/src/commands/vibe_team_skill_body.md`
+  - `src-tauri/src/team_hub/bridge.rs`
+  - `src-tauri/src/team_hub/protocol/schema.rs`
+  - `src-tauri/src/team_hub/protocol/tools/{send,diagnostics,read,status,update_task}.rs`
+  - `src-tauri/src/team_hub/mod.rs`
+- 検証は最低限以下を実行する。
+  - `npx vitest run src/renderer/src/lib/__tests__/team-prompts-liveness.test.ts`
+  - 追加した Rust / bridge / TeamHub 単体テスト
+  - `npm run typecheck`
+  - `cargo check --manifest-path src-tauri/Cargo.toml`
+  - `git diff --check`
+- 可能なら追加 smoke:
+  - standalone Codex / Claude の MCP startup warning が出ないこと。
+  - Canvas の Codex-only プリセットで HR / worker が Codex になること。
+  - `team_diagnostics` が delivered-but-not-active を pending / stalled として報告すること。
+
+### Next Steps
+
+- [ ] ユーザーがこの計画を確認し、実装開始を承認する。
+- [ ] 承認後、#456 -> #454 -> #451 の順に Red/Green で実装する。
+- [ ] 実装後、本セクションに進捗・検証結果・残課題を追記する。
+- [ ] PR を作成する場合は `Closes #451`, `Closes #454`, `Closes #456` を本文に含め、CodeRabbit と人間承認を待つ。自動マージはしない。

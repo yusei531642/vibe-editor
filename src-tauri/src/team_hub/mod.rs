@@ -162,7 +162,8 @@ pub struct MemberDiagnostics {
     /// `resolve_pending_recruit` で handshake が完了した最後の timestamp。
     /// `online: true` だが `last_handshake_at: null` → handshake 未完を可視化。
     pub last_handshake_at: Option<String>,
-    /// 任意のアクティビティ (handshake / send / read / dismiss) で更新される最終生存時刻。
+    /// Agent 自身が操作したアクティビティ (handshake / send / read / status / update_task / dismiss) の最終時刻。
+    /// 他者からの team_send 配信成功では更新しない。
     pub last_seen_at: Option<String>,
     /// この agent が他者から message を受領した最終時刻 (inject 成功 = 受領)。
     pub last_message_in_at: Option<String>,

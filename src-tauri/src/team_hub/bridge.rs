@@ -39,7 +39,8 @@ if (!TEAM_ID) missingEnv.push('VIBE_TEAM_ID');
 if (!ROLE) missingEnv.push('VIBE_TEAM_ROLE');
 if (!AGENT_ID) missingEnv.push('VIBE_AGENT_ID');
 const MISSING_HUB_ENV = missingEnv.length > 0;
-if (MISSING_HUB_ENV) {
+const DEBUG_BRIDGE = process.env.VIBE_TEAM_DEBUG === '1' || process.env.VIBE_TEAM_DEBUG === 'true';
+if (MISSING_HUB_ENV && DEBUG_BRIDGE) {
   process.stderr.write('[team-bridge] missing env: ' + missingEnv.join(', ') + ' — team tools disabled\n');
 }
 
@@ -193,7 +194,7 @@ process.stdin.on('data', (chunk) => {
     if (!line) continue;
 
     // Issue #100: 未接続時の挙動を 3 状態に整理する。
-    //   1) MISSING_HUB_ENV: env 不在 = 永続的に hub 無し → localFallback で error 応答
+    //   1) MISSING_HUB_ENV: env 不在 = standalone tab → localFallback で no-op MCP 応答
     //   2) givenUp:        再接続を諦めた状態 → localFallback で error 応答
     //   3) それ以外の未接続: connect 中 → pendingOut に積み、connect 後に flush
     // 旧実装は (3) でも localFallback を呼んでいたため、initialize が null 応答 →
@@ -221,14 +222,54 @@ process.stdin.on('data', (chunk) => {
 process.stdin.on('end', () => process.exit(0));
 
 function localFallback(req) {
-  // Issue #62 / #100: localFallback は env 不在 (MISSING_HUB_ENV) または再接続を
+  // Issue #62 / #100 / #454: localFallback は env 不在 (MISSING_HUB_ENV) または再接続を
   // 諦めた状態 (givenUp) でのみ呼ばれる。connect 試行中は pendingOut に積むので
   // ここには到達しない。
-  // 「失敗していること」を明示するため、id 付き request には error を返す。
+  // env 不在は standalone Codex / Claude 起動なので startup failure にしない。
+  // givenUp は本来 hub がある team session の異常なので error のまま返す。
   const { method, id } = req;
-  const reason = MISSING_HUB_ENV
-    ? 'vibe-team bridge is not configured (missing env: ' + missingEnv.join(', ') + ')'
-    : 'vibe-team hub is unreachable (gave up reconnecting)';
+  if (MISSING_HUB_ENV) {
+    if (method === 'initialize' && id !== undefined && id !== null) {
+      return {
+        jsonrpc: '2.0',
+        id,
+        result: {
+          protocolVersion: '2024-11-05',
+          capabilities: { tools: {} },
+          serverInfo: { name: 'vibe-team', version: 'standalone-noop' }
+        }
+      };
+    }
+    if (method === 'tools/list' && id !== undefined && id !== null) {
+      return { jsonrpc: '2.0', id, result: { tools: [] } };
+    }
+    if (method === 'ping' && id !== undefined && id !== null) {
+      return { jsonrpc: '2.0', id, result: {} };
+    }
+    if (method === 'notifications/initialized' || method === 'notifications/cancelled') {
+      return null;
+    }
+    if (method === 'tools/call' && id !== undefined && id !== null) {
+      return {
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: -32001,
+          message:
+            'not a vibe-team session: missing env (' + missingEnv.join(', ') + '); start from a Canvas team session to use vibe-team tools'
+        }
+      };
+    }
+    if (id !== undefined && id !== null) {
+      return {
+        jsonrpc: '2.0',
+        id,
+        error: { code: -32601, message: 'method not available in standalone vibe-team no-op mode' }
+      };
+    }
+    return null;
+  }
+  const reason = 'vibe-team hub is unreachable (gave up reconnecting)';
   if (id !== undefined && id !== null) {
     return {
       jsonrpc: '2.0', id,
@@ -239,3 +280,102 @@ function localFallback(req) {
   return null;
 }
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::SOURCE;
+    use serde_json::Value;
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    fn run_bridge_without_team_env(input: &str) -> Option<Vec<Value>> {
+        if Command::new("node").arg("--version").output().is_err() {
+            return None;
+        }
+
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "vibe-team-bridge-test-{}-{nonce}.js",
+            std::process::id()
+        ));
+        std::fs::write(&path, SOURCE).expect("write bridge source");
+
+        let mut child = Command::new("node")
+            .arg(&path)
+            .env_remove("VIBE_TEAM_SOCKET")
+            .env_remove("VIBE_TEAM_TOKEN")
+            .env_remove("VIBE_TEAM_ID")
+            .env_remove("VIBE_TEAM_ROLE")
+            .env_remove("VIBE_AGENT_ID")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn bridge");
+
+        child
+            .stdin
+            .as_mut()
+            .expect("stdin")
+            .write_all(input.as_bytes())
+            .expect("write stdin");
+        drop(child.stdin.take());
+
+        let output = child.wait_with_output().expect("wait bridge");
+        let _ = std::fs::remove_file(path);
+        assert!(
+            output.status.success(),
+            "bridge failed: status={:?}, stderr={}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let stdout = String::from_utf8(output.stdout).expect("utf8 stdout");
+        Some(
+            stdout
+                .lines()
+                .filter(|line| !line.trim().is_empty())
+                .map(|line| serde_json::from_str::<Value>(line).expect("json line"))
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn missing_env_still_allows_mcp_initialize_and_empty_tools_list() {
+        let Some(responses) = run_bridge_without_team_env(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
+{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+"#,
+        ) else {
+            return;
+        };
+
+        assert_eq!(responses.len(), 2);
+        assert_eq!(responses[0]["id"], 1);
+        assert!(responses[0].get("result").is_some(), "{:?}", responses[0]);
+        assert_eq!(responses[1]["id"], 2);
+        assert_eq!(responses[1]["result"]["tools"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn missing_env_tools_call_is_tool_error_not_startup_failure() {
+        let Some(responses) = run_bridge_without_team_env(
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"team_info","arguments":{}}}
+"#,
+        ) else {
+            return;
+        };
+
+        assert_eq!(responses.len(), 1);
+        assert_eq!(responses[0]["id"], 3);
+        assert_eq!(responses[0]["error"]["code"], -32001);
+        assert!(responses[0]["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not a vibe-team session"));
+    }
+}
