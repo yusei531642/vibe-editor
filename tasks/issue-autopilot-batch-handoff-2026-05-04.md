@@ -152,3 +152,58 @@
 - [ ] 通常の `npm run dev` または人間の確認用環境で Canvas を開き、Terminal / Agent header、CommandPalette、gap変更の手動 smoke を行う。
 - [ ] PR を作成し、本文に自動検証 PASS と UI smoke 未完了理由を明記する。
 - [ ] CodeRabbit / reviewer / 人間承認 / QA 合意なしに merge しない。
+
+---
+
+## Issue #455 追補計画 (2026-05-04 / Codex)
+
+### 現状
+
+- PR #459 は Draft / CI `verify` SUCCESS / review・comments なし。
+- #455 は Tier C の Canvas 配置バグで、#441/#457 と同じ Draft PR に追補する方が未マージ差分との衝突を避けやすい。
+- 既存カードの手動レイアウトは維持し、新規チーム起動バッチだけを非衝突位置へ移す。
+
+### 実装方針
+
+- `src/renderer/src/lib/canvas-placement.ts` に batch 配置 helper を追加する。
+- `CanvasLayout.applyPreset()` と `restoreRecent()` の追加カード配列へ helper を適用する。
+- `addCards()` 後は先頭カード id を `notifyRecruit()` に渡し、viewport が新 Leader を見失わないようにする。
+- 手動 `+` 追加の `stagger()` は今回の対象外として維持する。
+
+### 検証コマンド
+
+- `npx vitest run src/renderer/src/lib/__tests__/canvas-placement.test.ts src/renderer/src/lib/__tests__/workspace-presets.test.ts`
+- `npm run typecheck`
+- `npm run build:vite`
+- `git diff --check`
+
+### Next Steps
+
+- [ ] helper と回帰テストを実装する。
+- [ ] 検証結果と残課題をこの引き継ぎ書と `tasks/todo.md` へ追記する。
+- [ ] PR #459 の title/body を #455 追補込みへ更新する。
+- [ ] merge は CodeRabbit / reviewer / 人間承認 / QA 合意後に人間が判断する。
+
+## Issue #455 実装結果 (2026-05-04 / Codex)
+
+### 変更内容
+
+- `src/renderer/src/lib/canvas-placement.ts` を追加し、既存カードと重なる新規チーム起動 batch だけを非衝突位置へ移す helper を実装。
+- `CanvasLayout.applyPreset()` と `restoreRecent()` で、プリセット相対配置 / saved position を保ったまま helper を適用。
+- `addCards()` 後に先頭カード id を `notifyRecruit()` へ渡し、新 Leader を viewport が見失わないようにした。
+- full Vitest の未処理 rejection 対策として、`webview-zoom.ts` の `setZoomLevel` 呼び出しを `window` 存在確認つきに安全化。
+- `src/renderer/src/lib/__tests__/canvas-placement.test.ts` を追加し、leader-only / 複数member / style寸法 / 相対距離維持を検証。
+
+### 検証結果
+
+- `npx vitest run src/renderer/src/lib/__tests__/canvas-placement.test.ts src/renderer/src/lib/__tests__/workspace-presets.test.ts`: PASS (2 files / 8 tests)
+- `npx vitest run src/renderer/src/lib/__tests__/canvas-arrange.test.ts src/renderer/src/stores/__tests__/canvas-restore-normalize.test.ts src/renderer/src/components/__tests__/CommandPalette.test.tsx src/renderer/src/lib/__tests__/canvas-placement.test.ts src/renderer/src/lib/__tests__/workspace-presets.test.ts`: PASS (5 files / 29 tests)
+- `npm run test`: PASS (28 files / 191 tests)。既存の jsdom `HTMLCanvasElement.getContext` stderr は継続するが exit 0。
+- `npm run typecheck`: PASS
+- `npm run build:vite`: PASS。既存の chunk size / ineffective dynamic import warning は継続。
+- `git diff --check`: PASS
+
+### 残課題
+
+- UI smoke は未実施。通常 Tauri 環境で「チーム起動」新カードの非重なりと viewport focus を手動確認する。
+- PR #459 の title/body を #455 追補込みへ更新し、commit / push 後に CI と CodeRabbit を再確認する。

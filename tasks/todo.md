@@ -879,3 +879,59 @@ Branch: `feature/issue-452`
 - [ ] 通常の `npm run dev` または人間の確認用環境で Canvas を開き、#457/#453/#441 の手動 smoke を実施する。
 - [ ] PR 本文に `Closes #441`, `Closes #453`, `Closes #457` と検証結果、UI smoke 未完了理由を記載する。
 - [ ] CodeRabbit / reviewer / 人間承認 / QA 合意なしに merge しない。
+
+---
+
+## Issue #455 追補計画 (2026-05-04 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/455
+Branch: `feature/issue-441-canvas-ui-batch`
+PR: https://github.com/yusei531642/vibe-editor/pull/459
+
+### 判断
+- [x] PR #459 は Draft / CI `verify` SUCCESS / review・comments なし。
+- [x] #455 は Tier C で、#441/#457 と同じ Canvas 配置・表示領域に閉じる。
+- [x] 未マージの Canvas 差分と衝突しやすいため、別ブランチではなく現在の Draft PR #459 へ追補する。
+- [x] 既存カードは動かさず、新規チーム起動バッチだけを非衝突位置へ offset する。
+
+### 実装計画
+- [ ] `src/renderer/src/lib/canvas-placement.ts` を追加し、既存 node bbox と追加予定 batch bbox から非衝突 offset を決める helper を実装する。
+- [ ] helper は `NODE_W` / `NODE_H` を fallback にし、既存 node の `style.width` / `style.height` がある場合は bbox 計算へ反映する。
+- [ ] `CanvasLayout.applyPreset()` で `presetPosition()` の相対配置を維持したまま helper を通し、`addCards()` 後に先頭カードへ `notifyRecruit()` する。
+- [ ] `restoreRecent()` でも saved position / fallback position の batch 全体を同じ helper に通し、復元直後の重なりを避ける。
+- [ ] 手動 `+` 追加の `stagger()` は今回の対象外として維持する。
+
+### 検証計画
+- [ ] `npx vitest run src/renderer/src/lib/__tests__/canvas-placement.test.ts src/renderer/src/lib/__tests__/workspace-presets.test.ts`
+- [ ] `npm run typecheck`
+- [ ] `npm run build:vite`
+- [ ] `git diff --check`
+- [ ] UI smoke は PR #459 と同じ制約あり。可能なら通常 Tauri 環境で「チーム起動」新カードが既存カードと重ならず、viewport が新Leaderへ寄ることを確認する。
+
+### Next Steps
+- [ ] helper とテストを実装する。
+- [ ] 検証結果を `tasks/todo.md` と引き継ぎ書へ追記する。
+- [ ] PR #459 の本文・タイトルを #455 追補込みへ更新する。
+- [ ] CodeRabbit / reviewer / QA 合意なしに merge しない。
+
+### 進捗 (2026-05-04 / Codex)
+- [x] `src/renderer/src/lib/canvas-placement.ts` を追加。既存 node bbox と追加 batch bbox を比較し、重なる場合は既存 bbox の右側 / 下側 / grid scan の順で新規 batch だけを移動する。
+- [x] 既存 node の `style.width` / `style.height` を bbox 計算に反映。未指定時は `NODE_W` / `NODE_H` を fallback にする。
+- [x] `CanvasLayout.applyPreset()` と `restoreRecent()` に helper を接続し、`addCards()` 後に先頭カードへ `notifyRecruit()` を発火する。
+- [x] `src/renderer/src/lib/__tests__/canvas-placement.test.ts` を追加し、leader-only / 複数member / style寸法 / relative spacing の回帰を固定した。
+- [x] full Vitest の未処理 rejection を潰すため、`webview-zoom.ts` の host IPC 呼び出しを `window` 存在確認つきに安全化した。
+
+### 検証結果 (2026-05-04 / #455追補)
+- [x] `npx vitest run src/renderer/src/lib/__tests__/canvas-placement.test.ts src/renderer/src/lib/__tests__/workspace-presets.test.ts`: PASS (2 files / 8 tests)
+- [x] `npx vitest run src/renderer/src/lib/__tests__/canvas-arrange.test.ts src/renderer/src/stores/__tests__/canvas-restore-normalize.test.ts src/renderer/src/components/__tests__/CommandPalette.test.tsx src/renderer/src/lib/__tests__/canvas-placement.test.ts src/renderer/src/lib/__tests__/workspace-presets.test.ts`: PASS (5 files / 29 tests)
+- [x] `npm run test`: PASS (28 files / 191 tests)。既存の jsdom `HTMLCanvasElement.getContext` stderr は出るが exit 0。
+- [x] `npm run typecheck`: PASS
+- [x] `npm run build:vite`: PASS。既存の chunk size / ineffective dynamic import warning は継続。
+- [x] `git diff --check`: PASS
+- [ ] UI smoke: 未実施。PR #459 と同じく、通常 Tauri 環境での手動確認が必要。
+
+### Next Tasks (2026-05-04 / #455追補)
+- [ ] PR #459 の title/body を `Closes #455` と今回の検証結果込みへ更新する。
+- [ ] 変更を commit / push し、CI と CodeRabbit を確認する。
+- [ ] 通常 Tauri 環境で「チーム起動」新カードが既存カードと重ならず、viewport が新 Leader へ寄ることを手動 smoke する。
+- [ ] CodeRabbit / reviewer / QA 合意なしに merge しない。

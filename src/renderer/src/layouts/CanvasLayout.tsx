@@ -59,6 +59,7 @@ import {
   formatCardCount,
   formatOrganizationAgentCount
 } from '../lib/canvas-layout-helpers';
+import { placeBatchAwayFromNodes } from '../lib/canvas-placement';
 import { useCanvasTeamRestore } from '../lib/hooks/use-canvas-team-restore';
 import { useCanvasAutoSave } from '../lib/hooks/use-canvas-auto-save';
 
@@ -91,6 +92,7 @@ export function CanvasLayout(): JSX.Element {
   const viewport = useCanvasStore((s) => s.viewport);
   const clear = useCanvasStore((s) => s.clear);
   const addCards = useCanvasStore((s) => s.addCards);
+  const notifyRecruit = useCanvasStore((s) => s.notifyRecruit);
   const { settings, update: updateSettings, reset: resetSettings } = useSettings();
   const t = useT();
   // プロジェクトルート: runtime の lastOpenedRoot を優先。ユーザー設定の
@@ -239,7 +241,9 @@ export function CanvasLayout(): JSX.Element {
         };
       })
     );
-    addCards(cards);
+    const placedCards = placeBatchAwayFromNodes(useCanvasStore.getState().nodes, cards);
+    const ids = addCards(placedCards);
+    if (ids[0]) notifyRecruit(ids[0]);
     setSpawnOpen(false);
     void loadRecent();
   };
@@ -294,7 +298,9 @@ export function CanvasLayout(): JSX.Element {
         }
       };
     });
-    addCards(cards);
+    const placedCards = placeBatchAwayFromNodes(useCanvasStore.getState().nodes, cards);
+    const ids = addCards(placedCards);
+    if (ids[0]) notifyRecruit(ids[0]);
     const updatedEntry: TeamHistoryEntry = {
       ...entry,
       lastUsedAt: new Date().toISOString()
