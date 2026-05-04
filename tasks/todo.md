@@ -935,3 +935,17 @@ PR: https://github.com/yusei531642/vibe-editor/pull/459
 - [ ] 変更を commit / push し、CI と CodeRabbit を確認する。
 - [ ] 通常 Tauri 環境で「チーム起動」新カードが既存カードと重ならず、viewport が新 Leader へ寄ることを手動 smoke する。
 - [ ] CodeRabbit / reviewer / QA 合意なしに merge しない。
+
+### 追加UI Smoke (2026-05-04 / Playwright MCP)
+- [x] `npm run dev:vite -- --host 127.0.0.1 --port 5177` で renderer を起動し、Playwright MCP で Canvas へ遷移できることを確認。
+- [x] #453: Canvas 上で `Ctrl+Shift+P` を押下し、`.cmdp-backdrop` が 1 件、`body > .cmdp-backdrop` が 1 件、`z-index=9600` で表示されることを確認。
+- [x] #455: 「チーム起動」を 2 回実行し、React Flow node が 2 件、bbox は `[-423,279,640,400]` と `[249,279,640,400]`、overlap=false を確認。
+- [x] #457: `.canvas-agent-card__header` が 2 件、computed style は `font-size: 14px`, `min-height: 42px`, `height: 44.8px` を確認。
+- [x] #441: HUD「整理」メニューで「広い」をクリックし、`aria-checked=true`、カード間隔が 672px から 688px へ即時変化することを確認。
+- [x] screenshot: `issue-459-canvas-smoke.png`
+- [x] 検証用 Vite port 5177 は停止済み。
+
+### 完了処理 Next Tasks (2026-05-04)
+- [ ] PR #459 を Ready for review に変更する。
+- [ ] #441 / #453 / #455 / #457 に完了コメントを投稿し、`completed` として close する。
+- [ ] 最終PR/Issue状態を確認する。

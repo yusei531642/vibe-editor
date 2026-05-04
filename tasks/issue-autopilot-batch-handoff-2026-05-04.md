@@ -207,3 +207,30 @@
 
 - UI smoke は未実施。通常 Tauri 環境で「チーム起動」新カードの非重なりと viewport focus を手動確認する。
 - PR #459 の title/body を #455 追補込みへ更新し、commit / push 後に CI と CodeRabbit を再確認する。
+
+## 追加UI Smoke結果 (2026-05-04 / Playwright MCP)
+
+- `npm run dev:vite -- --host 127.0.0.1 --port 5177` で renderer を起動し、Playwright MCP で Canvas 画面へ遷移。
+- #453: Canvas 上で `Ctrl+Shift+P` を押下し、CommandPalette の body portal を確認。
+  - `.cmdp-backdrop`: 1
+  - `body > .cmdp-backdrop`: 1
+  - computed `z-index`: `9600`
+- #455: 「チーム起動」を 2 回実行し、React Flow node 2 件が重ならないことを bbox で確認。
+  - node boxes: `[-423,279,640,400]`, `[249,279,640,400]`
+  - overlap: `false`
+- #457: Agent header の computed style を確認。
+  - selector: `.canvas-agent-card__header`
+  - count: 2
+  - `font-size: 14px`, `min-height: 42px`, `height: 44.8px`
+- #441: HUD「整理」メニューで「広い」をクリックし、即時再配置を確認。
+  - before gap: `672px`
+  - after gap: `688px`
+  - `aria-checked=true`
+- screenshot: `issue-459-canvas-smoke.png`
+- 検証用 Vite port 5177 は停止済み。
+
+## 完了処理方針 (2026-05-04)
+
+- PR #459 を Ready for review に変更する。
+- #441 / #453 / #455 / #457 に完了コメントを投稿し、`completed` として close する。
+- merge は実施しない。人間承認とQA合意後に行う。
