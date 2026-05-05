@@ -1,3 +1,4 @@
+import { useCallback, useMemo } from 'react';
 import { Files, GitBranch, History, LayoutGrid, Settings as SettingsIcon, StickyNote } from 'lucide-react';
 import type { SidebarView } from '../Sidebar';
 import { useT } from '../../lib/i18n';
@@ -41,41 +42,49 @@ export function Rail({
   //   - アクティブタブ + sidebar 開 → 折り畳み
   //   - アクティブタブ + sidebar 閉 → 開く
   //   - 別タブ → そのタブに切替 (折り畳まれていたら開く)
-  const handleTabClick = (view: SidebarView): void => {
-    if (sidebarView === view) {
-      toggleSidebar();
-      return;
-    }
-    onSidebarViewChange(view);
-    if (sidebarCollapsed) setSidebarCollapsed(false);
-  };
-
-  const items: Array<{
-    view: SidebarView;
-    label: string;
-    icon: JSX.Element;
-    count?: number;
-  }> = [
-    { view: 'files', label: t('sidebar.files'), icon: <Files size={17} strokeWidth={2.2} /> },
-    // git リポジトリでない場合は Changes タブごと表示しない
-    ...(hasGitRepo
-      ? [
-          {
-            view: 'changes' as SidebarView,
-            label: t('sidebar.changes'),
-            icon: <GitBranch size={17} strokeWidth={2.2} />,
-            count: changeCount
-          }
-        ]
-      : []),
-    {
-      view: 'sessions',
-      label: t('sidebar.history'),
-      icon: <History size={17} strokeWidth={2.2} />,
-      count: historyBadgeCount
+  const handleTabClick = useCallback(
+    (view: SidebarView): void => {
+      if (sidebarView === view) {
+        toggleSidebar();
+        return;
+      }
+      onSidebarViewChange(view);
+      if (sidebarCollapsed) setSidebarCollapsed(false);
     },
-    { view: 'notes', label: t('sidebar.notes'), icon: <StickyNote size={17} strokeWidth={2.2} /> }
-  ];
+    [sidebarView, toggleSidebar, onSidebarViewChange, sidebarCollapsed, setSidebarCollapsed]
+  );
+
+  const items = useMemo<
+    Array<{
+      view: SidebarView;
+      label: string;
+      icon: JSX.Element;
+      count?: number;
+    }>
+  >(
+    () => [
+      { view: 'files', label: t('sidebar.files'), icon: <Files size={17} strokeWidth={2.2} /> },
+      // git リポジトリでない場合は Changes タブごと表示しない
+      ...(hasGitRepo
+        ? [
+            {
+              view: 'changes' as SidebarView,
+              label: t('sidebar.changes'),
+              icon: <GitBranch size={17} strokeWidth={2.2} />,
+              count: changeCount
+            }
+          ]
+        : []),
+      {
+        view: 'sessions',
+        label: t('sidebar.history'),
+        icon: <History size={17} strokeWidth={2.2} />,
+        count: historyBadgeCount
+      },
+      { view: 'notes', label: t('sidebar.notes'), icon: <StickyNote size={17} strokeWidth={2.2} /> }
+    ],
+    [t, hasGitRepo, changeCount, historyBadgeCount]
+  );
 
   return (
     <nav className="rail" aria-label="Primary navigation">

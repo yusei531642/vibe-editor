@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, Plus, Search, X } from 'lucide-react';
 import type { AgentConfig, AppSettings } from '../../../types/shared';
 import { DEFAULT_SETTINGS } from '../../../types/shared';
@@ -118,9 +118,12 @@ export function SettingsModal({
   // 並んでおり、ここで return すると mounted の値で hook 数が変わって "Rendered more hooks
   // than during the previous render" エラーになる (#220 系で再発)。
 
-  const update = <K extends keyof AppSettings>(key: K, value: AppSettings[K]): void => {
-    setDraft((d) => ({ ...d, [key]: value }));
-  };
+  const update = useCallback(
+    <K extends keyof AppSettings>(key: K, value: AppSettings[K]): void => {
+      setDraft((d) => ({ ...d, [key]: value }));
+    },
+    []
+  );
 
   const handleApply = (): void => {
     // saved=true の状態で再度押されるのはボタンの disabled で防いでいるが、
