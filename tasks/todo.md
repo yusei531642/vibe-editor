@@ -1134,3 +1134,43 @@ PR: https://github.com/yusei531642/vibe-editor/pull/459
 ### Next Tasks
 - [x] 実装時は `--bg` が Glass で透明になる点を避け、アクセント背景専用の foreground token を使う。
 - [ ] PR を作成し、CodeRabbit / CI を確認する。
+
+## Release v1.4.10 計画（2026-05-05 / Codex）
+
+### 計画
+- [x] 最新 `main` とタグを取得し、最新リリースが `v1.4.9` であることを確認する。
+- [x] `v1.4.9..origin/main` の変更範囲を確認する。
+- [x] release workflow が `v*` タグ push で draft release を作成する構成であることを確認する。
+- [x] `chore/release-1.4.10` ブランチで `package.json` / `package-lock.json` / `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json` / `src-tauri/Cargo.lock` を `1.4.10` に同期する。
+- [x] `npm run typecheck` / `npm run test` / `npm run build:vite` / `cargo check --manifest-path src-tauri/Cargo.toml` / `cargo check --locked --manifest-path src-tauri/Cargo.toml` / `git diff --check` を実行する。
+- [ ] Release PR を作成し、CI / reviewer を確認する。
+- [ ] PR merge 後に `main` を fast-forward し、`v1.4.10` annotated tag を作成して push する。
+- [ ] release workflow 完了後、draft release `v1.4.10` と成果物、`latest.json` の有無を確認する。
+- [ ] draft release の publish は成果物確認後に実施する。
+
+### 変更範囲
+- 対象: `v1.4.9..origin/main`
+- 主な内容: Issue #466 / PR #467 Glass テーマのアクセント文字色改善。
+- 本番影響: Tauri updater の `latest.json` が draft release publish 後に更新される。draft のままではユーザー配信されない。
+
+### Next Steps
+- [x] バージョン bump を実施して品質ゲートを通す。
+- [ ] PR merge 後、`v1.4.10` tag push で release workflow を起動する。
+
+### 進捗
+- [x] `npm version 1.4.10 --no-git-tag-version` で npm 側を同期。
+- [x] `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json` を `1.4.10` に更新。
+- [x] `cargo check --manifest-path src-tauri/Cargo.toml` で `src-tauri/Cargo.lock` の `vibe-editor` package version を `1.4.10` に更新。
+
+### 検証結果
+- [x] `cargo check --manifest-path src-tauri/Cargo.toml`: PASS
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS（29 files / 196 tests）
+- [x] `npm run build:vite`: PASS
+- [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml`: PASS
+- [x] `git diff --check`: PASS
+
+### Next Tasks
+- [ ] Release PR を作成し、CI / reviewer を確認する。
+- [ ] PR merge 後、`v1.4.10` tag push で release workflow を起動する。
+- [ ] draft release の成果物確認後に publish 判断を行う。
