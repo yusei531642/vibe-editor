@@ -49,7 +49,7 @@ fn init_logging() {
 
     // Issue #342 Phase 3 (3.11): `team_diagnostics` の `serverLogPath` 用に実パスを記録。
     // env var `VIBE_TEAM_LOG_PATH` で override 可能 (server_log_path_for_diagnostics 側で参照)。
-    team_hub::set_server_log_path(log_path.clone());
+    team_hub::set_server_log_path(log_path);
 
     let file_appender = tracing_appender::rolling::never(log_dir, "vibe-editor.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);

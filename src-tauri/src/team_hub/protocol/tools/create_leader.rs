@@ -135,7 +135,7 @@ pub async fn team_create_leader(
             if let Some(app) = &app {
                 let _ = app.emit(
                     "team:recruit-cancelled",
-                    json!({ "newAgentId": new_agent_id, "reason": phase_str.clone() }),
+                    json!({ "newAgentId": new_agent_id, "reason": phase_str }),
                 );
             }
             let message = if reason.is_empty() {

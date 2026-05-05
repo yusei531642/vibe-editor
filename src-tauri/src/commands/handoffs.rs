@@ -163,12 +163,11 @@ async fn ensure_private_handoff_dir(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-async fn restrict_private_file(_path: &Path) -> Result<(), String> {
+fn restrict_private_file(_path: &Path) -> Result<(), String> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(_path, std::fs::Permissions::from_mode(0o600))
-            .await
+        std::fs::set_permissions(_path, std::fs::Permissions::from_mode(0o600))
             .map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -272,12 +271,12 @@ async fn write_handoff(
     crate::commands::atomic_write::atomic_write(json_path, &json)
         .await
         .map_err(|e| e.to_string())?;
-    restrict_private_file(json_path).await?;
+    restrict_private_file(json_path)?;
     let markdown = render_markdown(handoff);
     crate::commands::atomic_write::atomic_write(md_path, markdown.as_bytes())
         .await
         .map_err(|e| e.to_string())?;
-    restrict_private_file(md_path).await
+    restrict_private_file(md_path)
 }
 
 #[tauri::command]
@@ -345,9 +344,8 @@ pub async fn handoffs_list(
 ) -> Vec<HandoffCheckpoint> {
     let dir = handoff_dir(&project_root, team_id.as_deref());
     let mut out = Vec::new();
-    let mut rd = match fs::read_dir(&dir).await {
-        Ok(r) => r,
-        Err(_) => return out,
+    let Ok(mut rd) = fs::read_dir(&dir).await else {
+        return out;
     };
     while let Ok(Some(entry)) = rd.next_entry().await {
         let path = entry.path();
