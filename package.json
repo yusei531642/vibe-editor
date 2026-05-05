@@ -50,7 +50,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.1",
     "esbuild": "^0.28.0",
-    "jsdom": "^26.0.0",
+    "jsdom": "^29.1.1",
     "png-to-ico": "^3.0.1",
     "sharp": "^0.34.5",
     "typescript": "^6.0.3",
