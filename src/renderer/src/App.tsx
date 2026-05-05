@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
 import {
   Clock,
   Command as CommandIcon,
@@ -280,7 +281,6 @@ export function App(): JSX.Element {
     let unlisten: (() => void) | null = null;
     let cancelled = false;
     void (async () => {
-      const { listen } = await import('@tauri-apps/api/event');
       const u = await listen<string>('project:files-changed', () => {
         const h = fsWatchHandlersRef.current;
         if (!h) return;

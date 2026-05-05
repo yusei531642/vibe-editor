@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { listen } from '@tauri-apps/api/event';
 
 /**
  * Issue #128: Rust 側 fs_watch が emit する `project:files-changed` を購読し、
@@ -17,7 +18,6 @@ export function useFilesChanged(callback: () => void, debounceMs = 250): void {
     let timer: number | null = null;
 
     void (async () => {
-      const { listen } = await import('@tauri-apps/api/event');
       const u = await listen<string>('project:files-changed', () => {
         if (timer !== null) window.clearTimeout(timer);
         timer = window.setTimeout(() => {
