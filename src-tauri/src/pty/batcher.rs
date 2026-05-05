@@ -22,7 +22,7 @@ const FLUSH_BYTES: usize = 32 * 1024;
 const STARTUP_DELAY_MS: u64 = 50;
 
 /// Issue #53: bounded チャネル容量 (vec chunk 単位)。
-/// PTY reader は 8KB/chunk なので、256 枠 ≒ 2MB の backpressure buffer。
+/// PTY reader は 16 KiB/chunk なので、256 枠 ≒ 4 MiB の backpressure buffer。
 /// これを超えると reader thread の blocking_send がブロックし、自動的に
 /// PTY へ backpressure が伝播する (unbounded による無限メモリ膨張を防ぐ)。
 pub const PTY_CHANNEL_CAPACITY: usize = 256;
@@ -84,17 +84,22 @@ fn flush(app: &AppHandle, event: &str, buf: &mut BytesMut, scrollback: &Scrollba
         // 先頭もマルチバイト途中 → 次 flush まで保留 (emit しない)
         return;
     }
-    let remainder: Vec<u8> = buf[safe_end..].to_vec();
-    buf.truncate(safe_end);
-    let len = buf.len();
     // Issue #285 follow-up: emit する確定済みバイト列を scrollback にも反映する。
     // 容量超過分は前から drop されるので、attach 経路では「最近 64 KiB」だけ replay される。
-    append_scrollback(scrollback, buf);
-    let text = String::from_utf8_lossy(buf).into_owned();
-    buf.clear();
-    if !remainder.is_empty() {
-        buf.extend_from_slice(&remainder);
+    // 旧実装は `buf` を一度 truncate してから scrollback に渡し、remainder を別 Vec に
+    // 退避 → emit 後に extend_from_slice で書き戻していた。slice 借用で済む処理を
+    // Vec 経由に分割していたため、flush ごとに `remainder.to_vec()` の追加 alloc + memcpy
+    // が走っていた。安定 API の copy_within で in-place 圧縮することで、flush あたりの
+    // ヒープ allocation を 1 件削減する (60Hz 上限で常時 emit 中は ~60 alloc/s 削減)。
+    let emit_slice = &buf[..safe_end];
+    append_scrollback(scrollback, emit_slice);
+    let text = String::from_utf8_lossy(emit_slice).into_owned();
+    let len = safe_end;
+    let remainder_len = buf.len() - safe_end;
+    if remainder_len > 0 {
+        buf.copy_within(safe_end.., 0);
     }
+    buf.truncate(remainder_len);
     match app.emit(event, text) {
         Ok(_) => tracing::debug!("[batcher] emit {event} {len}B ok"),
         Err(e) => tracing::warn!("emit {event} failed: {e}"),

@@ -565,9 +565,15 @@ pub fn spawn_session(
     // Issue #53: bounded channel で reader → batcher に backpressure をかける。
     //   reader (std::thread) は `blocking_send` でチャネル満杯時に待機 → OS 側で PTY
     //   への入力が詰まれば子プロセスが書き込み待ちに入るので、メモリ無限膨張を防げる。
+    //
+    // チャンクサイズは 16 KiB。旧 8 KiB 比で大量出力時 (cargo build 等) の syscall /
+    // Vec allocation / channel send 頻度が約半分になる。read() は OS が用意した
+    // 即時バイト数を返すブロッキング読み出しなので、対話的な小入力では従来通り少バイト
+    // しか allocate されない (latency 影響なし)。最大 backpressure は
+    // 16 KiB * PTY_CHANNEL_CAPACITY ≒ 4 MiB。
     let (tx, rx) = mpsc::channel::<Vec<u8>>(crate::pty::batcher::PTY_CHANNEL_CAPACITY);
     std::thread::spawn(move || {
-        let mut buf = [0u8; 8192];
+        let mut buf = [0u8; 16 * 1024];
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
