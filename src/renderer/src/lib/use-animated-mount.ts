@@ -85,10 +85,6 @@ export function useSpringMount(open: boolean, exitMs = 160): AnimatedMountResult
   return useAnimatedMount(open, { exitMs, preset: 'spring' });
 }
 
-export function useFadeMount(open: boolean, exitMs = 160): AnimatedMountResult {
-  return useAnimatedMount(open, { exitMs, preset: 'fade' });
-}
-
 export function useScaleMount(open: boolean, exitMs = 160): AnimatedMountResult {
   return useAnimatedMount(open, { exitMs, preset: 'scale' });
 }

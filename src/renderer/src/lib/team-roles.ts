@@ -9,7 +9,7 @@
  */
 import type { Language, RoleProfile, TeamRole } from '../../../types/shared';
 import { BUILTIN_BY_ID, BUILTIN_ROLE_PROFILES } from './role-profiles-builtin';
-import { fallbackProfile, profileText, renderSystemPrompt } from './role-profiles-context';
+import { fallbackProfile, profileText } from './role-profiles-context';
 
 export interface RoleMeta {
   role: string;
@@ -45,49 +45,6 @@ export function roleMetaFor(role: TeamRole, language: Language): RoleMeta {
   const p = BUILTIN_BY_ID[role];
   if (!p) return profileToMeta(fallbackProfile(role), language);
   return profileToMeta(p, language);
-}
-
-/**
- * UI 表示順。固定ワーカーロール撤廃に伴い、ビルトインは leader / hr のみ。
- * 動的ロール (Leader が team_recruit で生成) は UI 側でメンバーカード単位に並ぶため、
- * ここには含めない。
- */
-export const ROLE_ORDER: TeamRole[] = ['leader', 'hr'];
-
-export interface TeamMemberSeed {
-  agentId: string;
-  role: TeamRole;
-  agent: 'claude' | 'codex';
-}
-
-/**
- * @deprecated 新コードは role-profiles-context の renderSystemPrompt を直接使う。
- *             builtin の 5 種を使うレガシー経路のみ維持。
- */
-export function buildTeamSystemPrompt(
-  selfAgentId: string,
-  selfRole: TeamRole,
-  teamName: string,
-  members: TeamMemberSeed[],
-  language: Language = 'en'
-): string {
-  const profile = BUILTIN_BY_ID[selfRole] ?? fallbackProfile(selfRole);
-  const profilesById: Record<string, RoleProfile> = Object.fromEntries(
-    BUILTIN_ROLE_PROFILES.map((p) => [p.id, p])
-  );
-  return renderSystemPrompt({
-    profile,
-    profilesById,
-    teamName,
-    selfAgentId,
-    members: members.map((m) => ({
-      agentId: m.agentId,
-      roleProfileId: m.role,
-      agent: m.agent
-    })),
-    globalPreamble: undefined,
-    language
-  });
 }
 
 export function colorOf(role: string | undefined): string {
