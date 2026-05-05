@@ -39,7 +39,13 @@ export default defineConfig(async () => ({
     target: 'chrome120',
     minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
-    rollupOptions: {
+    // Monaco is intentionally isolated below; app-owned JS stays below 500 kB.
+    chunkSizeWarningLimit: 4000,
+    rolldownOptions: {
+      checks: {
+        // Keep semantic checks enabled, but suppress timing noise from CSS/transpile-heavy builds.
+        pluginTimings: false
+      },
       input: resolve(__dirname, 'src/renderer/index.html'),
       output: {
         // Issue #110: main chunk が 4.7MB あり起動時間と WebView メモリに響くため、

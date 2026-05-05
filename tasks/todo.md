@@ -1023,3 +1023,37 @@ PR: https://github.com/yusei531642/vibe-editor/pull/459
 - [ ] 承認後、#456 -> #454 -> #451 の順に Red/Green で実装する。
 - [ ] 実装後、本セクションに進捗・検証結果・残課題を追記する。
 - [ ] PR を作成する場合は `Closes #451`, `Closes #454`, `Closes #456` を本文に含め、CodeRabbit と人間承認を待つ。自動マージはしない。
+## Issue #460 ビルド/テスト時の既存警告整理 計画（2026-05-05 / Codex）
+
+### Fortress Review
+- 対象: https://github.com/yusei531642/vibe-editor/issues/460
+- Tier: C（スコア 3）
+- 判定根拠: DB migration / 認証 / 課金 / 公開 API 契約変更なし。対象は Vitest setup、`@tauri-apps/api/event` import 整理、Vite chunk warning 設定または分割方針の調整に限定する。
+- RCA 判定: PASS。`npm run test` で `HTMLCanvasElement.prototype.getContext` stderr、`npm run build:vite` で chunk size / ineffective dynamic import / plugin timings warning を再現済み。
+- 判定: 条件付き Go。実装前に本計画の確認を受ける。
+
+### 計画
+- [x] Issue #460 の内容を確認し、`feature/issue-460` ブランチを作成する。
+- [x] `npm ci`、`npm run test`、`npm run build:vite` で現状警告を再現する。
+- [x] `src/renderer/src/test-setup.ts` に jsdom 用の Canvas 2D mock を追加し、`measureCellSize` の fallback 挙動を stderr なしで維持する。
+- [x] `src/renderer/src/App.tsx` と `src/renderer/src/lib/use-files-changed.ts` の `@tauri-apps/api/event` import 経路を静的 import に統一し、ineffective dynamic import warning を解消する。
+- [x] `vite.config.ts` の chunk warning を確認し、Monaco 等の意図的な大型 vendor chunk は分割または明示的な warning limit で扱う。警告抑止だけに見える変更にしないよう、理由をコメントに残す。
+- [x] `npm run test` と `npm run build:vite` を再実行し、成功かつ対象警告が消えていることを確認する。
+- [x] 実装後に本節へ進捗、検証結果、残課題を追記する。
+
+### Next Steps
+- [x] ユーザー確認後、上記計画に沿って最小差分で実装する。
+- [ ] 実装後、必要なら PR 本文に `Closes #460` と検証結果を記載する。
+
+### 進捗
+- [x] `src/renderer/src/test-setup.ts` で `HTMLCanvasElement.prototype.getContext` を jsdom 用に no-op 化し、未実装 stderr を抑止。
+- [x] `src/renderer/src/App.tsx` / `src/renderer/src/lib/use-files-changed.ts` の `@tauri-apps/api/event` を静的 import に統一。
+- [x] `vite.config.ts` を `rolldownOptions` に移行し、Monaco の既知大型 chunk 向けに `chunkSizeWarningLimit` を明示。plugin timing warning は `checks.pluginTimings=false` で抑止し、ineffective dynamic import などの意味的チェックは維持。
+
+### 検証結果
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS（28 files / 194 tests、`HTMLCanvasElement.getContext` stderr なし）
+- [x] `npm run build:vite`: PASS（chunk size / ineffective dynamic import / plugin timings warning なし）
+
+### Next Tasks
+- [ ] PR を作成する場合は本文に `Closes #460` と上記検証結果を記載し、CodeRabbit と人間承認を待つ。自動マージはしない。
