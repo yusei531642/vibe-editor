@@ -365,8 +365,7 @@ pub async fn git_diff(
     // diff が「全削除」に見えてしまう。raw bytes → from_utf8_lossy で落としどころを作る。
     let worktree_too_large = tokio::fs::metadata(&abs)
         .await
-        .map(|m| m.len() > MAX_DIFF_BYTES as u64)
-        .unwrap_or(false);
+        .is_ok_and(|m| m.len() > MAX_DIFF_BYTES as u64);
     let (modified, worktree_is_lossy) = if worktree_too_large {
         (String::new(), false)
     } else {

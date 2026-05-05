@@ -51,7 +51,7 @@ pub fn remove_toml_section(content: &str, section: &str) -> String {
             out.push(line);
         }
     }
-    while out.last().map(|s| s.trim().is_empty()).unwrap_or(false) {
+    while out.last().is_some_and(|s| s.trim().is_empty()) {
         out.pop();
     }
     out.join("\n")
