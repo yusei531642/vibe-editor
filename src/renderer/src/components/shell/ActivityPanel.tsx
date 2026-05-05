@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import type { TeamRole } from '../../../../types/shared';
 import { useT } from '../../lib/i18n';
 import {
@@ -37,12 +37,15 @@ export function ActivityPanel({
 
   const groups = useMemo(() => groupEventsByRecency(filtered), [filtered]);
 
-  const filterChips: Array<{ id: FilterKind; label: string }> = [
-    { id: 'all', label: t('activity.filter.all') },
-    { id: 'handoff', label: t('activity.filter.handoff') },
-    { id: 'status', label: t('activity.filter.tool') },
-    { id: 'error', label: t('activity.filter.error') }
-  ];
+  const filterChips = useMemo<Array<{ id: FilterKind; label: string }>>(
+    () => [
+      { id: 'all', label: t('activity.filter.all') },
+      { id: 'handoff', label: t('activity.filter.handoff') },
+      { id: 'status', label: t('activity.filter.tool') },
+      { id: 'error', label: t('activity.filter.error') }
+    ],
+    [t]
+  );
 
   return (
     <aside className={`activity${className ? ' ' + className : ''}`} style={style} aria-label="Activity feed">
@@ -99,7 +102,7 @@ export function ActivityPanel({
   );
 }
 
-function FeedItem({ event }: { event: ActivityEvent }): JSX.Element {
+const FeedItem = memo(function FeedItem({ event }: { event: ActivityEvent }): JSX.Element {
   const color = roleColorVar(event.fromRole ?? event.role ?? null);
   const dateLabel = new Date(event.ts).toLocaleTimeString(undefined, {
     hour: '2-digit',
@@ -131,7 +134,7 @@ function FeedItem({ event }: { event: ActivityEvent }): JSX.Element {
       ) : null}
     </div>
   );
-}
+});
 
 function roleColorVar(role: TeamRole | string | null | undefined): string {
   if (!role) return 'var(--accent)';
