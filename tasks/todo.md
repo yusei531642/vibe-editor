@@ -1096,3 +1096,41 @@ PR: https://github.com/yusei531642/vibe-editor/pull/459
 - [ ] Release PR を作成し、CI / reviewer を確認する。
 - [ ] PR merge 後、`v1.4.9` tag push で release workflow を起動する。
 - [ ] draft release の成果物確認後に publish 判断を行う。
+
+## Issue #466 Glass テーマのボタン文字コントラスト改善計画（2026-05-05 / Codex）
+
+### 計画
+- [x] Glass テーマの色定義と `var(--accent)` 背景を使うボタン CSS を調査する。
+- [x] 新規 Issue を起票し、調査結果と再現手順を記載する。
+- [x] Issue コメントに実装計画を投稿し、`planned` ラベルを付与する。
+- [x] 実装前にユーザー確認を受ける。
+- [x] `ThemeVars` にアクセント背景上の文字色トークンを追加し、全テーマへ値を設定する。
+- [x] `setThemeColorVars()` から `--accent-foreground` を公開する。
+- [x] `.toolbar__btn--primary` / `.onboarding__btn--primary` / `.canvas-btn--primary` などの白系固定文字色を `var(--accent-foreground)` へ置き換える。
+- [x] Glass の `#00FFFF` 背景と濃色 foreground のコントラストが 4.5:1 以上であることを確認する。
+- [x] `npm run typecheck` / `npm run test` / `npm run build:vite` / Vite smoke で動作と見た目を確認する。
+
+### Next Steps
+- [ ] ユーザー確認後、`feature/issue-466` ブランチを作成して最小差分で実装する。
+- [ ] PR を作成する場合は本文に `Closes #466` と検証結果を記載し、CodeRabbit と人間承認を待つ。自動マージはしない。
+
+### 進捗
+- [x] Issue: https://github.com/yusei531642/vibe-editor/issues/466
+- [x] Plan comment: https://github.com/yusei531642/vibe-editor/issues/466#issuecomment-4378224994
+- [x] Labels: `bug`, `ui`, `a11y`, `planned`
+- [x] `feature/issue-466` ブランチを作成し、Issue ラベルを `implementing` に更新。
+- [x] `src/renderer/src/lib/themes.ts` に `accentForeground` を追加し、Glass は `#050714` に設定。
+- [x] `src/renderer/src/lib/__tests__/theme-contrast.test.ts` を追加し、Glass accent / hover と foreground の 4.5:1 以上を検証。
+- [x] Vite smoke で `.toolbar__btn--primary` / `.onboarding__btn--primary` / `.canvas-btn--primary` / `.rail__badge` の計算コントラスト 16.0:1 を確認。
+
+### 検証結果
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test -- theme-contrast`: PASS（2 tests）
+- [x] `npm run test`: PASS（29 files / 196 tests）
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
+- [x] Browser smoke: `http://127.0.0.1:5173/` で Glass 変数を適用し、主要ボタン/バッジの文字色 `rgb(5, 7, 20)`、背景 `rgb(0, 255, 255)`、contrast `16.0` を確認。
+
+### Next Tasks
+- [x] 実装時は `--bg` が Glass で透明になる点を避け、アクセント背景専用の foreground token を使う。
+- [ ] PR を作成し、CodeRabbit / CI を確認する。

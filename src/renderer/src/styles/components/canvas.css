@@ -181,7 +181,7 @@
 .canvas-btn--primary {
   background: var(--claude-brand, var(--accent));
   border-color: transparent;
-  color: #fffdf7;
+  color: var(--accent-foreground);
 }
 .canvas-btn--primary:hover {
   background: var(--claude-brand-strong, var(--accent-hover));
@@ -306,7 +306,7 @@
   font-size: 9px;
   font-weight: 700;
   line-height: 1;
-  color: var(--bg);
+  color: var(--accent-foreground);
   background: var(--claude-brand, var(--accent));
   border-radius: 999px;
 }

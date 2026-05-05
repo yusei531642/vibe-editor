@@ -393,7 +393,7 @@ body.is-resizing * {
 .sidebar-switcher__btn.is-active .sidebar-switcher__badge {
   background: var(--claude-brand, var(--accent));
   border-color: transparent;
-  color: #fffdf7;
+  color: var(--accent-foreground);
 }
 
 /* サイドバー個別ビュー */
@@ -644,7 +644,7 @@ body.is-resizing * {
 
 .toolbar__btn--primary {
   background: var(--accent);
-  color: #fffdf7;
+  color: var(--accent-foreground);
   font-weight: 600;
 }
 
@@ -2075,7 +2075,7 @@ body.is-resizing * {
   gap: 4px;
   padding: 3px 8px;
   background: var(--accent);
-  color: #fffdf7;
+  color: var(--accent-foreground);
   font-weight: 600;
   border: none;
   border-radius: 3px;
@@ -2615,7 +2615,7 @@ body.is-resizing * {
 :root[data-theme='claude-dark'] .toolbar__btn--primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fffdf7;
+  color: var(--accent-foreground);
   font-weight: 500;
 }
 
