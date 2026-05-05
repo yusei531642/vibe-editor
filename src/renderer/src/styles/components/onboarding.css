@@ -169,7 +169,7 @@
   display: grid;
   place-items: center;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-foreground);
   margin-bottom: 28px;
   box-shadow:
     0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent),
@@ -587,7 +587,7 @@
 
 .onboarding__btn--primary {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-foreground);
   border-color: var(--accent);
 }
 .onboarding__btn--primary:hover {

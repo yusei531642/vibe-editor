@@ -148,3 +148,10 @@ codex exec --sandbox read-only --color never --ephemeral \
 - exit 127 が「Bash の command not found 規約」由来か Codex 自身の戻り値か未確定。Claude Code ハーネスのプロセス kill 後の表示の可能性が高い (codex 自体は通常 0 / 1 を返す)。
 - ConstrainedLanguage の影響度。1 回目は完走したことから「常に致命的」ではなく、「内部 fallback の停止点」と推定。
 - 2 回目失敗時のセッションファイルが `~/.codex/sessions/2026/04/28/` に**作られていない**ことから、Codex CLI 起動初期のプロンプト読み込み段階で詰まっており、rollout 機構には到達していない。
+
+## Glass テーマのアクセント背景に白文字を固定しない
+
+- Glass の `--accent` は `#00FFFF` のため、`#fff` / `#fffdf7` / Glass text `#E0E0FF` を重ねるとコントラストが約 1.0〜1.2:1 になり読めない。
+- Glass の `--bg` は透明なので、アクセント背景上の文字色として `var(--bg)` を流用しない。
+- ボタンやバッジで `background: var(--accent)` を使う場合は、テーマ側から `--accent-foreground` のような専用トークンを流し、Glass では濃色ネイビーを使う。
+- テーマ色を調整するときは `themes.ts` の `ThemeVars`、CSS 変数流し込み、対象 CSS、必要なコントラスト検証をセットで確認する。

@@ -14,6 +14,7 @@ export interface ThemeVars {
   accentHover: string;
   accentSoft: string;
   accentTint: string;
+  accentForeground: string;
   warning: string;
   warningHover: string;
   text: string;
@@ -45,6 +46,7 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
     accentHover: '#e88a6a',
     accentSoft: '#d97757',
     accentTint: 'rgba(217, 119, 87, 0.12)',
+    accentForeground: '#fffdf7',
     warning: '#d4a27f',
     warningHover: '#e0b592',
     text: '#f8f8f6',
@@ -72,6 +74,7 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
     accentHover: '#c6613f',
     accentSoft: '#d97757',
     accentTint: 'rgba(217, 119, 87, 0.10)',
+    accentForeground: '#fffdf7',
     warning: '#a86b00',
     warningHover: '#8f5a00',
     text: '#141413',
@@ -95,6 +98,7 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
     accentHover: '#6e7bdc',
     accentSoft: '#8a94eb',
     accentTint: 'rgba(94, 106, 210, 0.16)',
+    accentForeground: '#fffdf7',
     warning: '#f5a623',
     warningHover: '#f7b955',
     text: '#f7f8f8',
@@ -118,6 +122,7 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
     accentHover: '#9072ff',
     accentSoft: '#a594ff',
     accentTint: 'rgba(124, 92, 255, 0.16)',
+    accentForeground: '#fffdf7',
     warning: '#f7b955',
     warningHover: '#f9c970',
     text: '#eef2ff',
@@ -160,6 +165,7 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
     accentHover: '#33FFFF',
     accentSoft: '#00CCCC',
     accentTint: 'rgba(0, 255, 255, 0.14)',
+    accentForeground: '#050714',
     warning: '#FFD700',
     warningHover: '#FFE033',
     text: '#E0E0FF',
@@ -183,6 +189,7 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
     accentHover: '#18181b',
     accentSoft: '#666666',
     accentTint: 'rgba(0, 0, 0, 0.06)',
+    accentForeground: '#ffffff',
     warning: '#f5a623',
     warningHover: '#d48806',
     text: '#000000',
@@ -225,6 +232,7 @@ function setThemeColorVars(root: HTMLElement, theme: ThemeVars): void {
     '--accent-hover': theme.accentHover,
     '--accent-soft': theme.accentSoft,
     '--accent-tint': theme.accentTint,
+    '--accent-foreground': theme.accentForeground,
     '--warning': theme.warning,
     '--warning-hover': theme.warningHover,
     '--text': theme.text,
