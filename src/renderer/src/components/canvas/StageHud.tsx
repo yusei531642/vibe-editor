@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { LayoutGrid, List, Maximize2, Ruler, Users, ZoomIn, ZoomOut } from 'lucide-react';
 import { useReactFlow } from '@xyflow/react';
 import { useT } from '../../lib/i18n';
@@ -46,32 +46,42 @@ export function StageHud(): JSX.Element {
     };
   }, [arrangeOpen]);
 
-  const views: Array<{ id: StageView; label: string; tip: string; icon: JSX.Element }> = [
-    {
-      id: 'stage',
-      label: t('canvas.hud.stage'),
-      tip: t('canvas.hud.stage.tooltip'),
-      icon: <Users size={12} strokeWidth={2} />
-    },
-    {
-      id: 'list',
-      label: t('canvas.hud.list'),
-      tip: t('canvas.hud.list.tooltip'),
-      icon: <List size={12} strokeWidth={2} />
-    },
-    {
-      id: 'focus',
-      label: t('canvas.hud.focus'),
-      tip: t('canvas.hud.focus.tooltip'),
-      icon: <Maximize2 size={12} strokeWidth={2} />
-    }
-  ];
+  // 翻訳結果の配列は `t` 依存。zustand store 変化 (stageView / arrangeGap) のたびに
+  // 配列リテラル + JSX を作り直すと map 配下の Lucide アイコン (memo されない子) も
+  // 全て新しい props で識別され、Chrome DevTools React profiler 上で目立つ flicker
+  // 要因になる。t を使うので useMemo で `t` 同一 → 同一参照にする。
+  const views = useMemo<Array<{ id: StageView; label: string; tip: string; icon: JSX.Element }>>(
+    () => [
+      {
+        id: 'stage',
+        label: t('canvas.hud.stage'),
+        tip: t('canvas.hud.stage.tooltip'),
+        icon: <Users size={12} strokeWidth={2} />
+      },
+      {
+        id: 'list',
+        label: t('canvas.hud.list'),
+        tip: t('canvas.hud.list.tooltip'),
+        icon: <List size={12} strokeWidth={2} />
+      },
+      {
+        id: 'focus',
+        label: t('canvas.hud.focus'),
+        tip: t('canvas.hud.focus.tooltip'),
+        icon: <Maximize2 size={12} strokeWidth={2} />
+      }
+    ],
+    [t]
+  );
 
-  const gaps: Array<{ id: ArrangeGap; label: string }> = [
-    { id: 'tight', label: t('canvas.hud.arrange.gap.tight') },
-    { id: 'normal', label: t('canvas.hud.arrange.gap.normal') },
-    { id: 'wide', label: t('canvas.hud.arrange.gap.wide') }
-  ];
+  const gaps = useMemo<Array<{ id: ArrangeGap; label: string }>>(
+    () => [
+      { id: 'tight', label: t('canvas.hud.arrange.gap.tight') },
+      { id: 'normal', label: t('canvas.hud.arrange.gap.normal') },
+      { id: 'wide', label: t('canvas.hud.arrange.gap.wide') }
+    ],
+    [t]
+  );
 
   return (
     <div className="tc__hud" role="toolbar" aria-label="Canvas view">

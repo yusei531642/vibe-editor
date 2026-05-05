@@ -41,6 +41,8 @@ function HandoffEdgeImpl({
   const color = d?.color ?? '#7a7afd';
   const preview = d?.preview ?? '';
 
+  // @keyframes handoff-flow は canvas.css に集約済み (旧実装は edge mount のたびに
+  // 同一内容の <style> を吐いていた)。インライン style は色依存ぶんだけ残す。
   return (
     <>
       <BaseEdge
@@ -57,21 +59,14 @@ function HandoffEdgeImpl({
       {preview && (
         <EdgeLabelRenderer>
           <div
+            className="canvas-handoff-edge__label"
             style={{
-              position: 'absolute',
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
               background: `${color}1a`,
               color,
-              padding: '2px 8px',
-              borderRadius: 6,
-              fontSize: 10,
               border: `1px solid ${color}66`,
-              maxWidth: 240,
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              pointerEvents: 'none',
-              fontFamily: "'Inter', sans-serif",
+              // Glass CSS contract (`.tc__hud` 以外で backdrop-filter 禁止) に従い
+              // インライン style 側で blur をかける。一時 edge ラベルなので影響軽微。
               backdropFilter: 'blur(4px)'
             }}
           >
@@ -79,11 +74,6 @@ function HandoffEdgeImpl({
           </div>
         </EdgeLabelRenderer>
       )}
-      <style>{`
-        @keyframes handoff-flow {
-          to { stroke-dashoffset: -14; }
-        }
-      `}</style>
     </>
   );
 }

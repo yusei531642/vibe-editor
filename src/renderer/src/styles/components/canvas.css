@@ -120,9 +120,6 @@
   z-index: 5;
 }
 
-
-
-
 .canvas-header__brand {
   display: inline-flex;
   align-items: center;
@@ -1039,8 +1036,18 @@
     stroke-dashoffset: -100;
   }
 }
-.react-flow__edge.react-flow__edge-handoff .react-flow__edge-path,
-.tc__edge-path {
+/* HandoffEdge コンポーネントが inline style で参照する keyframes。
+   旧実装では edge instance ごとに <style> を JSX 内で吐いていたため、HMR や
+   pulseEdge のたびに同一定義の <style> ノードが追加されていた。グローバル定義に集約。 */
+@keyframes handoff-flow {
+  to {
+    stroke-dashoffset: -14;
+  }
+}
+/* `.tc__edge-path` は HandoffEdge が `.react-flow__edge-path` を直接吐くため未使用だが、
+   旧クラス名のまま参照してくる外部スタイルがあった場合の互換のため残す削除候補。
+   現状コード側では参照されていないので将来削除予定。 */
+.react-flow__edge.react-flow__edge-handoff .react-flow__edge-path {
   fill: none;
   stroke: var(--role-color, var(--accent));
   stroke-width: 2;
@@ -1049,20 +1056,20 @@
   animation: tcEdgeFlow 1.6s linear infinite;
 }
 
-/* flying message pill (placed absolutely in container via inline style) */
-.tc__msg {
+/* HandoffEdge label: 静的レイアウトは CSS、色依存ぶんだけインライン。
+   backdrop-filter は Glass CSS contract (`.tc__hud` 以外で禁止) に従い、
+   従来通りインライン style 側で適用する。 */
+.canvas-handoff-edge__label {
   position: absolute;
-  padding: 4px 10px;
-  background: var(--bg-elev);
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  font-size: 10.5px;
-  color: var(--text);
-  font-family: var(--mono-font);
-  box-shadow: var(--shadow-md), 0 0 0 4px rgba(217, 119, 87, 0.28);
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  max-width: 240px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   pointer-events: none;
-  z-index: 40;
+  font-family: 'Inter', sans-serif;
 }
 
 /* stage view modes — when stageView === 'list', the ReactFlow stage is hidden */
