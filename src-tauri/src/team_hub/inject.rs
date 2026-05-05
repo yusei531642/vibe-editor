@@ -118,14 +118,11 @@ pub async fn inject(
     from_role: &str,
     text: &str,
 ) -> bool {
-    let session = match registry.get_by_agent(agent_id) {
-        Some(s) => s,
-        None => {
-            tracing::warn!(
-                "[inject] no session for agent {agent_id} — registry has no by_agent entry"
-            );
-            return false;
-        }
+    let Some(session) = registry.get_by_agent(agent_id) else {
+        tracing::warn!(
+            "[inject] no session for agent {agent_id} — registry has no by_agent entry"
+        );
+        return false;
     };
     let banner = format!("[Team ← {from_role}] ");
     let chunks = build_chunks(&banner, text);

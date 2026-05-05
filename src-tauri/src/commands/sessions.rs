@@ -27,9 +27,8 @@ fn projects_dir(root: &str) -> PathBuf {
 #[tauri::command]
 pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
     let dir = projects_dir(&project_root);
-    let mut rd = match tokio::fs::read_dir(&dir).await {
-        Ok(r) => r,
-        Err(_) => return vec![],
+    let Ok(mut rd) = tokio::fs::read_dir(&dir).await else {
+        return vec![];
     };
     // Issue #31: encode_project_path は非英数を '-' に潰すので、別 project が同じ
     // encoded directory に衝突し得る (例: `C:\repo-a` と `C:\repo\a`)。
@@ -59,9 +58,8 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
             .and_then(|s| s.to_str())
             .unwrap_or("")
             .to_string();
-        let metadata = match tokio::fs::metadata(&path).await {
-            Ok(m) => m,
-            Err(_) => continue,
+        let Ok(metadata) = tokio::fs::metadata(&path).await else {
+            continue;
         };
         let last_modified_at = metadata
             .modified()
@@ -145,9 +143,8 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
 ///     (正確な行数は fs::metadata の行数相当だと OS 依存で取れないので割り切る)
 async fn read_jsonl_summary(path: &std::path::Path) -> (String, u32, Option<String>) {
     const HEAD_LIMIT_LINES: u32 = 2000;
-    let f = match tokio::fs::File::open(path).await {
-        Ok(f) => f,
-        Err(_) => return (String::new(), 0, None),
+    let Ok(f) = tokio::fs::File::open(path).await else {
+        return (String::new(), 0, None);
     };
     let reader = tokio::io::BufReader::new(f);
     let mut lines = reader.lines();

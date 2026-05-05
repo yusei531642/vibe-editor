@@ -42,13 +42,11 @@ pub async fn dialog_open_file(
 /// 「ユーザーホーム配下」または「現在のプロジェクトルート / その祖先」だけを許可する。
 /// /etc, /sys, /proc, C:\Windows などのシステム領域は早期 reject。
 fn is_path_safe_to_query(path: &std::path::Path) -> bool {
-    let canon = match path.canonicalize() {
-        Ok(p) => p,
-        Err(_) => return false, // 存在しないパスも reject (fingerprint 防止)
+    let Ok(canon) = path.canonicalize() else {
+        return false; // 存在しないパスも reject (fingerprint 防止)
     };
-    let home = match dirs::home_dir() {
-        Some(h) => h,
-        None => return false,
+    let Some(home) = dirs::home_dir() else {
+        return false;
     };
     let home_canon = home.canonicalize().unwrap_or(home);
     if canon.starts_with(&home_canon) {

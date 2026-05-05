@@ -71,9 +71,8 @@ pub async fn restore(snap: Option<Vec<u8>>) -> Result<()> {
 
 pub async fn cleanup() -> Result<bool> {
     let path = config_path();
-    let bytes = match fs::read(&path).await {
-        Ok(b) => b,
-        Err(_) => return Ok(false),
+    let Ok(bytes) = fs::read(&path).await else {
+        return Ok(false);
     };
     let mut config: Value = serde_json::from_slice(&bytes).unwrap_or_default();
     let removed = config

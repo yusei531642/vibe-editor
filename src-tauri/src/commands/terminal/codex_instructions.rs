@@ -34,9 +34,8 @@ pub async fn prepare_codex_instructions_file(instructions: &str) -> Option<PathB
 pub async fn cleanup_old_codex_instructions(dir: &std::path::Path) {
     // Issue #138: 旧 7 日 → 24h に短縮。情報残存リスクを下げる
     const TTL_SECS: u64 = 24 * 60 * 60;
-    let mut rd = match tokio::fs::read_dir(dir).await {
-        Ok(r) => r,
-        Err(_) => return,
+    let Ok(mut rd) = tokio::fs::read_dir(dir).await else {
+        return;
     };
     let now = std::time::SystemTime::now();
     while let Ok(Some(entry)) = rd.next_entry().await {

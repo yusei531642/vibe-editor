@@ -674,9 +674,8 @@ fn is_safe_external_url(url: &str) -> bool {
     if trimmed.is_empty() || trimmed.len() > 8192 {
         return false;
     }
-    let colon = match trimmed.find(':') {
-        Some(i) => i,
-        None => return false,
+    let Some(colon) = trimmed.find(':') else {
+        return false;
     };
     let scheme = &trimmed[..colon];
     // scheme は ASCII 英数 + `-.+` のみが RFC 的に許容

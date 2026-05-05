@@ -20,9 +20,8 @@ static SAVE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 #[tauri::command]
 pub async fn role_profiles_load() -> Value {
     let path = role_profiles_path();
-    let bytes = match fs::read(&path).await {
-        Ok(b) => b,
-        Err(_) => return Value::Null,
+    let Ok(bytes) = fs::read(&path).await else {
+        return Value::Null;
     };
     match serde_json::from_slice::<Value>(&bytes) {
         Ok(v) => v,

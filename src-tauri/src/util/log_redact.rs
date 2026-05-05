@@ -8,9 +8,8 @@
 /// `path` 内に含まれるユーザーホームディレクトリを `~` に置き換えた文字列を返す。
 /// home が取れない場合は input をそのまま返す。
 pub fn redact_home(path: &str) -> String {
-    let home = match dirs::home_dir() {
-        Some(h) => h,
-        None => return path.to_string(),
+    let Some(home) = dirs::home_dir() else {
+        return path.to_string();
     };
     let home_str = home.to_string_lossy();
     if home_str.is_empty() {
