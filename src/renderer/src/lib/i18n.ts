@@ -350,6 +350,20 @@ const ja: Dict = {
   'settings.apply': '適用して保存',
   'settings.custom': '（カスタム）',
 
+  // ---------- Theme labels (UserMenu / TweaksPanel / OnboardingWizard 共有) ----------
+  'theme.label.claude-dark': 'Claude Dark',
+  'theme.label.claude-light': 'Claude Light',
+  'theme.label.dark': 'ダーク',
+  'theme.label.light': 'ライト',
+  'theme.label.midnight': 'ミッドナイト',
+  'theme.label.glass': 'グラス',
+
+  // ---------- Language labels (UserMenu / TweaksPanel / LanguageSection 共有) ----------
+  'lang.label.ja': '日本語',
+  'lang.label.ja.sub': 'Japanese',
+  'lang.label.en': 'English',
+  'lang.label.en.sub': 'English',
+
   // ---------- Settings: Logs (Issue #326) ----------
   'settings.logs.title': 'ログ',
   'settings.logs.desc':
@@ -374,6 +388,8 @@ const ja: Dict = {
   'toast.notEmpty': 'フォルダが空ではありません。既存として開きます',
   'toast.openedFile': '{file} の親フォルダをプロジェクトとして読み込みました',
   'toast.terminalNotReady': 'ターミナルが起動していません',
+  'toast.settings.saveFailed': '設定の保存に失敗しました: {error}',
+  'toast.settings.projectRootFailed': 'プロジェクトルートの反映に失敗しました: {error}',
 
   // ---------- Terminal (pasteエラー等) ----------
   'terminal.pasteImageFailed': '画像保存失敗',
@@ -876,6 +892,20 @@ const en: Dict = {
   'settings.apply': 'Apply & save',
   'settings.custom': '(custom)',
 
+  // ---------- Theme labels (UserMenu / TweaksPanel / OnboardingWizard) ----------
+  'theme.label.claude-dark': 'Claude Dark',
+  'theme.label.claude-light': 'Claude Light',
+  'theme.label.dark': 'Dark',
+  'theme.label.light': 'Light',
+  'theme.label.midnight': 'Midnight',
+  'theme.label.glass': 'Glass',
+
+  // ---------- Language labels (UserMenu / TweaksPanel / LanguageSection) ----------
+  'lang.label.ja': '日本語',
+  'lang.label.ja.sub': 'Japanese',
+  'lang.label.en': 'English',
+  'lang.label.en.sub': 'English',
+
   // ---------- Settings: Logs (Issue #326) ----------
   'settings.logs.title': 'Logs',
   'settings.logs.desc':
@@ -900,6 +930,8 @@ const en: Dict = {
   'toast.notEmpty': 'Folder is not empty. Opening as existing project',
   'toast.openedFile': 'Loaded parent folder of {file} as project',
   'toast.terminalNotReady': 'Terminal is not ready',
+  'toast.settings.saveFailed': 'Failed to save settings: {error}',
+  'toast.settings.projectRootFailed': 'Failed to apply project root: {error}',
 
   // ---------- Status ----------
   // ---------- Terminal (paste errors) ----------

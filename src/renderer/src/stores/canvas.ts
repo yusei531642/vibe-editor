@@ -12,6 +12,14 @@ import {
   unifyTerminalSize,
   type ArrangeGap
 } from '../lib/canvas-arrange';
+import {
+  NODE_W as NODE_W_DEFAULT,
+  NODE_H as NODE_H_DEFAULT,
+  __testables as MIGRATION_TESTABLES,
+  newId,
+  runCanvasMigration,
+  normalizeCanvasState
+} from '../lib/canvas-migrations';
 
 export type CardType = 'terminal' | 'agent' | 'editor' | 'diff' | 'fileTree' | 'changes';
 
@@ -90,12 +98,11 @@ export type StageView = 'stage' | 'list' | 'focus';
 
 /**
  * カード初期幅/高さ (新規 addCard 時に適用)。
- * Issue #253: 旧 480x320 では Codex/Claude TUI のヘッダーが折り返しで崩れがちだったため
- * 640x400 に引き上げ。永続化された旧サイズ (<=480 / <=320) のノードは persist v3 migration
- * で同じ値に拡大される。ユーザーが手動でそれより大きくリサイズした値は尊重。
+ * 値の実体は `lib/canvas-migrations.ts` に集約 (persist v3 の閾値定数と一緒に管理する
+ * ことで「初期サイズと migration 閾値が同期している」を読みやすくしている)。
  */
-export const NODE_W = 640;
-export const NODE_H = 400;
+export const NODE_W = NODE_W_DEFAULT;
+export const NODE_H = NODE_H_DEFAULT;
 /**
  * NodeResizer の最小幅/高さ (ユーザーが手動縮小したときの下限)。
  * Issue #253: ターミナル UI が崩れず Codex/Claude TUI が読める下限として 480x280。
@@ -103,162 +110,6 @@ export const NODE_H = 400;
  */
 export const NODE_MIN_W = 480;
 export const NODE_MIN_H = 280;
-/** persist v3 で既存ユーザーのカードを引き上げる閾値 (これ以下のサイズなら NODE_W/H に拡大) */
-const LEGACY_NODE_W_THRESHOLD = 480;
-const LEGACY_NODE_H_THRESHOLD = 320;
-const CARD_TYPES: CardType[] = ['terminal', 'agent', 'editor', 'diff', 'fileTree', 'changes'];
-const STAGE_VIEWS: StageView[] = ['stage', 'list', 'focus'];
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function isCardType(value: unknown): value is CardType {
-  return typeof value === 'string' && CARD_TYPES.includes(value as CardType);
-}
-
-function finiteOr(value: unknown, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
-}
-
-/**
- * Issue #385: Canvas viewport の `zoom` を可視範囲にクランプし、
- * `x` / `y` が極端な値 (= 全カードが viewport 外) のときは復帰用の値に戻す。
- * これらは render 中に React Flow が黒画面化する/カードが見えなくなる主要因。
- */
-const VIEWPORT_MIN_ZOOM = 0.1;
-const VIEWPORT_MAX_ZOOM = 4;
-/** nodes ありで viewport がここまで離れていたら「外れすぎ」と判定して復帰用 viewport にする */
-const VIEWPORT_RESCUE_DISTANCE = 1_000_000;
-
-function clampZoom(zoom: number): number {
-  // NaN は単位が無いので 1 (= 等倍) にフォールバック。±Infinity は Math.min/max で
-  // それぞれ MAX_ZOOM / MIN_ZOOM にクランプされる。
-  if (Number.isNaN(zoom)) return 1;
-  return Math.min(Math.max(zoom, VIEWPORT_MIN_ZOOM), VIEWPORT_MAX_ZOOM);
-}
-
-interface NormalizedCanvasState {
-  nodes: Node<CardData>[];
-  viewport: Viewport;
-  stageView: StageView;
-  teamLocks: Record<string, boolean>;
-  arrangeGap: ArrangeGap;
-}
-
-/**
- * 永続化データ / merge 入力を React Flow が安全に描画できる形へ正規化する。
- * - nodes: 必須プロパティの欠損 / 不正値を補い、type 不明な要素は捨てる
- * - viewport.zoom: [VIEWPORT_MIN_ZOOM, VIEWPORT_MAX_ZOOM] にクランプ
- * - viewport.x/y: 非有限なら 0、極端な値で nodes が完全に外れていれば nodes 中心へ復帰
- * - stageView / teamLocks / arrangeGap: 不正な値ならデフォルトに戻す
- */
-function normalizeCanvasState(input: unknown): NormalizedCanvasState {
-  const p = isRecord(input) ? input : {};
-  const nodes = Array.isArray(p.nodes)
-    ? p.nodes
-        .map((raw, index): Node<CardData> | null => {
-          if (!isRecord(raw)) return null;
-          const data = isRecord(raw.data) ? raw.data : {};
-          const type = isCardType(raw.type)
-            ? raw.type
-            : isCardType(data.cardType)
-              ? data.cardType
-              : null;
-          if (!type) return null;
-          const positionRaw = isRecord(raw.position) ? raw.position : {};
-          const styleRaw = isRecord(raw.style) ? raw.style : {};
-          const title =
-            typeof data.title === 'string' && data.title.trim()
-              ? data.title
-              : 'Card';
-          // Issue #385 (codex review #3): node.position が有限値でも極端 (|x|>1M 等)
-          // だと viewport が正常でもカードが viewport 外で見えず実質黒画面になる。
-          // rescue 距離を超える座標は fallback grid に戻して可視性を担保する。
-          const rawX = finiteOr(positionRaw.x, (index % 6) * (NODE_W + 32));
-          const rawY = finiteOr(positionRaw.y, Math.floor(index / 6) * (NODE_H + 32));
-          const safeX =
-            Math.abs(rawX) > VIEWPORT_RESCUE_DISTANCE
-              ? (index % 6) * (NODE_W + 32)
-              : rawX;
-          const safeY =
-            Math.abs(rawY) > VIEWPORT_RESCUE_DISTANCE
-              ? Math.floor(index / 6) * (NODE_H + 32)
-              : rawY;
-          return {
-            ...(raw as Partial<Node<CardData>>),
-            id: typeof raw.id === 'string' && raw.id ? raw.id : newId(type),
-            type,
-            position: { x: safeX, y: safeY },
-            data: {
-              ...data,
-              cardType: type,
-              title,
-              payload: data.payload
-            },
-            style: {
-              ...styleRaw,
-              width: finiteOr(styleRaw.width, NODE_W),
-              height: finiteOr(styleRaw.height, NODE_H)
-            }
-          };
-        })
-        .filter((n): n is Node<CardData> => n !== null)
-    : [];
-  const viewportRaw = isRecord(p.viewport) ? p.viewport : {};
-  let vpX = finiteOr(viewportRaw.x, 0);
-  let vpY = finiteOr(viewportRaw.y, 0);
-  // viewport.zoom は clampZoom 側で NaN→1 / ±Infinity→MAX/MIN を吸収する。
-  // finiteOr で潰すと Infinity が 1 にフォールバックされて clamp 仕様が崩れるので注意。
-  const vpZoom = clampZoom(
-    typeof viewportRaw.zoom === 'number' ? viewportRaw.zoom : 1
-  );
-  // nodes があるのに viewport がカード群から大きく外れていたら、nodes の中心 (= 0,0 周辺の代表点)
-  // へ寄せる。React Flow は座標を pan で表現するので、x/y が ±VIEWPORT_RESCUE_DISTANCE を
-  // 超えていたら現実的な操作で戻れない位置と判定。
-  if (
-    nodes.length > 0 &&
-    (Math.abs(vpX) > VIEWPORT_RESCUE_DISTANCE ||
-      Math.abs(vpY) > VIEWPORT_RESCUE_DISTANCE)
-  ) {
-    vpX = 0;
-    vpY = 0;
-  }
-  const teamLocks = isRecord(p.teamLocks)
-    ? Object.fromEntries(
-        Object.entries(p.teamLocks).filter(([, v]) => typeof v === 'boolean')
-      )
-    : {};
-  const stageView = STAGE_VIEWS.includes(p.stageView as StageView)
-    ? (p.stageView as StageView)
-    : 'stage';
-  const arrangeGap = ((): ArrangeGap => {
-    const gap = p.arrangeGap;
-    return gap === 'tight' || gap === 'normal' || gap === 'wide'
-      ? gap
-      : 'normal';
-  })();
-  return {
-    nodes,
-    viewport: { x: vpX, y: vpY, zoom: vpZoom },
-    stageView,
-    teamLocks,
-    arrangeGap
-  };
-}
-
-/**
- * Issue #157: 旧 `Date.now() + counter` 方式は zustand persist 復元 + リロード後の
- * counter リセットで稀に衝突しうる。crypto.randomUUID() で衝突確率を実質ゼロに。
- * (Tauri WebView2 / 主要ブラウザでサポート済み。fallback 環境では Math.random ベースで補う)。
- */
-function newId(prefix: string): string {
-  const u =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID()
-      : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-  return `${prefix}-${u}`;
-}
 
 /**
  * Issue #156: pulseEdge の TTL 用 setTimeout ハンドルを edge.id ごとに保持する。
@@ -271,13 +122,9 @@ const pulseTimers = new Map<string, number>();
 
 /** Issue #385: テストから直接 normalize の挙動を検証するための export。
  *  本体は zustand persist の migrate / merge から間接呼出しされるが、unit test では
- *  この export を使って壊れた localStorage 入力 / 極端な viewport などの境界条件を確認する。 */
-export const __testables = {
-  normalizeCanvasState,
-  VIEWPORT_MIN_ZOOM,
-  VIEWPORT_MAX_ZOOM,
-  VIEWPORT_RESCUE_DISTANCE
-};
+ *  この export を使って壊れた localStorage 入力 / 極端な viewport などの境界条件を確認する。
+ *  実体は `lib/canvas-migrations.ts` 側に移し、こちらは互換維持のための re-export。 */
+export const __testables = MIGRATION_TESTABLES;
 
 export const useCanvasStore = create<CanvasState>()(
   /**
@@ -447,47 +294,12 @@ export const useCanvasStore = create<CanvasState>()(
       // させる。同 version の rehydrate でも `merge` で再正規化するため、runtime で
       // 紛れ込んだ NaN viewport / 範囲外 zoom / 壊れた node も次回起動時には掃除される。
       version: 4,
-      migrate: (persisted, fromVersion) => {
-        if (!isRecord(persisted)) {
-          return normalizeCanvasState({}) as Partial<CanvasState>;
-        }
-        const p: Record<string, unknown> = { ...persisted };
-        // v1 → v2: payload.role を payload.roleProfileId にリネーム
-        if (fromVersion < 2 && Array.isArray(p.nodes)) {
-          p.nodes = p.nodes.map((n) => {
-            if (!isRecord(n)) return n;
-            const data = (n.data ?? {}) as Record<string, unknown>;
-            const payload = (data.payload ?? {}) as Record<string, unknown>;
-            if (typeof payload.role === 'string' && !payload.roleProfileId) {
-              payload.roleProfileId = payload.role;
-            }
-            return { ...n, data: { ...data, payload } };
-          });
-        }
-        // v2 → v3 (Issue #253): 旧 NODE_W/H (480x320) → 640x400。ユーザーが手動拡大した
-        // 値は尊重するため <= LEGACY_*_THRESHOLD のときだけ引き上げ。
-        if (fromVersion < 3 && Array.isArray(p.nodes)) {
-          p.nodes = p.nodes.map((n) => {
-            if (!isRecord(n)) return n;
-            const styleRaw = isRecord(n.style) ? n.style : {};
-            const w = typeof styleRaw.width === 'number' ? styleRaw.width : undefined;
-            const h = typeof styleRaw.height === 'number' ? styleRaw.height : undefined;
-            const nextW = w !== undefined && w <= LEGACY_NODE_W_THRESHOLD ? NODE_W : w;
-            const nextH = h !== undefined && h <= LEGACY_NODE_H_THRESHOLD ? NODE_H : h;
-            if (nextW === w && nextH === h) return n;
-            return {
-              ...n,
-              style: {
-                ...styleRaw,
-                ...(nextW !== undefined ? { width: nextW } : {}),
-                ...(nextH !== undefined ? { height: nextH } : {})
-              }
-            };
-          });
-        }
-        // v3 → v4 (Issue #385): 構造変換は不要 (normalize で吸収する)。
-        return normalizeCanvasState(p) as Partial<CanvasState>;
-      },
+      // 各 version の差分は `lib/canvas-migrations.ts` の `MIGRATION_STEPS` に集約。
+      // ここでは「fromVersion → 最新」を 1 行で進めるだけ。最後に必ず normalize を通すので
+      // 同 version の rehydrate でも runtime に紛れ込んだ NaN viewport / 範囲外 zoom /
+      // 壊れた node が掃除され、Canvas 真っ黒の症状を防ぐ。
+      migrate: (persisted, fromVersion) =>
+        runCanvasMigration(persisted, fromVersion) as Partial<CanvasState>,
       // Issue #385: 同 version でも rehydrate のたびに normalize を走らせる。
       // 旧実装は migrate 経由の正規化だけだったため、現バージョンで保存された
       // 不正値 (極端な viewport 等) を起動時に拾えず、Canvas 真っ黒の症状を引き起こしていた。

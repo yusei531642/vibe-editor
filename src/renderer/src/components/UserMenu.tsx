@@ -20,19 +20,19 @@ interface UserMenuProps {
   onOpenSettings: () => void;
 }
 
-const LANG_LABELS: Record<Language, string> = {
-  ja: '日本語',
-  en: 'English'
-};
-
-const THEME_LABELS: Record<ThemeName, string> = {
-  'claude-dark': 'Claude Dark',
-  'claude-light': 'Claude Light',
-  dark: 'Dark',
-  midnight: 'Midnight',
-  glass: 'Glass',
-  light: 'Light'
-};
+/**
+ * `theme.label.*` / `lang.label.*` の i18n キーは `lib/i18n.ts` に集約されており、
+ * ja/en で表記が揃っている。ここでは「対応する全テーマ ID」を保持するだけ。
+ */
+const LANG_IDS: Language[] = ['ja', 'en'];
+const THEME_IDS: ThemeName[] = [
+  'claude-dark',
+  'claude-light',
+  'dark',
+  'midnight',
+  'glass',
+  'light'
+];
 
 const LIGHT_THEMES: Set<ThemeName> = new Set(['claude-light', 'light']);
 
@@ -144,7 +144,7 @@ export function UserMenu({ onOpenSettings }: UserMenuProps): JSX.Element {
           <span className="user-menu__identity">
             <span className="user-menu__name">{info?.username ?? '…'}</span>
             <span className="user-menu__meta">
-              {LANG_LABELS[settings.language]} · {THEME_LABELS[settings.theme]}
+              {t(`lang.label.${settings.language}`)} · {t(`theme.label.${settings.theme}`)}
             </span>
           </span>
         </button>
@@ -206,7 +206,7 @@ export function UserMenu({ onOpenSettings }: UserMenuProps): JSX.Element {
           >
             <Languages size={14} strokeWidth={1.75} className="user-menu__item-icon" />
             <span className="user-menu__item-label">{t('userMenu.language')}</span>
-            <span className="user-menu__item-value">{LANG_LABELS[settings.language]}</span>
+            <span className="user-menu__item-value">{t(`lang.label.${settings.language}`)}</span>
             <ChevronRight
               size={12}
               strokeWidth={2}
@@ -215,7 +215,7 @@ export function UserMenu({ onOpenSettings }: UserMenuProps): JSX.Element {
           </button>
           {langOpen && (
             <div className="user-menu__sub">
-              {(['ja', 'en'] as Language[]).map((lang) => (
+              {LANG_IDS.map((lang) => (
                 <button
                   key={lang}
                   type="button"
@@ -224,7 +224,7 @@ export function UserMenu({ onOpenSettings }: UserMenuProps): JSX.Element {
                   }`}
                   onClick={() => pickLang(lang)}
                 >
-                  {LANG_LABELS[lang]}
+                  {t(`lang.label.${lang}`)}
                 </button>
               ))}
             </div>
@@ -242,7 +242,7 @@ export function UserMenu({ onOpenSettings }: UserMenuProps): JSX.Element {
           >
             <Palette size={14} strokeWidth={1.75} className="user-menu__item-icon" />
             <span className="user-menu__item-label">{t('userMenu.theme')}</span>
-            <span className="user-menu__item-value">{THEME_LABELS[settings.theme]}</span>
+            <span className="user-menu__item-value">{t(`theme.label.${settings.theme}`)}</span>
             <ChevronRight
               size={12}
               strokeWidth={2}
@@ -251,7 +251,7 @@ export function UserMenu({ onOpenSettings }: UserMenuProps): JSX.Element {
           </button>
           {themeOpen && (
             <div className="user-menu__sub">
-              {(Object.keys(THEME_LABELS) as ThemeName[]).map((theme) => (
+              {THEME_IDS.map((theme) => (
                 <button
                   key={theme}
                   type="button"
@@ -260,7 +260,7 @@ export function UserMenu({ onOpenSettings }: UserMenuProps): JSX.Element {
                   }`}
                   onClick={() => pickTheme(theme)}
                 >
-                  {THEME_LABELS[theme]}
+                  {t(`theme.label.${theme}`)}
                 </button>
               ))}
             </div>

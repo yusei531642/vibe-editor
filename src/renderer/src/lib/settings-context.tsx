@@ -13,6 +13,8 @@ import {
 import { DEFAULT_SETTINGS, type AppSettings } from '../../../types/shared';
 import { migrateSettings } from './settings-migrate';
 import { applyDensity, applyTheme, THEMES } from './themes';
+import { bridgedToast } from './toast-bridge';
+import { translate } from './i18n';
 
 interface SettingsContextValue {
   settings: AppSettings;
@@ -168,7 +170,14 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
     if (effectiveRoot === lastSyncedRootRef.current) return;
     lastSyncedRootRef.current = effectiveRoot;
     void window.api.app.setProjectRoot(effectiveRoot).catch((err) => {
-      console.warn('[settings] setProjectRoot failed:', err);
+      // Issue #490: console.warn だと開発者しか気付けないため Toast に昇格。
+      // SettingsProvider は ToastProvider の親なので bridge 経由で通知する。
+      bridgedToast(
+        translate(settingsRef.current.language ?? 'ja', 'toast.settings.projectRootFailed', {
+          error: String(err)
+        }),
+        { tone: 'error' }
+      );
     });
   }, [settingsState.lastOpenedRoot, settingsState.claudeCwd]);
 
@@ -182,7 +191,14 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
       saveTimerRef.current = window.setTimeout(() => {
         saveTimerRef.current = null;
         void window.api.settings.save(settingsRef.current).catch((err) => {
-          console.error('[settings] 保存失敗:', err);
+          // Issue #490: 旧実装は console.error で開発者にしか届かなかった。
+          // ユーザーに気付ける Toast に昇格 (Provider 順序は ToastProvider が子なので bridge 経由)。
+          bridgedToast(
+            translate(settingsRef.current.language ?? 'ja', 'toast.settings.saveFailed', {
+              error: String(err)
+            }),
+            { tone: 'error' }
+          );
         });
       }, 200);
     },

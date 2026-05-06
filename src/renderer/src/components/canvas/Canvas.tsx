@@ -35,6 +35,11 @@ import { QuickNav } from './QuickNav';
 import { LeaderGlow } from './LeaderGlow';
 import { StageHud } from './StageHud';
 import { useCanvasStore, NODE_W, NODE_H, type CardData } from '../../stores/canvas';
+import {
+  useCanvasNodes,
+  useCanvasEdges,
+  useCanvasStageView
+} from '../../stores/canvas-selectors';
 import { computeRecruitFocus } from '../../lib/canvas-recruit-focus';
 import { KEYS, useKeybinding } from '../../lib/keybindings';
 import { useUiStore } from '../../stores/ui';
@@ -74,8 +79,8 @@ const MIN_RECRUIT_ZOOM = 0.7;
 
 function FlowApp(): JSX.Element {
   const t = useT();
-  const nodes = useCanvasStore((s) => s.nodes);
-  const edges = useCanvasStore((s) => s.edges);
+  const nodes = useCanvasNodes();
+  const edges = useCanvasEdges();
   // setNodes / setEdges / setViewport / addCard / pulseEdge / setTeamLock は zustand
   // 内部で stable identity を保つため selector で取り出してキャッシュしておく。
   const setNodes = useCanvasStore((s) => s.setNodes);
@@ -322,7 +327,7 @@ function FlowApp(): JSX.Element {
   useKeybinding(KEYS.toggleIde, () => setViewMode('ide'));
   useKeybinding(KEYS.newTerminal, handleAddClaudeAgent);
 
-  const stageView = useCanvasStore((s) => s.stageView);
+  const stageView = useCanvasStageView();
 
   // Issue #253 / #372: recruit 後に viewport を「新規 worker カード」中心へ寄せる。
   // lastRecruitFocus は use-recruit-listener が `notifyRecruit(newNodeId)` で書き、
@@ -453,7 +458,7 @@ function FlowApp(): JSX.Element {
 /** stageView === 'list' のときに ReactFlow の代わりに表示する簡易ロスター。
  *  Canvas 上の agent ノードを一覧化する。 */
 function StageListOverlay(): JSX.Element {
-  const nodes = useCanvasStore((s) => s.nodes);
+  const nodes = useCanvasNodes();
   const { settings } = useSettings();
   const { byId: profilesById } = useRoleProfiles();
   const agentNodes = nodes.filter((n) => (n.data as CardData | undefined)?.cardType === 'agent');

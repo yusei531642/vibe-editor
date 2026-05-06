@@ -10,6 +10,7 @@ import {
 } from 'react';
 import { X } from 'lucide-react';
 import { useT } from './i18n';
+import { registerToastBridge } from './toast-bridge';
 
 /**
  * グローバルなトースト通知（Undoアクション付き）基盤。
@@ -123,6 +124,11 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
       timers.clear();
     };
   }, []);
+
+  // Issue #490: `SettingsProvider` (= `ToastProvider` の親) からも Toast を出せるように
+  // 自分の showToast を bridge に register する。Provider 外コードは `bridgedToast()`
+  // 経由で同じ表示パスに乗る。
+  useEffect(() => registerToastBridge(showToast), [showToast]);
 
   return (
     <ToastContext.Provider value={value}>

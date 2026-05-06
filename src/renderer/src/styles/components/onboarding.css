@@ -334,16 +334,23 @@
     0 0 0 6px color-mix(in srgb, var(--accent) 16%, transparent);
 }
 
+/*
+ * Issue #490: テーマプレビューは `data-theme={name}` を outer div に被せて、
+ * tokens.css の `[data-theme='X']` ブロックがこのサブツリーだけに別テーマの
+ * `--bg` / `--accent` などを供給する仕組みに切り替えた。子要素は `var(--xxx)`
+ * を参照するだけでよい。
+ */
 .onboarding__theme-preview {
   position: relative;
   height: 68px;
   border-radius: 8px;
-  border: 1px solid transparent;
+  border: 1px solid var(--border);
   padding: 10px 12px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  background: var(--bg);
 }
 
 .onboarding__theme-preview-bar {
@@ -353,6 +360,7 @@
   right: 0;
   height: 10px;
   opacity: 0.75;
+  background: var(--bg-panel);
 }
 
 .onboarding__theme-preview-line {
@@ -366,6 +374,16 @@
   margin-top: 0;
 }
 
+.onboarding__theme-preview-line--strong {
+  background: var(--text);
+  opacity: 0.82;
+}
+
+.onboarding__theme-preview-line--dim {
+  background: var(--text-dim);
+  width: 52%;
+}
+
 .onboarding__theme-preview-dot {
   position: absolute;
   bottom: 10px;
@@ -373,6 +391,7 @@
   width: 8px;
   height: 8px;
   border-radius: 999px;
+  background: var(--accent);
 }
 
 .onboarding__theme-name {
@@ -467,6 +486,9 @@
 /* ---------- Done ---------- */
 
 .onboarding__done-mark {
+  /* Issue #490: 旧 inline `style={{ background: themeAccent }}` を撤去し、
+   * 現在の data-theme cascade から解決される `--accent` を直接利用する。 */
+  background: var(--accent);
   width: 84px;
   height: 84px;
   border-radius: 999px;

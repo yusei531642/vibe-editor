@@ -1,5 +1,18 @@
 import type { Density, ThemeName } from '../../../types/shared';
 
+/**
+ * 各テーマの色は **`styles/tokens.css` の `[data-theme='X']` ブロックを唯一の
+ * source of truth** として扱う。`applyTheme` で `data-theme` 属性を切替えれば
+ * CSS 側が cascade で全変数を差し替える。
+ *
+ * ここで保持している hex 値は以下の **JS 側でしか到達できない経路** のための
+ * mirror であり、tokens.css 側と必ず一致させること:
+ *   - `xterm-theme.ts` が xterm.js に渡す `ITheme` (CSS var を解決できないライブラリ)
+ *   - `OnboardingWizard` のプレビューで `[data-theme]` を被せられない外側の構造
+ *
+ * Monaco 用の重複は撤廃済み: `monaco-setup.ts` は同じ CSS 変数を `getComputedStyle`
+ * 経由で読む (Issue #490)。
+ */
 export interface ThemeVars {
   bg: string;
   bgPanel: string;
@@ -217,55 +230,13 @@ function isClaudeTheme(name: ThemeName): boolean {
   return name === 'claude-light' || name === 'claude-dark';
 }
 
-function setThemeColorVars(root: HTMLElement, theme: ThemeVars): void {
-  const vars: Record<string, string> = {
-    '--bg': theme.bg,
-    '--bg-panel': theme.bgPanel,
-    '--bg-sidebar': theme.bgSidebar,
-    '--bg-toolbar': theme.bgToolbar,
-    '--bg-elev': theme.bgElev,
-    '--border': theme.border,
-    '--border-strong': theme.borderStrong,
-    '--bg-hover': theme.bgHover,
-    '--bg-active': theme.bgActive,
-    '--accent': theme.accent,
-    '--accent-hover': theme.accentHover,
-    '--accent-soft': theme.accentSoft,
-    '--accent-tint': theme.accentTint,
-    '--accent-foreground': theme.accentForeground,
-    '--warning': theme.warning,
-    '--warning-hover': theme.warningHover,
-    '--text': theme.text,
-    '--text-dim': theme.textDim,
-    '--text-mute': theme.textMute,
-    '--text-strong': theme.text,
-    '--text-secondary': theme.textDim,
-    '--text-subtle': theme.textMute,
-    '--fg': theme.text,
-    '--fg-muted': theme.textDim,
-    '--fg-subtle': theme.textMute,
-    '--surface-base': theme.bg,
-    '--surface-panel': theme.bgPanel,
-    '--surface-sidebar': theme.bgSidebar,
-    '--surface-toolbar': theme.bgToolbar,
-    '--surface-elev': theme.bgElev,
-    '--surface-hover': theme.bgHover,
-    '--surface-active': theme.bgActive,
-    '--surface-glass': theme.surfaceGlass,
-    '--focus-ring': theme.focusRing
-  };
-
-  for (const [name, value] of Object.entries(vars)) {
-    root.style.setProperty(name, value);
-  }
-}
-
 export function applyTheme(name: ThemeName, uiFontFamily: string, uiFontSize: number): void {
-  const theme = THEMES[name] ?? THEMES['claude-dark'];
   const root = document.documentElement;
   const claudeTheme = isClaudeTheme(name);
 
-  setThemeColorVars(root, theme);
+  // 色変数 (--bg / --text / --accent ...) は `tokens.css` の `[data-theme='X']`
+  // ブロックが cascade で流し込むため、ここでは imperative な setProperty は不要。
+  // `data-theme` 属性切替だけで全変数が差し替わる。
   root.style.setProperty('--ui-font', uiFontFamily);
   root.style.setProperty('--ui-font-size', `${uiFontSize}px`);
   root.style.setProperty('--heading-font', claudeTheme ? HEADING_FONT_SERIF : HEADING_FONT_SANS);

@@ -27,8 +27,8 @@ export function LanguageSection({ draft, update }: Props): JSX.Element {
               checked={draft.language === lang}
               onChange={() => update('language', lang)}
             />
-            <strong>{lang === 'ja' ? '日本語' : 'English'}</strong>
-            <span>{lang === 'ja' ? 'Japanese' : 'English'}</span>
+            <strong>{t(`lang.label.${lang}`)}</strong>
+            <span>{t(`lang.label.${lang}.sub`)}</span>
           </label>
         ))}
       </div>
