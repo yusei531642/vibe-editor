@@ -1,3 +1,4 @@
+//! Centralized error type for IPC commands.
 use serde::ser::{Serialize, Serializer};
 use std::fmt;
 
