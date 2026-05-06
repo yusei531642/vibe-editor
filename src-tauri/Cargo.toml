@@ -1,6 +1,6 @@
 [package]
 name = "vibe-editor"
-version = "1.4.11"
+version = "1.4.12"
 description = "Electron→Tauri 移行版 vibe-editor (Claude Code / Codex 専用エディタ)"
 authors = ["yusei <yusei@yuseilab.com>"]
 edition = "2021"

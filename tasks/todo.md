@@ -1310,9 +1310,9 @@ Plan: `tasks/release-v1.4.12.md`
 - [x] Latest release confirmed as `v1.4.11`.
 - [x] Next patch version selected: `v1.4.12`.
 - [x] Release workflow confirmed: `v*` tag push creates a draft release.
-- [ ] Commit Issue #475 implementation.
-- [ ] Bump app versions to `1.4.12`.
-- [ ] Run quality gates.
+- [x] Commit Issue #475 implementation.
+- [x] Bump app versions to `1.4.12`.
+- [x] Run quality gates.
 - [ ] Create release PR and wait for CodeRabbit, CI, and human approval before merge/tag push.
 
 計画: `tasks/issue-475/plan.md`
