@@ -207,6 +207,74 @@ describe('FileTreeStateProvider — concurrency queue', () => {
   });
 });
 
+// ---- Issue #478: 初回 toggleDir で loadDir が呼ばれる -----------------------
+
+describe('FileTreeStateProvider — toggleDir triggers loadDir on first expand (Issue #478)', () => {
+  it('初回 toggleDir() で files.list が1回呼ばれる', async () => {
+    const filesApi: MockFilesApi = {
+      list: vi.fn(async () => ({
+        ok: true,
+        entries: [{ name: 'child.ts', isDir: false, path: 'src/child.ts' }]
+      }))
+    };
+    installWindowApi(filesApi, () => Promise.resolve({ schemaVersion: 6 }));
+
+    const { result } = renderHook(() => useFileTreeState(), { wrapper });
+
+    // 初回 toggleDir: 未展開のディレクトリを開く → loadDir が即発火すること
+    await act(async () => {
+      result.current.toggleDir('/root', 'src');
+    });
+
+    // queue drain + state 反映を待つ
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // files.list が1回呼ばれている (Issue #478 回帰: 0回ではないこと)
+    expect(filesApi.list).toHaveBeenCalledTimes(1);
+    expect(filesApi.list).toHaveBeenCalledWith('/root', 'src');
+  });
+
+  it('既にロード済みのディレクトリを再展開しても追加の files.list は発火しない', async () => {
+    const filesApi: MockFilesApi = {
+      list: vi.fn(async () => ({
+        ok: true,
+        entries: []
+      }))
+    };
+    installWindowApi(filesApi, () => Promise.resolve({ schemaVersion: 6 }));
+
+    const { result } = renderHook(() => useFileTreeState(), { wrapper });
+
+    // 初回展開
+    await act(async () => {
+      result.current.toggleDir('/root', 'src');
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(filesApi.list).toHaveBeenCalledTimes(1);
+
+    // 折り畳み
+    await act(async () => {
+      result.current.toggleDir('/root', 'src');
+    });
+
+    // 再展開: dirs キャッシュにあるので loadDir は呼ばれない
+    await act(async () => {
+      result.current.toggleDir('/root', 'src');
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // files.list は初回の1回のみ
+    expect(filesApi.list).toHaveBeenCalledTimes(1);
+  });
+});
+
 // ---- lazy prune --------------------------------------------------------
 
 describe('FileTreeStateProvider — lazy prune on load failure', () => {

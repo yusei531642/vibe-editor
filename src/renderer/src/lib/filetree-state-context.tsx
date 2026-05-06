@@ -349,27 +349,34 @@ export function FileTreeStateProvider({ children }: { children: ReactNode }): JS
     [drainQueue, pruneOnLoadFailure]
   );
 
-  // 自己レビュー N1 / W1 / A3: setState updater 内で wasOpen を判定して loadDir 必要性を
-  // 確定する (closure stale を排除)。dirs.has は呼び出し時 closure でも実害なし
-  // (load の重複は pendingPromisesRef で抑止される)。
+  // Issue #478: expandedRef を toggleDir より前に配置し、クリック時点の最新 expanded を
+  // 同期的に参照できるようにする。refreshAll でも同じ ref を使う。
+  const expandedRef = useRef(expanded);
+  expandedRef.current = expanded;
+
+  // dirs の最新値を同期的に参照する ref (load の重複は pendingPromisesRef で抑止)。
   const dirsRef = useRef(dirs);
   dirsRef.current = dirs;
 
   const toggleDir = useCallback(
     (rootPath: string, relPath: string) => {
       const key = dirKey(rootPath, relPath);
-      let nowOpened = false;
+      // Issue #478: setExpanded updater の実行タイミングに依存せず、ref で同期的に判定。
+      const wasOpen = expandedRef.current.has(key);
+
       setExpanded((prev) => {
         const next = new Set(prev);
         if (next.has(key)) {
           next.delete(key);
         } else {
           next.add(key);
-          nowOpened = true;
         }
         return next;
       });
-      if (nowOpened && !dirsRef.current.has(key)) {
+
+      // 閉じていた → 開く、かつ dirs キャッシュにまだ無い場合だけ loadDir を発火。
+      // pendingPromisesRef による重複ロード抑止、MAX_CONCURRENT_LOADS、load 失敗時 prune は維持。
+      if (!wasOpen && !dirsRef.current.has(key)) {
         void loadDir(rootPath, relPath);
       }
     },
@@ -385,11 +392,7 @@ export function FileTreeStateProvider({ children }: { children: ReactNode }): JS
     });
   }, []);
 
-  // 自己レビュー: refreshAll 内で expanded を closure 経由で見ると stale なので、
-  // ref 経由で最新値を読む。
-  const expandedRef = useRef(expanded);
-  expandedRef.current = expanded;
-
+  // refreshAll は上で定義済みの expandedRef を参照する。
   const refreshAll = useCallback(
     (roots: string[]) => {
       for (const root of roots) {
