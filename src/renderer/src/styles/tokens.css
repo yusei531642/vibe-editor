@@ -278,8 +278,12 @@ samp,
  * - blur は OS Acrylic 主導なのでアプリ側は控えめ (12px) で十分。重ね過ぎると milky になる。
  * - Issue #440: brightness(0.7) で背後の明るい壁紙を暗化し、Cyber Neon ベースの
  *   「黒いすりガラス」質感を作る。非 Glass テーマでは fallback の 1 が効くため no-op。
+ * - Issue #475: Canvas root の tint は IDE root より薄くし、背景の白濁を減らしつつ
+ *   card / sidebar / HUD の surface opacity は維持する。
  */
 :root[data-theme='glass'] {
+  --glass-layout-tint: rgba(10, 10, 26, 0.55);
+  --glass-canvas-layout-tint: rgba(10, 10, 26, 0.40);
   --glass-blur: 12px;
   --glass-saturate: 120%;
   --glass-brightness: 0.7;

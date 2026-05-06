@@ -38,6 +38,18 @@ function slashPath(path: string): string {
   return path.replace(/\\/g, '/');
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function rgbaTokenAlpha(css: string, tokenName: string): number {
+  const match = css.match(
+    new RegExp(`${escapeRegExp(tokenName)}\\s*:\\s*rgba\\([^)]*,\\s*([0-9.]+)\\s*\\)`)
+  );
+  expect(match, `${tokenName} should be an rgba token`).not.toBeNull();
+  return Number(match?.[1]);
+}
+
 function cssDeclarationsForProperty(
   css: string,
   property: 'backdrop-filter' | '-webkit-backdrop-filter'
@@ -80,8 +92,11 @@ describe('Glass CSS contract', () => {
     const tokens = stripCssComments(readRendererFile('styles/tokens.css'));
 
     for (const tokenName of [
+      '--glass-layout-tint',
+      '--glass-canvas-layout-tint',
       '--glass-blur',
       '--glass-saturate',
+      '--glass-brightness',
       '--glass-border',
       '--glass-highlight'
     ]) {
@@ -93,6 +108,16 @@ describe('Glass CSS contract', () => {
     expect(tokens).not.toMatch(/\[data-theme=['"]glass['"]\]\s+\.glass-surface/);
   });
 
+  it('keeps the Glass canvas root tint more transparent than the IDE root tint', () => {
+    const tokens = stripCssComments(readRendererFile('styles/tokens.css'));
+
+    const layoutAlpha = rgbaTokenAlpha(tokens, '--glass-layout-tint');
+    const canvasAlpha = rgbaTokenAlpha(tokens, '--glass-canvas-layout-tint');
+
+    expect(canvasAlpha).toBeLessThan(layoutAlpha);
+    expect(canvasAlpha).toBeGreaterThanOrEqual(0.35);
+  });
+
   it('glass.css owns root transparency, root tint, glass-surface effects, and major surfaces', () => {
     const glass = stripCssComments(readComponentCss('glass.css'));
 
@@ -100,7 +125,13 @@ describe('Glass CSS contract', () => {
       /:root\[data-theme='glass'\][\s\S]*:root\[data-theme='glass'\]\s+body[\s\S]*:root\[data-theme='glass'\]\s+#root\s*\{[\s\S]*background:\s*transparent\s*!important/
     );
     expect(glass).toMatch(
-      /:root\[data-theme='glass'\]\s+\.layout,\s*:root\[data-theme='glass'\]\s+\.canvas-layout\s*\{[\s\S]*background:\s*rgba\([\s\S]*backdrop-filter:\s*blur\(var\(--glass-blur\)\)/
+      /:root\[data-theme='glass'\]\s+\.layout,\s*:root\[data-theme='glass'\]\s+\.canvas-layout\s*\{[\s\S]*backdrop-filter:\s*blur\(var\(--glass-blur\)\)/
+    );
+    expect(glass).toMatch(
+      /:root\[data-theme='glass'\]\s+\.layout\s*\{[\s\S]*background:\s*var\(--glass-layout-tint,\s*rgba\(10,\s*10,\s*26,\s*0\.55\)\)/
+    );
+    expect(glass).toMatch(
+      /:root\[data-theme='glass'\]\s+\.canvas-layout\s*\{[\s\S]*background:\s*var\(--glass-canvas-layout-tint,\s*rgba\(10,\s*10,\s*26,\s*0\.40\)\)/
     );
     expect(glass).toMatch(
       /:root\[data-theme='glass'\]\s+\.glass-surface[\s\S]*backdrop-filter:\s*blur\(var\(--glass-blur\)\)/

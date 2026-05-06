@@ -1295,3 +1295,45 @@ PR: https://github.com/yusei531642/vibe-editor/pull/459
 - [ ] Release PR を作成し、CI / reviewer を確認する。
 - [ ] PR merge 後に `v1.4.11` annotated tag を作成して push する。
 - [ ] release workflow 完了後、draft release の成果物と `latest.json` を確認する。
+
+## Issue #475 - Glass canvas background transparency (2026-05-06 / Codex)
+
+- [x] GitHub Issue #475 closed as `COMPLETED`: https://github.com/yusei531642/vibe-editor/issues/475
+- [x] Close comment posted: https://github.com/yusei531642/vibe-editor/issues/475#issuecomment-4385121557
+- [x] Label updated to `implemented`.
+- [ ] PR is not created. Local implementation remains on `feature/issue-475`.
+
+## Release v1.4.12 (2026-05-06 / Codex)
+
+Plan: `tasks/release-v1.4.12.md`
+
+- [x] Latest release confirmed as `v1.4.11`.
+- [x] Next patch version selected: `v1.4.12`.
+- [x] Release workflow confirmed: `v*` tag push creates a draft release.
+- [ ] Commit Issue #475 implementation.
+- [ ] Bump app versions to `1.4.12`.
+- [ ] Run quality gates.
+- [ ] Create release PR and wait for CodeRabbit, CI, and human approval before merge/tag push.
+
+計画: `tasks/issue-475/plan.md`
+
+- [x] Issue #475 の本文、コメント、ラベル状態を確認
+- [x] `main` を調査対象ブランチとして確認し、Issue #475 参照 PR がないことを確認
+- [x] Glass / Canvas の背景・surface 関連 CSS とテーマ token を調査
+- [x] Root Cause Confirmed: Glass 時の Canvas root tint が IDE root と同じ強さで全面適用されている
+- [x] 実装前計画と Next Steps を記録
+- [x] Issue #475 へ実装計画コメントを投稿: https://github.com/yusei531642/vibe-editor/issues/475#issuecomment-4384854342
+- [x] Issue #475 に `enhancement`, `ui`, `canvas`, `planned` ラベルを付与
+- [x] `feature/issue-475` ブランチを作成し、Issue ラベルを `implementing` に更新
+- [x] `tokens.css` に IDE / Canvas root tint token を追加
+- [x] `glass.css` で Canvas root tint を IDE root から分離
+- [x] `glass-css-contract.test.ts` で Canvas tint が IDE tint より低 alpha であることを固定
+
+### Next Steps
+
+- [x] `npm run test -- src/renderer/src/styles/__tests__/glass-css-contract.test.ts`: PASS (6 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (30 files / 200 tests)
+- [x] `npm run build:vite`: PASS
+- [x] Browser CSS smoke: IDE root `rgba(10, 10, 26, 0.55)` / Canvas root `rgba(10, 10, 26, 0.4)` を確認
+- [ ] PR 前に `npm run dev` で Tauri 実機の Glass + Canvas を smoke 確認する。
