@@ -25,18 +25,15 @@ use crate::team_hub::{CallContext, TeamHub};
 use schema::tool_defs;
 use serde_json::{json, Value};
 use tools::{
-    team_assign_task, team_create_leader, team_diagnostics, team_dismiss, team_get_tasks,
-    team_info, team_list_role_profiles, team_read, team_recruit, team_send, team_status,
-    team_switch_leader, team_update_task,
+    team_ack_handoff, team_assign_task, team_create_leader, team_diagnostics, team_dismiss,
+    team_get_tasks, team_info, team_list_role_profiles, team_read, team_recruit, team_send,
+    team_status, team_switch_leader, team_update_task,
 };
 
 pub async fn handle(hub: &TeamHub, ctx: &CallContext, req: &Value) -> Option<Value> {
     let method = req.get("method").and_then(|v| v.as_str()).unwrap_or("");
     let id = req.get("id").cloned().unwrap_or(Value::Null);
-    let params = req
-        .get("params")
-        .cloned()
-        .unwrap_or_else(|| json!({}));
+    let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
 
     match method {
         "initialize" => Some(json!({
@@ -59,11 +56,11 @@ pub async fn handle(hub: &TeamHub, ctx: &CallContext, req: &Value) -> Option<Val
             "result": { "tools": if ctx.team_id.is_empty() { json!([]) } else { tool_defs() } }
         })),
         "tools/call" => {
-            let tool_name = params
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+            let tool_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let args = params
+                .get("arguments")
+                .cloned()
+                .unwrap_or_else(|| json!({}));
             let result = dispatch_tool(hub, ctx, tool_name, &args).await;
             match result {
                 Ok(value) => Some(json!({
@@ -128,6 +125,7 @@ async fn dispatch_tool(
         "team_update_task" => team_update_task(hub, ctx, args).await,
         "team_recruit" => team_recruit(hub, ctx, args).await,
         "team_create_leader" => team_create_leader(hub, ctx, args).await,
+        "team_ack_handoff" => team_ack_handoff(hub, ctx, args).await,
         "team_switch_leader" => team_switch_leader(hub, ctx, args).await,
         "team_dismiss" => team_dismiss(hub, ctx, args).await,
         "team_list_role_profiles" => team_list_role_profiles(hub, ctx).await,

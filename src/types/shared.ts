@@ -336,6 +336,8 @@ export interface TeamOrganizationMeta {
 export interface TeamHistoryMember {
   role: TeamRole;
   agent: TerminalAgent;
+  /** TeamHub / Canvas 上の配送先 identity。旧履歴では未設定 */
+  agentId?: string | null;
   /** Claude Code の出力から抽出したセッションID。Codex や未キャプチャは null */
   sessionId: string | null;
   /** ユーザーが手動でリネームしたタブ名。resume 時に復元する。null/未指定なら自動生成名 */
@@ -360,6 +362,8 @@ export interface TeamHistoryEntry {
   canvasState?: TeamCanvasState;
   /** Issue #359: 最新 handoff の参照。本体は ~/.vibe-editor/handoffs/ に保存する。 */
   latestHandoff?: HandoffReference;
+  /** Issue #470: TeamHub orchestration state の軽量要約 */
+  orchestration?: TeamOrchestrationSummary;
 }
 
 export interface TeamCanvasNode {
@@ -376,7 +380,14 @@ export interface TeamCanvasState {
 }
 
 export type HandoffKind = 'leader' | 'worker' | 'terminal';
-export type HandoffStatus = 'created' | 'started' | 'acknowledged' | 'retired' | 'failed';
+export type HandoffStatus =
+  | 'created'
+  | 'injected'
+  | 'acked'
+  | 'started'
+  | 'acknowledged'
+  | 'retired'
+  | 'failed';
 
 export interface HandoffReference {
   id: string;
@@ -441,6 +452,19 @@ export interface HandoffMutationResult {
   ok: boolean;
   handoff?: HandoffCheckpoint | null;
   error?: string | null;
+}
+
+export interface TeamOrchestrationSummary {
+  statePath: string;
+  activeLeaderAgentId?: string | null;
+  pendingTaskCount: number;
+  workerReportCount: number;
+  blockedByHumanGate: boolean;
+  blockedReason?: string | null;
+  requiredHumanDecision?: string | null;
+  latestHandoffId?: string | null;
+  latestHandoffStatus?: string | null;
+  updatedAt: string;
 }
 
 // ---------- ファイルツリー / 簡易エディタ ----------

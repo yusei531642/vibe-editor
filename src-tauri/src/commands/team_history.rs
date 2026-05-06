@@ -3,6 +3,7 @@
 // ~/.vibe-editor/team-history.json (JSON 配列) を読み書き。
 // プロジェクト単位のフィルタ、最新 20 件 + lastUsedAt 降順保持。
 
+use crate::commands::team_state::TeamOrchestrationSummary;
 use crate::pty::path_norm::normalize_project_root;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -20,18 +21,21 @@ static CACHE: once_cell::sync::Lazy<Mutex<Option<Vec<TeamHistoryEntry>>>> =
 /// 挙動を避けるため)
 const MAX_ENTRIES_PER_PROJECT: usize = 20;
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamHistoryMember {
     pub role: String,
     pub agent: String,
+    /// Issue #470: Canvas / TeamHub の配送先 identity。旧履歴では未設定のため復元時 fallback する。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
     pub session_id: Option<String>,
     /// ユーザーが手動でリネームしたタブ名 (resume 時に復元する。null なら自動生成名)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub custom_label: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamCanvasNode {
     pub agent_id: String,
@@ -43,7 +47,7 @@ pub struct TeamCanvasNode {
     pub height: Option<f64>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamCanvasViewport {
     pub x: f64,
@@ -51,14 +55,14 @@ pub struct TeamCanvasViewport {
     pub zoom: f64,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamCanvasState {
     pub nodes: Vec<TeamCanvasNode>,
     pub viewport: TeamCanvasViewport,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamOrganizationMeta {
     pub id: String,
@@ -70,7 +74,7 @@ pub struct TeamOrganizationMeta {
     pub preset_id: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct HandoffReference {
     pub id: String,
@@ -89,7 +93,7 @@ pub struct HandoffReference {
     pub replacement_for_agent_id: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamHistoryEntry {
     pub id: String,
@@ -107,6 +111,9 @@ pub struct TeamHistoryEntry {
     /// Issue #359: 最新 handoff の参照のみ。本文は handoffs store に置く。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub latest_handoff: Option<HandoffReference>,
+    /// Issue #470: TeamHub orchestration state の軽量要約。本体は team-state store に置く。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub orchestration: Option<TeamOrchestrationSummary>,
 }
 
 #[derive(Serialize, Default)]
@@ -189,8 +196,17 @@ fn merge_entry(all: &mut Vec<TeamHistoryEntry>, entry: TeamHistoryEntry) {
     *all = kept;
 }
 
+async fn hydrate_orchestration_summary(entry: &mut TeamHistoryEntry) {
+    if let Some(summary) =
+        crate::commands::team_state::orchestration_summary(&entry.project_root, &entry.id).await
+    {
+        entry.orchestration = Some(summary);
+    }
+}
+
 #[tauri::command]
-pub async fn team_history_save(entry: TeamHistoryEntry) -> MutationResult {
+pub async fn team_history_save(mut entry: TeamHistoryEntry) -> MutationResult {
+    hydrate_orchestration_summary(&mut entry).await;
     let _g = LOCK.lock().await;
     let mut cache = CACHE.lock().await;
     ensure_loaded(&mut cache).await;
@@ -225,7 +241,8 @@ pub async fn team_history_save_batch(entries: Vec<TeamHistoryEntry>) -> Mutation
     let mut cache = CACHE.lock().await;
     ensure_loaded(&mut cache).await;
     let all = cache.as_mut().expect("ensured");
-    for entry in entries {
+    for mut entry in entries {
+        hydrate_orchestration_summary(&mut entry).await;
         merge_entry(all, entry);
     }
     match save_all(all).await {

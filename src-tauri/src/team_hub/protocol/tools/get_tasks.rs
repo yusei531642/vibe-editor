@@ -14,13 +14,21 @@ pub async fn team_get_tasks(hub: &TeamHub, ctx: &CallContext) -> Result<Value, S
             t.tasks
                 .iter()
                 .map(|x| {
+                    let snapshot = x.to_snapshot();
                     json!({
-                        "id": x.id,
-                        "assignedTo": x.assigned_to,
-                        "description": x.description,
-                        "status": x.status,
-                        "createdBy": x.created_by,
-                        "createdAt": x.created_at,
+                        "id": snapshot.id,
+                        "assignedTo": snapshot.assigned_to,
+                        "description": snapshot.description,
+                        "status": snapshot.status,
+                        "createdBy": snapshot.created_by,
+                        "createdAt": snapshot.created_at,
+                        "updatedAt": snapshot.updated_at,
+                        "summary": snapshot.summary,
+                        "blockedReason": snapshot.blocked_reason,
+                        "nextAction": snapshot.next_action,
+                        "artifactPath": snapshot.artifact_path,
+                        "blockedByHumanGate": snapshot.blocked_by_human_gate,
+                        "requiredHumanDecision": snapshot.required_human_decision,
                     })
                 })
                 .collect::<Vec<_>>()

@@ -330,7 +330,8 @@ pub async fn app_setup_team_mcp(
             ..Default::default()
         });
     }
-    hub.register_team(&team_id, &team_name).await;
+    hub.register_team(&team_id, &team_name, Some(&project_root))
+        .await;
 
     // vibe-team Skill ファイルを best-effort で配置/同期する。
     // setupTeamMcp は「_init」ウォームアップ呼び出しでも、実チーム起動でも、復元呼び出しでも走る。

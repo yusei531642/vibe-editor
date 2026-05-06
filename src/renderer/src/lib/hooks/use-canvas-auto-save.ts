@@ -60,7 +60,12 @@ export function useCanvasAutoSave(opts: UseCanvasAutoSaveOptions): void {
     interface TeamEntryInfo {
       name: string;
       organization?: TeamOrganizationMeta;
-      members: { role: TeamRole; agent: TerminalAgent; sessionId?: string | null }[];
+      members: {
+        role: TeamRole;
+        agent: TerminalAgent;
+        agentId?: string | null;
+        sessionId?: string | null;
+      }[];
       canvasNodes: { agentId: string; x: number; y: number; width?: number; height?: number }[];
       latestHandoff?: HandoffReference;
     }
@@ -88,6 +93,7 @@ export function useCanvasAutoSave(opts: UseCanvasAutoSaveOptions): void {
       entry.members.push({
         role: (p.roleProfileId ?? p.role ?? 'leader') as TeamRole,
         agent: (p.agent ?? 'claude') as TerminalAgent,
+        agentId: p.agentId,
         sessionId: typeof p.resumeSessionId === 'string' ? p.resumeSessionId : null
       });
       entry.canvasNodes.push({

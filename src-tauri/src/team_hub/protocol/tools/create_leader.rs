@@ -59,6 +59,13 @@ pub async fn team_create_leader(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    let handoff_id = args
+        .get("handoff_id")
+        .or_else(|| args.get("handoffId"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToOwned::to_owned);
 
     // builtin の leader profile から default engine を引く
     let summary = hub.get_role_profile_summary().await;
@@ -185,14 +192,32 @@ pub async fn team_create_leader(
     match tokio::time::timeout(RECRUIT_TIMEOUT, rx).await {
         Ok(Ok(outcome)) => {
             let diag = hub.get_member_diagnostics(&outcome.agent_id).await;
-            let recruited_at = diag.as_ref().map(|d| d.recruited_at.clone()).unwrap_or_default();
+            let recruited_at = diag
+                .as_ref()
+                .map(|d| d.recruited_at.clone())
+                .unwrap_or_default();
             let handshake_at = diag.and_then(|d| d.last_handshake_at);
+            if let Some(handoff_id) = &handoff_id {
+                if let Err(e) = hub
+                    .record_handoff_lifecycle(
+                        &ctx.team_id,
+                        handoff_id,
+                        "created",
+                        Some(outcome.agent_id.clone()),
+                        Some("replacement leader created".into()),
+                    )
+                    .await
+                {
+                    tracing::warn!("[team_create_leader] handoff lifecycle update failed: {e}");
+                }
+            }
             Ok(json!({
                 "success": true,
                 "agentId": outcome.agent_id,
                 "roleProfileId": outcome.role_profile_id,
                 "recruitedAt": recruited_at,
                 "handshakeAt": handshake_at,
+                "handoffId": handoff_id,
             }))
         }
         Ok(Err(_)) => {

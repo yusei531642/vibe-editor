@@ -299,7 +299,7 @@ export function useTeamManagement(
 
       // MCP は現行の TeamHub 情報で確実に再登録する
       const allMembers = entry.members.map((m, i) => ({
-        agentId: `${entry.id}-${m.role}-${i}`,
+        agentId: m.agentId ?? `${entry.id}-${m.role}-${i}`,
         role: m.role,
         agent: m.agent
       }));

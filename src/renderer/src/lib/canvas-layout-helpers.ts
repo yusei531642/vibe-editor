@@ -37,11 +37,20 @@ export function formatOrganizationAgentCount(
 }
 
 export function mergeCanvasMembers(
-  currentMembers: { role: TeamRole; agent: TerminalAgent; sessionId?: string | null }[],
+  currentMembers: {
+    role: TeamRole;
+    agent: TerminalAgent;
+    agentId?: string | null;
+    sessionId?: string | null;
+  }[],
   existingEntry?: TeamHistoryEntry
 ): TeamHistoryEntry['members'] {
+  const existingByAgentId = new Map<string, TeamHistoryEntry['members'][number]>();
   const sessionQueues = new Map<string, Array<string | null>>();
   for (const member of existingEntry?.members ?? []) {
+    if (member.agentId) {
+      existingByAgentId.set(member.agentId, member);
+    }
     const key = `${member.role}:${member.agent}`;
     const queue = sessionQueues.get(key) ?? [];
     queue.push(member.sessionId ?? null);
@@ -49,11 +58,20 @@ export function mergeCanvasMembers(
   }
 
   return currentMembers.map((member) => {
+    const existingById = member.agentId ? existingByAgentId.get(member.agentId) : undefined;
     const key = `${member.role}:${member.agent}`;
     const queue = sessionQueues.get(key);
-    const existingSessionId = queue && queue.length > 0 ? queue.shift() ?? null : null;
+    const existingSessionId = existingById?.sessionId ?? (queue && queue.length > 0 ? queue.shift() ?? null : null);
     const sessionId = member.sessionId ?? existingSessionId;
-    return { role: member.role, agent: member.agent, sessionId };
+    const merged: TeamHistoryEntry['members'][number] = {
+      role: member.role,
+      agent: member.agent,
+      sessionId
+    };
+    const agentId = member.agentId ?? existingById?.agentId;
+    if (agentId) merged.agentId = agentId;
+    if (existingById?.customLabel !== undefined) merged.customLabel = existingById.customLabel;
+    return merged;
   });
 }
 
@@ -63,7 +81,12 @@ export function serializeAutoSavePayload(payload: {
     {
       name: string;
       organization?: TeamOrganizationMeta;
-      members?: { role: TeamRole; agent: TerminalAgent; sessionId?: string | null }[];
+      members?: {
+        role: TeamRole;
+        agent: TerminalAgent;
+        agentId?: string | null;
+        sessionId?: string | null;
+      }[];
       canvasNodes: { agentId: string; x: number; y: number; width?: number; height?: number }[];
       latestHandoff?: HandoffReference;
     }
@@ -76,7 +99,7 @@ export function serializeAutoSavePayload(payload: {
       `${teamId}|${info.name}|` +
         `org:${info.organization?.id ?? ''}:${info.organization?.name ?? ''}:${info.organization?.color ?? ''}|` +
         `members:${(info.members ?? [])
-          .map((m) => `${m.role}:${m.agent}:${m.sessionId ?? ''}`)
+          .map((m) => `${m.agentId ?? ''}:${m.role}:${m.agent}:${m.sessionId ?? ''}`)
           .sort()
           .join(',')}|` +
         info.canvasNodes

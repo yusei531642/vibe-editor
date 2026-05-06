@@ -64,6 +64,13 @@ pub async fn team_switch_leader(
         .get("close_old_card")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
+    let handoff_id = args
+        .get("handoff_id")
+        .or_else(|| args.get("handoffId"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToOwned::to_owned);
 
     // 新 leader が同チームに居て role が leader か確認
     let members = hub.registry.list_team_members(&ctx.team_id);
@@ -97,6 +104,20 @@ pub async fn team_switch_leader(
     // active leader を切替え
     hub.set_active_leader(&ctx.team_id, Some(new_leader_agent_id.clone()))
         .await;
+    if let Some(handoff_id) = &handoff_id {
+        if let Err(e) = hub
+            .record_handoff_lifecycle(
+                &ctx.team_id,
+                handoff_id,
+                "retired",
+                Some(new_leader_agent_id.clone()),
+                Some(format!("old leader {} retired", ctx.agent_id)),
+            )
+            .await
+        {
+            tracing::warn!("[team_switch_leader] handoff lifecycle update failed: {e}");
+        }
+    }
 
     // 旧 leader カードの retire を予約 (2 秒遅延で MCP 応答配送猶予を確保)
     if close_old_card {
@@ -121,5 +142,6 @@ pub async fn team_switch_leader(
         "newLeaderAgentId": new_leader_agent_id,
         "oldLeaderAgentId": ctx.agent_id,
         "oldCardCloseScheduledMs": if close_old_card { 2000 } else { 0 },
+        "handoffId": handoff_id,
     }))
 }

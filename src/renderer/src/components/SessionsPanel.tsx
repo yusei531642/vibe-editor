@@ -119,6 +119,14 @@ export function SessionsPanel({
                 .map((m) => m.role)
                 .slice(0, 5)
                 .join(' · ');
+              const orchestration = entry.orchestration;
+              const orchestrationSummary = orchestration?.blockedByHumanGate
+                ? `blocked_by_human_gate: ${
+                    orchestration.requiredHumanDecision ?? orchestration.blockedReason ?? ''
+                  }`
+                : orchestration?.latestHandoffStatus
+                  ? `handoff: ${orchestration.latestHandoffStatus}`
+                  : '';
               return (
                 <li key={entry.id} className="team-history-item">
                   <button
@@ -137,6 +145,15 @@ export function SessionsPanel({
                       {memberSummary}
                       {entry.members.length > 5 ? ` +${entry.members.length - 5}` : ''}
                     </div>
+                    {orchestrationSummary && (
+                      <div
+                        className={`team-history-item__state ${
+                          orchestration?.blockedByHumanGate ? 'is-blocked' : ''
+                        }`}
+                      >
+                        {orchestrationSummary}
+                      </div>
+                    )}
                   </button>
                   <button
                     type="button"

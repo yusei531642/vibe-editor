@@ -391,6 +391,17 @@
   font-size: 11px;
   color: var(--fg-muted);
 }
+.canvas-popover__preset-state {
+  max-width: 100%;
+  font-size: 10px;
+  color: var(--fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.canvas-popover__preset-state.is-blocked {
+  color: var(--warning, #d29922);
+}
 .canvas-popover__preset-roles {
   display: flex;
   gap: 4px;

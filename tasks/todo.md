@@ -1211,3 +1211,48 @@ PR: https://github.com/yusei531642/vibe-editor/pull/459
 
 - [ ] PR を作成する場合は本文に `Closes #469` と検証結果を記載する。
 - [ ] CodeRabbit / CI / 人間レビューを待ち、自動マージは行わない。
+
+## Issue #470 - Leader orchestration state persistence (2026-05-06 / Codex)
+
+計画: `tasks/issue-470/plan.md`
+
+- [x] Issue #470 の本文、計画コメント、ラベル状態を確認
+- [x] `vibeeditor` / `pullrequest` / `issue-autopilot-batch` / `root-cause-guardrail` / `fortress-review` の該当手順を確認
+- [x] Root Cause Confirmed: TeamHub の監督状態が in-memory only で、team-history / handoff lifecycle へ durable に接続されていない
+- [x] 実装前計画と Next Steps を記録
+- [x] `team-state` 永続化ストアを追加する
+- [x] TeamHub mutation と handoff lifecycle を永続化へ接続する
+- [x] Canvas / IDE restore で persisted agentId と orchestration summary を保持する
+- [x] テストと品質ゲートで動作を実証する
+
+### Next Steps
+
+- [x] `team-state` helper と型を追加する。
+- [x] `team_assign_task` / `team_update_task` / `team_send` / leader switch 系 tool から team-state を更新する。
+- [x] `TeamHistoryMember.agentId` を保存し、復元時に fallback ではなく persisted agentId を優先する。
+- [x] human gate / handoff status summary を Canvas 履歴に表示する。
+- [x] 実装後に進捗、検証結果、Next Tasks を追記する。
+
+### 進捗
+
+- [x] `src-tauri/src/commands/team_state.rs` を追加し、TeamHub orchestration snapshot を project/team 単位で永続化。
+- [x] assign/update/send/leader switch/ack handoff の各 mutation を team-state と handoff lifecycle へ接続。
+- [x] team-history / shared types / Canvas restore / IDE restore に `agentId` と orchestration summary を追加。
+- [x] Canvas と sessions 履歴に human gate / handoff status の状態表示を追加。
+
+### 検証結果
+
+- [x] `cargo check --manifest-path src-tauri\Cargo.toml`: PASS
+- [x] `npm run typecheck`: PASS
+- [x] `npx vitest run src\renderer\src\lib\__tests__\canvas-layout-helpers.test.ts`: PASS (5 tests)
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml update_task_records_structured_report_and_human_gate -- --nocapture`: PASS
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml pending_tasks_exclude_done_tasks -- --nocapture`: PASS
+- [x] `npm run test`: PASS (30 files / 199 tests)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
+
+### Next Tasks
+
+- [ ] PR を作成する場合は本文に `Closes #470` と検証結果を記載する。
+- [ ] CodeRabbit / CI / 人間レビューを待ち、自動マージは行わない。
+- [ ] 必要に応じて Tauri 実機起動で handoff 復元の手動 smoke を追加確認する。
