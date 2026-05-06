@@ -1256,3 +1256,42 @@ PR: https://github.com/yusei531642/vibe-editor/pull/459
 - [ ] PR を作成する場合は本文に `Closes #470` と検証結果を記載する。
 - [ ] CodeRabbit / CI / 人間レビューを待ち、自動マージは行わない。
 - [ ] 必要に応じて Tauri 実機起動で handoff 復元の手動 smoke を追加確認する。
+
+## Release v1.4.11 計画（2026-05-06 / Codex）
+
+計画: `tasks/release-v1.4.11.md`
+
+- [x] Issue #470 / PR #472 / CI / Issue close 状態を確認する
+- [x] 最新 release と tag を確認し、次の patch version を `v1.4.11` と判断する
+- [x] `package.json` / `package-lock.json` / `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json` / `src-tauri/Cargo.lock` を `1.4.11` に更新する
+- [x] 品質ゲートを通す
+- [ ] Release PR を作成し、CI / reviewer を確認する
+- [ ] PR merge 後に `v1.4.11` annotated tag を push して release workflow を起動する
+
+### Next Steps
+
+- [x] バージョン bump を実施する。
+- [x] `npm run typecheck` / `npm run test` / `npm run build:vite` / `cargo check --manifest-path src-tauri/Cargo.toml` / `cargo check --locked --manifest-path src-tauri/Cargo.toml` / `git diff --check` を実行する。
+- [ ] Release PR 作成後、CodeRabbit / CI / 人間レビューを確認する。
+- [ ] PR merge 後に tag push で release workflow を起動する。
+
+### 進捗
+
+- [x] `npm version 1.4.11 --no-git-tag-version` で npm 側を同期。
+- [x] `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json` を `1.4.11` に更新。
+- [x] `cargo check --manifest-path src-tauri/Cargo.toml` で `src-tauri/Cargo.lock` の `vibe-editor` package version を `1.4.11` に更新。
+
+### 検証結果
+
+- [x] `cargo check --manifest-path src-tauri\Cargo.toml`: PASS
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (30 files / 199 tests)
+- [x] `npm run build:vite`: PASS
+- [x] `cargo check --locked --manifest-path src-tauri\Cargo.toml`: PASS
+- [x] `git diff --check`: PASS
+
+### Next Tasks
+
+- [ ] Release PR を作成し、CI / reviewer を確認する。
+- [ ] PR merge 後に `v1.4.11` annotated tag を作成して push する。
+- [ ] release workflow 完了後、draft release の成果物と `latest.json` を確認する。
