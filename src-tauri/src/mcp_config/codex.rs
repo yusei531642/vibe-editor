@@ -51,7 +51,7 @@ pub fn remove_toml_section(content: &str, section: &str) -> String {
             out.push(line);
         }
     }
-    while out.last().map(|s| s.trim().is_empty()).unwrap_or(false) {
+    while out.last().is_some_and(|s| s.trim().is_empty()) {
         out.pop();
     }
     out.join("\n")
@@ -81,9 +81,8 @@ pub async fn setup(bridge_path: &str) -> Result<()> {
 
 pub async fn cleanup() -> Result<()> {
     let path = config_path();
-    let content = match fs::read_to_string(&path).await {
-        Ok(s) => s,
-        Err(_) => return Ok(()),
+    let Ok(content) = fs::read_to_string(&path).await else {
+        return Ok(());
     };
     let stripped = remove_toml_section(&content, SECTION);
     let stripped = remove_toml_section(&stripped, LEGACY_SECTION);

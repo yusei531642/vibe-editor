@@ -202,9 +202,8 @@ pub fn set_server_log_path(p: PathBuf) {
 /// home directory プレフィックスを `~` に reduce する。
 /// home が解決できない / s が home 配下でないときは原文を返す。
 fn reduce_home_prefix(s: &str) -> String {
-    let home = match dirs::home_dir() {
-        Some(h) => h,
-        None => return s.to_string(),
+    let Some(home) = dirs::home_dir() else {
+        return s.to_string();
     };
     let home_s = home.to_string_lossy().to_string();
     // Windows では `\` と `/` の混在があり得るので両形で試す
@@ -247,9 +246,8 @@ mod path_tests {
     /// 存在しないと一部スキップされる点だけ承知 (Linux CI / Windows CI とも home はある)。
     #[test]
     fn reduces_home_prefix_when_under_home() {
-        let home = match dirs::home_dir() {
-            Some(h) => h,
-            None => return, // home 取れない環境ではスキップ (CI 上は通常存在する)
+        let Some(home) = dirs::home_dir() else {
+            return; // home 取れない環境ではスキップ (CI 上は通常存在する)
         };
         let inside = home
             .join(".vibe-editor")
@@ -745,14 +743,11 @@ impl TeamHub {
         outcome: RecruitAckOutcome,
     ) -> Result<(), AckError> {
         let mut s = self.state.lock().await;
-        let pending = match s.pending_recruits.get_mut(agent_id) {
-            Some(p) => p,
-            None => {
-                tracing::warn!(
-                    "[teamhub] recruit_ack ignored: no pending recruit for agent={agent_id}"
-                );
-                return Err(AckError::NotFound);
-            }
+        let Some(pending) = s.pending_recruits.get_mut(agent_id) else {
+            tracing::warn!(
+                "[teamhub] recruit_ack ignored: no pending recruit for agent={agent_id}"
+            );
+            return Err(AckError::NotFound);
         };
         if pending.team_id != expected_team_id {
             tracing::warn!(
@@ -897,16 +892,13 @@ impl TeamHub {
                             break;
                         }
                     };
-                    let permit = match sem.clone().try_acquire_owned() {
-                        Ok(p) => p,
-                        Err(_) => {
-                            tracing::warn!(
-                                "[teamhub] rejecting connection: client limit ({}) reached",
-                                MAX_CONCURRENT_CLIENTS
-                            );
-                            drop(connected);
-                            continue;
-                        }
+                    let Ok(permit) = sem.clone().try_acquire_owned() else {
+                        tracing::warn!(
+                            "[teamhub] rejecting connection: client limit ({}) reached",
+                            MAX_CONCURRENT_CLIENTS
+                        );
+                        drop(connected);
+                        continue;
                     };
                     let hub2 = hub.clone();
                     let token = token.clone();
@@ -1260,12 +1252,9 @@ where
         // Issue #149: 書き込み I/O 失敗で client loop ごと終了するのを避ける。
         // ECONNRESET 等の一時的な失敗は log + continue で次の line を待つ。
         // notification (id=null) には仕様上 error を返さない。
-        let line_str = match std::str::from_utf8(&buf) {
-            Ok(s) => s,
-            Err(_) => {
-                tracing::warn!("[teamhub] dropping invalid utf-8 line");
-                continue;
-            }
+        let Ok(line_str) = std::str::from_utf8(&buf) else {
+            tracing::warn!("[teamhub] dropping invalid utf-8 line");
+            continue;
         };
         let req: serde_json::Value = match serde_json::from_str(line_str) {
             Ok(v) => v,

@@ -9,7 +9,7 @@
 // POSIX も Windows も rename は same-volume なら atomic (Windows は MoveFileEx + REPLACE_EXISTING)。
 
 use anyhow::{anyhow, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
 
@@ -25,15 +25,14 @@ pub async fn atomic_write(target: &Path, bytes: &[u8]) -> Result<()> {
     let tmp = {
         let file_name = target
             .file_name()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "vibe.tmp".to_string());
+            .map_or_else(|| "vibe.tmp".to_string(), |s| s.to_string_lossy().into_owned());
         let pid = std::process::id();
         let unique = uuid::Uuid::new_v4().simple().to_string();
         let tmp_name = format!(".{file_name}.tmp.{pid}.{unique}");
-        target
-            .parent()
-            .map(|p| p.join(tmp_name.clone()))
-            .unwrap_or_else(|| Path::new(&tmp_name).to_path_buf())
+        match target.parent() {
+            Some(p) => p.join(&tmp_name),
+            None => PathBuf::from(&tmp_name),
+        }
     };
 
     // Issue #187 (Security): tmp が攻撃者によって symlink 先置きされている可能性に備え、

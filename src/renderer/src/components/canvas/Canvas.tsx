@@ -59,10 +59,25 @@ const edgeTypes = {
   handoff: HandoffEdge
 };
 
+// React Flow に渡す静的な props はモジュール定数にしてレンダー間で参照を保つ。
+// インラインオブジェクトだと毎レンダーで新しい識別子になり MiniMap / Background が
+// memoization を活かせない。
+const MINIMAP_STYLE = { background: '#0d0d12' } as const;
+const MINIMAP_MASK_COLOR = 'rgba(0,0,0,0.6)';
+const FLOW_DELETE_KEYS = ['Delete'];
+const FLOW_PAN_BUTTONS = [0, 1, 2];
+const FLOW_PRO_OPTIONS = { hideAttribution: true } as const;
+const FLOW_STAGE_STYLE = { position: 'absolute' as const, inset: 0 };
+const BACKGROUND_COLOR_VAR = 'var(--canvas-grid, #1c1c20)';
+/** Issue #259 継承: zoom が 0.7 を下回ると TUI が読めなくなるため recruit focus 時のクランプ閾値。 */
+const MIN_RECRUIT_ZOOM = 0.7;
+
 function FlowApp(): JSX.Element {
   const t = useT();
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
+  // setNodes / setEdges / setViewport / addCard / pulseEdge / setTeamLock は zustand
+  // 内部で stable identity を保つため selector で取り出してキャッシュしておく。
   const setNodes = useCanvasStore((s) => s.setNodes);
   const setEdges = useCanvasStore((s) => s.setEdges);
   const setViewport = useCanvasStore((s) => s.setViewport);
@@ -111,9 +126,13 @@ function FlowApp(): JSX.Element {
       // 同じキャストが index 構築 + position/dimensions 分岐で計 3 回走るので helper に集約。
       const teamIdOf = (n: Node<CardData>): string | undefined =>
         (n.data?.payload as { teamId?: string } | undefined)?.teamId;
+      // store から最新 nodes を直接取り出す (subscribe している `nodes` と等価だが、
+      // ここで getState 越しに読むと callback の deps から `nodes` を外せる →
+      // ドラッグ中に毎フレーム識別子が変わる onNodesChange を React Flow に再 bind せずに済む)。
+      const currentNodes = useCanvasStore.getState().nodes;
       const nodesById = new Map<string, Node<CardData>>();
       const teamMembers = new Map<string, Node<CardData>[]>();
-      for (const n of nodes) {
+      for (const n of currentNodes) {
         nodesById.set(n.id, n);
         const tid = teamIdOf(n);
         if (tid) {
@@ -192,17 +211,18 @@ function FlowApp(): JSX.Element {
       }
 
       const allChanges = extra.length > 0 ? [...remaining, ...extra] : remaining;
-      setNodes(applyNodeChanges(allChanges, nodes));
+      setNodes(applyNodeChanges(allChanges, currentNodes));
     },
-    [nodes, setNodes, confirmRemoveCard, isTeamLocked]
+    [setNodes, confirmRemoveCard, isTeamLocked]
   );
   const onEdgesChange = useCallback(
-    (changes: EdgeChange<Edge>[]) => setEdges(applyEdgeChanges(changes, edges)),
-    [edges, setEdges]
+    (changes: EdgeChange<Edge>[]) =>
+      setEdges(applyEdgeChanges(changes, useCanvasStore.getState().edges)),
+    [setEdges]
   );
   const onConnect = useCallback(
-    (c: Connection) => setEdges(addEdge(c, edges)),
-    [edges, setEdges]
+    (c: Connection) => setEdges(addEdge(c, useCanvasStore.getState().edges)),
+    [setEdges]
   );
 
   // ----- 右クリックメニュー (カード単位) -----
@@ -212,15 +232,18 @@ function FlowApp(): JSX.Element {
     items: ContextMenuItem[];
   } | null>(null);
 
-  // Ctrl+Space / Pane 右クリック共通: 新規 AI Agent (Claude Code) を追加
+  // Ctrl+Space / Pane 右クリック共通: 新規 AI Agent (Claude Code) を追加。
+  // 件数カウントは getState で都度参照し、callback 識別子を `nodes` の参照変化から切り離す
+  // (ドラッグ中の毎フレーム再生成を抑え、useKeybinding の listener 再登録も発生させない)。
   const handleAddClaudeAgent = useCallback((): void => {
-    const n = nodes.filter((x) => x.type === 'agent').length + 1;
+    const currentNodes = useCanvasStore.getState().nodes;
+    const n = currentNodes.filter((x) => x.type === 'agent').length + 1;
     addCard({
       type: 'agent',
       title: `Claude #${n}`,
       payload: { agent: 'claude', role: 'leader' }
     });
-  }, [addCard, nodes]);
+  }, [addCard]);
 
   const handleNodeContextMenu = useCallback(
     (e: React.MouseEvent, node: Node<CardData>) => {
@@ -311,7 +334,7 @@ function FlowApp(): JSX.Element {
   //
   // Issue #259 (継承): zoom が MIN_RECRUIT_ZOOM を下回ると TUI が読めなくなるため、
   // 現在の zoom がそれより大きければ尊重し、下回っていれば minZoom にクランプして寄せる。
-  const MIN_RECRUIT_ZOOM = 0.7;
+  // (MIN_RECRUIT_ZOOM はモジュールトップで定義)
   // 旧 #372 review (vibe-editor-reviewer #418): selector で `lastRecruitFocus` を
   // オブジェクトのまま購読すると、zustand が毎回新しい参照を返すため effect deps が
   // 「object reference に敏感」になり、useReactFlow の参照変化と組み合わさって
@@ -355,7 +378,7 @@ function FlowApp(): JSX.Element {
     <div
       className="tc-stage-root"
       data-view={stageView}
-      style={{ position: 'absolute', inset: 0 }}
+      style={FLOW_STAGE_STYLE}
     >
       <LeaderGlow />
       <ReactFlow
@@ -370,7 +393,7 @@ function FlowApp(): JSX.Element {
         onNodeContextMenu={handleNodeContextMenu}
         onPaneContextMenu={handlePaneContextMenu}
         // Delete キーで選択中カードを削除 (Backspace は xterm 入力と衝突するので除外)
-        deleteKeyCode={['Delete']}
+        deleteKeyCode={FLOW_DELETE_KEYS}
         defaultViewport={initialViewport}
         // --- zoom / pan の挙動 ---
         // Figma/Miro 風のカメラ zoom を React Flow 本来の挙動として復活。
@@ -391,24 +414,24 @@ function FlowApp(): JSX.Element {
         zoomOnScroll
         zoomOnPinch
         zoomOnDoubleClick={false}
-        panOnDrag={[0, 1, 2]}
+        panOnDrag={FLOW_PAN_BUTTONS}
         // onlyRenderVisibleElements は付けない。
         // 付けると React Flow がビューポート外のカードを DOM からアンマウントし、
         // TerminalCard 配下の usePtySession クリーンアップが走って PTY (= Claude/Codex)
         // ごと kill されてしまう。
         // パンで視点を動かしただけで Claude が死ぬのは UX として許容できないので、
         // 多少の DOM 増加は呑んで全カードを常時マウントしておく。
-        proOptions={{ hideAttribution: true }}
+        proOptions={FLOW_PRO_OPTIONS}
       >
-        <Background gap={32} color="var(--canvas-grid, #1c1c20)" />
+        <Background gap={32} color={BACKGROUND_COLOR_VAR} />
         {/* React Flow デフォルトの白い縦 4 ボタン (zoom/+/-、fit、lock) は UI と不整合なので非表示。
             ズームはマウスホイール / トラックパッド、fit はキー (KEYS.fitView)、lock は不要なため。 */}
         <MiniMap
           pannable
           zoomable
           nodeColor={minimapColor}
-          maskColor="rgba(0,0,0,0.6)"
-          style={{ background: '#0d0d12' }}
+          maskColor={MINIMAP_MASK_COLOR}
+          style={MINIMAP_STYLE}
         />
       </ReactFlow>
 

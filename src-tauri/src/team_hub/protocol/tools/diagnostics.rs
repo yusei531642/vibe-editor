@@ -61,7 +61,7 @@ fn pending_inbox_summary(
     }
 
     let oldest_age_ms = oldest_at.map(|oldest| (now - oldest).num_milliseconds().max(0));
-    let stalled = oldest_age_ms.map_or(false, |age| age >= STALLED_INBOUND_THRESHOLD_MS);
+    let stalled = oldest_age_ms.is_some_and(|age| age >= STALLED_INBOUND_THRESHOLD_MS);
 
     PendingInboxSummary {
         ids,
@@ -80,18 +80,17 @@ fn build_member_diagnostics_row(
 ) -> Value {
     let pending = pending_inbox_summary(messages, agent_id, role, now);
     let pending_count = pending.ids.len();
-    let last_seen_at = diagnostics.last_seen_at.clone();
     json!({
         "agentId": agent_id,
         "role": role,
         "online": true,
         "inconsistent": inconsistent,
-        "recruitedAt": diagnostics.recruited_at.clone(),
-        "lastHandshakeAt": diagnostics.last_handshake_at.clone(),
-        "lastSeenAt": last_seen_at.clone(),
-        "lastAgentActivityAt": last_seen_at,
-        "lastMessageInAt": diagnostics.last_message_in_at.clone(),
-        "lastMessageOutAt": diagnostics.last_message_out_at.clone(),
+        "recruitedAt": diagnostics.recruited_at,
+        "lastHandshakeAt": diagnostics.last_handshake_at,
+        "lastSeenAt": diagnostics.last_seen_at,
+        "lastAgentActivityAt": diagnostics.last_seen_at,
+        "lastMessageInAt": diagnostics.last_message_in_at,
+        "lastMessageOutAt": diagnostics.last_message_out_at,
         "messagesInCount": diagnostics.messages_in_count,
         "messagesOutCount": diagnostics.messages_out_count,
         "tasksClaimedCount": diagnostics.tasks_claimed_count,
@@ -99,8 +98,8 @@ fn build_member_diagnostics_row(
         "pendingInboxCount": pending_count,
         "oldestPendingInboxAgeMs": pending.oldest_age_ms,
         "stalledInbound": pending.stalled,
-        "currentStatus": diagnostics.current_status.clone(),
-        "lastStatusAt": diagnostics.last_status_at.clone(),
+        "currentStatus": diagnostics.current_status,
+        "lastStatusAt": diagnostics.last_status_at,
     })
 }
 

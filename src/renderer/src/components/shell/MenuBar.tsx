@@ -9,7 +9,7 @@
  *   - 別の項目を hover (どこかが既に開いている場合のみ) → そちらに開け替え
  *   - 外クリック / Esc / 項目選択 → 全閉じ
  */
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 
 export interface MenuBarItem {
@@ -103,7 +103,13 @@ export interface MenuItemProps {
   disabled?: boolean;
 }
 
-export function MenuItem({ icon, label, shortcut, onClick, disabled }: MenuItemProps): JSX.Element {
+export const MenuItem = memo(function MenuItem({
+  icon,
+  label,
+  shortcut,
+  onClick,
+  disabled
+}: MenuItemProps): JSX.Element {
   return (
     <button
       type="button"
@@ -118,15 +124,15 @@ export function MenuItem({ icon, label, shortcut, onClick, disabled }: MenuItemP
       {shortcut && <span className="menubar__item-shortcut">{shortcut}</span>}
     </button>
   );
-}
+});
 
 /** 区切り線 */
-export function MenuDivider(): JSX.Element {
+export const MenuDivider = memo(function MenuDivider(): JSX.Element {
   return <div className="menubar__divider" aria-hidden="true" />;
-}
+});
 
 /** セクション見出し (例: 「最近開いたプロジェクト」) */
-export function MenuSection({
+export const MenuSection = memo(function MenuSection({
   label,
   rightSlot
 }: {
@@ -139,4 +145,4 @@ export function MenuSection({
       {rightSlot}
     </div>
   );
-}
+});

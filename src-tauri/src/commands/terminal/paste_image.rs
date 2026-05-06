@@ -28,9 +28,8 @@ fn extension_for_mime(mime: &str) -> Option<&'static str> {
 async fn cleanup_old_paste_images(dir: &std::path::Path) {
     // Issue #138: 旧 7 日 → 24h に短縮。情報残存リスクを下げる
     const TTL_SECS: u64 = 24 * 60 * 60;
-    let mut rd = match tokio::fs::read_dir(dir).await {
-        Ok(r) => r,
-        Err(_) => return,
+    let Ok(mut rd) = tokio::fs::read_dir(dir).await else {
+        return;
     };
     let now = std::time::SystemTime::now();
     while let Ok(Some(entry)) = rd.next_entry().await {
@@ -67,17 +66,14 @@ pub async fn save(
             error: Some("pasted image exceeds size limit (32 MB)".into()),
         };
     }
-    let ext = match extension_for_mime(&mime_type) {
-        Some(e) => e,
-        None => {
-            return SavePastedImageResult {
-                ok: false,
-                path: None,
-                error: Some(format!(
-                    "unsupported MIME type for pasted image: {mime_type}"
-                )),
-            };
-        }
+    let Some(ext) = extension_for_mime(&mime_type) else {
+        return SavePastedImageResult {
+            ok: false,
+            path: None,
+            error: Some(format!(
+                "unsupported MIME type for pasted image: {mime_type}"
+            )),
+        };
     };
     use base64::Engine;
     let bytes = match base64::engine::general_purpose::STANDARD.decode(base64.as_bytes()) {
@@ -87,7 +83,7 @@ pub async fn save(
                 ok: false,
                 path: None,
                 error: Some(e.to_string()),
-            };
+            }
         }
     };
     if bytes.len() > MAX_PASTED_IMAGE_BYTES {

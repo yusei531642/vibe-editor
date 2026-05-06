@@ -295,16 +295,13 @@ pub async fn git_diff(
 
     // Issue #36: rel_path が ".." を含むと project_root の外を読めてしまうため safe_join を通す。
     // safe_join が None (= 境界外 / absolute / 不正) の場合は empty にしてエラー扱い。
-    let abs = match crate::commands::files::safe_join(&project_root, &rel_path) {
-        Some(p) => p,
-        None => {
-            return GitDiffResult {
-                ok: false,
-                error: Some("invalid relative path".into()),
-                path: rel_path,
-                ..Default::default()
-            };
-        }
+    let Some(abs) = crate::commands::files::safe_join(&project_root, &rel_path) else {
+        return GitDiffResult {
+            ok: false,
+            error: Some("invalid relative path".into()),
+            path: rel_path,
+            ..Default::default()
+        };
     };
 
     // Issue #154 #1: project_root が submodule / worktree 内のとき、cwd を project_root に
@@ -317,16 +314,13 @@ pub async fn git_diff(
 
     // git の HEAD blob path は repo_root 相対なので、project_root → repo_root の差分を埋める。
     // safe_join 後に repo_root に含まれるかどうかを確認し、相対化する。
-    let abs_head_target = match crate::commands::files::safe_join(&project_root, head_path) {
-        Some(p) => p,
-        None => {
-            return GitDiffResult {
-                ok: false,
-                error: Some("invalid head path".into()),
-                path: rel_path,
-                ..Default::default()
-            };
-        }
+    let Some(abs_head_target) = crate::commands::files::safe_join(&project_root, head_path) else {
+        return GitDiffResult {
+            ok: false,
+            error: Some("invalid head path".into()),
+            path: rel_path,
+            ..Default::default()
+        };
     };
     let head_path_for_git = match abs_head_target.strip_prefix(&repo_root) {
         Ok(p) => p.to_string_lossy().replace('\\', "/"),
@@ -371,8 +365,7 @@ pub async fn git_diff(
     // diff が「全削除」に見えてしまう。raw bytes → from_utf8_lossy で落としどころを作る。
     let worktree_too_large = tokio::fs::metadata(&abs)
         .await
-        .map(|m| m.len() > MAX_DIFF_BYTES as u64)
-        .unwrap_or(false);
+        .is_ok_and(|m| m.len() > MAX_DIFF_BYTES as u64);
     let (modified, worktree_is_lossy) = if worktree_too_large {
         (String::new(), false)
     } else {

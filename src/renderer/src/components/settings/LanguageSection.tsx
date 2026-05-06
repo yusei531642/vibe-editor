@@ -7,13 +7,15 @@ interface Props {
   update: UpdateSetting;
 }
 
+const LANGUAGES: ReadonlyArray<Language> = ['ja', 'en'];
+
 export function LanguageSection({ draft, update }: Props): JSX.Element {
   const t = useT();
   return (
     <section className="modal__section">
       <h3>{t('settings.language')}</h3>
       <div className="lang-grid">
-        {(['ja', 'en'] as Language[]).map((lang) => (
+        {LANGUAGES.map((lang) => (
           <label
             key={lang}
             className={`lang-card ${draft.language === lang ? 'is-selected' : ''}`}

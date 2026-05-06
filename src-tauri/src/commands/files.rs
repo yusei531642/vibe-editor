@@ -137,16 +137,13 @@ pub async fn files_list(project_root: String, rel_path: String) -> FileListResul
 #[tauri::command]
 pub async fn files_read(project_root: String, rel_path: String) -> FileReadResult {
     const MAX_READ_BYTES: u64 = 50 * 1024 * 1024;
-    let abs = match safe_join(&project_root, &rel_path) {
-        Some(p) => p,
-        None => {
-            return FileReadResult {
-                ok: false,
-                error: Some("invalid path".into()),
-                path: rel_path,
-                ..Default::default()
-            }
-        }
+    let Some(abs) = safe_join(&project_root, &rel_path) else {
+        return FileReadResult {
+            ok: false,
+            error: Some("invalid path".into()),
+            path: rel_path,
+            ..Default::default()
+        };
     };
     let meta = match tokio::fs::metadata(&abs).await {
         Ok(m) => m,
@@ -224,15 +221,12 @@ pub async fn files_write(
     // mtime/size を見逃した「同サイズ・1 秒以内」変更でも conflict を確定する。
     expected_content_hash: Option<String>,
 ) -> FileWriteResult {
-    let abs = match safe_join(&project_root, &rel_path) {
-        Some(p) => p,
-        None => {
-            return FileWriteResult {
-                ok: false,
-                error: Some("invalid path".into()),
-                ..Default::default()
-            }
-        }
+    let Some(abs) = safe_join(&project_root, &rel_path) else {
+        return FileWriteResult {
+            ok: false,
+            error: Some("invalid path".into()),
+            ..Default::default()
+        };
     };
 
     // Issue #102: 指定 encoding で再エンコード。lossy / binary は拒否。

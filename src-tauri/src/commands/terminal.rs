@@ -102,9 +102,8 @@ async fn inject_codex_prompt_to_pty(
 ) {
     use tokio::time::sleep;
     sleep(Duration::from_millis(1800)).await;
-    let session = match registry.get(&term_id) {
-        Some(s) => s,
-        None => return,
+    let Some(session) = registry.get(&term_id) else {
+        return;
     };
     // Issue #153: 注入中はユーザーの xterm 入力 (terminal_write) を抑止する。
     // build_chunks は banner 込みで分割するが、Codex 注入では banner 不要なので空文字を渡す。

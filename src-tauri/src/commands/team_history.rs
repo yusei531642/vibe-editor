@@ -137,12 +137,9 @@ async fn ensure_loaded(cache: &mut Option<Vec<TeamHistoryEntry>>) {
         return;
     }
     let path = store_path();
-    let bytes = match fs::read(&path).await {
-        Ok(b) => b,
-        Err(_) => {
-            *cache = Some(Vec::new());
-            return;
-        }
+    let Ok(bytes) = fs::read(&path).await else {
+        *cache = Some(Vec::new());
+        return;
     };
     let entries = serde_json::from_slice::<Vec<TeamHistoryEntry>>(&bytes).unwrap_or_default();
     *cache = Some(entries);

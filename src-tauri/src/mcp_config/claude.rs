@@ -18,7 +18,7 @@ fn config_path() -> PathBuf {
 pub async fn setup(desired: &Value) -> Result<bool> {
     let path = config_path();
     let mut config: Value = match fs::read(&path).await {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or(Value::Object(Default::default())),
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|_| Value::Object(Default::default())),
         Err(_) => Value::Object(Default::default()),
     };
     let obj = config
@@ -71,20 +71,18 @@ pub async fn restore(snap: Option<Vec<u8>>) -> Result<()> {
 
 pub async fn cleanup() -> Result<bool> {
     let path = config_path();
-    let bytes = match fs::read(&path).await {
-        Ok(b) => b,
-        Err(_) => return Ok(false),
+    let Ok(bytes) = fs::read(&path).await else {
+        return Ok(false);
     };
     let mut config: Value = serde_json::from_slice(&bytes).unwrap_or_default();
     let removed = config
         .get_mut("mcpServers")
         .and_then(|s| s.as_object_mut())
-        .map(|s| {
+        .is_some_and(|s| {
             let a = s.remove(ENTRY).is_some();
             let b = s.remove(LEGACY_ENTRY).is_some();
             a || b
-        })
-        .unwrap_or(false);
+        });
     if removed {
         let json = serde_json::to_vec_pretty(&config)?;
         // Issue #108: setup と同じく cleanup も atomic_write を使う。

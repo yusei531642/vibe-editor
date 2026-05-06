@@ -45,16 +45,13 @@ pub async fn logs_read_tail(max_bytes: Option<u64>) -> Result<ReadLogTailRespons
     let path_str = path.to_string_lossy().to_string();
 
     // metadata 取得 (ファイル不在は empty=true で正常終了)
-    let meta = match fs::metadata(&path).await {
-        Ok(m) => m,
-        Err(_) => {
-            return Ok(ReadLogTailResponse {
-                content: String::new(),
-                path: path_str,
-                truncated: false,
-                empty: true,
-            });
-        }
+    let Ok(meta) = fs::metadata(&path).await else {
+        return Ok(ReadLogTailResponse {
+            content: String::new(),
+            path: path_str,
+            truncated: false,
+            empty: true,
+        });
     };
     let size = meta.len();
     if size == 0 {

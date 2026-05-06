@@ -65,26 +65,30 @@ pub fn encode_for_save(content: &str, encoding: &str) -> Result<Vec<u8>, String>
 /// 戻り値: (is_binary, content, encoding)
 pub fn detect_text_or_binary(bytes: &[u8]) -> (bool, String, String) {
     // --- BOM による UTF-16/32 判定 ---
+    // 各 BOM 分岐で decode 失敗時に返すフォールバック (binary 扱い)。
+    // `unwrap_or` だと Ok 経路でも String::new() / "binary".to_string() が毎回 alloc されるので
+    // `unwrap_or_else` で遅延評価する。
+    let binary_fallback = || (true, String::new(), "binary".to_string());
     if bytes.starts_with(&[0xFF, 0xFE, 0x00, 0x00]) {
         // UTF-32 LE BOM (UTF-16 LE と prefix 被るので先にチェック)
         return utf32_decode(&bytes[4..], true)
             .map(|s| (false, s, "utf-32le".to_string()))
-            .unwrap_or((true, String::new(), "binary".to_string()));
+            .unwrap_or_else(binary_fallback);
     }
     if bytes.starts_with(&[0x00, 0x00, 0xFE, 0xFF]) {
         return utf32_decode(&bytes[4..], false)
             .map(|s| (false, s, "utf-32be".to_string()))
-            .unwrap_or((true, String::new(), "binary".to_string()));
+            .unwrap_or_else(binary_fallback);
     }
     if bytes.starts_with(&[0xFF, 0xFE]) {
         return utf16_decode(&bytes[2..], true)
             .map(|s| (false, s, "utf-16le".to_string()))
-            .unwrap_or((true, String::new(), "binary".to_string()));
+            .unwrap_or_else(binary_fallback);
     }
     if bytes.starts_with(&[0xFE, 0xFF]) {
         return utf16_decode(&bytes[2..], false)
             .map(|s| (false, s, "utf-16be".to_string()))
-            .unwrap_or((true, String::new(), "binary".to_string()));
+            .unwrap_or_else(binary_fallback);
     }
     if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
         // UTF-8 BOM

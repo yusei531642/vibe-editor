@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { StatusMascotVariant } from '../../../../types/shared';
 import type { StatusMascotState } from '../../lib/status-mascot';
 
@@ -7,7 +8,7 @@ interface StatusMascotProps {
   variant?: StatusMascotVariant;
 }
 
-export function StatusMascot({
+export const StatusMascot = memo(function StatusMascot({
   state,
   label,
   variant = 'vibe'
@@ -42,7 +43,7 @@ export function StatusMascot({
       </span>
     </span>
   );
-}
+});
 
 type Tool = 'pencil' | 'paper' | 'lens';
 

@@ -197,8 +197,10 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   // 30 カード並ぶと idle 中も毎秒 150 回 timer が起きていた (省電力モード/裏画面でも)。
   // → 出力イベント (handleActivity) の都度 setTimeout を立て直し、idle 復帰でクリアする。
   //   typing 状態の間しかタイマーが動かないので idle 時はゼロコスト。
+  // useCallback で参照固定: TerminalView に渡す onActivity が毎レンダー新規になると、
+  //   TerminalView 内部の effect (handler 再 attach) が無駄に再実行される。
   const idleTimerRef = useRef<number | null>(null);
-  const handleActivity = (): void => {
+  const handleActivity = useCallback((): void => {
     setActivity('typing');
     if (idleTimerRef.current !== null) {
       window.clearTimeout(idleTimerRef.current);
@@ -207,7 +209,7 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
       idleTimerRef.current = null;
       setActivity((prev) => (prev !== 'idle' ? 'idle' : prev));
     }, 600);
-  };
+  }, []);
   useEffect(() => {
     return () => {
       if (idleTimerRef.current !== null) {
@@ -220,34 +222,41 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   // ----- ユーザー入力から auto-summary タイトル -----
   // 入力をバッファし、Enter (\r) を押した瞬間にバッファ内容をタイトル化する。
   // 既にユーザーが手で名付けた (auto title 形式でない) 場合は上書きしない。
+  // title は user 入力で都度上書きされうるが、判定は確定タイミングだけなので ref で読む
+  // → callback 自体は (id, setCardTitle) のみに依存させて識別子を安定化。
   const inputBufferRef = useRef('');
-  const handleUserInput = (raw: string): void => {
-    if (!raw) return;
-    // 制御コードのうち BS, ESC, 矢印キー等は無視。Enter (\r/\n) は確定トリガ。
-    for (const ch of raw) {
-      const code = ch.charCodeAt(0);
-      if (ch === '\r' || ch === '\n') {
-        const text = inputBufferRef.current;
-        inputBufferRef.current = '';
-        const summary = summarizeInput(text);
-        if (summary && isAutoTitle(title)) {
-          setCardTitle(id, summary);
-        }
-      } else if (code === 0x7f || code === 0x08) {
-        // Backspace
-        inputBufferRef.current = inputBufferRef.current.slice(0, -1);
-      } else if (code === 0x1b) {
-        // ESC シーケンス開始 → 同チャンク内の残りも捨てる近似
-        return;
-      } else if (code >= 0x20) {
-        inputBufferRef.current += ch;
-        // 暴走防止: 200 文字超えたらリセット
-        if (inputBufferRef.current.length > 200) {
-          inputBufferRef.current = inputBufferRef.current.slice(-200);
+  const titleRef = useRef(title);
+  titleRef.current = title;
+  const handleUserInput = useCallback(
+    (raw: string): void => {
+      if (!raw) return;
+      // 制御コードのうち BS, ESC, 矢印キー等は無視。Enter (\r/\n) は確定トリガ。
+      for (const ch of raw) {
+        const code = ch.charCodeAt(0);
+        if (ch === '\r' || ch === '\n') {
+          const text = inputBufferRef.current;
+          inputBufferRef.current = '';
+          const summary = summarizeInput(text);
+          if (summary && isAutoTitle(titleRef.current)) {
+            setCardTitle(id, summary);
+          }
+        } else if (code === 0x7f || code === 0x08) {
+          // Backspace
+          inputBufferRef.current = inputBufferRef.current.slice(0, -1);
+        } else if (code === 0x1b) {
+          // ESC シーケンス開始 → 同チャンク内の残りも捨てる近似
+          return;
+        } else if (code >= 0x20) {
+          inputBufferRef.current += ch;
+          // 暴走防止: 200 文字超えたらリセット
+          if (inputBufferRef.current.length > 200) {
+            inputBufferRef.current = inputBufferRef.current.slice(-200);
+          }
         }
       }
-    }
-  };
+    },
+    [id, setCardTitle]
+  );
 
   // Issue #23 + カスタムエージェント対応:
   // agent-resolver 経由で built-in (claude/codex) + customAgents のコマンド/引数/cwd を解決する。
@@ -512,6 +521,16 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   }, []);
   useXtermScrollToBottomOnResize(termContainerRef, scrollToBottom);
 
+  // TerminalView に渡す onSessionId を useCallback 化。インライン lambda だと
+  // setActivity / status の局所 setState で AgentNodeCard が再描画するたび
+  // TerminalView 側の onSessionId が新規参照になり、内部 deps 経由の handler 差替えが起きる。
+  const handleSessionId = useCallback(
+    (sid: string): void => {
+      if (sid) setCardPayload(id, { resumeSessionId: sid });
+    },
+    [id, setCardPayload]
+  );
+
   return (
     <>
       <NodeResizer
@@ -595,9 +614,7 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
             onStatus={setStatus}
             onActivity={handleActivity}
             onUserInput={handleUserInput}
-            onSessionId={(sid) => {
-              if (sid) setCardPayload(id, { resumeSessionId: sid });
-            }}
+            onSessionId={handleSessionId}
             // Issue #342 Phase 1: terminal_create 失敗を Hub に ack(false) する。
             // 30 秒の handshake timeout を待たず、recruit MCP に構造化エラーが即返る。
             onSpawnError={onSpawnError}

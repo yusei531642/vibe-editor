@@ -51,7 +51,7 @@ import {
 } from './lib/settings-context';
 import { useToast } from './lib/toast-context';
 import { useUiStore } from './stores/ui';
-import { dedupPrepend, listContainsPath } from './lib/path-norm';
+import { listContainsPath } from './lib/path-norm';
 import { useProjectLoader } from './lib/hooks/use-project-loader';
 import { useFileTabs } from './lib/hooks/use-file-tabs';
 import type { DiffTab, EditorTab } from './lib/hooks/use-file-tabs';
