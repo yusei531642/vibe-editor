@@ -3,15 +3,13 @@ import {
   ChevronDown,
   ChevronRight,
   File as DefaultFileIcon,
-  Folder,
-  FolderOpen,
   FolderPlus,
   RefreshCw,
   X
 } from 'lucide-react';
 import type { FileNode } from '../../../types/shared';
 import { useT } from '../lib/i18n';
-import { fileIcon } from '../lib/file-icon-color';
+import { fileIcon, folderIcon } from '../lib/file-icon-color';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu';
 import { useToast } from '../lib/toast-context';
 import { api } from '../lib/tauri-api';
@@ -364,6 +362,7 @@ function FileTreeNodeImpl({
   const fileIconDef = node.isDir ? undefined : fileIcon(node.name);
   const FileTypeIcon = fileIconDef?.Icon ?? DefaultFileIcon;
   const fileTypeColor = fileIconDef?.color;
+  const folderDef = node.isDir ? folderIcon(node.name, isOpen) : undefined;
 
   const handleClick = (): void => {
     if (node.isDir) onToggle(rootPath, node);
@@ -393,30 +392,22 @@ function FileTreeNodeImpl({
         onClick={handleClick}
         onContextMenu={(e) => onContextMenu(e, rootPath, node)}
       >
-        {node.isDir ? (
+        {node.isDir && folderDef ? (
           <>
             <ChevronRight
               size={13}
               strokeWidth={2.25}
               className={`filetree__chevron${isOpen ? ' is-open' : ''}`}
             />
-            {isOpen ? (
-              <FolderOpen
-                size={14}
-                strokeWidth={2}
-                fill="currentColor"
-                fillOpacity={0.22}
-                className="filetree__icon filetree__icon--open"
-              />
-            ) : (
-              <Folder
-                size={14}
-                strokeWidth={2}
-                fill="currentColor"
-                fillOpacity={0.18}
-                className="filetree__icon"
-              />
-            )}
+            <folderDef.Icon
+              size={14}
+              strokeWidth={2}
+              fill="currentColor"
+              fillOpacity={isOpen ? 0.22 : 0.18}
+              className={`filetree__icon${isOpen ? ' filetree__icon--open' : ''}${folderDef.color ? ' filetree__icon--colored' : ''}`}
+              style={folderDef.color ? { color: folderDef.color } : undefined}
+              aria-hidden
+            />
           </>
         ) : (
           <>

@@ -26,6 +26,15 @@ import {
   FileText,
   FileVideo,
   FileType2,
+  Folder,
+  FolderArchive,
+  FolderCode,
+  FolderCog,
+  FolderGit2,
+  FolderHeart,
+  FolderKey,
+  FolderOpen,
+  FolderOutput,
   Gem,
   GitBranch,
   Globe,
@@ -43,6 +52,7 @@ import {
   Snowflake,
   Sparkles,
   Terminal,
+  TestTube2,
   Type as TypeIcon,
   Video,
   Wrench,
@@ -259,4 +269,147 @@ export function fileIcon(name: string): FileIconDef | undefined {
 /** 旧 API: 色だけ返す。他箇所 (Canvas 等) が参照している可能性があるので残す。 */
 export function fileIconColor(name: string): string | undefined {
   return fileIcon(name)?.color;
+}
+
+// ========== フォルダアイコン (VSCode Material Icon Theme 風) ==========
+
+export interface FolderIconDef {
+  /** 閉じ状態のアイコン */
+  Icon: LucideIcon;
+  /** 開き状態のアイコン (未指定時は Icon をそのまま使う) */
+  IconOpen?: LucideIcon;
+  /** フォルダの識別色 (開閉どちらでも同じ色を使い、VSCode 風に統一感を出す) */
+  color: string;
+}
+
+/**
+ * フォルダ名 → アイコン + 色マッピング。
+ * キーは小文字正規化済み。VSCode の material-icon-theme を参考に、
+ * lucide-react の中から最も意味の近いアイコンを割り当てている。
+ */
+const FOLDER: Record<string, FolderIconDef> = {
+  // ソースコード系
+  src:        { Icon: FolderCode,    IconOpen: FolderCode,    color: '#60a5fa' },
+  source:     { Icon: FolderCode,    IconOpen: FolderCode,    color: '#60a5fa' },
+  app:        { Icon: FolderCode,    IconOpen: FolderCode,    color: '#818cf8' },
+  pages:      { Icon: FolderCode,    IconOpen: FolderCode,    color: '#818cf8' },
+
+  // コンポーネント / UI
+  components: { Icon: Layers,        IconOpen: Layers,        color: '#f472b6' },
+  component:  { Icon: Layers,        IconOpen: Layers,        color: '#f472b6' },
+  layouts:    { Icon: Layers,        IconOpen: Layers,        color: '#c084fc' },
+  views:      { Icon: Layers,        IconOpen: Layers,        color: '#c084fc' },
+
+  // ライブラリ / ユーティリティ
+  lib:        { Icon: FolderCode,    IconOpen: FolderCode,    color: '#a78bfa' },
+  libs:       { Icon: FolderCode,    IconOpen: FolderCode,    color: '#a78bfa' },
+  utils:      { Icon: FolderCog,     IconOpen: FolderCog,     color: '#94a3b8' },
+  helpers:    { Icon: FolderCog,     IconOpen: FolderCog,     color: '#94a3b8' },
+
+  // React Hooks
+  hooks:      { Icon: Zap,           IconOpen: Zap,           color: '#fbbf24' },
+  composables: { Icon: Zap,          IconOpen: Zap,           color: '#fbbf24' },
+
+  // スタイル
+  styles:     { Icon: Paintbrush,    IconOpen: Paintbrush,    color: '#ec4899' },
+  css:        { Icon: Paintbrush,    IconOpen: Paintbrush,    color: '#ec4899' },
+  scss:       { Icon: Paintbrush,    IconOpen: Paintbrush,    color: '#ec4899' },
+
+  // テスト
+  tests:      { Icon: TestTube2,     IconOpen: TestTube2,     color: '#22c55e' },
+  test:       { Icon: TestTube2,     IconOpen: TestTube2,     color: '#22c55e' },
+  __tests__:  { Icon: TestTube2,     IconOpen: TestTube2,     color: '#22c55e' },
+  __test__:   { Icon: TestTube2,     IconOpen: TestTube2,     color: '#22c55e' },
+  spec:       { Icon: TestTube2,     IconOpen: TestTube2,     color: '#22c55e' },
+  specs:      { Icon: TestTube2,     IconOpen: TestTube2,     color: '#22c55e' },
+  e2e:        { Icon: TestTube2,     IconOpen: TestTube2,     color: '#16a34a' },
+  cypress:    { Icon: TestTube2,     IconOpen: TestTube2,     color: '#16a34a' },
+
+  // ドキュメント
+  docs:       { Icon: BookOpen,      IconOpen: BookOpen,      color: '#60a5fa' },
+  doc:        { Icon: BookOpen,      IconOpen: BookOpen,      color: '#60a5fa' },
+  documentation: { Icon: BookOpen,   IconOpen: BookOpen,      color: '#60a5fa' },
+
+  // Git / CI / CD
+  '.github':  { Icon: FolderGit2,    IconOpen: FolderGit2,    color: '#f87171' },
+  '.git':     { Icon: FolderGit2,    IconOpen: FolderGit2,    color: '#f87171' },
+  '.gitlab':  { Icon: FolderGit2,    IconOpen: FolderGit2,    color: '#fb923c' },
+  '.circleci': { Icon: FolderCog,    IconOpen: FolderCog,     color: '#64748b' },
+  '.vscode':  { Icon: FolderCog,     IconOpen: FolderCog,     color: '#0ea5e9' },
+
+  // ビルド出力
+  build:      { Icon: FolderOutput,  IconOpen: FolderOutput,  color: '#f59e0b' },
+  dist:       { Icon: FolderOutput,  IconOpen: FolderOutput,  color: '#f59e0b' },
+  out:        { Icon: FolderOutput,  IconOpen: FolderOutput,  color: '#f59e0b' },
+  output:     { Icon: FolderOutput,  IconOpen: FolderOutput,  color: '#f59e0b' },
+
+  // パッケージ / 依存
+  node_modules: { Icon: FolderArchive, IconOpen: FolderArchive, color: '#64748b' },
+  vendor:     { Icon: FolderArchive, IconOpen: FolderArchive, color: '#64748b' },
+  packages:   { Icon: Package,       IconOpen: Package,       color: '#dc2626' },
+
+  // 設定 / 環境
+  config:     { Icon: FolderCog,     IconOpen: FolderCog,     color: '#94a3b8' },
+  configs:    { Icon: FolderCog,     IconOpen: FolderCog,     color: '#94a3b8' },
+  '.config':  { Icon: FolderCog,     IconOpen: FolderCog,     color: '#94a3b8' },
+
+  // 静的アセット
+  assets:     { Icon: FolderHeart,   IconOpen: FolderHeart,   color: '#a78bfa' },
+  images:     { Icon: FolderHeart,   IconOpen: FolderHeart,   color: '#a78bfa' },
+  img:        { Icon: FolderHeart,   IconOpen: FolderHeart,   color: '#a78bfa' },
+  icons:      { Icon: FolderHeart,   IconOpen: FolderHeart,   color: '#a78bfa' },
+  fonts:      { Icon: FolderHeart,   IconOpen: FolderHeart,   color: '#f59e0b' },
+  media:      { Icon: FolderHeart,   IconOpen: FolderHeart,   color: '#ec4899' },
+  public:     { Icon: Globe,         IconOpen: Globe,         color: '#06b6d4' },
+  static:     { Icon: Globe,         IconOpen: Globe,         color: '#06b6d4' },
+
+  // タスク / スキル (vibe-editor 固有)
+  'src-tauri': { Icon: FolderCog,    IconOpen: FolderCog,     color: '#facc15' },
+  tasks:      { Icon: FolderKey,     IconOpen: FolderKey,     color: '#f97316' },
+  skills:     { Icon: Sparkles,      IconOpen: Sparkles,      color: '#d97757' },
+
+  // セキュリティ
+  '.ssh':     { Icon: FolderKey,     IconOpen: FolderKey,     color: '#16a34a' },
+  '.certs':   { Icon: Shield,        IconOpen: Shield,        color: '#16a34a' },
+
+  // その他
+  scripts:    { Icon: Terminal,      IconOpen: Terminal,      color: '#22c55e' },
+  bin:        { Icon: Terminal,      IconOpen: Terminal,      color: '#22c55e' },
+  types:      { Icon: FileCode2,     IconOpen: FileCode2,     color: '#3178c6' },
+  typings:    { Icon: FileCode2,     IconOpen: FileCode2,     color: '#3178c6' },
+  stores:     { Icon: Layers,        IconOpen: Layers,        color: '#facc15' },
+  store:      { Icon: Layers,        IconOpen: Layers,        color: '#facc15' },
+  api:        { Icon: Globe,         IconOpen: Globe,         color: '#10b981' },
+  routes:     { Icon: Globe,         IconOpen: Globe,         color: '#10b981' },
+  middleware: { Icon: FolderCog,     IconOpen: FolderCog,     color: '#6366f1' },
+  plugins:    { Icon: Zap,           IconOpen: Zap,           color: '#a855f7' },
+  i18n:       { Icon: Globe,         IconOpen: Globe,         color: '#06b6d4' },
+  locales:    { Icon: Globe,         IconOpen: Globe,         color: '#06b6d4' },
+  locale:     { Icon: Globe,         IconOpen: Globe,         color: '#06b6d4' },
+  overlays:   { Icon: Layers,        IconOpen: Layers,        color: '#818cf8' },
+  canvas:     { Icon: Layers,        IconOpen: Layers,        color: '#f59e0b' },
+  shell:      { Icon: Terminal,      IconOpen: Terminal,      color: '#22c55e' },
+  settings:   { Icon: FolderCog,     IconOpen: FolderCog,     color: '#94a3b8' },
+  renderer:   { Icon: FolderCode,    IconOpen: FolderCode,    color: '#60a5fa' }
+};
+
+/** デフォルトのフォルダ定義 (マッピングに一致しなかった場合) */
+const DEFAULT_FOLDER: FolderIconDef = {
+  Icon: Folder,
+  IconOpen: FolderOpen,
+  color: '' // 色なし = 既存テーマの currentColor で描画
+};
+
+/**
+ * フォルダ名と開閉状態からアイコン + 色を返す。
+ * 未知のフォルダ名にはデフォルト (汎用 Folder / FolderOpen) をフォールバック。
+ */
+export function folderIcon(
+  name: string,
+  isOpen: boolean
+): { Icon: LucideIcon; color: string } {
+  const lower = name.toLowerCase();
+  const def = FOLDER[lower] ?? DEFAULT_FOLDER;
+  const Icon = isOpen ? (def.IconOpen ?? def.Icon) : def.Icon;
+  return { Icon, color: def.color };
 }

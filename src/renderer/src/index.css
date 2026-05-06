@@ -3439,8 +3439,18 @@ body.is-resizing * {
 }
 
 /* 開フォルダはテラコッタで点灯。fill もテラコッタ opacity 0.22 で乗る */
-.filetree__icon--open {
+.filetree__icon--open:not(.filetree__icon--colored) {
   color: var(--accent);
+  opacity: 1;
+}
+
+/* フォルダ名ベースの識別色が付いている場合。inline style で color を指定し、
+   開閉どちらでも同じ色を維持して VSCode 風の統一感を出す。 */
+.filetree__icon--colored {
+  opacity: 0.88;
+  transition: opacity 120ms var(--ease-out-soft);
+}
+.filetree__icon--colored.filetree__icon--open {
   opacity: 1;
 }
 
