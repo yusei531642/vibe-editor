@@ -155,3 +155,9 @@ codex exec --sandbox read-only --color never --ephemeral \
 - Glass の `--bg` は透明なので、アクセント背景上の文字色として `var(--bg)` を流用しない。
 - ボタンやバッジで `background: var(--accent)` を使う場合は、テーマ側から `--accent-foreground` のような専用トークンを流し、Glass では濃色ネイビーを使う。
 - テーマ色を調整するときは `themes.ts` の `ThemeVars`、CSS 変数流し込み、対象 CSS、必要なコントラスト検証をセットで確認する。
+
+## Issue #469 - Canvas sidebar width
+
+- IDE と Canvas で同じ `Sidebar` を再利用していても、親レイアウトが Grid から flex に変わると幅制約は引き継がれない。
+- 「IDE と同じ幅に合わせる」系の UI 修正では、既存 token の `--shell-sidebar-w` を参照し、別の px 値を直書きしない。
+- Canvas 固有の表示不具合は `canvas.css` 側へ局所化し、shared `.sidebar` や `FileTreePanel` へ波及させない。
