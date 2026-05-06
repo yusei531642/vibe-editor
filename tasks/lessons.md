@@ -168,3 +168,11 @@ codex exec --sandbox read-only --color never --ephemeral \
 - `src/renderer/src/lib/team-roles.ts` の `colorOf()` は builtin 互換 shim であり、動的 role、custom role profile、ユーザー override の色を解決できない。新規 UI で使い回さない。
 - Stage/List のような並列表現は、片方だけ CSS 変数名を変えると drift しやすい。`--agent-accent` / `--organization-accent` など意味が同じ変数を揃える。
 - List 本体だけでなく MiniMap や handoff edge など周辺表示も旧 `colorOf()` 参照が残りやすい。表示系の source of truth を変えるときは関連する補助表示まで検索する。
+
+## Issue #475 - Glass Canvas background transparency
+
+- Glass の白濁・透過度調整は、まず Canvas root の tint を IDE root から分離して局所調整する。
+- `--surface-glass` や Glass の `bgPanel` 系を先に下げると、IDE、terminal、modal、menu、card の可読性へ広く波及するため初手にしない。
+- Glass + Canvas の視覚判定は Vite 単体では不足する。最終確認は `npm run dev` の Tauri 実機で行う。
+- 実装完了報告の前に対象 Issue の `state` を必ず確認する。完了条件を満たしているなら、E2E結果とクローズ根拠をコメントして `gh issue close --reason completed` まで実行する。
+- 検証未完了などの理由で Issue を閉じない場合は、最終報告で「OPENのままにした理由」と「残りのクローズ条件」を明示する。単に実装・検証結果だけを報告して Issue open 状態を見落とさない。
