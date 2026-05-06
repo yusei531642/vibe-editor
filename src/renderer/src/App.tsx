@@ -46,12 +46,11 @@ import { getStatusMascotState } from './lib/status-mascot';
 import { useT } from './lib/i18n';
 import {
   useSettingsActions,
-  useSettingsLoading,
-  useSettingsValue
+  useSettingsLoading
 } from './lib/settings-context';
 import { useToast } from './lib/toast-context';
 import { useUiStore } from './stores/ui';
-import { listContainsPath } from './lib/path-norm';
+import { useAppShellState } from './lib/hooks/use-app-shell-state';
 import { useProjectLoader } from './lib/hooks/use-project-loader';
 import { useFileTabs } from './lib/hooks/use-file-tabs';
 import type { DiffTab, EditorTab } from './lib/hooks/use-file-tabs';
@@ -81,24 +80,10 @@ export function App(): JSX.Element {
   useWindowFrameInsets();
   const settingsLoading = useSettingsLoading();
   const { update: updateSettings, reset: resetSettings } = useSettingsActions();
-  const settings = {
-    claudeCommand: useSettingsValue('claudeCommand'),
-    claudeArgs: useSettingsValue('claudeArgs'),
-    claudeCwd: useSettingsValue('claudeCwd'),
-    lastOpenedRoot: useSettingsValue('lastOpenedRoot'),
-    recentProjects: useSettingsValue('recentProjects'),
-    workspaceFolders: useSettingsValue('workspaceFolders'),
-    claudeCodePanelWidth: useSettingsValue('claudeCodePanelWidth'),
-    sidebarWidth: useSettingsValue('sidebarWidth'),
-    codexCommand: useSettingsValue('codexCommand'),
-    codexArgs: useSettingsValue('codexArgs'),
-    language: useSettingsValue('language'),
-    theme: useSettingsValue('theme'),
-    density: useSettingsValue('density'),
-    statusMascotVariant: useSettingsValue('statusMascotVariant'),
-    hasCompletedOnboarding: useSettingsValue('hasCompletedOnboarding'),
-    mcpAutoSetup: useSettingsValue('mcpAutoSetup')
-  };
+  // Phase 2 (Issue #487): App.tsx 冒頭の `useSettingsValue` 17 連発合成は
+  // `useAppShellState` hook に外出し済み。再描画粒度は変えていない (各キーが
+  // useSettingsValue で個別購読される元の挙動を維持)。
+  const settings = useAppShellState();
   const { showToast, dismissToast } = useToast();
   const t = useT();
   // Canvas モードでは App が裏で常時マウントされるが、下の初回タブ生成
@@ -116,15 +101,21 @@ export function App(): JSX.Element {
   // sidebar
   const [sidebarView, setSidebarView] = useState<SidebarView>('changes');
 
-  // Phase 1-1 (Issue #373): プロジェクトローダ責務を hook に外出し。
-  // confirmDiscardEditorTabs / onProjectSwitched / onLoaded はこのコンポーネント
-  // の下方で宣言される state setter / 派生値に依存するため、ref 経由で渡す。
-  // Phase 1-2/1-3/1-4 で各 hook に分散したらこの ref ブリッジは順次解消する。
+  // Phase 1-1 (Issue #373) / Phase 2 (Issue #487): プロジェクトローダ責務 + プロジェクト
+  // メニュー / ワークスペース系 handler を hook に外出し。
+  // confirmDiscardEditorTabs / onProjectSwitched / onLoaded /
+  // discardEditorTabsForRoot はこのコンポーネントの下方で宣言される state setter
+  // や useFileTabs の戻り値に依存するため、ref 経由で渡す。
   const confirmDiscardRef = useRef<() => boolean>(() => true);
   const projectSwitchedRef = useRef<(root: string) => void>(() => {});
   const projectLoadedRef = useRef<
     (snapshot: { gitStatus: GitStatus; sessions: SessionInfo[] }) => void
   >(() => {});
+  // Phase 2 (Issue #487): handleRemoveWorkspaceFolder の「rootPath で editor タブを
+  // 整理する」ブリッジ。useFileTabs の戻り値が確定するまでは true を返す noop。
+  const discardEditorTabsForRootRef = useRef<(rootPath: string) => boolean>(
+    () => true
+  );
   const stableConfirmDiscard = useCallback(() => confirmDiscardRef.current(), []);
   const stableProjectSwitched = useCallback(
     (root: string) => projectSwitchedRef.current(root),
@@ -135,16 +126,29 @@ export function App(): JSX.Element {
       projectLoadedRef.current(snapshot),
     []
   );
+  const stableDiscardForRoot = useCallback(
+    (rootPath: string) => discardEditorTabsForRootRef.current(rootPath),
+    []
+  );
   const {
     projectRoot,
     loadProject,
     refreshGit,
     gitStatus,
-    gitLoading
+    gitLoading,
+    workspaceFolders,
+    handleNewProject,
+    handleOpenFolder,
+    handleOpenFile,
+    handleOpenRecent,
+    handleAddWorkspaceFolder,
+    handleRemoveWorkspaceFolder
   } = useProjectLoader({
     confirmDiscardEditorTabs: stableConfirmDiscard,
     onProjectSwitched: stableProjectSwitched,
-    onLoaded: stableProjectLoaded
+    onLoaded: stableProjectLoaded,
+    showToast,
+    discardEditorTabsForRoot: stableDiscardForRoot
   });
 
   // Phase 1-2 (Issue #373): editor / diff tab + recentlyClosed を hook に外出し。
@@ -437,105 +441,28 @@ export function App(): JSX.Element {
     [showToast, addTerminalTab]
   );
 
-  // ---------- プロジェクトメニュー操作 ----------
-
-  const handleNewProject = useCallback(async () => {
-    const folder = await window.api.dialog.openFolder('新規プロジェクト: 空フォルダを選択/作成');
-    if (!folder) return;
-    const empty = await window.api.dialog.isFolderEmpty(folder);
-    const loaded = await loadProject(folder);
-    if (!loaded) return;
-    if (!empty) {
-      showToast('フォルダが空ではありません。既存として開きます', { tone: 'warning' });
-    } else {
-      showToast('新規プロジェクトを作成', { tone: 'success' });
+  // ---------- プロジェクトメニュー操作 / ワークスペース ----------
+  // Phase 2 (Issue #487): handleNewProject / handleOpenFolder / handleOpenFile /
+  // handleOpenRecent / handleClearRecent / workspaceFolders / handleAddWorkspaceFolder /
+  // handleRemoveWorkspaceFolder は use-project-loader.ts に移管済み。
+  // useFileTabs の戻り値が確定した後に「rootPath 単位で editor タブを破棄する」
+  // ブリッジ関数を ref に差し込み、use-project-loader 側の handleRemoveWorkspaceFolder
+  // から呼べるようにする (上方の stableDiscardForRoot 経由)。
+  discardEditorTabsForRootRef.current = (path: string): boolean => {
+    const closingTabs = editorTabs.filter((tab) => tab.rootPath === path);
+    const dirty = closingTabs.filter(
+      (tab) => !tab.isBinary && tab.content !== tab.originalContent
+    );
+    if (dirty.length > 0 && !confirmDiscardEditorTabs(closingTabs.map((tab) => tab.id))) {
+      // 破棄キャンセル → 呼び出し側 (use-project-loader.handleRemoveWorkspaceFolder)
+      // で settings / tabs どちらも変更させない (Issue #33 の約束を維持)。
+      return false;
     }
-  }, [loadProject, showToast]);
-
-  const handleOpenFolder = useCallback(async () => {
-    const folder = await window.api.dialog.openFolder('既存プロジェクトを開く');
-    if (!folder) return;
-    await loadProject(folder);
-  }, [loadProject]);
-
-  const handleOpenFile = useCallback(async () => {
-    const file = await window.api.dialog.openFile('ファイルを開く');
-    if (!file) return;
-    const parent = file.replace(/[\\/][^\\/]+$/, '');
-    const loaded = await loadProject(parent);
-    if (loaded) {
-      showToast(`${file} の親フォルダをプロジェクトとして読み込みました`, { tone: 'info' });
+    if (closingTabs.length > 0) {
+      setEditorTabs((prev) => prev.filter((tab) => tab.rootPath !== path));
     }
-  }, [loadProject, showToast]);
-
-  const handleOpenRecent = useCallback(
-    async (path: string) => {
-      await loadProject(path);
-    },
-    [loadProject]
-  );
-
-  const handleClearRecent = useCallback(() => {
-    void updateSettings({ recentProjects: [] });
-    showToast('最近のプロジェクト履歴をクリアしました', { tone: 'info' });
-  }, [updateSettings, showToast]);
-
-  // ---------- Issue #4: ワークスペースフォルダ管理 ----------
-
-  const workspaceFolders = useMemo(
-    () => (settings.workspaceFolders ?? []).filter((p) => p && p !== projectRoot),
-    [settings.workspaceFolders, projectRoot]
-  );
-
-  const handleAddWorkspaceFolder = useCallback(async () => {
-    const folder = await window.api.dialog.openFolder(t('appMenu.addWorkspaceDialogTitle'));
-    if (!folder) return;
-    const name = folder.split(/[\\/]/).pop() ?? folder;
-    // Issue #67: 比較を normalize 後キーで行い、表記揺れ (大小文字 / `\` vs `/`) を吸収。
-    if (listContainsPath([projectRoot], folder)) {
-      showToast(t('workspace.alreadyAdded', { name }), { tone: 'info' });
-      return;
-    }
-    const current = settings.workspaceFolders ?? [];
-    if (listContainsPath(current, folder)) {
-      showToast(t('workspace.alreadyAdded', { name }), { tone: 'info' });
-      return;
-    }
-    await updateSettings({ workspaceFolders: [...current, folder] });
-    showToast(t('workspace.added', { name }), { tone: 'success' });
-  }, [settings.workspaceFolders, projectRoot, updateSettings, showToast, t]);
-
-  const handleRemoveWorkspaceFolder = useCallback(
-    (path: string) => {
-      const current = settings.workspaceFolders ?? [];
-      if (!current.includes(path)) return;
-      const name = path.split(/[\\/]/).pop() ?? path;
-
-      // Issue #33: 未保存タブの破棄確認を settings 更新より先に行う。
-      // Cancel された場合は settings / tabs どちらも変更せず、UI と永続状態の整合を保つ。
-      const closingTabs = editorTabs.filter((tab) => tab.rootPath === path);
-      const dirty = closingTabs.filter(
-        (t) => !t.isBinary && t.content !== t.originalContent
-      );
-      if (dirty.length > 0 && !confirmDiscardEditorTabs(closingTabs.map((t) => t.id))) {
-        // 破棄キャンセル → 何も変更しない
-        return;
-      }
-      if (closingTabs.length > 0) {
-        setEditorTabs((prev) => prev.filter((t) => t.rootPath !== path));
-      }
-      void updateSettings({ workspaceFolders: current.filter((p) => p !== path) });
-      showToast(t('workspace.removed', { name }), { tone: 'info' });
-    },
-    [
-      settings.workspaceFolders,
-      editorTabs,
-      updateSettings,
-      showToast,
-      t,
-      confirmDiscardEditorTabs
-    ]
-  );
+    return true;
+  };
 
   // Phase 1-9 (Issue #373): コマンドパレット用 Command[] 構築は lib/app-commands.ts に集約。
   // useMemo の deps 配列は呼び出し側に残し、react-hooks/exhaustive-deps が機能する形を維持。

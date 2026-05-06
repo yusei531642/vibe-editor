@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GitStatus, SessionInfo } from '../../../../types/shared';
 import { useT } from '../i18n';
 import {
@@ -7,7 +7,12 @@ import {
   useSettingsValue
 } from '../settings-context';
 import { useUiStore } from '../../stores/ui';
-import { dedupPrepend } from '../path-norm';
+import { dedupPrepend, listContainsPath } from '../path-norm';
+
+type ToastFn = (
+  msg: string,
+  opts?: { tone?: 'info' | 'success' | 'warning' | 'error' }
+) => void;
 
 export interface UseProjectLoaderOptions {
   /** 既存タブの discard 確認。返り値が false ならプロジェクト切替を中止する。
@@ -20,6 +25,14 @@ export interface UseProjectLoaderOptions {
   /** loadProject / 初回ロード effect で取得した snapshot を上に流す。
    *  hook が責務外として保持しない state (sessions など) を親に伝える橋渡し。 */
   onLoaded: (snapshot: { gitStatus: GitStatus; sessions: SessionInfo[] }) => void;
+  /** Phase 2 (Issue #487): プロジェクトメニュー / ワークスペース系 handler 移管に伴い追加。
+   *  toast はこの hook 内で表示する (UI 配線を呼び出し側に分散させない)。 */
+  showToast: ToastFn;
+  /** Phase 2 (Issue #487): handleRemoveWorkspaceFolder で「rootPath = path のエディタ
+   *  タブを破棄する」ためのブリッジ。dirty タブがあるときはユーザー確認を取り、OK なら
+   *  setEditorTabs で当該タブを閉じる。返り値が false の場合 (= ユーザーが Cancel)、
+   *  hook 側は workspaceFolders を変更してはならない (Issue #33 と同じ約束)。 */
+  discardEditorTabsForRoot: (rootPath: string) => boolean;
 }
 
 export interface UseProjectLoaderResult {
@@ -31,6 +44,17 @@ export interface UseProjectLoaderResult {
   refreshGit: () => Promise<void>;
   gitStatus: GitStatus | null;
   gitLoading: boolean;
+
+  // ---- Phase 2 (Issue #487): プロジェクトメニュー / ワークスペース系 ----
+  /** projectRoot を除いたユーザー登録ワークスペース一覧。Sidebar に渡す。 */
+  workspaceFolders: string[];
+  handleNewProject: () => Promise<void>;
+  handleOpenFolder: () => Promise<void>;
+  handleOpenFile: () => Promise<void>;
+  handleOpenRecent: (path: string) => Promise<void>;
+  handleClearRecent: () => void;
+  handleAddWorkspaceFolder: () => Promise<void>;
+  handleRemoveWorkspaceFolder: (path: string) => void;
 }
 
 export function useProjectLoader(
@@ -186,11 +210,125 @@ export function useProjectLoader(
     }
   }, [projectRoot]);
 
+  // ---- Phase 2 (Issue #487): プロジェクトメニュー / ワークスペース ----
+
+  // Issue #67: 比較を normalize 後キーで行い、表記揺れ (大小文字 / `\` vs `/`) を吸収。
+  // projectRoot 自体は別 UI 上 (Sidebar header) で表示されるので一覧からは除外する。
+  const workspaceFoldersFromSettings = useSettingsValue('workspaceFolders');
+  const workspaceFolders = useMemo(
+    () =>
+      (workspaceFoldersFromSettings ?? []).filter(
+        (p) => p && p !== projectRoot
+      ),
+    [workspaceFoldersFromSettings, projectRoot]
+  );
+
+  const handleNewProject = useCallback(async () => {
+    const folder = await window.api.dialog.openFolder(
+      '新規プロジェクト: 空フォルダを選択/作成'
+    );
+    if (!folder) return;
+    const empty = await window.api.dialog.isFolderEmpty(folder);
+    const loaded = await loadProject(folder);
+    if (!loaded) return;
+    if (!empty) {
+      optsRef.current.showToast('フォルダが空ではありません。既存として開きます', {
+        tone: 'warning'
+      });
+    } else {
+      optsRef.current.showToast('新規プロジェクトを作成', { tone: 'success' });
+    }
+  }, [loadProject]);
+
+  const handleOpenFolder = useCallback(async () => {
+    const folder = await window.api.dialog.openFolder('既存プロジェクトを開く');
+    if (!folder) return;
+    await loadProject(folder);
+  }, [loadProject]);
+
+  const handleOpenFile = useCallback(async () => {
+    const file = await window.api.dialog.openFile('ファイルを開く');
+    if (!file) return;
+    const parent = file.replace(/[\\/][^\\/]+$/, '');
+    const loaded = await loadProject(parent);
+    if (loaded) {
+      optsRef.current.showToast(
+        `${file} の親フォルダをプロジェクトとして読み込みました`,
+        { tone: 'info' }
+      );
+    }
+  }, [loadProject]);
+
+  const handleOpenRecent = useCallback(
+    async (path: string) => {
+      await loadProject(path);
+    },
+    [loadProject]
+  );
+
+  const handleClearRecent = useCallback(() => {
+    void updateSettings({ recentProjects: [] });
+    optsRef.current.showToast('最近のプロジェクト履歴をクリアしました', {
+      tone: 'info'
+    });
+  }, [updateSettings]);
+
+  const handleAddWorkspaceFolder = useCallback(async () => {
+    const folder = await window.api.dialog.openFolder(
+      t('appMenu.addWorkspaceDialogTitle')
+    );
+    if (!folder) return;
+    const name = folder.split(/[\\/]/).pop() ?? folder;
+    // Issue #67: 比較を normalize 後キーで行い、表記揺れ (大小文字 / `\` vs `/`) を吸収。
+    if (listContainsPath([projectRoot], folder)) {
+      optsRef.current.showToast(t('workspace.alreadyAdded', { name }), {
+        tone: 'info'
+      });
+      return;
+    }
+    const current = workspaceFoldersFromSettings ?? [];
+    if (listContainsPath(current, folder)) {
+      optsRef.current.showToast(t('workspace.alreadyAdded', { name }), {
+        tone: 'info'
+      });
+      return;
+    }
+    await updateSettings({ workspaceFolders: [...current, folder] });
+    optsRef.current.showToast(t('workspace.added', { name }), { tone: 'success' });
+  }, [workspaceFoldersFromSettings, projectRoot, updateSettings, t]);
+
+  const handleRemoveWorkspaceFolder = useCallback(
+    (path: string) => {
+      const current = workspaceFoldersFromSettings ?? [];
+      if (!current.includes(path)) return;
+      const name = path.split(/[\\/]/).pop() ?? path;
+
+      // Issue #33: 未保存タブの破棄確認を settings 更新より先に行う。
+      // Cancel された場合は settings / tabs どちらも変更せず、UI と永続状態の整合を保つ。
+      // editor-tab 側の操作 (確認 → 閉じる) は呼び出し側の use-file-tabs 知識が必要なので
+      // discardEditorTabsForRoot ブリッジ越しに委譲する。
+      if (!optsRef.current.discardEditorTabsForRoot(path)) {
+        return;
+      }
+      void updateSettings({ workspaceFolders: current.filter((p) => p !== path) });
+      optsRef.current.showToast(t('workspace.removed', { name }), { tone: 'info' });
+    },
+    [workspaceFoldersFromSettings, updateSettings, t]
+  );
+
   return {
     projectRoot,
     loadProject,
     refreshGit,
     gitStatus,
-    gitLoading
+    gitLoading,
+    workspaceFolders,
+    handleNewProject,
+    handleOpenFolder,
+    handleOpenFile,
+    handleOpenRecent,
+    handleClearRecent,
+    handleAddWorkspaceFolder,
+    handleRemoveWorkspaceFolder
   };
 }
