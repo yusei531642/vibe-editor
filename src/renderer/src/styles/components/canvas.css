@@ -30,6 +30,13 @@
   min-height: 0;
 }
 
+.canvas-layout__body > .sidebar {
+  flex: 0 0 var(--shell-sidebar-w);
+  width: var(--shell-sidebar-w);
+  min-width: var(--shell-sidebar-w);
+  max-width: var(--shell-sidebar-w);
+}
+
 .canvas-layout__stage {
   flex: 1;
   position: relative;

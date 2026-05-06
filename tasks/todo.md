@@ -1174,3 +1174,40 @@ PR: https://github.com/yusei531642/vibe-editor/pull/459
 - [ ] Release PR を作成し、CI / reviewer を確認する。
 - [ ] PR merge 後、`v1.4.10` tag push で release workflow を起動する。
 - [ ] draft release の成果物確認後に publish 判断を行う。
+
+## Issue #469 - Canvas mode file tree width (2026-05-06 / Codex)
+
+計画: `tasks/issue-469/plan.md`
+
+- [x] Issue #469 の本文、コメント、ラベル状態を確認
+- [x] IDE / Canvas の Sidebar 構造と幅定義を調査
+- [x] Root Cause Confirmed: Canvas の flex 配下で `.sidebar` 幅が `--shell-sidebar-w` に固定されていない
+- [x] 実装前計画と Next Steps を記録
+- [x] `src/renderer/src/styles/components/canvas.css` に Canvas 限定の Sidebar 幅制約を追加する
+- [x] CSS contract test / typecheck / UI smoke で動作を実証する
+
+### Next Steps
+
+- [x] Canvas の `.sidebar` を `var(--shell-sidebar-w)` に固定する。
+- [x] IDE 側の grid 幅定義と Canvas 側の flex 幅定義が同じ token を参照することをテストで固定する。
+- [x] 実装後に進捗、検証結果、Next Tasks を追記する。
+
+### 進捗
+
+- [x] `.canvas-layout__body > .sidebar` に `flex` / `width` / `min-width` / `max-width` の固定を追加。
+- [x] `canvas-css-contract.test.ts` で `--shell-sidebar-w` 参照を検証。
+- [x] Issue #469 の GitHub ラベルを `planned` から `implementing` に更新。
+
+### 検証結果
+
+- [x] `npx vitest run src/renderer/src/styles/__tests__/canvas-css-contract.test.ts`: PASS
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (30 files / 197 tests)
+- [x] `npm run build:vite`: PASS
+- [x] Browser smoke: `http://127.0.0.1:5174/` で Canvas モード表示、Rail/sidebar/stage の DOM 表示を確認。Vite 単体では Tauri API 未注入の既存 error が出る。
+- [x] `git diff --check`: PASS
+
+### Next Tasks
+
+- [ ] PR を作成する場合は本文に `Closes #469` と検証結果を記載する。
+- [ ] CodeRabbit / CI / 人間レビューを待ち、自動マージは行わない。
