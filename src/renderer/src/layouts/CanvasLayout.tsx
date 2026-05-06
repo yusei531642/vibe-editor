@@ -42,6 +42,7 @@ import { useT } from '../lib/i18n';
 import { useUiStore } from '../stores/ui';
 import { useHistoryBadgeCount } from '../lib/use-history-badge-count';
 import { useCanvasStore } from '../stores/canvas';
+import { useCanvasViewport } from '../stores/canvas-selectors';
 import {
   BUILTIN_PRESETS,
   DEFAULT_SPAWN_PRESET,
@@ -89,7 +90,7 @@ export function CanvasLayout(): JSX.Element {
       setNodes(state.nodes);
     });
   }, []);
-  const viewport = useCanvasStore((s) => s.viewport);
+  const viewport = useCanvasViewport();
   const clear = useCanvasStore((s) => s.clear);
   const addCards = useCanvasStore((s) => s.addCards);
   const notifyRecruit = useCanvasStore((s) => s.notifyRecruit);

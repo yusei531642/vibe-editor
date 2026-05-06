@@ -270,8 +270,272 @@ samp,
   font-variant-numeric: tabular-nums slashed-zero;
 }
 
+/* ==========================================================================
+ * Per-theme color cascade
+ *
+ * 各テーマの色は data-theme 属性で切り替わる。`:root[data-theme='X']` で
+ * <html> 全体に適用し、同じ値を `[data-theme='X']` でネスト要素 (OnboardingWizard
+ * のテーマプレビュー等) にも適用できるようにする。CSS 変数の cascade を活用して
+ * `style={{ background: 'var(--bg)' }}` だけで該当テーマの色が引ける。
+ *
+ * 旧 themes.ts の `setThemeColorVars` が `root.style.setProperty` で動的に流し込んで
+ * いた値を、ここに静的に集約する。Monaco エディタの claude-dark / claude-light も
+ * 同じ変数を `getComputedStyle` で読み取って duplicate を解消する。
+ * ========================================================================== */
+
+:root[data-theme='claude-dark'],
+[data-theme='claude-dark'] {
+  /*
+   * Claude.ai 本体の CSS 変数実測値に準拠:
+   *   app bg = --_gray-840 (#171716), surface1 = --_gray-800 (#1f1f1e),
+   *   deep   = --_gray-860 (#121212), surface raised = --_gray-750 (#2c2c2a),
+   *   text   = --_gray-20 (#f8f8f6) / 200 (#c3c2b7) / 350 (#97958c)
+   */
+  --bg: #171716;
+  --bg-panel: #1f1f1e;
+  --bg-sidebar: #121212;
+  --bg-toolbar: rgba(23, 23, 22, 0.62);
+  --bg-elev: #2c2c2a;
+  --bg-hover: rgba(248, 248, 246, 0.06);
+  --bg-active: rgba(217, 119, 87, 0.14);
+  --border: rgba(248, 248, 246, 0.10);
+  --border-strong: rgba(248, 248, 246, 0.16);
+  --accent: #d97757;
+  --accent-hover: #e88a6a;
+  --accent-soft: #d97757;
+  --accent-tint: rgba(217, 119, 87, 0.12);
+  --accent-foreground: #fffdf7;
+  --warning: #d4a27f;
+  --warning-hover: #e0b592;
+  --text: #f8f8f6;
+  --text-dim: #c3c2b7;
+  --text-mute: #97958c;
+  --text-strong: var(--text);
+  --text-secondary: var(--text-dim);
+  --text-subtle: var(--text-mute);
+  --fg: var(--text);
+  --fg-muted: var(--text-dim);
+  --fg-subtle: var(--text-mute);
+  --surface-base: var(--bg);
+  --surface-panel: var(--bg-panel);
+  --surface-sidebar: var(--bg-sidebar);
+  --surface-toolbar: var(--bg-toolbar);
+  --surface-elev: var(--bg-elev);
+  --surface-hover: var(--bg-hover);
+  --surface-active: var(--bg-active);
+  --surface-glass: rgba(23, 23, 22, 0.62);
+  --focus-ring: 0 0 0 3px rgba(217, 119, 87, 0.28);
+  color-scheme: dark;
+}
+
+:root[data-theme='claude-light'],
+[data-theme='claude-light'] {
+  /*
+   * Claude.ai 実測: bg-100=#f8f8f6 / bg-200=#f4f4f1 / bg-300=#efeeeb / bg-400=#e6e5e0,
+   * text=#141413 / #373734 / #7b7974, accent=#d97757 (hover #c6613f)
+   */
+  --bg: #f8f8f6;
+  --bg-panel: #ffffff;
+  --bg-sidebar: #f4f4f1;
+  --bg-toolbar: rgba(248, 248, 246, 0.72);
+  --bg-elev: #ffffff;
+  --bg-hover: rgba(31, 30, 29, 0.05);
+  --bg-active: rgba(217, 119, 87, 0.12);
+  --border: rgba(31, 30, 29, 0.10);
+  --border-strong: rgba(31, 30, 29, 0.18);
+  --accent: #d97757;
+  --accent-hover: #c6613f;
+  --accent-soft: #d97757;
+  --accent-tint: rgba(217, 119, 87, 0.10);
+  --accent-foreground: #fffdf7;
+  --warning: #a86b00;
+  --warning-hover: #8f5a00;
+  --text: #141413;
+  --text-dim: #373734;
+  --text-mute: #7b7974;
+  --text-strong: var(--text);
+  --text-secondary: var(--text-dim);
+  --text-subtle: var(--text-mute);
+  --fg: var(--text);
+  --fg-muted: var(--text-dim);
+  --fg-subtle: var(--text-mute);
+  --surface-base: var(--bg);
+  --surface-panel: var(--bg-panel);
+  --surface-sidebar: var(--bg-sidebar);
+  --surface-toolbar: var(--bg-toolbar);
+  --surface-elev: var(--bg-elev);
+  --surface-hover: var(--bg-hover);
+  --surface-active: var(--bg-active);
+  --surface-glass: rgba(248, 248, 246, 0.72);
+  --focus-ring: 0 0 0 3px rgba(217, 119, 87, 0.22);
+  color-scheme: light;
+}
+
+:root[data-theme='dark'],
+[data-theme='dark'] {
+  --bg: #0b0d12;
+  --bg-panel: #101216;
+  --bg-sidebar: #0d0f14;
+  --bg-toolbar: rgba(11, 13, 18, 0.62);
+  --bg-elev: #16181d;
+  --bg-hover: rgba(255, 255, 255, 0.04);
+  --bg-active: rgba(94, 106, 210, 0.12);
+  --border: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --accent: #5e6ad2;
+  --accent-hover: #6e7bdc;
+  --accent-soft: #8a94eb;
+  --accent-tint: rgba(94, 106, 210, 0.16);
+  --accent-foreground: #fffdf7;
+  --warning: #f5a623;
+  --warning-hover: #f7b955;
+  --text: #f7f8f8;
+  --text-dim: #8a8f98;
+  --text-mute: #62666d;
+  --text-strong: var(--text);
+  --text-secondary: var(--text-dim);
+  --text-subtle: var(--text-mute);
+  --fg: var(--text);
+  --fg-muted: var(--text-dim);
+  --fg-subtle: var(--text-mute);
+  --surface-base: var(--bg);
+  --surface-panel: var(--bg-panel);
+  --surface-sidebar: var(--bg-sidebar);
+  --surface-toolbar: var(--bg-toolbar);
+  --surface-elev: var(--bg-elev);
+  --surface-hover: var(--bg-hover);
+  --surface-active: var(--bg-active);
+  --surface-glass: rgba(11, 13, 18, 0.62);
+  --focus-ring: 0 0 0 1px rgba(8, 9, 10, 0.8), 0 0 0 3px rgba(94, 106, 210, 0.3);
+  color-scheme: dark;
+}
+
+:root[data-theme='midnight'],
+[data-theme='midnight'] {
+  --bg: #05070c;
+  --bg-panel: #0b0e15;
+  --bg-sidebar: #070910;
+  --bg-toolbar: rgba(5, 7, 12, 0.62);
+  --bg-elev: #111522;
+  --bg-hover: rgba(255, 255, 255, 0.05);
+  --bg-active: rgba(124, 92, 255, 0.18);
+  --border: rgba(255, 255, 255, 0.04);
+  --border-strong: rgba(180, 190, 255, 0.12);
+  --accent: #7c5cff;
+  --accent-hover: #9072ff;
+  --accent-soft: #a594ff;
+  --accent-tint: rgba(124, 92, 255, 0.16);
+  --accent-foreground: #fffdf7;
+  --warning: #f7b955;
+  --warning-hover: #f9c970;
+  --text: #eef2ff;
+  --text-dim: #b8c2f0;
+  --text-mute: #7a83b2;
+  --text-strong: var(--text);
+  --text-secondary: var(--text-dim);
+  --text-subtle: var(--text-mute);
+  --fg: var(--text);
+  --fg-muted: var(--text-dim);
+  --fg-subtle: var(--text-mute);
+  --surface-base: var(--bg);
+  --surface-panel: var(--bg-panel);
+  --surface-sidebar: var(--bg-sidebar);
+  --surface-toolbar: var(--bg-toolbar);
+  --surface-elev: var(--bg-elev);
+  --surface-hover: var(--bg-hover);
+  --surface-active: var(--bg-active);
+  --surface-glass: rgba(5, 7, 12, 0.62);
+  --focus-ring: 0 0 0 1px rgba(5, 7, 12, 0.86), 0 0 0 3px rgba(124, 92, 255, 0.28);
+  color-scheme: dark;
+}
+
+:root[data-theme='light'],
+[data-theme='light'] {
+  --bg: #ffffff;
+  --bg-panel: #fafafa;
+  --bg-sidebar: #f4f5f8;
+  --bg-toolbar: rgba(255, 255, 255, 0.62);
+  --bg-elev: #ffffff;
+  --bg-hover: rgba(0, 0, 0, 0.04);
+  --bg-active: rgba(0, 0, 0, 0.06);
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.14);
+  --accent: #000000;
+  --accent-hover: #18181b;
+  --accent-soft: #666666;
+  --accent-tint: rgba(0, 0, 0, 0.06);
+  --accent-foreground: #ffffff;
+  --warning: #f5a623;
+  --warning-hover: #d48806;
+  --text: #000000;
+  --text-dim: #666666;
+  --text-mute: #a1a1aa;
+  --text-strong: var(--text);
+  --text-secondary: var(--text-dim);
+  --text-subtle: var(--text-mute);
+  --fg: var(--text);
+  --fg-muted: var(--text-dim);
+  --fg-subtle: var(--text-mute);
+  --surface-base: var(--bg);
+  --surface-panel: var(--bg-panel);
+  --surface-sidebar: var(--bg-sidebar);
+  --surface-toolbar: var(--bg-toolbar);
+  --surface-elev: var(--bg-elev);
+  --surface-hover: var(--bg-hover);
+  --surface-active: var(--bg-active);
+  --surface-glass: rgba(255, 255, 255, 0.62);
+  --focus-ring: 0 0 0 1px rgba(255, 255, 255, 0.92), 0 0 0 3px rgba(0, 0, 0, 0.14);
+  color-scheme: light;
+}
+
+:root[data-theme='glass'],
+[data-theme='glass'] {
+  /*
+   * Issue #16 / #367 / #440: アクリル風テーマ (Cyber Neon ベース)。
+   * Windows Terminal "Cyber Neon" と同じ世界観 — ダーク (#0A0A1A) ベース +
+   * ネオンシアン (#00FFFF) アクセント — に揃え、OS Acrylic の light tint で
+   * 白濁する問題を「surface 自体を暗化 + 高 opacity で確保」して解決する。
+   */
+  --bg: rgba(0, 0, 0, 0);
+  --bg-panel: rgba(10, 10, 26, 0.82);
+  --bg-sidebar: rgba(8, 8, 20, 0.80);
+  --bg-toolbar: rgba(6, 6, 18, 0.78);
+  --bg-elev: rgba(20, 20, 40, 0.85);
+  --bg-hover: rgba(0, 255, 255, 0.06);
+  --bg-active: rgba(0, 255, 255, 0.14);
+  --border: rgba(0, 255, 255, 0.08);
+  --border-strong: rgba(0, 255, 255, 0.15);
+  --accent: #00FFFF;
+  --accent-hover: #33FFFF;
+  --accent-soft: #00CCCC;
+  --accent-tint: rgba(0, 255, 255, 0.14);
+  --accent-foreground: #050714;
+  --warning: #FFD700;
+  --warning-hover: #FFE033;
+  --text: #E0E0FF;
+  --text-dim: #B0B8E0;
+  --text-mute: #6070A0;
+  --text-strong: var(--text);
+  --text-secondary: var(--text-dim);
+  --text-subtle: var(--text-mute);
+  --fg: var(--text);
+  --fg-muted: var(--text-dim);
+  --fg-subtle: var(--text-mute);
+  --surface-base: var(--bg);
+  --surface-panel: var(--bg-panel);
+  --surface-sidebar: var(--bg-sidebar);
+  --surface-toolbar: var(--bg-toolbar);
+  --surface-elev: var(--bg-elev);
+  --surface-hover: var(--bg-hover);
+  --surface-active: var(--bg-active);
+  --surface-glass: rgba(10, 10, 26, 0.68);
+  --focus-ring: 0 0 0 2px rgba(0, 255, 255, 0.40);
+  color-scheme: dark;
+}
+
 /*
- * Glass テーマ専用オーバーライド。
+ * Glass テーマ専用オーバーライド (上の color cascade に加えて、glass 効果用の
+ * `--glass-*` 系トークンと、layout 透過 tint を別途上書きする)。
  * - saturate(180%) は backdrop の明色画素を増幅して "milky" 化させるため 120% に下げる。
  * - glass-border / glass-highlight も白の主張を抑える (テーマ palette 側の border と
  *   合わせて全体の白浮きを断ち切る)。

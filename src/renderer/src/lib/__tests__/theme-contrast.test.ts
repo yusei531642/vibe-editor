@@ -36,11 +36,19 @@ describe('theme accent foreground', () => {
     ).toBeGreaterThanOrEqual(4.5);
   });
 
-  it('publishes --accent-foreground when applying the Glass theme', () => {
+  it('switches root data-theme attribute when applying the Glass theme', () => {
+    /*
+     * Issue #490: 旧実装は applyTheme が `root.style.setProperty('--accent-foreground', ...)`
+     * を直接書き込んでいたが、現在は `tokens.css` の `[data-theme='glass']` ブロックが
+     * cascade で値を流す方式に切り替わっている。`style.getPropertyValue` は inline 値しか
+     * 返さないので、テストは「`data-theme` が確実に切り替わっていること」をもって
+     * CSS 経由で `--accent-foreground` が解決される前提を確認する。
+     * (実値が `THEMES.glass.accentForeground` と一致することは tokens.css と themes.ts の
+     * mirror で担保される — 上のコントラストテストが値の妥当性を保証する。)
+     */
     applyTheme('glass', 'Inter', 14);
 
-    expect(document.documentElement.style.getPropertyValue('--accent-foreground')).toBe(
-      THEMES.glass.accentForeground
-    );
+    expect(document.documentElement.dataset.theme).toBe('glass');
+    expect(THEMES.glass.accentForeground).toBe('#050714');
   });
 });

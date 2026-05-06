@@ -4,7 +4,7 @@ import type { AppSettings, Language, ThemeName } from '../../../types/shared';
 import { translate } from '../lib/i18n';
 import { useSettings } from '../lib/settings-context';
 import { useSpringMount } from '../lib/use-animated-mount';
-import { THEMES, applyTheme } from '../lib/themes';
+import { applyTheme } from '../lib/themes';
 
 type Step = 'welcome' | 'appearance' | 'workspace' | 'done';
 const STEP_ORDER: Step[] = ['welcome', 'appearance', 'workspace', 'done'];
@@ -23,14 +23,8 @@ const SUPPORTED_THEMES: ThemeName[] = [
   'glass'
 ];
 
-const THEME_LABEL: Record<ThemeName, { ja: string; en: string }> = {
-  'claude-dark': { ja: 'Claude Dark', en: 'Claude Dark' },
-  'claude-light': { ja: 'Claude Light', en: 'Claude Light' },
-  dark: { ja: 'ダーク', en: 'Dark' },
-  light: { ja: 'ライト', en: 'Light' },
-  midnight: { ja: 'ミッドナイト', en: 'Midnight' },
-  glass: { ja: 'グラス', en: 'Glass' }
-};
+const themeLabelKey = (name: ThemeName): string => `theme.label.${name}`;
+const langLabelKey = (lang: Language): string => `lang.label.${lang}`;
 
 function guessLanguage(): Language {
   const loc = (navigator.language || 'en').toLowerCase();
@@ -91,8 +85,6 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
       translate(draftLanguage, key, params),
     [draftLanguage]
   );
-
-  const themeVars = THEMES[draftTheme];
 
   const goNext = useCallback(() => {
     const idx = STEP_ORDER.indexOf(step);
@@ -193,7 +185,6 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
               draftLanguage={draftLanguage}
               draftTheme={draftTheme}
               draftFolder={draftFolder}
-              themeAccent={themeVars.accent}
             />
           )}
         </div>
@@ -314,7 +305,7 @@ function AppearanceStep({
               data-active={draftLanguage === lang}
               onClick={() => onLanguageChange(lang)}
             >
-              {lang === 'ja' ? '日本語' : 'English'}
+              {t(langLabelKey(lang))}
             </button>
           ))}
         </div>
@@ -323,44 +314,29 @@ function AppearanceStep({
       <section className="onboarding__section">
         <div className="onboarding__section-label">{t('onboarding.appearance.theme')}</div>
         <div className="onboarding__theme-grid">
-          {SUPPORTED_THEMES.map((name) => {
-            const v = THEMES[name];
-            return (
-              <button
-                key={name}
-                type="button"
-                className="onboarding__theme-card"
-                data-active={draftTheme === name}
-                onClick={() => onThemeChange(name)}
-              >
-                <div
-                  className="onboarding__theme-preview"
-                  style={{
-                    background: v.bg,
-                    borderColor: v.border
-                  }}
-                >
-                  <div
-                    className="onboarding__theme-preview-bar"
-                    style={{ background: v.bgPanel }}
-                  />
-                  <div
-                    className="onboarding__theme-preview-line"
-                    style={{ background: v.text, opacity: 0.82 }}
-                  />
-                  <div
-                    className="onboarding__theme-preview-line"
-                    style={{ background: v.textDim, width: '52%' }}
-                  />
-                  <div
-                    className="onboarding__theme-preview-dot"
-                    style={{ background: v.accent }}
-                  />
-                </div>
-                <span className="onboarding__theme-name">{THEME_LABEL[name][draftLanguage]}</span>
-              </button>
-            );
-          })}
+          {SUPPORTED_THEMES.map((name) => (
+            <button
+              key={name}
+              type="button"
+              className="onboarding__theme-card"
+              data-active={draftTheme === name}
+              onClick={() => onThemeChange(name)}
+            >
+              {/*
+               * Issue #490: 旧実装は THEMES[name].{bg,bgPanel,...} を inline style で
+               * 流し込んでいた。tokens.css の `[data-theme='X']` ブロックがネスト要素にも
+               * cascade するようになったので、ここでは data-theme 属性を被せるだけで
+               * 子の `var(--bg)` / `var(--accent)` などが該当テーマ色に解決される。
+               */}
+              <div className="onboarding__theme-preview" data-theme={name}>
+                <div className="onboarding__theme-preview-bar" />
+                <div className="onboarding__theme-preview-line onboarding__theme-preview-line--strong" />
+                <div className="onboarding__theme-preview-line onboarding__theme-preview-line--dim" />
+                <div className="onboarding__theme-preview-dot" />
+              </div>
+              <span className="onboarding__theme-name">{t(themeLabelKey(name))}</span>
+            </button>
+          ))}
         </div>
       </section>
     </div>
@@ -430,24 +406,18 @@ interface DoneStepProps extends StepProps {
   draftLanguage: Language;
   draftTheme: ThemeName;
   draftFolder: string;
-  themeAccent: string;
 }
 
 function DoneStep({
   t,
   draftLanguage,
   draftTheme,
-  draftFolder,
-  themeAccent
+  draftFolder
 }: DoneStepProps): JSX.Element {
-  const themeLabel = THEME_LABEL[draftTheme][draftLanguage];
+  const themeLabel = t(themeLabelKey(draftTheme));
   return (
     <div className="onboarding__hero">
-      <div
-        className="onboarding__done-mark"
-        aria-hidden
-        style={{ background: themeAccent }}
-      >
+      <div className="onboarding__done-mark" aria-hidden>
         <Check size={36} strokeWidth={2.5} color="#fff" />
       </div>
       <span className="onboarding__eyebrow">{t('onboarding.done.eyebrow')}</span>
@@ -457,7 +427,7 @@ function DoneStep({
       <dl className="onboarding__summary">
         <div className="onboarding__summary-row">
           <dt>{t('onboarding.done.summaryLanguage')}</dt>
-          <dd>{draftLanguage === 'ja' ? '日本語' : 'English'}</dd>
+          <dd>{t(langLabelKey(draftLanguage))}</dd>
         </div>
         <div className="onboarding__summary-row">
           <dt>{t('onboarding.done.summaryTheme')}</dt>

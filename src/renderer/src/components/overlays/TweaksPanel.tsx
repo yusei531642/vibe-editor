@@ -4,25 +4,18 @@ import { useT } from '../../lib/i18n';
 import { useSettings } from '../../lib/settings-context';
 import { useUiStore } from '../../stores/ui';
 
-const THEMES: ReadonlyArray<{ id: ThemeName; label: string }> = [
-  { id: 'claude-dark', label: 'claude dark' },
-  { id: 'claude-light', label: 'claude light' },
-  { id: 'dark', label: 'dark' },
-  { id: 'light', label: 'light' },
-  { id: 'midnight', label: 'midnight' },
-  { id: 'glass', label: 'glass' }
+const THEME_IDS: ReadonlyArray<ThemeName> = [
+  'claude-dark',
+  'claude-light',
+  'dark',
+  'light',
+  'midnight',
+  'glass'
 ];
 
-const DENSITIES: ReadonlyArray<{ id: Density; label: string }> = [
-  { id: 'compact', label: 'compact' },
-  { id: 'normal', label: 'normal' },
-  { id: 'comfortable', label: 'comfortable' }
-];
+const DENSITY_IDS: ReadonlyArray<Density> = ['compact', 'normal', 'comfortable'];
 
-const LANGUAGES: ReadonlyArray<{ id: Language; label: string }> = [
-  { id: 'ja', label: '日本語' },
-  { id: 'en', label: 'English' }
-];
+const LANGUAGE_IDS: ReadonlyArray<Language> = ['ja', 'en'];
 
 /**
  * TweaksPanel — 右下に浮かぶクイック調整パネル。
@@ -54,14 +47,14 @@ export function TweaksPanel(): JSX.Element | null {
         <div className="tw-group">
           <div className="tw-label">{t('tweaks.theme')}</div>
           <div className="tw-row">
-            {THEMES.map((theme) => (
+            {THEME_IDS.map((id) => (
               <button
-                key={theme.id}
+                key={id}
                 type="button"
-                className={`tw-chip${settings.theme === theme.id ? ' is-active' : ''}`}
-                onClick={() => void update({ theme: theme.id })}
+                className={`tw-chip${settings.theme === id ? ' is-active' : ''}`}
+                onClick={() => void update({ theme: id })}
               >
-                {theme.label}
+                {t(`theme.label.${id}`)}
               </button>
             ))}
           </div>
@@ -69,14 +62,14 @@ export function TweaksPanel(): JSX.Element | null {
         <div className="tw-group">
           <div className="tw-label">{t('tweaks.density')}</div>
           <div className="tw-row">
-            {DENSITIES.map((d) => (
+            {DENSITY_IDS.map((id) => (
               <button
-                key={d.id}
+                key={id}
                 type="button"
-                className={`tw-chip${settings.density === d.id ? ' is-active' : ''}`}
-                onClick={() => void update({ density: d.id })}
+                className={`tw-chip${settings.density === id ? ' is-active' : ''}`}
+                onClick={() => void update({ density: id })}
               >
-                {d.label}
+                {t(`settings.density.${id}`)}
               </button>
             ))}
           </div>
@@ -84,14 +77,14 @@ export function TweaksPanel(): JSX.Element | null {
         <div className="tw-group">
           <div className="tw-label">{t('tweaks.language')}</div>
           <div className="tw-row">
-            {LANGUAGES.map((lng) => (
+            {LANGUAGE_IDS.map((id) => (
               <button
-                key={lng.id}
+                key={id}
                 type="button"
-                className={`tw-chip${settings.language === lng.id ? ' is-active' : ''}`}
-                onClick={() => void update({ language: lng.id })}
+                className={`tw-chip${settings.language === id ? ' is-active' : ''}`}
+                onClick={() => void update({ language: id })}
               >
-                {lng.label}
+                {t(`lang.label.${id}`)}
               </button>
             ))}
           </div>

@@ -3,6 +3,7 @@ import { LayoutGrid, List, Maximize2, Ruler, Users, ZoomIn, ZoomOut } from 'luci
 import { useReactFlow } from '@xyflow/react';
 import { useT } from '../../lib/i18n';
 import { useCanvasStore, type StageView } from '../../stores/canvas';
+import { useCanvasStageView } from '../../stores/canvas-selectors';
 import type { ArrangeGap } from '../../lib/canvas-arrange';
 
 /**
@@ -15,7 +16,7 @@ import type { ArrangeGap } from '../../lib/canvas-arrange';
  */
 export function StageHud(): JSX.Element {
   const t = useT();
-  const stageView = useCanvasStore((s) => s.stageView);
+  const stageView = useCanvasStageView();
   const setStageView = useCanvasStore((s) => s.setStageView);
   const arrangeGap = useCanvasStore((s) => s.arrangeGap);
   const setArrangeGap = useCanvasStore((s) => s.setArrangeGap);

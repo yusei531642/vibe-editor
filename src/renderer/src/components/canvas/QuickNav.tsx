@@ -6,7 +6,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
-import { useCanvasStore } from '../../stores/canvas';
+import { useCanvasNodes } from '../../stores/canvas-selectors';
 import { useT } from '../../lib/i18n';
 import { metaOf } from '../../lib/team-roles';
 
@@ -17,7 +17,7 @@ interface QuickNavProps {
 
 export function QuickNav({ open, onClose }: QuickNavProps): JSX.Element | null {
   const t = useT();
-  const nodes = useCanvasStore((s) => s.nodes);
+  const nodes = useCanvasNodes();
   const rf = useReactFlow();
   const [query, setQuery] = useState('');
   const [activeIdx, setActiveIdx] = useState(0);
