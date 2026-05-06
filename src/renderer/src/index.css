@@ -3477,6 +3477,61 @@ body.is-resizing * {
   min-width: 0;
 }
 
+/* Issue #480: 最近開いたファイルの名前色ハイライト (黄緑/黄色系)。
+   active (is-active) は常に最優先: row 自体の色指定が勝つので
+   is-recent は active でないファイルにのみ付与される (TSX 側で制御)。
+   段階: is-recent-1 (直近) → is-recent-2 (2-3番目) → is-recent-3 (4-6番目) → is-recent (それ以降) */
+.filetree__name.is-recent-1 {
+  color: #b5e853;
+  font-weight: 500;
+}
+.filetree__name.is-recent-2 {
+  color: #c8d84a;
+}
+.filetree__name.is-recent-3 {
+  color: #d4c944;
+  opacity: 0.88;
+}
+.filetree__name.is-recent {
+  color: #d4c944;
+  opacity: 0.78;
+}
+/* is-recent-N が付いている場合は is-recent の薄い opacity を上書き */
+.filetree__name.is-recent.is-recent-1,
+.filetree__name.is-recent.is-recent-2 {
+  opacity: 1;
+}
+.filetree__name.is-recent.is-recent-3 {
+  opacity: 0.88;
+}
+
+/* ライトテーマでは黄緑/黄色は背景に溶けやすいため、彩度と明度を調整 */
+[data-theme='claude-light'] .filetree__name.is-recent-1,
+[data-theme='light'] .filetree__name.is-recent-1 {
+  color: #4a8c1a;
+  font-weight: 500;
+}
+[data-theme='claude-light'] .filetree__name.is-recent-2,
+[data-theme='light'] .filetree__name.is-recent-2 {
+  color: #5d8a20;
+}
+[data-theme='claude-light'] .filetree__name.is-recent-3,
+[data-theme='light'] .filetree__name.is-recent-3 {
+  color: #6e8928;
+  opacity: 0.88;
+}
+[data-theme='claude-light'] .filetree__name.is-recent,
+[data-theme='light'] .filetree__name.is-recent {
+  color: #6e8928;
+  opacity: 0.78;
+}
+[data-theme='claude-light'] .filetree__name.is-recent.is-recent-1,
+[data-theme='claude-light'] .filetree__name.is-recent.is-recent-2,
+[data-theme='light'] .filetree__name.is-recent.is-recent-1,
+[data-theme='light'] .filetree__name.is-recent.is-recent-2 {
+  opacity: 1;
+}
+
 .filetree__loading,
 .filetree__empty,
 .filetree__error {

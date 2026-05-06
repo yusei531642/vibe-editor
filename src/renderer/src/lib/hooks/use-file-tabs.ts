@@ -62,6 +62,18 @@ export interface UseFileTabsOptions {
   showToast: ToastFn;
 }
 
+/**
+ * Issue #480: 最近開いたファイルの履歴エントリ。
+ * キーは `rootPath + KEY_SEP + relPath` で一意に識別する。
+ */
+export interface RecentFileEntry {
+  rootPath: string;
+  relPath: string;
+}
+
+/** Issue #480: 履歴上限 */
+export const RECENT_FILES_LIMIT = 15;
+
 export interface UseFileTabsResult {
   // ---- state ----
   editorTabs: EditorTab[];
@@ -76,6 +88,11 @@ export interface UseFileTabsResult {
   dirtyEditorTabs: EditorTab[];
   /** tabIds 省略時は全 dirty を対象。confirm dialog を出して bool を返す。 */
   confirmDiscardEditorTabs: (tabIds?: string[]) => boolean;
+  /**
+   * Issue #480: 最近開いたファイルの履歴 (新しい順)。
+   * active ファイルも含むが、UI 側で active を優先表示する。
+   */
+  recentFiles: RecentFileEntry[];
 
   // ---- handlers ----
   openEditorTab: (rootPath: string, relPath: string) => Promise<void>;
@@ -118,6 +135,8 @@ export function useFileTabs(opts: UseFileTabsOptions): UseFileTabsResult {
   const [diffTabs, setDiffTabs] = useState<DiffTab[]>([]);
   const [editorTabs, setEditorTabs] = useState<EditorTab[]>([]);
   const [recentlyClosed, setRecentlyClosed] = useState<DiffTab[]>([]);
+  // Issue #480: 最近開いたファイルの履歴 (新しい順、上限 RECENT_FILES_LIMIT)
+  const [recentFiles, setRecentFiles] = useState<RecentFileEntry[]>([]);
 
   const dirtyEditorTabs = useMemo(
     () => editorTabs.filter((tab) => !tab.isBinary && tab.content !== tab.originalContent),
@@ -232,6 +251,13 @@ export function useFileTabs(opts: UseFileTabsOptions): UseFileTabsResult {
       // Issue #4: 同じ相対パスが別ルートに存在しうるので id に root も混ぜる
       const id = `edit:${effectiveRoot}\u0001${relPath}`;
       setActiveTabId(id);
+      // Issue #480: 最近開いたファイル履歴を更新 (先頭へ移動、上限制限)
+      setRecentFiles((prev) => {
+        const filtered = prev.filter(
+          (entry) => !(entry.rootPath === effectiveRoot && entry.relPath === relPath)
+        );
+        return [{ rootPath: effectiveRoot, relPath }, ...filtered].slice(0, RECENT_FILES_LIMIT);
+      });
       setEditorTabs((prev) => {
         if (prev.some((t) => t.id === id)) return prev;
         return [
@@ -455,6 +481,7 @@ export function useFileTabs(opts: UseFileTabsOptions): UseFileTabsResult {
     setEditorTabs([]);
     setRecentlyClosed([]);
     setActiveTabId(null);
+    setRecentFiles([]);
   }, []);
 
   return {
@@ -467,6 +494,7 @@ export function useFileTabs(opts: UseFileTabsOptions): UseFileTabsResult {
     setActiveTabId,
     dirtyEditorTabs,
     confirmDiscardEditorTabs,
+    recentFiles,
     openEditorTab,
     updateEditorContent,
     saveEditorTab,

@@ -8,6 +8,7 @@ import {
   X
 } from 'lucide-react';
 import type { FileNode } from '../../../types/shared';
+import type { RecentFileEntry } from '../lib/hooks/use-file-tabs';
 import { useT } from '../lib/i18n';
 import { fileIcon, folderIcon } from '../lib/file-icon-color';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu';
@@ -30,6 +31,8 @@ interface FileTreePanelProps {
    */
   extraRoots: string[];
   activeFilePath: string | null;
+  /** Issue #480: 最近開いたファイルの履歴 (新しい順) */
+  recentFiles?: RecentFileEntry[];
   /** ファイルを開くときにどのルート配下かを明示する */
   onOpenFile: (rootPath: string, relPath: string) => void;
   onAddWorkspaceFolder: () => void;
@@ -45,6 +48,7 @@ export function FileTreePanel({
   primaryRoot,
   extraRoots,
   activeFilePath,
+  recentFiles,
   onOpenFile,
   onAddWorkspaceFolder,
   onRemoveWorkspaceFolder
@@ -127,6 +131,18 @@ export function FileTreePanel({
     // expanded / dirs を意図的に deps から除外 (mount + roots 変動時のみ走る)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [primaryRoot, extraRoots.join(KEY_SEP), loadDir]);
+
+  // Issue #480: recentFiles を rootPath+relPath -> rank (0始まり) のマップに変換。
+  // rank 0 = 直近に開いたファイル, rank 1 = その前, ... (active は UI 側で優先)
+  const recentRankMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!recentFiles) return map;
+    for (let i = 0; i < recentFiles.length; i++) {
+      const entry = recentFiles[i];
+      map.set(`${entry.rootPath}${KEY_SEP}${entry.relPath}`, i);
+    }
+    return map;
+  }, [recentFiles]);
 
   const toggleDir = useCallback(
     (rootPath: string, node: FileNode) => {
@@ -228,6 +244,10 @@ export function FileTreePanel({
             ? dirs.get(childKey) ?? null
             : null;
           const isActive = !node.isDir && activeFilePath === node.path;
+          // Issue #480: ファイルの recent ランクを取得 (-1 = 履歴なし)
+          const recentRank = node.isDir
+            ? -1
+            : recentRankMap.get(`${rootPath}${KEY_SEP}${node.path}`) ?? -1;
           return (
             <FileTreeNode
               key={childKey}
@@ -236,6 +256,7 @@ export function FileTreePanel({
               depth={depth}
               isOpen={isOpen}
               isActive={isActive}
+              recentRank={recentRank}
               childState={childState}
               onToggle={toggleDir}
               onOpenFile={onOpenFile}
@@ -335,6 +356,11 @@ interface FileTreeNodeProps {
   depth: number;
   isOpen: boolean;
   isActive: boolean;
+  /**
+   * Issue #480: 最近開いたファイルの順位 (0 = 直近, 1 = その前, ...)。
+   * -1 は履歴に含まれていない。active と重なる場合は UI 側で active を優先する。
+   */
+  recentRank: number;
   /** 子ディレクトリの DirState (再レンダー判定用)。null は未読込 or ファイル */
   childState: DirState | null;
   onToggle: (rootPath: string, node: FileNode) => void;
@@ -354,6 +380,7 @@ function FileTreeNodeImpl({
   depth,
   isOpen,
   isActive,
+  recentRank,
   onToggle,
   onOpenFile,
   onContextMenu,
@@ -421,7 +448,21 @@ function FileTreeNodeImpl({
             />
           </>
         )}
-        <span className="filetree__name">{node.name}</span>
+        <span
+          className={
+            'filetree__name' +
+            // Issue #480: active でない最近ファイルに段階的な色クラスを付与
+            (!isActive && recentRank >= 0
+              ? recentRank === 0
+                ? ' is-recent is-recent-1'
+                : recentRank <= 2
+                  ? ' is-recent is-recent-2'
+                  : recentRank <= 5
+                    ? ' is-recent is-recent-3'
+                    : ' is-recent'
+              : '')
+          }
+        >{node.name}</span>
       </button>
       {node.isDir && isOpen ? renderChildren(rootPath, node.path, depth + 1) : null}
     </>
@@ -444,6 +485,7 @@ const FileTreeNode = memo(FileTreeNodeImpl, (prev, next) => {
     prev.depth === next.depth &&
     prev.isOpen === next.isOpen &&
     prev.isActive === next.isActive &&
+    prev.recentRank === next.recentRank &&
     prev.childState === next.childState &&
     prev.onToggle === next.onToggle &&
     prev.onOpenFile === next.onOpenFile &&

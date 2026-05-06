@@ -4,6 +4,7 @@ import type {
   SessionInfo,
   TeamHistoryEntry
 } from '../../../types/shared';
+import type { RecentFileEntry } from '../lib/hooks/use-file-tabs';
 import { ChangesPanel } from './ChangesPanel';
 import { SessionsPanel } from './SessionsPanel';
 import { FileTreePanel } from './FileTreePanel';
@@ -21,6 +22,8 @@ interface SidebarProps {
   onRemoveWorkspaceFolder: (path: string) => void;
   onAddWorkspaceFolder: () => void;
   activeFilePath: string | null;
+  /** Issue #480: 最近開いたファイルの履歴 (新しい順) */
+  recentFiles: RecentFileEntry[];
   onOpenFile: (rootPath: string, relPath: string) => void;
   gitStatus: GitStatus | null;
   gitLoading: boolean;
@@ -53,6 +56,7 @@ export function Sidebar(props: SidebarProps): JSX.Element {
             primaryRoot={props.projectRoot}
             extraRoots={props.workspaceFolders}
             activeFilePath={props.activeFilePath}
+            recentFiles={props.recentFiles}
             onOpenFile={props.onOpenFile}
             onAddWorkspaceFolder={props.onAddWorkspaceFolder}
             onRemoveWorkspaceFolder={props.onRemoveWorkspaceFolder}
