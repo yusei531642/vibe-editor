@@ -161,3 +161,10 @@ codex exec --sandbox read-only --color never --ephemeral \
 - IDE と Canvas で同じ `Sidebar` を再利用していても、親レイアウトが Grid から flex に変わると幅制約は引き継がれない。
 - 「IDE と同じ幅に合わせる」系の UI 修正では、既存 token の `--shell-sidebar-w` を参照し、別の px 値を直書きしない。
 - Canvas 固有の表示不具合は `canvas.css` 側へ局所化し、shared `.sidebar` や `FileTreePanel` へ波及させない。
+
+## Issue #474 - Canvas list / stage color parity
+
+- Canvas の複数ビューで同じ agent / terminal を描く場合は、`roleProfileId` と `RoleProfilesContext` を色・glyph・label の single source of truth にする。
+- `src/renderer/src/lib/team-roles.ts` の `colorOf()` は builtin 互換 shim であり、動的 role、custom role profile、ユーザー override の色を解決できない。新規 UI で使い回さない。
+- Stage/List のような並列表現は、片方だけ CSS 変数名を変えると drift しやすい。`--agent-accent` / `--organization-accent` など意味が同じ変数を揃える。
+- List 本体だけでなく MiniMap や handoff edge など周辺表示も旧 `colorOf()` 参照が残りやすい。表示系の source of truth を変えるときは関連する補助表示まで検索する。
