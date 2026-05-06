@@ -16,7 +16,11 @@ pub(super) fn tool_defs() -> Value {
                 "type": "object",
                 "properties": {
                     "to": { "type": "string" },
-                    "message": { "type": "string" }
+                    "message": { "type": "string" },
+                    "handoff_id": {
+                        "type": "string",
+                        "description": "Optional handoff id. When delivery succeeds, the handoff lifecycle is marked injected."
+                    }
                 },
                 "required": ["to", "message"]
             }
@@ -77,7 +81,14 @@ pub(super) fn tool_defs() -> Value {
                 "type": "object",
                 "properties": {
                     "task_id": { "type": "number" },
-                    "status": { "type": "string" }
+                    "status": { "type": "string" },
+                    "summary": { "type": "string" },
+                    "blocked_reason": { "type": "string" },
+                    "next_action": { "type": "string" },
+                    "artifact_path": { "type": "string" },
+                    "blocked_by_human_gate": { "type": "boolean" },
+                    "required_human_decision": { "type": "string" },
+                    "report_kind": { "type": "string" }
                 },
                 "required": ["task_id", "status"]
             }
@@ -144,8 +155,32 @@ pub(super) fn tool_defs() -> Value {
                     "agent_label_hint": {
                         "type": "string",
                         "description": "Optional canvas card title override for the new leader."
+                    },
+                    "handoff_id": {
+                        "type": "string",
+                        "description": "Optional handoff id to record replacement leader creation against."
                     }
                 }
+            }
+        },
+        {
+            "name": "team_ack_handoff",
+            "description":
+                "(leader only) Mark a handoff document as read and acknowledged by the current leader. \
+                 Call this after reading the handoff markdown and before asking the old leader to retire.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "handoff_id": {
+                        "type": "string",
+                        "description": "handoff id from the markdown or team_create_leader/team_send arguments."
+                    },
+                    "note": {
+                        "type": "string",
+                        "description": "Optional one-line acknowledgement note."
+                    }
+                },
+                "required": ["handoff_id"]
             }
         },
         {
@@ -166,6 +201,10 @@ pub(super) fn tool_defs() -> Value {
                         "type": "boolean",
                         "default": true,
                         "description": "If true (default), the caller's canvas card is retired ~2s after this call returns."
+                    },
+                    "handoff_id": {
+                        "type": "string",
+                        "description": "Optional handoff id to mark retired after active leader switch."
                     }
                 },
                 "required": ["new_leader_agent_id"]

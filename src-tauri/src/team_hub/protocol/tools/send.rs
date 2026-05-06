@@ -17,6 +17,36 @@ fn record_recipient_delivery_diagnostics(diagnostics: &mut MemberDiagnostics, de
     diagnostics.messages_in_count = diagnostics.messages_in_count.saturating_add(1);
 }
 
+fn optional_string(args: &Value, snake: &str, camel: &str) -> Option<String> {
+    args.get(snake)
+        .or_else(|| args.get(camel))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn is_leader_report(to: &str, message: &str, sender_role: &str) -> bool {
+    if sender_role == "leader" || to.trim() != "leader" {
+        return false;
+    }
+    let lower = message.to_ascii_lowercase();
+    message.contains("完了報告")
+        || lower.contains("completion report")
+        || lower.contains("done:")
+        || lower.contains("blocked")
+        || message.contains("ブロック")
+}
+
+fn report_kind(message: &str) -> &'static str {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("blocked") || message.contains("ブロック") {
+        "blocked"
+    } else {
+        "message"
+    }
+}
+
 pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
     // trim は resolve_targets 内で行うので、ここでは生文字列を保持して履歴 / 検証に使う。
     let to = args
@@ -25,6 +55,7 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         .unwrap_or("")
         .to_string();
     let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("");
+    let handoff_id = optional_string(args, "handoff_id", "handoffId");
     if to.trim().is_empty() || message.is_empty() {
         return Err(SendError {
             code: "send_invalid_args".into(),
@@ -95,6 +126,7 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
 
     // メッセージ履歴に追加
     let timestamp = Utc::now().to_rfc3339();
+    let should_record_report = is_leader_report(&to, message, &ctx.role);
     let mut state = hub.state.lock().await;
     let team = state
         .teams
@@ -128,6 +160,25 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
     while team.messages.len() > MAX_MESSAGES_PER_TEAM {
         let _ = team.messages.pop_front();
     }
+    if should_record_report {
+        let summary: String = message.chars().take(500).collect();
+        team.worker_reports
+            .push_back(crate::commands::team_state::WorkerReportSnapshot {
+                id: format!("message-{msg_id}"),
+                task_id: None,
+                from_role: ctx.role.clone(),
+                from_agent_id: ctx.agent_id.clone(),
+                kind: report_kind(message).to_string(),
+                summary,
+                blocked_reason: None,
+                next_action: None,
+                artifact_path: None,
+                created_at: timestamp.clone(),
+            });
+        while team.worker_reports.len() > 50 {
+            let _ = team.worker_reports.pop_front();
+        }
+    }
     // Issue #342 Phase 3 (3.3): 送信者自身の last_message_out_at / messages_out_count / last_seen_at を更新
     let sender_diag = state
         .member_diagnostics
@@ -137,6 +188,11 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
     sender_diag.last_seen_at = Some(timestamp.clone());
     sender_diag.messages_out_count = sender_diag.messages_out_count.saturating_add(1);
     drop(state);
+    if should_record_report {
+        if let Err(e) = hub.persist_team_state(&ctx.team_id).await {
+            tracing::warn!("[team_send] persist worker report failed: {e}");
+        }
+    }
 
     // Issue #150: 宛先メンバーへの inject を並列実行する。
     // 旧実装はメンバーごとに inject().await を直列で回し、to=all + 6 メンバー +
@@ -240,6 +296,28 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
                 if let Err(e) = app.emit("team:handoff", payload) {
                     tracing::warn!("emit team:handoff failed: {e}");
                 }
+            }
+        }
+    }
+
+    if let Some(handoff_id) = handoff_id {
+        if let Some((target_aid, _)) = targets.iter().find(|(aid, _)| {
+            delivered_at_per_recipient
+                .get(aid)
+                .and_then(|v| v.as_ref())
+                .is_some()
+        }) {
+            if let Err(e) = hub
+                .record_handoff_lifecycle(
+                    &ctx.team_id,
+                    &handoff_id,
+                    "injected",
+                    Some(target_aid.clone()),
+                    Some("team_send delivered handoff".into()),
+                )
+                .await
+            {
+                tracing::warn!("[team_send] handoff lifecycle update failed: {e}");
             }
         }
     }

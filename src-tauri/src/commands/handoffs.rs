@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 use uuid::Uuid;
 
+use crate::commands::team_history::HandoffReference;
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct HandoffContent {
@@ -172,14 +174,30 @@ async fn restrict_private_file(_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn normalize_status(status: &str) -> Option<&'static str> {
+pub fn normalize_status(status: &str) -> Option<&'static str> {
     match status {
         "created" => Some("created"),
-        "started" => Some("started"),
-        "acknowledged" => Some("acknowledged"),
+        // Issue #470: old names are accepted as migration aliases, but new writes are canonical.
+        "started" | "injected" => Some("injected"),
+        "acknowledged" | "acked" => Some("acked"),
         "retired" => Some("retired"),
         "failed" => Some("failed"),
         _ => None,
+    }
+}
+
+pub fn handoff_reference_of(handoff: &HandoffCheckpoint) -> HandoffReference {
+    HandoffReference {
+        id: handoff.id.clone(),
+        kind: handoff.kind.clone(),
+        status: handoff.status.clone(),
+        created_at: handoff.created_at.clone(),
+        updated_at: Some(handoff.updated_at.clone()),
+        json_path: handoff.json_path.clone(),
+        markdown_path: handoff.markdown_path.clone(),
+        from_agent_id: handoff.from_agent_id.clone(),
+        to_agent_id: handoff.to_agent_id.clone(),
+        replacement_for_agent_id: handoff.replacement_for_agent_id.clone(),
     }
 }
 
@@ -368,44 +386,16 @@ pub async fn handoffs_update_status(
     status: String,
     to_agent_id: Option<String>,
 ) -> HandoffMutationResult {
-    let Some(next_status) = normalize_status(status.as_str()) else {
-        return HandoffMutationResult {
-            ok: false,
-            error: Some("invalid handoff status".into()),
-            handoff: None,
-        };
-    };
-    let id = safe_segment(&handoff_id);
-    let dir = handoff_dir(&project_root, team_id.as_deref());
-    let json_path = dir.join(format!("{id}.json"));
-    let md_path = dir.join(format!("{id}.md"));
-    let bytes = match fs::read(&json_path).await {
-        Ok(b) => b,
-        Err(e) => {
-            return HandoffMutationResult {
-                ok: false,
-                error: Some(e.to_string()),
-                handoff: None,
-            }
-        }
-    };
-    let mut handoff = match serde_json::from_slice::<HandoffCheckpoint>(&bytes) {
-        Ok(h) => h,
-        Err(e) => {
-            return HandoffMutationResult {
-                ok: false,
-                error: Some(e.to_string()),
-                handoff: None,
-            }
-        }
-    };
-    handoff.status = next_status.to_string();
-    if let Some(to_agent_id) = to_agent_id {
-        handoff.to_agent_id = Some(to_agent_id);
-    }
-    handoff.updated_at = Utc::now().to_rfc3339();
-    match write_handoff(&handoff, &json_path, &md_path).await {
-        Ok(()) => HandoffMutationResult {
+    match update_handoff_status_file(
+        &project_root,
+        team_id.as_deref(),
+        &handoff_id,
+        &status,
+        to_agent_id,
+    )
+    .await
+    {
+        Ok(handoff) => HandoffMutationResult {
             ok: true,
             handoff: Some(handoff),
             error: None,
@@ -416,6 +406,32 @@ pub async fn handoffs_update_status(
             handoff: None,
         },
     }
+}
+
+pub async fn update_handoff_status_file(
+    project_root: &str,
+    team_id: Option<&str>,
+    handoff_id: &str,
+    status: &str,
+    to_agent_id: Option<String>,
+) -> Result<HandoffCheckpoint, String> {
+    let Some(next_status) = normalize_status(status) else {
+        return Err("invalid handoff status".into());
+    };
+    let id = safe_segment(handoff_id);
+    let dir = handoff_dir(project_root, team_id);
+    let json_path = dir.join(format!("{id}.json"));
+    let md_path = dir.join(format!("{id}.md"));
+    let bytes = fs::read(&json_path).await.map_err(|e| e.to_string())?;
+    let mut handoff =
+        serde_json::from_slice::<HandoffCheckpoint>(&bytes).map_err(|e| e.to_string())?;
+    handoff.status = next_status.to_string();
+    if let Some(to_agent_id) = to_agent_id {
+        handoff.to_agent_id = Some(to_agent_id);
+    }
+    handoff.updated_at = Utc::now().to_rfc3339();
+    write_handoff(&handoff, &json_path, &md_path).await?;
+    Ok(handoff)
 }
 
 #[cfg(test)]

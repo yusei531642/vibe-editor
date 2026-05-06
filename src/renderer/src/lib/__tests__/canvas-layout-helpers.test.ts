@@ -57,4 +57,39 @@ describe('canvas-layout-helpers', () => {
 
     expect(makeKey('session-a')).not.toBe(makeKey('session-b'));
   });
+
+  it('Canvas payload の agentId を Team 履歴メンバーへ保持する', () => {
+    const members = mergeCanvasMembers(
+      [{ role: 'leader', agent: 'claude', agentId: 'leader-live-1', sessionId: null }],
+      entryWithSession('old-session')
+    );
+
+    expect(members).toEqual([
+      {
+        role: 'leader',
+        agent: 'claude',
+        agentId: 'leader-live-1',
+        sessionId: 'old-session'
+      }
+    ]);
+  });
+
+  it('agentId の変更でも auto-save key が変わる', () => {
+    const makeKey = (agentId: string): string =>
+      serializeAutoSavePayload({
+        byTeam: new Map([
+          [
+            'team-1',
+            {
+              name: 'Team',
+              members: [{ role: 'leader', agent: 'claude', agentId, sessionId: 'session-a' }],
+              canvasNodes: [{ agentId, x: 0, y: 0 }]
+            }
+          ]
+        ]),
+        viewport: { x: 0, y: 0, zoom: 1 }
+      });
+
+    expect(makeKey('leader-a')).not.toBe(makeKey('leader-b'));
+  });
 });

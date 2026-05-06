@@ -43,10 +43,7 @@ fn init_logging() {
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(
-                &log_path,
-                std::fs::Permissions::from_mode(0o600),
-            );
+            let _ = std::fs::set_permissions(&log_path, std::fs::Permissions::from_mode(0o600));
         }
     }
 
@@ -126,6 +123,7 @@ pub fn run() {
             commands::team_history::team_history_save,
             commands::team_history::team_history_save_batch,
             commands::team_history::team_history_delete,
+            commands::team_state::team_state_read,
             // ---- handoffs ----
             commands::handoffs::handoffs_create,
             commands::handoffs::handoffs_list,
@@ -175,7 +173,9 @@ pub fn run() {
                                 .downcast_ref::<String>()
                                 .cloned()
                                 .or_else(|| {
-                                    payload.downcast_ref::<&'static str>().map(|s| s.to_string())
+                                    payload
+                                        .downcast_ref::<&'static str>()
+                                        .map(|s| s.to_string())
                                 })
                                 .unwrap_or_else(|| "(unknown)".to_string());
                             tracing::error!("[setup] {name} task panicked: {msg}");
@@ -233,10 +233,7 @@ pub fn run() {
                 // - glass テーマは renderer のテーマ適用直後に Acrylic が乗るが、settings_load の
                 //   disk read を待つ僅かな時間だけ「不透明 #171716 の上に panel が薄く乗る」状態
                 //   になる。実機検証で気になるなら PR-2 でカスタム title bar 化と同時に再評価する。
-                let theme = settings
-                    .get("theme")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let theme = settings.get("theme").and_then(|v| v.as_str()).unwrap_or("");
                 if theme == "glass" {
                     if let Some(win) = app_handle_for_root.get_webview_window("main") {
                         let res = commands::app::apply_window_effects_for_startup(&win, true);

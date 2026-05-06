@@ -3567,6 +3567,18 @@ body.is-resizing * {
   text-overflow: ellipsis;
 }
 
+.team-history-item__state {
+  font-size: 10px;
+  color: var(--text-mute);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.team-history-item__state.is-blocked {
+  color: var(--warning, #d29922);
+}
+
 .team-history-item__delete {
   background: transparent;
   border: none;

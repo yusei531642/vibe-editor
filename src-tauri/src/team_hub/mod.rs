@@ -13,6 +13,11 @@ pub mod error;
 pub mod inject;
 pub mod protocol;
 
+use crate::commands::team_history::HandoffReference;
+use crate::commands::team_state::{
+    HandoffLifecycleEvent, HumanGateState, TeamOrchestrationState, TeamTaskSnapshot,
+    WorkerReportSnapshot, TEAM_STATE_SCHEMA_VERSION,
+};
 use crate::pty::SessionRegistry;
 use crate::team_hub::error::{AckError, AckFailPhase};
 use anyhow::{anyhow, Result};
@@ -26,11 +31,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::sync::{oneshot, Mutex, Semaphore};
-#[cfg(unix)]
-use tokio::net::UnixListener;
 #[cfg(windows)]
 use tokio::net::windows::named_pipe::{NamedPipeServer, ServerOptions};
+#[cfg(unix)]
+use tokio::net::UnixListener;
+use tokio::sync::{oneshot, Mutex, Semaphore};
 
 /// Issue #51: ハンドシェイクに要する最大時間。超過したら接続を切る。
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -246,11 +251,17 @@ mod path_tests {
             Some(h) => h,
             None => return, // home 取れない環境ではスキップ (CI 上は通常存在する)
         };
-        let inside = home.join(".vibe-editor").join("logs").join("vibe-editor.log");
+        let inside = home
+            .join(".vibe-editor")
+            .join("logs")
+            .join("vibe-editor.log");
         let inside_str = inside.to_string_lossy().to_string();
         let reduced = reduce_home_prefix(&inside_str);
         // `~/.vibe-editor/logs/vibe-editor.log` 形 (区切り文字は OS 依存だが prefix は `~`)
-        assert!(reduced.starts_with('~'), "expected '~' prefix, got: {reduced}");
+        assert!(
+            reduced.starts_with('~'),
+            "expected '~' prefix, got: {reduced}"
+        );
         assert!(reduced.contains(".vibe-editor"));
     }
 
@@ -357,8 +368,15 @@ pub struct PendingRecruitChannels {
 #[derive(Default, Clone)]
 pub struct TeamInfo {
     pub name: String,
+    /// Issue #470: durable orchestration state の保存先解決用。
+    pub project_root: Option<String>,
     pub messages: VecDeque<TeamMessage>,
     pub tasks: VecDeque<TeamTask>,
+    pub worker_reports: VecDeque<WorkerReportSnapshot>,
+    pub latest_handoff: Option<HandoffReference>,
+    pub handoff_events: VecDeque<HandoffLifecycleEvent>,
+    pub human_gate: HumanGateState,
+    pub next_actions: VecDeque<String>,
     /// Issue #359: leader handoff 中の role 宛て二重配送を避けるため、
     /// team_send("leader", ...) はこの agent_id が設定されていれば単一宛先に絞る。
     pub active_leader_agent_id: Option<String>,
@@ -413,6 +431,51 @@ pub struct TeamTask {
     pub status: String,
     pub created_by: String,
     pub created_at: String,
+    pub updated_at: Option<String>,
+    pub summary: Option<String>,
+    pub blocked_reason: Option<String>,
+    pub next_action: Option<String>,
+    pub artifact_path: Option<String>,
+    pub blocked_by_human_gate: bool,
+    pub required_human_decision: Option<String>,
+}
+
+impl TeamTask {
+    pub fn to_snapshot(&self) -> TeamTaskSnapshot {
+        TeamTaskSnapshot {
+            id: self.id,
+            assigned_to: self.assigned_to.clone(),
+            description: self.description.clone(),
+            status: self.status.clone(),
+            created_by: self.created_by.clone(),
+            created_at: self.created_at.clone(),
+            updated_at: self.updated_at.clone(),
+            summary: self.summary.clone(),
+            blocked_reason: self.blocked_reason.clone(),
+            next_action: self.next_action.clone(),
+            artifact_path: self.artifact_path.clone(),
+            blocked_by_human_gate: self.blocked_by_human_gate,
+            required_human_decision: self.required_human_decision.clone(),
+        }
+    }
+
+    pub fn from_snapshot(snapshot: TeamTaskSnapshot) -> Self {
+        Self {
+            id: snapshot.id,
+            assigned_to: snapshot.assigned_to,
+            description: snapshot.description,
+            status: snapshot.status,
+            created_by: snapshot.created_by,
+            created_at: snapshot.created_at,
+            updated_at: snapshot.updated_at,
+            summary: snapshot.summary,
+            blocked_reason: snapshot.blocked_reason,
+            next_action: snapshot.next_action,
+            artifact_path: snapshot.artifact_path,
+            blocked_by_human_gate: snapshot.blocked_by_human_gate,
+            required_human_decision: snapshot.required_human_decision,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -586,14 +649,18 @@ impl TeamHub {
             if p.team_id != team_id {
                 tracing::warn!(
                     "[teamhub] team_id mismatch on handshake (pending) agent={} expected={} got={}",
-                    agent_id, p.team_id, team_id
+                    agent_id,
+                    p.team_id,
+                    team_id
                 );
                 return false;
             }
             if p.role_profile_id != role_profile_id {
                 tracing::warn!(
                     "[teamhub] role mismatch on handshake (pending) agent={} expected={} got={}",
-                    agent_id, p.role_profile_id, role_profile_id
+                    agent_id,
+                    p.role_profile_id,
+                    role_profile_id
                 );
                 return false;
             }
@@ -608,7 +675,9 @@ impl TeamHub {
             if bound != role_profile_id {
                 tracing::warn!(
                     "[teamhub] role mismatch on handshake (rebind) agent={} bound={} got={}",
-                    agent_id, bound, role_profile_id
+                    agent_id,
+                    bound,
+                    role_profile_id
                 );
                 return false;
             }
@@ -621,7 +690,10 @@ impl TeamHub {
         // last_seen_at を更新する。recruit 経路を通らずに直接 handshake してきた場合 (= 旧 context
         // 残骸の再接続等) は entry が無いので or_default で生成する。
         let now_iso = chrono::Utc::now().to_rfc3339();
-        let entry = s.member_diagnostics.entry(agent_id.to_string()).or_default();
+        let entry = s
+            .member_diagnostics
+            .entry(agent_id.to_string())
+            .or_default();
         if entry.recruited_at.is_empty() {
             entry.recruited_at = now_iso.clone();
         }
@@ -638,10 +710,7 @@ impl TeamHub {
 
     /// Issue #342 Phase 3 (3.3): `team_diagnostics` で見える member_diagnostics エントリを返す。
     /// agent_id が未登録なら None。
-    pub async fn get_member_diagnostics(
-        &self,
-        agent_id: &str,
-    ) -> Option<MemberDiagnostics> {
+    pub async fn get_member_diagnostics(&self, agent_id: &str) -> Option<MemberDiagnostics> {
         self.state
             .lock()
             .await
@@ -654,9 +723,7 @@ impl TeamHub {
     /// `team_diagnostics` MCP ツールは protocol.rs 側で state.lock を直接取るため、
     /// この helper は外部 (テスト / 将来の機能拡張) からの read-only スナップショット用。
     #[allow(dead_code)]
-    pub async fn snapshot_member_diagnostics(
-        &self,
-    ) -> HashMap<String, MemberDiagnostics> {
+    pub async fn snapshot_member_diagnostics(&self) -> HashMap<String, MemberDiagnostics> {
         self.state.lock().await.member_diagnostics.clone()
     }
 
@@ -701,9 +768,7 @@ impl TeamHub {
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             .is_err()
         {
-            tracing::warn!(
-                "[teamhub] recruit_ack ignored: already acked agent={agent_id}"
-            );
+            tracing::warn!("[teamhub] recruit_ack ignored: already acked agent={agent_id}");
             return Err(AckError::AlreadyAcked);
         }
         let ack_tx = pending.ack_tx.take();
@@ -869,18 +934,55 @@ impl TeamHub {
     }
 
     /// チームを active list に追加 (renderer の setupTeamMcp 経由)
-    pub async fn register_team(&self, team_id: &str, name: &str) {
+    pub async fn register_team(&self, team_id: &str, name: &str, project_root: Option<&str>) {
         if team_id.is_empty() || team_id == "_init" {
             return;
         }
+        let persisted = match project_root.map(str::trim).filter(|v| !v.is_empty()) {
+            Some(root) => {
+                crate::commands::team_state::load_orchestration_state(root, team_id).await
+            }
+            None => None,
+        };
         let mut s = self.state.lock().await;
         s.active_teams.insert(team_id.to_string());
         let team = s
             .teams
             .entry(team_id.to_string())
             .or_insert_with(TeamInfo::default);
+        if let Some(root) = project_root.map(str::trim).filter(|v| !v.is_empty()) {
+            team.project_root = Some(root.to_string());
+        }
         if !name.is_empty() {
             team.name = name.to_string();
+        }
+        if let Some(persisted) = persisted {
+            if team.active_leader_agent_id.is_none() {
+                team.active_leader_agent_id = persisted.active_leader_agent_id;
+            }
+            if team.latest_handoff.is_none() {
+                team.latest_handoff = persisted.latest_handoff;
+            }
+            if team.tasks.is_empty() {
+                team.tasks = persisted
+                    .tasks
+                    .into_iter()
+                    .map(TeamTask::from_snapshot)
+                    .collect();
+                team.next_task_id = team.tasks.iter().map(|task| task.id).max().unwrap_or(0);
+            }
+            if team.worker_reports.is_empty() {
+                team.worker_reports = persisted.worker_reports.into_iter().collect();
+            }
+            if team.handoff_events.is_empty() {
+                team.handoff_events = persisted.handoff_events.into_iter().collect();
+            }
+            if !persisted.next_actions.is_empty() && team.next_actions.is_empty() {
+                team.next_actions = persisted.next_actions.into_iter().collect();
+            }
+            if persisted.human_gate.blocked {
+                team.human_gate = persisted.human_gate;
+            }
         }
     }
 
@@ -901,12 +1003,99 @@ impl TeamHub {
         if team_id.trim().is_empty() {
             return;
         }
-        let mut s = self.state.lock().await;
-        let team = s
-            .teams
-            .entry(team_id.to_string())
-            .or_insert_with(TeamInfo::default);
-        team.active_leader_agent_id = agent_id.filter(|v| !v.trim().is_empty());
+        {
+            let mut s = self.state.lock().await;
+            let team = s
+                .teams
+                .entry(team_id.to_string())
+                .or_insert_with(TeamInfo::default);
+            team.active_leader_agent_id = agent_id.filter(|v| !v.trim().is_empty());
+        }
+        if let Err(e) = self.persist_team_state(team_id).await {
+            tracing::warn!("[teamhub] persist active leader failed: {e}");
+        }
+    }
+
+    /// Issue #470: TeamHub の in-memory orchestration state を team-state に保存する。
+    pub async fn persist_team_state(&self, team_id: &str) -> Result<(), String> {
+        let snapshot = {
+            let s = self.state.lock().await;
+            let Some(team) = s.teams.get(team_id) else {
+                return Ok(());
+            };
+            let Some(project_root) = team.project_root.clone() else {
+                return Ok(());
+            };
+            if project_root.trim().is_empty() {
+                return Ok(());
+            }
+            TeamOrchestrationState {
+                schema_version: TEAM_STATE_SCHEMA_VERSION,
+                project_root,
+                team_id: team_id.to_string(),
+                active_leader_agent_id: team.active_leader_agent_id.clone(),
+                latest_handoff: team.latest_handoff.clone(),
+                tasks: team.tasks.iter().map(TeamTask::to_snapshot).collect(),
+                pending_tasks: Vec::new(),
+                worker_reports: team.worker_reports.iter().cloned().collect(),
+                human_gate: team.human_gate.clone(),
+                next_actions: team.next_actions.iter().cloned().collect(),
+                handoff_events: team.handoff_events.iter().cloned().collect(),
+                updated_at: chrono::Utc::now().to_rfc3339(),
+            }
+        };
+        crate::commands::team_state::save_orchestration_state(snapshot)
+            .await
+            .map(|_| ())
+    }
+
+    /// Issue #470: handoff lifecycle を handoff store と team-state の両方へ記録する。
+    pub async fn record_handoff_lifecycle(
+        &self,
+        team_id: &str,
+        handoff_id: &str,
+        status: &str,
+        agent_id: Option<String>,
+        note: Option<String>,
+    ) -> Result<(), String> {
+        let project_root = {
+            let s = self.state.lock().await;
+            s.teams
+                .get(team_id)
+                .and_then(|team| team.project_root.clone())
+                .ok_or_else(|| "project_root is not registered for this team".to_string())?
+        };
+        let handoff = crate::commands::handoffs::update_handoff_status_file(
+            &project_root,
+            Some(team_id),
+            handoff_id,
+            status,
+            agent_id.clone(),
+        )
+        .await?;
+        let reference = crate::commands::handoffs::handoff_reference_of(&handoff);
+        {
+            let mut s = self.state.lock().await;
+            let team = s
+                .teams
+                .entry(team_id.to_string())
+                .or_insert_with(TeamInfo::default);
+            team.project_root.get_or_insert(project_root);
+            team.latest_handoff = Some(reference);
+            team.handoff_events.push_back(HandoffLifecycleEvent {
+                handoff_id: handoff_id.to_string(),
+                status: crate::commands::handoffs::normalize_status(status)
+                    .unwrap_or(status)
+                    .to_string(),
+                agent_id,
+                note,
+                created_at: chrono::Utc::now().to_rfc3339(),
+            });
+            while team.handoff_events.len() > 50 {
+                let _ = team.handoff_events.pop_front();
+            }
+        }
+        self.persist_team_state(team_id).await
     }
 }
 
@@ -936,7 +1125,9 @@ where
             return Err(anyhow!("connection closed before handshake"));
         }
         if n > HANDSHAKE_LINE_LIMIT || hello_line.len() > HANDSHAKE_LINE_LIMIT {
-            return Err(anyhow!("handshake line exceeds {HANDSHAKE_LINE_LIMIT} bytes"));
+            return Err(anyhow!(
+                "handshake line exceeds {HANDSHAKE_LINE_LIMIT} bytes"
+            ));
         }
         Ok::<_, anyhow::Error>(())
     };
@@ -1025,9 +1216,7 @@ where
             Ok(Ok(_)) => {}
             Ok(Err(_)) => return Ok(()),
             Err(_) => {
-                tracing::warn!(
-                    "[teamhub] dropping idle client (no data for {IDLE_TIMEOUT:?})"
-                );
+                tracing::warn!("[teamhub] dropping idle client (no data for {IDLE_TIMEOUT:?})");
                 return Ok(());
             }
         }
@@ -1054,9 +1243,7 @@ where
         }
 
         if overflowed {
-            tracing::warn!(
-                "[teamhub] dropping RPC line: exceeded {RPC_LINE_LIMIT} bytes"
-            );
+            tracing::warn!("[teamhub] dropping RPC line: exceeded {RPC_LINE_LIMIT} bytes");
             // Issue #149: line too long の段階では req.id が読めないので、JSON-RPC 仕様上
             // notification と区別できない。仕様準拠のため error 応答を送らずに drop する。
             // 書き込み I/O 失敗で client loop ごと切断するのも避ける。

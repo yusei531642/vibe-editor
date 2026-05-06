@@ -4,6 +4,7 @@
 //! 各 tool は `pub(super) async fn team_xxx(...)` で公開され、
 //! 親 `protocol/mod.rs` の `dispatch_tool` から呼び出される。
 
+mod ack_handoff;
 mod assign_task;
 mod create_leader;
 mod diagnostics;
@@ -18,6 +19,7 @@ mod status;
 mod switch_leader;
 mod update_task;
 
+pub use ack_handoff::team_ack_handoff;
 pub use assign_task::team_assign_task;
 pub use create_leader::team_create_leader;
 pub use diagnostics::team_diagnostics;

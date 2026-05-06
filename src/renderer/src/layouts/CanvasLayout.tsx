@@ -258,7 +258,7 @@ export function CanvasLayout(): JSX.Element {
           entry.id,
           entry.name,
           entry.members.map((m, i) => ({
-            agentId: `${m.role}-${i}-${entry.id}`,
+            agentId: m.agentId ?? `${m.role}-${i}-${entry.id}`,
             role: m.role,
             agent: m.agent
           }))
@@ -268,7 +268,7 @@ export function CanvasLayout(): JSX.Element {
       }
     }
     const cards = entry.members.map((m, i) => {
-      const agentId = `${m.role}-${i}-${entry.id}`;
+      const agentId = m.agentId ?? `${m.role}-${i}-${entry.id}`;
       const saved = entry.canvasState?.nodes.find((s) => s.agentId === agentId);
       // Issue #385: 旧 team-history.json に NaN / Infinity / undefined な座標が残っていると、
       // 復元直後に React Flow が render 例外を出して Canvas 全体が黒画面になる。
@@ -727,6 +727,14 @@ function RecentItem({
   lastUsedLabel: string;
   onClick: () => void;
 }): JSX.Element {
+  const orchestration = entry.orchestration;
+  const stateLabel = orchestration?.blockedByHumanGate
+    ? `blocked_by_human_gate: ${
+        orchestration.requiredHumanDecision ?? orchestration.blockedReason ?? ''
+      }`
+    : orchestration?.latestHandoffStatus
+      ? `handoff: ${orchestration.latestHandoffStatus}`
+      : '';
   return (
     <button type="button" onClick={onClick} className="canvas-popover__preset">
       <span className="canvas-popover__preset-title-row">
@@ -740,6 +748,15 @@ function RecentItem({
           style={{ ['--org-color' as string]: entry.organization.color } as React.CSSProperties}
         >
           {entry.organization.name}
+        </span>
+      )}
+      {stateLabel && (
+        <span
+          className={`canvas-popover__preset-state ${
+            orchestration?.blockedByHumanGate ? 'is-blocked' : ''
+          }`}
+        >
+          {stateLabel}
         </span>
       )}
       <span className="canvas-popover__preset-roles">

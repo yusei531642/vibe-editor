@@ -30,7 +30,10 @@ pub async fn team_assign_task(
     }
     let assignee_raw = args.get("assignee").and_then(|v| v.as_str()).unwrap_or("");
     let assignee = assignee_raw.trim();
-    let description = args.get("description").and_then(|v| v.as_str()).unwrap_or("");
+    let description = args
+        .get("description")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     if assignee.is_empty() || description.is_empty() {
         return Err(AssignError {
             code: "assign_invalid_args".into(),
@@ -124,6 +127,13 @@ pub async fn team_assign_task(
             status: "pending".into(),
             created_by: ctx.role.clone(),
             created_at: assigned_at.clone(),
+            updated_at: None,
+            summary: None,
+            blocked_reason: None,
+            next_action: None,
+            artifact_path: None,
+            blocked_by_human_gate: false,
+            required_human_decision: None,
         });
         // Issue #107 / #216: tasks も件数上限で古い順に O(1) で破棄
         while team.tasks.len() > MAX_TASKS_PER_TEAM {
@@ -140,6 +150,9 @@ pub async fn team_assign_task(
                 .or_default();
             diag.tasks_claimed_count = diag.tasks_claimed_count.saturating_add(1);
         }
+    }
+    if let Err(e) = hub.persist_team_state(&ctx.team_id).await {
+        tracing::warn!("[team_assign_task] persist team-state failed: {e}");
     }
     // Issue #172: 通知の team_send を await せず fire-and-forget でバックグラウンド spawn する。
     // assignee="all" のとき fan-out で sleep 累積して MCP RPC を秒単位でブロックしていたのを解消。
@@ -176,9 +189,7 @@ pub async fn team_assign_task(
                 }
             }
             Err(e) => {
-                tracing::warn!(
-                    "[team_assign_task] task #{task_id_for_log} notify failed: {e}"
-                );
+                tracing::warn!("[team_assign_task] task #{task_id_for_log} notify failed: {e}");
             }
         }
     });
