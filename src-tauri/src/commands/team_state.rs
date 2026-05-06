@@ -154,10 +154,7 @@ pub struct TeamOrchestrationSummary {
 }
 
 fn state_root() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".vibe-editor")
-        .join("team-state")
+    crate::util::config_paths::vibe_root().join("team-state")
 }
 
 fn project_key(project_root: &str) -> String {
@@ -187,7 +184,7 @@ pub fn team_state_path(project_root: &str, team_id: &str) -> PathBuf {
         .join(format!("{}.json", safe_segment(team_id)))
 }
 
-async fn ensure_private_dir(dir: &Path) -> Result<(), String> {
+async fn ensure_private_dir(dir: &Path) -> crate::commands::error::CommandResult<()> {
     fs::create_dir_all(dir).await.map_err(|e| e.to_string())?;
     #[cfg(unix)]
     {
@@ -232,7 +229,7 @@ pub async fn load_orchestration_state(
 
 pub async fn save_orchestration_state(
     mut state: TeamOrchestrationState,
-) -> Result<TeamOrchestrationState, String> {
+) -> crate::commands::error::CommandResult<TeamOrchestrationState> {
     state.updated_at = Utc::now().to_rfc3339();
     state = normalize(state);
     let path = team_state_path(&state.project_root, &state.team_id);

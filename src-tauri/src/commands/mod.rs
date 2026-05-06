@@ -6,6 +6,7 @@
 pub mod app;
 pub mod atomic_write;
 pub mod dialog;
+pub mod error;
 pub mod files;
 pub mod fs_watch;
 pub mod git;

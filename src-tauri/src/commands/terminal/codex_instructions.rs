@@ -13,10 +13,7 @@ pub async fn prepare_codex_instructions_file(instructions: &str) -> Option<PathB
     if instructions.trim().is_empty() {
         return None;
     }
-    let dir = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".vibe-editor")
-        .join("codex-instructions");
+    let dir = crate::util::config_paths::vibe_root().join("codex-instructions");
     if let Err(e) = tokio::fs::create_dir_all(&dir).await {
         tracing::warn!("[terminal] codex-instructions dir create failed: {e}");
         return None;
@@ -39,8 +36,12 @@ pub async fn cleanup_old_codex_instructions(dir: &std::path::Path) {
     };
     let now = std::time::SystemTime::now();
     while let Ok(Some(entry)) = rd.next_entry().await {
-        let Ok(meta) = entry.metadata().await else { continue };
-        let Ok(modified) = meta.modified() else { continue };
+        let Ok(meta) = entry.metadata().await else {
+            continue;
+        };
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
         let age = now.duration_since(modified).unwrap_or_default();
         if age.as_secs() > TTL_SECS {
             let _ = tokio::fs::remove_file(entry.path()).await;

@@ -3,7 +3,7 @@
 // 16ms or 32KB で flush し、ターミナル出力を tauri::Emitter で送る。
 // 大量出力時に renderer 側のレンダリングを 60fps 以下に保つため必須。
 
-use crate::pty::session::{append_scrollback, Scrollback};
+use crate::pty::scrollback::{append_scrollback, Scrollback};
 use bytes::BytesMut;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};

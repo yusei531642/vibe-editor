@@ -15,6 +15,7 @@ pub mod claude_watcher;
 pub mod codex_broker;
 pub mod path_norm;
 pub mod registry;
+pub mod scrollback;
 pub mod session;
 
 pub use registry::SessionRegistry;

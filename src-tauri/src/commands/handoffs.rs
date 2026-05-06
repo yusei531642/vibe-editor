@@ -109,10 +109,7 @@ pub struct HandoffMutationResult {
 }
 
 fn handoff_root() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".vibe-editor")
-        .join("handoffs")
+    crate::util::config_paths::handoffs_path()
 }
 
 fn project_key(project_root: &str) -> String {
@@ -141,7 +138,7 @@ fn handoff_dir(project_root: &str, team_id: Option<&str>) -> PathBuf {
     handoff_root().join(project_key(project_root)).join(team)
 }
 
-async fn ensure_private_handoff_dir(dir: &Path) -> Result<(), String> {
+async fn ensure_private_handoff_dir(dir: &Path) -> crate::commands::error::CommandResult<()> {
     fs::create_dir_all(dir).await.map_err(|e| e.to_string())?;
     #[cfg(unix)]
     {
@@ -163,7 +160,7 @@ async fn ensure_private_handoff_dir(dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn restrict_private_file(_path: &Path) -> Result<(), String> {
+fn restrict_private_file(_path: &Path) -> crate::commands::error::CommandResult<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -266,7 +263,7 @@ async fn write_handoff(
     handoff: &HandoffCheckpoint,
     json_path: &Path,
     md_path: &Path,
-) -> Result<(), String> {
+) -> crate::commands::error::CommandResult<()> {
     let json = serde_json::to_vec_pretty(handoff).map_err(|e| e.to_string())?;
     crate::commands::atomic_write::atomic_write(json_path, &json)
         .await
@@ -292,7 +289,7 @@ pub async fn handoffs_create(req: HandoffCreateRequest) -> HandoffCreateResult {
     if let Err(e) = ensure_private_handoff_dir(&dir).await {
         return HandoffCreateResult {
             ok: false,
-            error: Some(e),
+            error: Some(e.to_string()),
             handoff: None,
         };
     }
@@ -331,7 +328,7 @@ pub async fn handoffs_create(req: HandoffCreateRequest) -> HandoffCreateResult {
         },
         Err(e) => HandoffCreateResult {
             ok: false,
-            error: Some(e),
+            error: Some(e.to_string()),
             handoff: None,
         },
     }
@@ -400,7 +397,7 @@ pub async fn handoffs_update_status(
         },
         Err(e) => HandoffMutationResult {
             ok: false,
-            error: Some(e),
+            error: Some(e.to_string()),
             handoff: None,
         },
     }
@@ -412,7 +409,7 @@ pub async fn update_handoff_status_file(
     handoff_id: &str,
     status: &str,
     to_agent_id: Option<String>,
-) -> Result<HandoffCheckpoint, String> {
+) -> crate::commands::error::CommandResult<HandoffCheckpoint> {
     let Some(next_status) = normalize_status(status) else {
         return Err("invalid handoff status".into());
     };

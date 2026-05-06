@@ -8,14 +8,8 @@
 use crate::commands::atomic_write::atomic_write;
 use once_cell::sync::Lazy;
 use serde_json::Value;
-use std::path::PathBuf;
 use tokio::fs;
 use tokio::sync::Mutex;
-
-fn settings_path() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_default();
-    home.join(".vibe-editor").join("settings.json")
-}
 
 /// Issue #37: 並列 save を直列化する。atomic_write だけでは同時 2 save で
 /// どちらかが temp rename 競合して 1 つが失敗しうるが、この Mutex で書き込みを 1 つずつに。
@@ -24,7 +18,7 @@ static SAVE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 #[tauri::command]
 pub async fn settings_load() -> Value {
     tracing::info!("[IPC] settings_load called");
-    let path = settings_path();
+    let path = crate::util::config_paths::settings_path();
     let Ok(bytes) = fs::read(&path).await else {
         return Value::Null;
     };
@@ -47,10 +41,12 @@ pub async fn settings_load() -> Value {
 }
 
 #[tauri::command]
-pub async fn settings_save(settings: Value) -> Result<(), String> {
+pub async fn settings_save(settings: Value) -> crate::commands::error::CommandResult<()> {
     let _g = SAVE_LOCK.lock().await;
-    let path = settings_path();
+    let path = crate::util::config_paths::settings_path();
     let json = serde_json::to_vec_pretty(&settings).map_err(|e| e.to_string())?;
     // Issue #37: 書き込み中の crash で settings.json が半端 JSON にならないよう atomic
-    atomic_write(&path, &json).await.map_err(|e| e.to_string())
+    Ok(atomic_write(&path, &json)
+        .await
+        .map_err(|e| e.to_string())?)
 }

@@ -7,7 +7,7 @@ mod codex_instructions;
 mod command_validation;
 mod paste_image;
 
-use crate::pty::{SpawnOptions, UserWriteOutcome, spawn_session};
+use crate::pty::{spawn_session, SpawnOptions, UserWriteOutcome};
 use crate::state::AppState;
 use crate::team_hub::inject::build_chunks;
 use crate::util::log_redact::redact_home;
@@ -147,7 +147,7 @@ pub async fn terminal_create(
     app: AppHandle,
     state: State<'_, AppState>,
     opts: TerminalCreateOptions,
-) -> Result<TerminalCreateResult, String> {
+) -> crate::commands::error::CommandResult<TerminalCreateResult> {
     let spawned_at = std::time::SystemTime::now();
     let (command, mut args) = resolve_command(opts.command, opts.args);
     if !command_validation::is_allowed_terminal_command(&command) {
@@ -445,7 +445,7 @@ pub async fn terminal_write(
     state: State<'_, AppState>,
     id: String,
     data: String,
-) -> Result<(), String> {
+) -> crate::commands::error::CommandResult<()> {
     if let Some(s) = state.pty_registry.get(&id) {
         match s.user_write(data.as_bytes()).map_err(|e| e.to_string())? {
             UserWriteOutcome::Written | UserWriteOutcome::SuppressedInjecting => {}
@@ -472,7 +472,7 @@ pub async fn terminal_resize(
     id: String,
     cols: u32,
     rows: u32,
-) -> Result<(), String> {
+) -> crate::commands::error::CommandResult<()> {
     if let Some(s) = state.pty_registry.get(&id) {
         // resize 失敗は無害なので握りつぶす (旧実装と同じ)
         let _ = s.resize(
@@ -484,7 +484,10 @@ pub async fn terminal_resize(
 }
 
 #[tauri::command]
-pub async fn terminal_kill(state: State<'_, AppState>, id: String) -> Result<(), String> {
+pub async fn terminal_kill(
+    state: State<'_, AppState>,
+    id: String,
+) -> crate::commands::error::CommandResult<()> {
     if let Some(s) = state.pty_registry.remove(&id) {
         let _ = s.kill();
     }

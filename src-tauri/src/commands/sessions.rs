@@ -21,7 +21,9 @@ pub struct SessionInfo {
 
 fn projects_dir(root: &str) -> PathBuf {
     let home = dirs::home_dir().unwrap_or_default();
-    home.join(".claude").join("projects").join(encode_project_path(root))
+    home.join(".claude")
+        .join("projects")
+        .join(encode_project_path(root))
 }
 
 #[tauri::command]
@@ -164,9 +166,7 @@ async fn read_jsonl_summary(path: &std::path::Path) -> (String, u32, Option<Stri
                         cwd = Some(c.to_string());
                     }
                 }
-                if title.is_empty()
-                    && v.get("type").and_then(|t| t.as_str()) == Some("user")
-                {
+                if title.is_empty() && v.get("type").and_then(|t| t.as_str()) == Some("user") {
                     if let Some(text) = v
                         .pointer("/message/content")
                         .and_then(|c| c.as_str())

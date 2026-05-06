@@ -23,9 +23,10 @@ pub async fn atomic_write(target: &Path, bytes: &[u8]) -> Result<()> {
     // 同一ナノ秒に揃うと衝突しうる (settings リサイズ + role profile save 並行時など)。
     // uuid v4 を混ぜて衝突確率を実質ゼロにする。
     let tmp = {
-        let file_name = target
-            .file_name()
-            .map_or_else(|| "vibe.tmp".to_string(), |s| s.to_string_lossy().into_owned());
+        let file_name = target.file_name().map_or_else(
+            || "vibe.tmp".to_string(),
+            |s| s.to_string_lossy().into_owned(),
+        );
         let pid = std::process::id();
         let unique = uuid::Uuid::new_v4().simple().to_string();
         let tmp_name = format!(".{file_name}.tmp.{pid}.{unique}");
@@ -80,10 +81,7 @@ mod tests {
 
     #[tokio::test]
     async fn atomic_write_creates_file_with_content() {
-        let dir = std::env::temp_dir().join(format!(
-            "vibe-atomic-test-{}",
-            std::process::id()
-        ));
+        let dir = std::env::temp_dir().join(format!("vibe-atomic-test-{}", std::process::id()));
         let _ = fs::create_dir_all(&dir).await;
         let target = dir.join("example.json");
         atomic_write(&target, b"{\"a\":1}").await.unwrap();
@@ -94,10 +92,8 @@ mod tests {
 
     #[tokio::test]
     async fn atomic_write_replaces_existing() {
-        let dir = std::env::temp_dir().join(format!(
-            "vibe-atomic-test-replace-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("vibe-atomic-test-replace-{}", std::process::id()));
         let _ = fs::create_dir_all(&dir).await;
         let target = dir.join("example.json");
         atomic_write(&target, b"v1").await.unwrap();

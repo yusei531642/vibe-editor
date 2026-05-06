@@ -126,8 +126,7 @@ pub struct MutationResult {
 static LOCK: once_cell::sync::Lazy<Mutex<()>> = once_cell::sync::Lazy::new(|| Mutex::new(()));
 
 fn store_path() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_default();
-    home.join(".vibe-editor").join("team-history.json")
+    crate::util::config_paths::vibe_root().join("team-history.json")
 }
 
 /// Issue #132: cache が live なら disk I/O をスキップ。
@@ -145,13 +144,13 @@ async fn ensure_loaded(cache: &mut Option<Vec<TeamHistoryEntry>>) {
     *cache = Some(entries);
 }
 
-async fn save_all(entries: &[TeamHistoryEntry]) -> Result<(), String> {
+async fn save_all(entries: &[TeamHistoryEntry]) -> crate::commands::error::CommandResult<()> {
     let path = store_path();
     let json = serde_json::to_vec_pretty(entries).map_err(|e| e.to_string())?;
     // Issue #37: クラッシュ耐性のため atomic write を使う
-    crate::commands::atomic_write::atomic_write(&path, &json)
+    Ok(crate::commands::atomic_write::atomic_write(&path, &json)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?)
 }
 
 #[tauri::command]
@@ -219,7 +218,7 @@ pub async fn team_history_save(mut entry: TeamHistoryEntry) -> MutationResult {
         },
         Err(e) => MutationResult {
             ok: false,
-            error: Some(e),
+            error: Some(e.to_string()),
         },
     }
 }
@@ -249,7 +248,7 @@ pub async fn team_history_save_batch(entries: Vec<TeamHistoryEntry>) -> Mutation
         },
         Err(e) => MutationResult {
             ok: false,
-            error: Some(e),
+            error: Some(e.to_string()),
         },
     }
 }
@@ -275,7 +274,7 @@ pub async fn team_history_delete(id: String) -> MutationResult {
         },
         Err(e) => MutationResult {
             ok: false,
-            error: Some(e),
+            error: Some(e.to_string()),
         },
     }
 }
