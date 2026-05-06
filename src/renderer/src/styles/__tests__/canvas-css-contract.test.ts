@@ -31,4 +31,21 @@ describe('Canvas CSS contract', () => {
       /\.canvas-layout__body\s*>\s*\.sidebar\s*\{[\s\S]*flex:\s*0\s+0\s+var\(--shell-sidebar-w\)\s*;[\s\S]*width:\s*var\(--shell-sidebar-w\)\s*;[\s\S]*min-width:\s*var\(--shell-sidebar-w\)\s*;[\s\S]*max-width:\s*var\(--shell-sidebar-w\)\s*;/
     );
   });
+
+  it('keeps canvas list rows wired to the same agent and organization accent variables as stage cards', () => {
+    const canvas = stripCssComments(readComponentCss('canvas.css'));
+
+    expect(canvas).toMatch(
+      /\.tc-list-row\s*\{[\s\S]*box-shadow:\s*inset\s+3px\s+0\s+0\s+var\(--organization-accent,\s*var\(--agent-accent,\s*var\(--accent\)\)\)\s*;/
+    );
+    expect(canvas).toMatch(
+      /\.tc-list-row__avatar\s*\{[\s\S]*var\(--agent-accent,\s*var\(--role-color,\s*var\(--accent\)\)\)/
+    );
+    expect(canvas).toMatch(
+      /\.tc-list-row__role\s*\{[\s\S]*color:\s*var\(--agent-accent,\s*var\(--role-color,\s*var\(--text-mute\)\)\)\s*;/
+    );
+    expect(canvas).toMatch(
+      /\.tc-list-row__status-dot\s*\{[\s\S]*background:\s*var\(--agent-accent,\s*var\(--role-color,\s*var\(--success\)\)\)\s*;/
+    );
+  });
 });

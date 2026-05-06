@@ -18,7 +18,8 @@ import { useCanvasStore, NODE_MIN_W, NODE_MIN_H } from '../../../stores/canvas';
 import { useCanvasTerminalFit } from '../../../lib/use-canvas-terminal-fit';
 import { useConfirmRemoveCard } from '../../../lib/use-confirm-remove-card';
 import { useXtermScrollToBottomOnResize } from '../../../lib/use-xterm-scroll-on-resize';
-import { fallbackProfile, profileText, renderSystemPrompt, useRoleProfiles } from '../../../lib/role-profiles-context';
+import { renderSystemPrompt, useRoleProfiles } from '../../../lib/role-profiles-context';
+import { resolveAgentVisual } from '../../../lib/agent-visual';
 import { parseShellArgs } from '../../../lib/parse-args';
 import { resolveAgentConfig } from '../../../lib/agent-resolver';
 import { useRecruitSpawnAck } from '../../../lib/use-terminal-spawn';
@@ -175,14 +176,15 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const fit = useCanvasTerminalFit(settings);
   const payload = (data?.payload ?? {}) as AgentPayload;
   // 新スキーマ roleProfileId を優先、無ければ legacy role を読む
-  const roleProfileId = payload.roleProfileId ?? payload.role ?? 'leader';
-  const profilesById = useRoleProfiles().byId;
-  const globalPreamble = useRoleProfiles().file.globalPreamble;
-  const profile = profilesById[roleProfileId] ?? fallbackProfile(roleProfileId);
-  const accent = profile.visual.color;
-  const organizationAccent = payload.organization?.color;
-  const meta = profileText(profile, settings.language);
-  const title = (data?.title as string) ?? meta.label;
+  const roleProfiles = useRoleProfiles();
+  const profilesById = roleProfiles.byId;
+  const globalPreamble = roleProfiles.file.globalPreamble;
+  const visual = resolveAgentVisual(payload, profilesById, settings.language);
+  const roleProfileId = visual.roleProfileId;
+  const profile = visual.profile;
+  const accent = visual.agentAccent;
+  const organizationAccent = visual.organizationAccent;
+  const title = (data?.title as string) ?? visual.label;
   const [handoffBusy, setHandoffBusy] = useState(false);
   // Issue #342 Phase 1: recruit 経路の spawn 失敗を Hub に ack するためのコールバック。
   // payload.agentId / payload.teamId が揃っているとき (= 通常の AgentNode は常に揃う)
@@ -395,7 +397,7 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
       retireAfterAck: true,
       trigger: 'manual',
       content: {
-        summary: `${title} (${meta.label}) の Canvas handoff。保存時点の terminal snapshot と次アクションを含みます。`,
+        summary: `${title} (${visual.label}) の Canvas handoff。保存時点の terminal snapshot と次アクションを含みます。`,
         decisions: ['この handoff は既存セッションを --resume せず、新しいセッションへ注入するための継続メモとして保存されました。'],
         filesTouched: [],
         openTasks: ['handoff markdown を読み、現在の作業目的・未完了タスク・次アクションを確認する。'],
@@ -414,7 +416,7 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   }, [
     cwd,
     id,
-    meta.label,
+    visual.label,
     payload.agent,
     payload.agentId,
     payload.cwd,
@@ -536,7 +538,7 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
                 {payload.organization.name}
               </span>
             )}
-            <span className="canvas-agent-card__role">{meta.label}</span>
+            <span className="canvas-agent-card__role">{visual.label}</span>
           </span>
           <span className="canvas-agent-card__actions">
             <StatusBadge state={activity} label={t(`agentStatus.${activity}`)} />
