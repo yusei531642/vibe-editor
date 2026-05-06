@@ -5,7 +5,7 @@
  * Rust 側 TeamHub から `team:handoff` event が来たら、from→to エッジを
  * 一時的に追加して 10 秒で自動 fade (#379)。
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 // Controls (zoom/+/-、fit、lock 4 ボタン) はデフォルトで白くアプリのテーマと合わないため import しない。
 import {
   ReactFlow,
@@ -35,13 +35,16 @@ import { QuickNav } from './QuickNav';
 import { LeaderGlow } from './LeaderGlow';
 import { StageHud } from './StageHud';
 import { useCanvasStore, NODE_W, NODE_H, type CardData } from '../../stores/canvas';
-import { colorOf } from '../../lib/team-roles';
 import { computeRecruitFocus } from '../../lib/canvas-recruit-focus';
 import { KEYS, useKeybinding } from '../../lib/keybindings';
 import { useUiStore } from '../../stores/ui';
 import { ContextMenu, type ContextMenuItem } from '../ContextMenu';
 import { useT } from '../../lib/i18n';
 import { useConfirmRemoveCard } from '../../lib/use-confirm-remove-card';
+import { useRoleProfiles } from '../../lib/role-profiles-context';
+import { useSettings } from '../../lib/settings-context';
+import { resolveAgentVisual, type AgentVisualPayload } from '../../lib/agent-visual';
+import type { TeamOrganizationMeta } from '../../../../types/shared';
 
 const nodeTypes = {
   terminal: TerminalCard,
@@ -68,6 +71,13 @@ function FlowApp(): JSX.Element {
   const confirmRemoveCard = useConfirmRemoveCard();
   const pulseEdge = useCanvasStore((s) => s.pulseEdge);
   const setTeamLock = useCanvasStore((s) => s.setTeamLock);
+  const { settings } = useSettings();
+  const { byId: profilesById } = useRoleProfiles();
+  const resolveAccent = useCallback(
+    (payload: AgentVisualPayload | undefined): string =>
+      resolveAgentVisual(payload, profilesById, settings.language).agentAccent,
+    [profilesById, settings.language]
+  );
   // 個別の getter は store から都度引く (selector は使わない: teamLocks 全体購読すると
   // ロック切替で全カード再レンダーになるため、必要時に getState で参照する)。
   const isTeamLocked = useCallback((teamId: string): boolean => {
@@ -268,18 +278,17 @@ function FlowApp(): JSX.Element {
       source: fromNode.id,
       target: toNode.id,
       type: 'handoff',
-      data: { color: colorOf(p.fromRole), preview: p.preview, fromRole: p.fromRole }
+      data: { color: resolveAccent({ roleProfileId: p.fromRole }), preview: p.preview, fromRole: p.fromRole }
     });
   });
 
   const minimapColor = useCallback((node: Node) => {
     const data = node.data as CardData | undefined;
     if (data?.cardType === 'agent') {
-      const role = (data.payload as { role?: string } | undefined)?.role;
-      return colorOf(role);
+      return resolveAccent(data.payload as AgentVisualPayload | undefined);
     }
     return '#7a7afd';
-  }, []);
+  }, [resolveAccent]);
 
   const initialViewport = useMemo(() => useCanvasStore.getState().viewport, []);
 
@@ -422,6 +431,8 @@ function FlowApp(): JSX.Element {
  *  Canvas 上の agent ノードを一覧化する。 */
 function StageListOverlay(): JSX.Element {
   const nodes = useCanvasStore((s) => s.nodes);
+  const { settings } = useSettings();
+  const { byId: profilesById } = useRoleProfiles();
   const agentNodes = nodes.filter((n) => (n.data as CardData | undefined)?.cardType === 'agent');
   return (
     <div className="tc-list-overlay">
@@ -435,17 +446,28 @@ function StageListOverlay(): JSX.Element {
         ) : (
           agentNodes.map((n) => {
             const payload = (n.data as CardData | undefined)?.payload as
-              | { role?: string; agentId?: string; agent?: string }
+              | {
+                  roleProfileId?: string;
+                  role?: string;
+                  agentId?: string;
+                  agent?: string;
+                  organization?: TeamOrganizationMeta;
+                }
               | undefined;
-            const color = colorOf(payload?.role);
+            const visual = resolveAgentVisual(payload, profilesById, settings.language);
+            const rowStyle = {
+              ['--agent-accent' as string]: visual.agentAccent,
+              ['--organization-accent' as string]: visual.organizationAccent,
+              ['--role-color' as string]: visual.agentAccent
+            } as CSSProperties;
             return (
-              <div key={n.id} className="tc-list-row" style={{ ['--role-color' as string]: color }}>
+              <div key={n.id} className="tc-list-row" style={rowStyle}>
                 <span className="tc-list-row__avatar">
-                  {(payload?.role ?? '?').charAt(0).toUpperCase()}
+                  {visual.glyph}
                 </span>
                 <div className="tc-list-row__id">
                   <span className="tc-list-row__name">{(n.data as CardData | undefined)?.title}</span>
-                  <span className="tc-list-row__role">{payload?.role ?? 'unassigned'}</span>
+                  <span className="tc-list-row__role">{visual.label}</span>
                 </div>
                 <span className="tc-list-row__status">
                   <span className="tc-list-row__status-dot" aria-hidden="true" />

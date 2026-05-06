@@ -1313,7 +1313,9 @@ Plan: `tasks/release-v1.4.12.md`
 - [x] Commit Issue #475 implementation.
 - [x] Bump app versions to `1.4.12`.
 - [x] Run quality gates.
-- [ ] Create release PR and wait for CodeRabbit, CI, and human approval before merge/tag push.
+- [x] Create release PR: https://github.com/yusei531642/vibe-editor/pull/477
+- [x] Resolve `origin/main` conflict after PR initially reported `DIRTY`.
+- [ ] Wait for CodeRabbit, CI, and human approval before merge/tag push.
 
 計画: `tasks/issue-475/plan.md`
 
@@ -1337,3 +1339,55 @@ Plan: `tasks/release-v1.4.12.md`
 - [x] `npm run build:vite`: PASS
 - [x] Browser CSS smoke: IDE root `rgba(10, 10, 26, 0.55)` / Canvas root `rgba(10, 10, 26, 0.4)` を確認
 - [ ] PR 前に `npm run dev` で Tauri 実機の Glass + Canvas を smoke 確認する。
+
+## Issue #474 - Canvas list terminal colors (2026-05-06 / Codex)
+
+計画: `tasks/issue-474/plan.md`
+
+- [x] Issue #474 の本文、コメント、ラベル状態を確認
+- [x] `issue-planner` / `issue-plan` / `vibeeditor` の該当手順を確認
+- [x] Canvas の Stage/List 表示、AgentNodeCard、role profile 解決、CSS を調査
+- [x] Root Cause Confirmed: List 表示が旧 `payload.role` + builtin shim `colorOf()` を使い、Stage 表示の `roleProfileId` + `RoleProfilesContext` と同じ色解決になっていない
+- [x] 実装前計画と Next Steps を `tasks/issue-474/plan.md` に記録
+- [x] Issue #474 に実装計画コメントを投稿する
+- [x] Issue #474 に `planned` と種別/領域ラベルを付与する
+- [x] 実装開始時に状態ラベルを `planned` から `implementing` へ遷移する
+- [x] `tasks/batch-pipeline-state.json` に Issue #474 の Phase A 状態を記録する
+
+### Next Steps
+
+- [x] `StageListOverlay` を `roleProfileId` 優先 + `RoleProfilesContext` ベースの色解決へ変更する。
+- [x] リスト行の CSS 変数を Stage 側の `AgentNodeCard` と同じ意味に揃える。
+- [x] 動的ロール / custom profile / legacy role fallback をテストで固定する。
+- [x] `npm run typecheck`、対象 vitest、`npm run test`、`npm run build:vite`、Canvas Stage/List smoke で確認する。
+
+### 進捗
+
+- [x] Issue #474 は OPEN、コメントなし、ラベルなしであることを確認。
+- [x] 調査対象は Renderer の Canvas 表示に限定できると判断。Rust / IPC / PTY 起動処理は変更不要。
+- [x] `AgentNodeCard` は `profile.visual.color`、List は `colorOf(payload.role)` で、色の source of truth が分岐していることを確認。
+- [x] `fix/issue-474-canvas-list-terminal-colors` ブランチを作成し、Issue #474 を `implementing` に更新。
+- [x] `agent-visual` helper を追加し、Stage/List/MiniMap/handoff edge の色解決を `resolveAgentVisual()` に統一。
+- [x] `agent-visual.test.ts` と `canvas-css-contract.test.ts` を追加/更新し、roleProfileId 優先と list CSS 変数契約を固定。
+- [x] Playwright smoke で Stage/List とも `roleProfileId=hr` の agent accent `#22c55e`、organization accent `#0ea5e9`、role label `人事`、glyph `H` を確認。
+
+### Next Tasks
+
+- [x] GitHub Issue コメント投稿後、コメント URL とラベル状態を確認する。
+- [x] 実装フェーズへ進む場合は `fix/issue-474-canvas-list-terminal-colors` を切る。
+- [ ] PR を作成する場合は本文に `Closes #474` と検証結果を記載する。
+- [ ] CodeRabbit / CI / 人間レビューを待ち、自動マージは行わない。
+
+### 投稿結果
+
+- [x] Issue comment: https://github.com/yusei531642/vibe-editor/issues/474#issuecomment-4384844892
+- [x] Labels: `planned`, `bug`, `canvas`, `ui`
+
+### 検証結果
+
+- [x] `npm run typecheck`: PASS
+- [x] `npx vitest run src/renderer/src/lib/__tests__/agent-visual.test.ts src/renderer/src/styles/__tests__/canvas-css-contract.test.ts`: PASS (2 files / 6 tests)
+- [x] `npm run test`: PASS (31 files / 204 tests)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
+- [x] Browser smoke: `http://127.0.0.1:5175/` で Stage/List の DOM/CSS 変数を確認。Vite 単体のため Tauri API 未注入由来の既存 console error は発生。

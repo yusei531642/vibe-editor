@@ -25,13 +25,15 @@
 - [x] Committed Issue #475 implementation: `b67ef26`.
 - [x] Created release branch: `chore/release-1.4.12`.
 - [x] Updated app versions to `1.4.12`.
+- [x] Created release PR: https://github.com/yusei531642/vibe-editor/pull/477
+- [x] Merged latest `origin/main` after PR reported `DIRTY`; conflicts were limited to `tasks/lessons.md` and `tasks/todo.md`.
 
 ## Verification Results
 
 - [x] `cargo check --manifest-path src-tauri\Cargo.toml`: PASS
 - [x] `npm run test -- src/renderer/src/styles/__tests__/glass-css-contract.test.ts`: PASS (6 tests)
 - [x] `npm run typecheck`: PASS
-- [x] `npm run test`: PASS (30 files / 200 tests)
+- [x] `npm run test`: PASS (31 files / 205 tests after `origin/main` merge)
 - [x] `npm run build:vite`: PASS
 - [x] `cargo check --locked --manifest-path src-tauri\Cargo.toml`: PASS
 - [x] `cargo test --locked --manifest-path src-tauri\Cargo.toml`: PASS (101 tests)
@@ -39,7 +41,7 @@
 
 ## Next Tasks
 
-- [ ] Commit the release bump.
-- [ ] Push `chore/release-1.4.12`.
-- [ ] Create the release PR.
+- [x] Commit the release bump.
+- [x] Push `chore/release-1.4.12`.
+- [x] Create the release PR.
 - [ ] After PR merge and human approval, push `v1.4.12` tag to trigger the draft release workflow.
