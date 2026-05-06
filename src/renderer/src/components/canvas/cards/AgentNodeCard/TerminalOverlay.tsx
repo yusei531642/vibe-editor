@@ -1,8 +1,8 @@
 /**
  * AgentNodeCard / TerminalOverlay
  *
- * Issue #487: AgentNodeCard 単一ファイルから「PTY / xterm との配線」を切り出し
- * たもの。CardFrame は枠 / role visual / handoff UI を担当し、本ファイルは
+ * Issue #487: AgentNodeCard 単一ファイルから「PTY / xterm との配線」を
+ * 切り出したもの。CardFrame は枠 / role visual / handoff UI を担当し、本ファイルは
  *   - TerminalView の mount + props 配線
  *   - 出力アクティビティ → AgentStatus 'typing/idle' の自動遷移 (idle timer)
  *   - ユーザー入力バッファ → 入力確定時に auto-summary をカードタイトルへ反映
