@@ -159,6 +159,7 @@ export function App(): JSX.Element {
     setActiveTabId,
     dirtyEditorTabs,
     confirmDiscardEditorTabs,
+    recentFiles,
     openEditorTab,
     updateEditorContent,
     saveEditorTab,
@@ -877,6 +878,7 @@ export function App(): JSX.Element {
         onAddWorkspaceFolder={() => void handleAddWorkspaceFolder()}
         onRemoveWorkspaceFolder={handleRemoveWorkspaceFolder}
         activeFilePath={activeFilePath}
+        recentFiles={recentFiles}
         onOpenFile={(rootPath, relPath) => void openEditorTab(rootPath, relPath)}
         gitStatus={gitStatus}
         gitLoading={gitLoading}
