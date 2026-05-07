@@ -365,7 +365,7 @@ const ja: Dict = {
   'dashboard.state.stale': '停滞',
   'dashboard.state.completed': '完了',
   'dashboard.state.idle': '待機',
-  'dashboard.task.unassigned': 'タスク未割当',
+  'dashboard.task.unassigned': 'タスク未割り当て',
   'dashboard.lastSeen.never': '未観測',
   'dashboard.empty.noTeam':
     '対象のチームが Canvas にありません。Agent カードを 1 枚以上配置してください',
