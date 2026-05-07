@@ -931,7 +931,7 @@ const en: Dict = {
   'preset.name': 'Name',
   'preset.namePlaceholder': 'e.g. Plan + Build + Review team',
   'preset.description': 'Description',
-  'preset.descriptionPlaceholder': 'Optional notes (what kind of work this team fits)',
+  'preset.descriptionPlaceholder': 'Optional notes (what kind of work this team is suited for)',
   'preset.apply': 'Apply',
   'preset.apply.tooltip': 'Spawn this preset onto the canvas',
   'preset.delete': 'Delete',
