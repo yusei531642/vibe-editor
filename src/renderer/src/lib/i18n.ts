@@ -352,6 +352,27 @@ const ja: Dict = {
   'preset.error.saveFailed': 'プリセット保存に失敗しました: {detail}',
   'preset.error.deleteFailed': 'プリセット削除に失敗しました: {detail}',
 
+  // Issue #514: Team Dashboard
+  'dashboard.title': 'チームダッシュボード',
+  'dashboard.button.tooltip': 'チームダッシュボード — 全メンバーの状態 / タスク / 経過を一覧',
+  'dashboard.count': '{count} 名',
+  'dashboard.col.member': 'メンバー',
+  'dashboard.col.state': '状態',
+  'dashboard.col.task': '担当タスク',
+  'dashboard.col.lastSeen': '最終出力',
+  'dashboard.state.active': '進行中',
+  'dashboard.state.blocked': 'Leader 待ち',
+  'dashboard.state.stale': '停滞',
+  'dashboard.state.completed': '完了',
+  'dashboard.state.idle': '待機',
+  'dashboard.task.unassigned': 'タスク未割り当て',
+  'dashboard.lastSeen.never': '未観測',
+  'dashboard.empty.noTeam':
+    '対象のチームが Canvas にありません。Agent カードを 1 枚以上配置してください',
+  'dashboard.empty.noMembers':
+    'このチームにはまだメンバーがいません。Leader から `team_recruit` でメンバーを招集してください',
+  'dashboard.banner.humanGate': 'Human gate が blocked: Leader の判断待ちです',
+
   // ---------- Sessions ----------
   'sessions.resume': 'セッション {id} に戻る',
   'sessions.messages': '{count} 件',
@@ -955,6 +976,28 @@ const en: Dict = {
   'preset.error.listFailed': 'Failed to load preset list',
   'preset.error.saveFailed': 'Failed to save preset: {detail}',
   'preset.error.deleteFailed': 'Failed to delete preset: {detail}',
+
+  // Issue #514: Team Dashboard
+  'dashboard.title': 'Team Dashboard',
+  'dashboard.button.tooltip':
+    'Team dashboard — overview of every member with state, task, and last activity',
+  'dashboard.count': '{count} members',
+  'dashboard.col.member': 'Member',
+  'dashboard.col.state': 'State',
+  'dashboard.col.task': 'Task',
+  'dashboard.col.lastSeen': 'Last seen',
+  'dashboard.state.active': 'Active',
+  'dashboard.state.blocked': 'Awaiting leader',
+  'dashboard.state.stale': 'Stale',
+  'dashboard.state.completed': 'Completed',
+  'dashboard.state.idle': 'Idle',
+  'dashboard.task.unassigned': 'No task assigned',
+  'dashboard.lastSeen.never': 'never',
+  'dashboard.empty.noTeam':
+    'No agent team on this canvas. Add at least one agent card to use the dashboard.',
+  'dashboard.empty.noMembers':
+    'This team has no members yet. Recruit members from the Leader using `team_recruit`.',
+  'dashboard.banner.humanGate': 'Human gate blocked: waiting for leader decision',
 
   // ---------- Sessions ----------
   'sessions.resume': 'Resume session {id}',

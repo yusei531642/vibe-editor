@@ -4,6 +4,7 @@ import {
   Bookmark,
   CheckCircle2,
   CircleDot,
+  ClipboardList,
   Hourglass,
   LayoutGrid,
   List,
@@ -15,7 +16,8 @@ import {
 } from 'lucide-react';
 import { useReactFlow } from '@xyflow/react';
 import { useT } from '../../lib/i18n';
-import { useCanvasStore, type StageView } from '../../stores/canvas';
+import { useSettings } from '../../lib/settings-context';
+import { useCanvasStore, type StageView, type CardData } from '../../stores/canvas';
 import { useCanvasNodes, useCanvasStageView } from '../../stores/canvas-selectors';
 import { useAgentActivityStore } from '../../stores/agent-activity';
 import {
@@ -23,6 +25,8 @@ import {
   type CardSummary
 } from '../../lib/agent-summary';
 import { TeamPresetsPanel } from './TeamPresetsPanel';
+import { TeamDashboard } from './TeamDashboard';
+import type { AgentPayload } from './cards/AgentNodeCard/types';
 import type { ArrangeGap } from '../../lib/canvas-arrange';
 
 /**
@@ -48,6 +52,9 @@ export function StageHud(): JSX.Element {
   // Issue #522: team preset panel toggle. arrange popover とは独立。
   const [presetsOpen, setPresetsOpen] = useState(false);
   const presetsWrapRef = useRef<HTMLDivElement | null>(null);
+  // Issue #514: team dashboard panel toggle.
+  const [dashboardOpen, setDashboardOpen] = useState(false);
+  const dashboardWrapRef = useRef<HTMLDivElement | null>(null);
 
   // ポップオーバー外クリック / Escape で閉じる
   useEffect(() => {
@@ -68,6 +75,26 @@ export function StageHud(): JSX.Element {
       window.removeEventListener('keydown', onKey);
     };
   }, [arrangeOpen]);
+
+  // Issue #514: dashboard も同じく親 ref で外クリック判定 (#522 同パターン)。
+  useEffect(() => {
+    if (!dashboardOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!dashboardWrapRef.current) return;
+      if (!dashboardWrapRef.current.contains(e.target as Node)) {
+        setDashboardOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setDashboardOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [dashboardOpen]);
 
   // Issue #522: presets popover も同じく「ボタン + popover」を内包する親 ref で
   // 外クリック判定する。子コンポーネント (TeamPresetsPanel) 側で同じ処理をすると、
@@ -150,6 +177,23 @@ export function StageHud(): JSX.Element {
     [agentNodes, cardSummaries]
   );
   const showTeamSummary = teamSummary.total > 0;
+
+  // Issue #514: dashboard に渡す teamId / projectRoot を canvas state + settings から導出。
+  // 複数 team が並ぶ稀なケースは「Leader カードがある team を優先」、無ければ最初の agent team を採る。
+  const { settings } = useSettings();
+  const dashboardTeamId = useMemo<string | null>(() => {
+    let leaderTeam: string | null = null;
+    let firstTeam: string | null = null;
+    for (const node of agentNodes) {
+      const payload = (node.data as CardData | undefined)?.payload as AgentPayload | undefined;
+      if (!payload?.teamId) continue;
+      if (firstTeam === null) firstTeam = payload.teamId;
+      const role = payload.roleProfileId ?? payload.role;
+      if (role === 'leader' && leaderTeam === null) leaderTeam = payload.teamId;
+    }
+    return leaderTeam ?? firstTeam;
+  }, [agentNodes]);
+  const dashboardProjectRoot = settings.lastOpenedRoot || null;
 
   return (
     <div className="tc__hud glass-surface" role="toolbar" aria-label="Canvas view">
@@ -249,6 +293,26 @@ export function StageHud(): JSX.Element {
         <ZoomIn size={12} strokeWidth={2} />
       </button>
       <span className="tc__hud-sep" aria-hidden="true" />
+      <div className="tc__hud-dashboard" ref={dashboardWrapRef}>
+        <button
+          type="button"
+          className={dashboardOpen ? 'is-active' : ''}
+          onClick={() => setDashboardOpen((v) => !v)}
+          title={t('dashboard.button.tooltip')}
+          aria-label={t('dashboard.button.tooltip')}
+          aria-haspopup="dialog"
+          aria-expanded={dashboardOpen}
+        >
+          <ClipboardList size={12} strokeWidth={2} />
+        </button>
+        {dashboardOpen ? (
+          <TeamDashboard
+            teamId={dashboardTeamId}
+            projectRoot={dashboardProjectRoot}
+            onClose={() => setDashboardOpen(false)}
+          />
+        ) : null}
+      </div>
       <div className="tc__hud-presets" ref={presetsWrapRef}>
         <button
           type="button"

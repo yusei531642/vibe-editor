@@ -1,0 +1,279 @@
+/* ===========================================================================
+ * Team Dashboard — Issue #514
+ *
+ * Canvas 中央下部の StageHud から popover として開く集約 dashboard。
+ * 行 = agent、列 = member / state / task / lastSeen。
+ * canvas.css の `.tc__hud-presets` / `.tc__preset-panel` と同じ glass-surface 系。
+ * ========================================================================= */
+
+.tc__hud-dashboard {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.tc__dashboard {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  /* HUD 中央配置に対し dashboard は HUD の上に大きく開く。長 task 名や 8 名チームでも
+     UI が崩れないよう min-width を 480px、max-height を 60vh で制限する。 */
+  right: 0;
+  width: 520px;
+  max-width: calc(100vw - 32px);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-glass, rgba(20, 20, 19, 0.82));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  box-shadow: var(--shadow-lg);
+  z-index: 30;
+  font-size: var(--text-sm, 12px);
+  color: var(--fg);
+}
+
+.tc__dashboard-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.tc__dashboard-title {
+  font-weight: 600;
+  font-size: var(--text-md, 14px);
+  flex: 0 0 auto;
+}
+.tc__dashboard-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--fg-subtle);
+  flex: 1 1 auto;
+}
+.tc__dashboard-close {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--fg-subtle);
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+.tc__dashboard-close:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+
+/* human_gate 警告バナー: blocked=true のときに最上部に出す */
+.tc__dashboard-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background: color-mix(
+    in srgb,
+    var(--accent-warning, #d97706) 18%,
+    var(--bg-elev, var(--bg-panel)) 82%
+  );
+  border: 1px solid color-mix(in srgb, var(--accent-warning, #d97706) 35%, var(--border));
+  color: var(--accent-warning, #d97706);
+  font-weight: 500;
+  font-size: var(--text-xs, 11px);
+}
+
+.tc__dashboard-empty {
+  padding: 24px 8px;
+  text-align: center;
+  color: var(--fg-subtle);
+  font-size: var(--text-xs, 11px);
+}
+
+/* ----------
+ * テーブル本体
+ * ---------- */
+.tc__dashboard-table {
+  flex: 1 1 auto;
+  min-height: 0;
+  width: 100%;
+  border-collapse: collapse;
+  overflow-y: auto;
+  display: block;
+}
+.tc__dashboard-table thead,
+.tc__dashboard-table tbody {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+}
+.tc__dashboard-table thead {
+  position: sticky;
+  top: 0;
+  background: color-mix(in srgb, var(--bg-elev, var(--bg-panel)) 92%, transparent);
+  z-index: 1;
+}
+.tc__dashboard-table th {
+  text-align: left;
+  padding: 6px 8px;
+  font-weight: 500;
+  font-size: var(--text-xs, 11px);
+  color: var(--fg-subtle);
+  border-bottom: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tc__dashboard-table td {
+  padding: 8px;
+  vertical-align: top;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.tc__dashboard-table tr:last-child td {
+  border-bottom: 0;
+}
+.tc__dashboard-cell-num {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--fg-subtle);
+  width: 64px;
+}
+
+/* row 状態によるトーン */
+.tc__dashboard-row--blocked {
+  background: color-mix(in srgb, var(--accent-warning, #d97706) 8%, transparent);
+}
+.tc__dashboard-row--stale {
+  background: color-mix(in srgb, var(--text-mute) 6%, transparent);
+}
+.tc__dashboard-row--completed {
+  opacity: 0.65;
+}
+
+/* member 列 */
+.tc__dashboard-member {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.tc__dashboard-member-title {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tc__dashboard-member-meta {
+  font-size: var(--text-xs, 11px);
+  color: var(--fg-subtle);
+}
+
+/* state 列のバッジ */
+.tc__dash-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: var(--text-xs, 11px);
+  font-weight: 500;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.tc__dash-state--active {
+  color: var(--accent-success, var(--accent));
+  background: color-mix(in srgb, var(--accent-success, var(--accent)) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent-success, var(--accent)) 30%, transparent);
+}
+.tc__dash-state--blocked {
+  color: var(--accent-warning, #d97706);
+  background: color-mix(in srgb, var(--accent-warning, #d97706) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent-warning, #d97706) 35%, transparent);
+}
+.tc__dash-state--stale {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--text-mute) 16%, transparent);
+  border-color: color-mix(in srgb, var(--text-mute) 28%, transparent);
+}
+.tc__dash-state--completed {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.tc__dash-state--idle {
+  color: var(--fg-subtle);
+  background: transparent;
+  border-color: var(--border);
+}
+.tc__dashboard-alert {
+  margin-top: 4px;
+  font-size: var(--text-xs, 11px);
+  color: var(--accent-warning, #d97706);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* task 列 */
+.tc__dashboard-task {
+  min-width: 0;
+}
+.tc__dashboard-task-title {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tc__dashboard-task-meta {
+  font-size: var(--text-xs, 11px);
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.tc__dashboard-task-empty {
+  color: var(--fg-subtle);
+  font-style: italic;
+}
+
+/* ----------
+ * footer aggregate
+ * ---------- */
+.tc__dashboard-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  font-size: var(--text-xs, 11px);
+}
+.tc__dashboard-foot-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elev, var(--bg-panel)) 80%, transparent);
+  color: var(--fg-subtle);
+  border: 1px solid transparent;
+  font-variant-numeric: tabular-nums;
+}
+.tc__dashboard-foot-pill--blocked.is-on {
+  color: var(--accent-warning, #d97706);
+  border-color: color-mix(in srgb, var(--accent-warning, #d97706) 35%, transparent);
+}
+.tc__dashboard-foot-pill--stale.is-on {
+  color: var(--fg);
+}
+
+/* density=compact では footer の pill 群と member meta を縮める */
+[data-density='compact'] .tc__dashboard {
+  width: 440px;
+}
+[data-density='compact'] .tc__dashboard-member-meta,
+[data-density='compact'] .tc__dashboard-task-meta {
+  display: none;
+}

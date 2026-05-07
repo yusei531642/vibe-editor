@@ -522,6 +522,58 @@ export interface TeamOrchestrationSummary {
 }
 
 /**
+ * Issue #514: TeamHub orchestration state の TS 投影。
+ * Rust 側 `commands/team_state.rs` の `TeamOrchestrationState` (camelCase) に揃える。
+ * dashboard / 履歴復元 / 統合フェーズビューなど renderer 全体で参照する。
+ */
+export interface TeamTaskSnapshot {
+  id: number;
+  assignedTo: string;
+  description: string;
+  status: string;
+  createdBy: string;
+  createdAt: string;
+  updatedAt?: string | null;
+  summary?: string | null;
+  blockedReason?: string | null;
+  nextAction?: string | null;
+  artifactPath?: string | null;
+  blockedByHumanGate?: boolean;
+  requiredHumanDecision?: string | null;
+}
+
+export interface HumanGateState {
+  blocked?: boolean;
+  reason?: string | null;
+  requiredDecision?: string | null;
+  source?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface HandoffLifecycleEvent {
+  handoffId: string;
+  status: string;
+  agentId?: string | null;
+  note?: string | null;
+  createdAt: string;
+}
+
+export interface TeamOrchestrationState {
+  schemaVersion: number;
+  projectRoot: string;
+  teamId: string;
+  activeLeaderAgentId?: string | null;
+  latestHandoff?: HandoffReference | null;
+  tasks: TeamTaskSnapshot[];
+  pendingTasks: TeamTaskSnapshot[];
+  workerReports: WorkerReport[];
+  humanGate: HumanGateState;
+  nextActions: string[];
+  handoffEvents: HandoffLifecycleEvent[];
+  updatedAt: string;
+}
+
+/**
  * Issue #516: Leader が複数 worker の成果を統合フェーズで突き合わせるための構造化フィールド。
  * 既存の単発 `summary` / `nextAction` / `artifactPath` と重複してもよい (後方互換目的)。
  * 全フィールド optional で、必要な軸だけ埋めて返してよい。
