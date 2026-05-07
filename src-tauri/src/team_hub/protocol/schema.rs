@@ -35,7 +35,12 @@ pub(super) fn tool_defs() -> Value {
         },
         {
             "name": "team_info",
-            "description": "Get the current team roster and your identity.",
+            "description":
+                "Get the current team roster and your identity. \
+                 Returns `{ teamId, teamName, myRole, myAgentId, myBoundRole, members, enginePolicy }`. \
+                 `enginePolicy` shape: `{ kind: 'mixed_allowed' | 'claude_only' | 'codex_only', defaultEngine: 'claude' | 'codex' | '' }`. \
+                 HR / Leader should respect `enginePolicy.kind` when choosing engines for new recruits — \
+                 violating policies will be rejected by team_recruit with code `recruit_engine_policy_violation`.",
             "inputSchema": { "type": "object", "properties": {} }
         },
         {
@@ -143,7 +148,10 @@ pub(super) fn tool_defs() -> Value {
                  Bypasses the normal singleton-leader constraint so the old and new leaders coexist briefly. \
                  Used by the canvas \"引き継ぎ\" button: 1) save handoff document, 2) call team_create_leader, \
                  3) wait for the new leader to read the handoff, 4) call team_switch_leader to retire yourself. \
-                 Returns the new leader's agentId once it has handshaked.",
+                 Returns the new leader's agentId once it has handshaked. \
+                 Optionally pass `engine_policy: { kind, defaultEngine? }` (kind: claude_only / codex_only / mixed_allowed) \
+                 to set or update the team's engine policy at creation time. Subsequent `team_recruit` calls validate \
+                 against this policy, preventing HR / Leader from accidentally recruiting Claude into a Codex-only team.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -159,6 +167,22 @@ pub(super) fn tool_defs() -> Value {
                     "handoff_id": {
                         "type": "string",
                         "description": "Optional handoff id to record replacement leader creation against."
+                    },
+                    "engine_policy": {
+                        "type": "object",
+                        "description": "Optional team-level engine policy. When set, all subsequent team_recruit calls validate `engine` against this policy.",
+                        "properties": {
+                            "kind": {
+                                "type": "string",
+                                "enum": ["claude_only", "codex_only", "mixed_allowed"]
+                            },
+                            "defaultEngine": {
+                                "type": "string",
+                                "enum": ["claude", "codex", ""],
+                                "description": "Default engine when `engine` arg is omitted in team_recruit. ClaudeOnly forces 'claude', CodexOnly forces 'codex', MixedAllowed uses this value (or role profile default if empty)."
+                            }
+                        },
+                        "required": ["kind"]
                     }
                 }
             }

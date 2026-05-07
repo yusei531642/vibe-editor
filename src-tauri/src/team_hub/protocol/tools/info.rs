@@ -12,12 +12,12 @@ pub async fn team_info(hub: &TeamHub, ctx: &CallContext) -> Result<Value, String
     // プロセスが同 agent_id で違う role を主張した / context が古い) なら
     // `inconsistent: true` を返す。`bindingTeamId` 等の cross-member 機微情報は伏字化し、
     // 自分自身の binding (`myBoundRole`) のみフル表示する。
+    // Issue #518: チーム単位の engine_policy を一緒に取得して response に乗せる。
+    // HR / Leader / UI が「自分が属する team は ClaudeOnly か?」を確認するために必要。
     let state = hub.state.lock().await;
-    let name = state
-        .teams
-        .get(&ctx.team_id)
-        .map(|t| t.name.clone())
-        .unwrap_or_default();
+    let team_entry = state.teams.get(&ctx.team_id);
+    let name = team_entry.map(|t| t.name.clone()).unwrap_or_default();
+    let engine_policy = team_entry.map(|t| t.engine_policy.clone()).unwrap_or_default();
     let bindings_snapshot: HashMap<String, String> = state.agent_role_bindings.clone();
     drop(state);
     let members: Vec<_> = hub
@@ -48,5 +48,6 @@ pub async fn team_info(hub: &TeamHub, ctx: &CallContext) -> Result<Value, String
         "myAgentId": ctx.agent_id,
         "myBoundRole": my_bound_role,
         "members": members,
+        "enginePolicy": engine_policy,
     }))
 }

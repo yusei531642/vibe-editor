@@ -364,6 +364,41 @@ export interface TeamMember {
   role: TeamRole;
 }
 
+/**
+ * Issue #518: チーム単位の engine policy。`team_info` response の `enginePolicy` /
+ * `team_create_leader({engine_policy})` 引数 / `team_recruit` の policy 違反時の
+ * 構造化エラー (`recruit_engine_policy_violation`) で参照される。
+ *
+ * - `mixed_allowed` (既定): claude / codex 混在 OK。レガシーチームもこの扱い。
+ * - `claude_only`: `engine: 'codex'` の recruit を拒否。
+ * - `codex_only`: `engine: 'claude'` の recruit を拒否。HR 経由採用で Codex 指定が
+ *   消えて Claude にリセットされる事故を構造的に防ぐ。
+ *
+ * snake_case literal は Rust 側 enum `EnginePolicyKind` の `#[serde(rename_all = "snake_case")]`
+ * 出力と一致する wire format。既存の lowercase union (`HandoffStatus` 等) と異なり 2-語
+ * になるが、Rust 側 enum variant (`ClaudeOnly` 等) との対応を直訳した形。
+ */
+export type EnginePolicyKind = 'mixed_allowed' | 'claude_only' | 'codex_only';
+
+export interface EnginePolicy {
+  kind: EnginePolicyKind;
+  /**
+   * チーム既定の engine。`team_recruit` で `engine` 引数が省略されたときに使われる。
+   * `claude_only` / `codex_only` のときは実質強制。`mixed_allowed` では `undefined` (= field 省略)
+   * の場合 role profile の default engine が使われる。
+   *
+   * 「未設定」と「空文字明示」を distinguishable に保つため、空文字 `""` は許容しない
+   * (Rust 側 `Option<String>` + `skip_serializing_if = "Option::is_none"` と整合)。
+   *
+   * **scope**: 本 policy は built-in 2 engine (`claude` / `codex`) のみをガード対象とする。
+   * `TerminalAgent` (string alias) で表現される custom agents (例: `gemini` 等のユーザー登録
+   * カスタム engine) は **engine_policy の検証対象外**で、`team_recruit` で自由に渡せる。
+   * Rust 側 `EnginePolicy::validate` も `("codex", ClaudeOnly)` / `("claude", CodexOnly)` の
+   * 2 ペアだけ拒否する設計で、custom 値は素通りする。
+   */
+  defaultEngine?: 'claude' | 'codex';
+}
+
 /** Canvas 上で同時運用する「組織」の表示・復元用メタデータ。 */
 export interface TeamOrganizationMeta {
   /** 組織単位の識別子。通常は teamId と同じ。 */
