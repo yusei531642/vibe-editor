@@ -570,6 +570,10 @@
   width: 3px;
   background: var(--organization-accent, var(--agent-accent, var(--accent)));
   opacity: 0.75;
+  /* Issue #503: terminal 上のクリック・ホイール等を奪わないようにする。
+     accent bar はあくまで装飾なので、xterm の textarea / scrollbar / wheel handler に
+     pointer event が必ず届くよう pointer-events を切る。 */
+  pointer-events: none;
 }
 .canvas-agent-card:hover {
   border-color: color-mix(in srgb, var(--organization-accent, var(--agent-accent, var(--accent))) 35%, var(--border));
@@ -736,6 +740,13 @@
      吸収されるため、wrapper 側は min-height: 0 を維持するだけで足りる。 */
   overflow: hidden;
   position: relative;
+  /* Issue #503: ::before の 3px accent bar が xterm の左端セルを覆い、最初のカラムの
+     glyph が縦帯と重なって描画崩れに見える問題を防ぐ。padding を入れることで
+     clientWidth が 4px 縮み、computeUnscaledGrid が自動的に正しい cols を返すので、
+     xterm 描画原点と accent bar が物理的に重ならない。
+     z-index による解決 (新たな stacking context 生成) は #253 で確認済みの zoom 滲み
+     回帰リスクがあるため採らない。 */
+  padding-left: 4px;
 }
 
 /* Issue #272: TerminalCard 用の scroll host wrapper。

@@ -145,8 +145,13 @@ function ensureCjkFallbacks(family: string): string {
 /**
  * Issue #349: 安全のため必ず BoxDrawing → CJK の順で fallback を積む共通入口。
  * 順序は Latin/罫線 (ASCII の見た目を崩さないよう前) → CJK → generic `monospace`。
+ *
+ * Issue #503: useCanvasTerminalFit からも参照するため named export 化。
+ *   xterm 描画側 (term.options.fontFamily) と Canvas 2D 計測側 (measureCellSize) が
+ *   必ず同じ fontFamily chain を見るようにし、cellW のズレで横方向の文字滲み/被りが
+ *   発生するのを構造的に防ぐ。
  */
-function applySafetyFallbacks(family: string): string {
+export function applySafetyFallbacks(family: string): string {
   return ensureCjkFallbacks(ensureBoxDrawingFallbacks(family));
 }
 

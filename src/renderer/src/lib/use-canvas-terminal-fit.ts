@@ -17,6 +17,7 @@
 import { useCallback, useMemo } from 'react';
 import { useCanvasStore } from '../stores/canvas';
 import { measureCellSize, type CellSize } from './measure-cell-size';
+import { applySafetyFallbacks } from './use-xterm-instance';
 import type { AppSettings } from '../../../types/shared';
 
 const quantizeZoom = (z: number): number => Math.round(z * 100) / 100;
@@ -34,7 +35,16 @@ export interface CanvasTerminalFit {
 
 export function useCanvasTerminalFit(settings: AppSettings): CanvasTerminalFit {
   const fontSize = settings.terminalFontSize;
-  const fontFamily = settings.terminalFontFamily || settings.editorFontFamily || 'monospace';
+  // Issue #503: xterm 描画側と Canvas 2D 計測側で fontFamily chain を一致させる。
+  //   xterm 本体は use-xterm-instance で applySafetyFallbacks (BoxDrawing → CJK → monospace)
+  //   を通した chain で描画する一方、ここで素の settings 値のまま measureCellSize を呼ぶと、
+  //   Canvas 2D が選ぶフォールバックフォント (system monospace) と xterm が選ぶ
+  //   primary フォントの advance width が微妙にズレ、cellW が cellW_xterm と乖離する。
+  //   結果 computeUnscaledGrid が誤った cols を返し、最後の数 cell が右端で重なって描画崩れ
+  //   (横方向の文字滲み・カラム被り) を起こす。fallback chain も含めて完全一致させる。
+  const fontFamily = applySafetyFallbacks(
+    settings.terminalFontFamily || settings.editorFontFamily || 'monospace'
+  );
 
   const getCellSize = useCallback(
     (): CellSize => measureCellSize(fontSize, fontFamily, 1.0),
