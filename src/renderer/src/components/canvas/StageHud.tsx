@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  Bookmark,
   CheckCircle2,
   CircleDot,
   Hourglass,
@@ -21,6 +22,7 @@ import {
   aggregateTeamSummary,
   type CardSummary
 } from '../../lib/agent-summary';
+import { TeamPresetsPanel } from './TeamPresetsPanel';
 import type { ArrangeGap } from '../../lib/canvas-arrange';
 
 /**
@@ -43,6 +45,9 @@ export function StageHud(): JSX.Element {
 
   const [arrangeOpen, setArrangeOpen] = useState(false);
   const arrangeWrapRef = useRef<HTMLDivElement | null>(null);
+  // Issue #522: team preset panel toggle. arrange popover とは独立。
+  const [presetsOpen, setPresetsOpen] = useState(false);
+  const presetsWrapRef = useRef<HTMLDivElement | null>(null);
 
   // ポップオーバー外クリック / Escape で閉じる
   useEffect(() => {
@@ -63,6 +68,29 @@ export function StageHud(): JSX.Element {
       window.removeEventListener('keydown', onKey);
     };
   }, [arrangeOpen]);
+
+  // Issue #522: presets popover も同じく「ボタン + popover」を内包する親 ref で
+  // 外クリック判定する。子コンポーネント (TeamPresetsPanel) 側で同じ処理をすると、
+  // toggle ボタン押下の pointerdown が「外クリック扱い→close」 → onClick で再 open
+  // という競合が起きるため、判定責務を親 (HUD) に集約する。
+  useEffect(() => {
+    if (!presetsOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!presetsWrapRef.current) return;
+      if (!presetsWrapRef.current.contains(e.target as Node)) {
+        setPresetsOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPresetsOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [presetsOpen]);
 
   // 翻訳結果の配列は `t` 依存。zustand store 変化 (stageView / arrangeGap) のたびに
   // 配列リテラル + JSX を作り直すと map 配下の Lucide アイコン (memo されない子) も
@@ -220,6 +248,21 @@ export function StageHud(): JSX.Element {
       >
         <ZoomIn size={12} strokeWidth={2} />
       </button>
+      <span className="tc__hud-sep" aria-hidden="true" />
+      <div className="tc__hud-presets" ref={presetsWrapRef}>
+        <button
+          type="button"
+          className={presetsOpen ? 'is-active' : ''}
+          onClick={() => setPresetsOpen((v) => !v)}
+          title={t('preset.button.tooltip')}
+          aria-label={t('preset.button.tooltip')}
+          aria-haspopup="dialog"
+          aria-expanded={presetsOpen}
+        >
+          <Bookmark size={12} strokeWidth={2} />
+        </button>
+        <TeamPresetsPanel open={presetsOpen} onClose={() => setPresetsOpen(false)} />
+      </div>
       <span className="tc__hud-sep" aria-hidden="true" />
       <div className="tc__hud-arrange" ref={arrangeWrapRef}>
         <button

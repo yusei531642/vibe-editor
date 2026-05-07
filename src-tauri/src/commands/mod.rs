@@ -17,6 +17,7 @@ pub mod sessions;
 pub mod settings;
 pub mod team_history;
 pub mod team_inject;
+pub mod team_presets;
 pub mod team_state;
 pub mod terminal;
 pub mod vibe_team_skill;

@@ -1248,6 +1248,180 @@
   border-color: var(--border-strong);
 }
 
+/* ----------
+ * Issue #522: Team Presets popover panel.
+ * `.tc__hud-presets` は HUD ボタンを内包し、`.tc__preset-panel` を anchor する relative 親。
+ * arrange popover (`.tc__hud-arrange-pop`) と同じ「HUD の上にせり出す」配置。
+ * ---------- */
+.tc__hud-presets {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.tc__preset-panel {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  /* HUD は中央配置なので、preset panel は HUD ボタンの中心ではなく右寄せにすることで
+     画面右端からはみ出さない。長い preset 名でも幅 320px 内に収まる。 */
+  right: 0;
+  width: 320px;
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-glass, rgba(20, 20, 19, 0.78));
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  box-shadow: var(--shadow-lg);
+  z-index: 30;
+  font-size: var(--text-sm, 12px);
+  color: var(--fg);
+}
+.tc__preset-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.tc__preset-panel-title {
+  font-weight: 600;
+  font-size: var(--text-md, 14px);
+}
+.tc__preset-panel-close {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--fg-subtle);
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+.tc__preset-panel-close:hover {
+  background: var(--bg-hover);
+  color: var(--fg);
+}
+.tc__preset-panel-section {
+  padding: 4px 0 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+.tc__preset-panel-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: var(--bg-elev, var(--bg-panel));
+  color: var(--fg);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font: inherit;
+  transition: background-color 100ms ease, color 100ms ease;
+}
+.tc__preset-panel-action:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.tc__preset-panel-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.tc__preset-panel-action--primary {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev, var(--bg-panel)) 82%);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+.tc__preset-panel-action--primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 28%, var(--bg-elev, var(--bg-panel)) 72%);
+}
+.tc__preset-panel-action--danger {
+  color: var(--accent-warning, #d97706);
+  border-color: color-mix(in srgb, var(--accent-warning, #d97706) 30%, var(--border));
+  padding: 6px 8px;
+}
+.tc__preset-panel-action--danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-warning, #d97706) 14%, transparent);
+}
+.tc__preset-panel-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tc__preset-panel-form input,
+.tc__preset-panel-form textarea {
+  width: 100%;
+  background: var(--bg-elev, var(--bg-panel));
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+  resize: vertical;
+}
+.tc__preset-panel-form input:focus,
+.tc__preset-panel-form textarea:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border-strong));
+}
+.tc__preset-panel-form-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.tc__preset-panel-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tc__preset-panel-empty {
+  padding: 12px 4px;
+  color: var(--fg-subtle);
+  text-align: center;
+  font-size: var(--text-xs, 11px);
+}
+.tc__preset-panel-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev, var(--bg-panel)) 85%, transparent);
+}
+.tc__preset-panel-item-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.tc__preset-panel-item-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tc__preset-panel-item-roles {
+  font-size: var(--text-xs, 11px);
+  color: var(--fg-subtle);
+}
+.tc__preset-panel-item-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 /* handoff edge: stroke-dasharray flow */
 @keyframes tcEdgeFlow {
   to {

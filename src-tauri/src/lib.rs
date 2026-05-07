@@ -132,6 +132,11 @@ pub fn run() {
             commands::team_state::team_state_read,
             // ---- team inject retry (Issue #511) ----
             commands::team_inject::team_send_retry_inject,
+            // ---- team_presets (Issue #522) ----
+            commands::team_presets::team_presets_list,
+            commands::team_presets::team_presets_load,
+            commands::team_presets::team_presets_save,
+            commands::team_presets::team_presets_delete,
             // ---- handoffs ----
             commands::handoffs::handoffs_create,
             commands::handoffs::handoffs_list,
