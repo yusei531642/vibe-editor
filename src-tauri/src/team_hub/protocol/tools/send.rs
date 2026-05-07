@@ -80,26 +80,93 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         }
         .into_err_string());
     }
-    // 「長文ペイロード・ルール」: SOFT_PAYLOAD_LIMIT 超過は弾いてファイル経由を強制する。
-    // PTY 注入のチャンク分割や受信側 Claude 入力制限で truncate しやすいので、
-    // 「2000 文字超は .vibe-team/tmp/<short_id>.md に書き出してパスを送る」設計に倒す。
+    // Issue #512: 「長文ペイロード」(SOFT_PAYLOAD_LIMIT 超過) は **Hub 側で自動 spool 化** する。
+    //
+    // 旧実装は呼び出し側 (Leader / HR / worker) に「自分でファイル書き出してから path で送れ」と
+    // reject で要求していたため、運用知識への依存と再呼び出しの往復コストが発生していた
+    // (Issue #107 の運用回避策が前提)。Hub が自動で `<project_root>/.vibe-team/tmp/<short_id>.md` に
+    // 本文書き出し → message を「summary + attached: <path>」に置換することで、Leader が
+    // 知らない状態でも長文が安全に流れる。
+    //
+    // 旧 `send_payload_threshold` error は project_root が無い (= MCP setup 未完の稀ケース) と
+    // spool 書き込みが失敗した場合のみ発火する fallback として残す (code 名は旧名のまま、
+    // message 文で「auto-spool 失敗」を伝える形にして既存 caller の condition 判定を壊さない)。
+    let mut spooled_message: Option<String> = None;
     if message.len() > SOFT_PAYLOAD_LIMIT {
-        return Err(SendError {
-            code: "send_payload_threshold".into(),
-            message: format!(
-                "message exceeds the long-payload threshold ({} > {} bytes). \
-                 Write the full content to `.vibe-team/tmp/<short_id>.md` with the Write tool, \
-                 then call team_send again with a brief summary plus the file path. \
-                 (Inline messages up to 32 KiB are now delivered via bracketed paste, but anything \
-                 beyond that should still be passed by file path.)",
-                message.len(),
-                SOFT_PAYLOAD_LIMIT
-            ),
-            phase: None,
-            elapsed_ms: None,
+        let project_root = {
+            let s = hub.state.lock().await;
+            s.teams
+                .get(&ctx.team_id)
+                .and_then(|t| t.project_root.clone())
+        };
+        let project_root = match project_root.as_deref().map(str::trim).filter(|p| !p.is_empty())
+        {
+            Some(p) => p.to_string(),
+            None => {
+                return Err(SendError {
+                    // Issue #512 ↔ #545 review: error code は旧名 `send_payload_threshold`
+                    // を維持して後方互換を保つ。新実装で挙動が変わったのは「成功時に reject せず
+                    // spool 化する」path であり、reject 時の error code は旧来の SOFT_PAYLOAD_LIMIT
+                    // 超過と同じ意味で扱える。caller (Leader / HR / worker) が code 判定で
+                    // fallback handler を持っていても、本 PR で挙動が壊れない。
+                    code: "send_payload_threshold".into(),
+                    message: format!(
+                        "message exceeds the long-payload threshold ({} > {} bytes) and \
+                         this team has no project_root configured for auto-spool. \
+                         Setup the team via Canvas (setupTeamMcp) or write the full content to \
+                         a file with the Write tool and call team_send again with a brief summary plus the file path.",
+                        message.len(),
+                        SOFT_PAYLOAD_LIMIT
+                    ),
+                    phase: None,
+                    elapsed_ms: None,
+                }
+                .into_err_string());
+            }
+        };
+        match crate::team_hub::spool::spool_long_payload(&project_root, message, "send").await {
+            Ok(result) => {
+                tracing::info!(
+                    "[team_send] auto-spooled long payload ({} bytes) team={} role={} to={} → {}",
+                    message.len(),
+                    ctx.team_id,
+                    ctx.role,
+                    to,
+                    result.spool_path.display()
+                );
+                spooled_message = Some(result.replacement_message);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[team_send] auto-spool failed for team={}: {e:#}; falling back to reject",
+                    ctx.team_id
+                );
+                return Err(SendError {
+                    // Issue #512 ↔ #545 review: error code は旧名 `send_payload_threshold`
+                    // を維持して後方互換を保つ。新実装で挙動が変わったのは「成功時に reject せず
+                    // spool 化する」path であり、reject 時の error code は旧来の SOFT_PAYLOAD_LIMIT
+                    // 超過と同じ意味で扱える。caller (Leader / HR / worker) が code 判定で
+                    // fallback handler を持っていても、本 PR で挙動が壊れない。
+                    code: "send_payload_threshold".into(),
+                    message: format!(
+                        "message exceeds the long-payload threshold ({} > {} bytes) and \
+                         auto-spool to `.vibe-team/tmp/` failed: {e}. \
+                         Write the full content to a file with the Write tool, then call team_send \
+                         again with a brief summary plus the file path.",
+                        message.len(),
+                        SOFT_PAYLOAD_LIMIT
+                    ),
+                    phase: None,
+                    elapsed_ms: None,
+                }
+                .into_err_string());
+            }
         }
-        .into_err_string());
     }
+    // 以後は spool 化された場合は `effective_message`、そうでなければ元 `message` を使う。
+    // 既存の history 保存 (TeamMessage.message) / preview 切り出し / inject 全てに共通の
+    // 「実際に送られた本文」として使われるので、shadow ではなく明示的な変数で扱う。
+    let effective_message: &str = spooled_message.as_deref().unwrap_or(message);
 
     // Issue #342 Phase 2: lock 順序を逆転。先に registry から宛先を解決して
     // `resolved_recipient_ids` を作り、それから state.lock を取って message を
@@ -146,7 +213,7 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         from_agent_id: ctx.agent_id.clone(),
         to: to.clone(),
         resolved_recipient_ids: resolved_recipient_ids.clone(),
-        message: message.to_string(),
+        message: effective_message.to_string(),
         timestamp: timestamp.clone(),
         // Issue #378: sender 自身は送信時点で既読扱いを継続。recipient は inject が成功
         // しても自動で read_by に入れない (= worker が `team_read` を実行する経路でしか
@@ -162,6 +229,12 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         let _ = team.messages.pop_front();
     }
     if should_record_report {
+        // Issue #512: worker_reports は **元 `message`** (spool 化 **前**) の先頭 500 文字を保持する。
+        // worker_reports は Leader が後で「完了報告 / blocked の経緯」を読み返すための診断ログで、
+        // 「summary + attached: <path>」だけが残ると情報量が著しく落ちる。spool ファイル本体は
+        // `<project_root>/.vibe-team/tmp/` に残っているので、original の冒頭 500 文字 + ファイル
+        // パス (= effective_message にも含まれる) の組み合わせで「report として何があったか」が
+        // 後追いできる設計にする。
         let summary: String = message.chars().take(500).collect();
         team.worker_reports
             .push_back(crate::commands::team_state::WorkerReportSnapshot {
@@ -200,7 +273,7 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
     // 旧実装はメンバーごとに inject().await を直列で回し、to=all + 6 メンバー +
     // 4KB メッセージで 6 秒間 RPC を握りっぱなしになっていた (sleep 15ms × 64chunk × 6人)。
     // → 各宛先を tokio::spawn で並列発火して JoinSet で集約する。
-    let preview: String = message.chars().take(80).collect();
+    let preview: String = effective_message.chars().take(80).collect();
     let app = hub.app_handle.lock().await.clone();
 
     let other_members: Vec<(String, String)> = team_members
@@ -230,7 +303,7 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         let reg = registry.clone();
         let aid = target_aid.clone();
         let from_role = ctx.role.clone();
-        let msg = message.to_string();
+        let msg = effective_message.to_string();
         let role_clone = target_role.clone();
         join_set.spawn(async move {
             let result = inject::inject(reg, &aid, &from_role, &msg).await;

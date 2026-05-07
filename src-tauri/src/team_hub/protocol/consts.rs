@@ -64,3 +64,24 @@ pub(crate) const INJECT_RETRY_BACKOFF_MS: u64 = 200;
 /// 5 分は「主要 shell コマンド (cargo build / npm test / 長めの Claude 思考) より長く、
 /// かつ 30 分のような長すぎる threshold で督促が遅れる事故を避けた中間値」。
 pub(crate) const STATUS_STALE_THRESHOLD_SECS: u64 = 300;
+
+// ---------- Issue #512: long-payload spool ----------
+//
+// `team_send` / `team_assign_task` が `SOFT_PAYLOAD_LIMIT` (32 KiB) を超える本文を受け取ったとき、
+// silent reject ではなく project_root 配下の spool ディレクトリに書き出して、Hub から worker へは
+// 「summary + attached: <path>」の短文だけを inject する。長文を fail-loud から「安全に分流」させる。
+
+/// project_root 直下の spool ディレクトリ (= `<project_root>/.vibe-team/tmp/`)。
+/// renderer 側の SKILL.md が以前から「`.vibe-team/tmp/<short_id>.md` に書き出す」と
+/// 案内していた path と整合させ、ユーザーが手動で書いた spool ファイルと Hub が自動で
+/// 書いた spool ファイルが同じ directory に混在しても困らない設計にする。
+pub(crate) const SPOOL_DIR: &str = ".vibe-team/tmp";
+
+/// spool ファイルの保持時間 (時間単位)。Hub 起動時 + 24 時間ごとに古い entry を削除する。
+/// 24 時間あれば worker が読み終えていない可能性は低く、long-running session でも安全。
+pub(crate) const SPOOL_TTL_HOURS: u64 = 24;
+
+/// spool 化された場合に inject 本文の冒頭に残す summary 行数の上限。
+/// 80 行あれば「最初の指示 + 最初の参照」が見える程度の preview になり、
+/// worker が「全文を読まなくても全体像を掴めて attach を読み込みに行く」動機を作る。
+pub(crate) const SPOOL_SUMMARY_LINES: usize = 80;

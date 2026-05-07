@@ -84,20 +84,38 @@ pub(super) async fn validate_and_register_dynamic_role(
             MAX_DYNAMIC_DESCRIPTION_LEN
         ));
     }
+    // Issue #512: instructions は recruit の prompt 本体になる重要 payload。`team_send` /
+    // `team_assign_task` の description のように auto-spool 化すると prompt が path 参照に化けて
+    // worker が起動時に instructions を読めなくなるため、**spool 化せず明示エラー**で reject する。
+    // 構造化エラー (`recruit_role_instructions_too_long`) で renderer 側 UI が機械的に分岐できるように整理。
     if instructions.len() > MAX_DYNAMIC_INSTRUCTIONS_LEN {
-        return Err(format!(
-            "instructions too long: {} bytes (limit {})",
-            instructions.len(),
-            MAX_DYNAMIC_INSTRUCTIONS_LEN
-        ));
+        return Err(RecruitError::new(
+            "recruit_role_instructions_too_long",
+            format!(
+                "instructions too long: {} bytes (limit {} bytes). \
+                 Recruit instructions are the prompt body for the worker and cannot be auto-spooled. \
+                 Trim the body to fit the limit, or split the role into multiple narrower roles.",
+                instructions.len(),
+                MAX_DYNAMIC_INSTRUCTIONS_LEN
+            ),
+        )
+        .with_phase("validate")
+        .into_err_string());
     }
     if let Some(ja) = instructions_ja {
         if ja.len() > MAX_DYNAMIC_INSTRUCTIONS_LEN {
-            return Err(format!(
-                "instructions_ja too long: {} bytes (limit {})",
-                ja.len(),
-                MAX_DYNAMIC_INSTRUCTIONS_LEN
-            ));
+            return Err(RecruitError::new(
+                "recruit_role_instructions_too_long",
+                format!(
+                    "instructions_ja too long: {} bytes (limit {} bytes). \
+                     Recruit instructions are the prompt body for the worker and cannot be auto-spooled. \
+                     Trim the body to fit the limit, or split the role into multiple narrower roles.",
+                    ja.len(),
+                    MAX_DYNAMIC_INSTRUCTIONS_LEN
+                ),
+            )
+            .with_phase("validate")
+            .into_err_string());
         }
     }
     // Issue #508: 必須テンプレ / 曖昧名 / Worktree Isolation Rule の validation。

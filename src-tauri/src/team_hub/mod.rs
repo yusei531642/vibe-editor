@@ -16,6 +16,9 @@ pub mod inject;
 pub mod protocol;
 // Issue #517: 動的ロール同士の責務境界 lint (recruit / assign_task で warning 発火)。
 pub mod role_lint;
+// Issue #512: 32 KiB 超の payload を `<project_root>/.vibe-team/tmp/<short_id>.md` に書き出して
+// inject 本文を「summary + attached: <path>」に置換する spool 機構。
+pub mod spool;
 pub mod state;
 
 /// Issue #494: TeamHub 周辺の integration test を集約する test-only module。
