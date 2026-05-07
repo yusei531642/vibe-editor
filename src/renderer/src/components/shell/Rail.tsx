@@ -8,9 +8,6 @@ interface RailProps {
   sidebarView: SidebarView;
   onSidebarViewChange: (v: SidebarView) => void;
   changeCount: number;
-  /** Issue #387: 履歴ボタンに表示する「未確認件数」。総件数ではない。
-   *  履歴パネルを開いた時点で 0 になり、新規履歴が増えるまで再表示しない。 */
-  historyBadgeCount: number;
   onOpenSettings: () => void;
   /** プロジェクトが git リポジトリかどうか。false のとき Changes タブを Rail から外す。
    *  undefined / true は表示 (status 取得前に一瞬で消えるのを避けるためデフォルト表示)。 */
@@ -27,7 +24,6 @@ export function Rail({
   sidebarView,
   onSidebarViewChange,
   changeCount,
-  historyBadgeCount,
   onOpenSettings,
   hasGitRepo = true
 }: RailProps): JSX.Element {
@@ -78,12 +74,11 @@ export function Rail({
       {
         view: 'sessions',
         label: t('sidebar.history'),
-        icon: <History size={17} strokeWidth={2.2} />,
-        count: historyBadgeCount
+        icon: <History size={17} strokeWidth={2.2} />
       },
       { view: 'notes', label: t('sidebar.notes'), icon: <StickyNote size={17} strokeWidth={2.2} /> }
     ],
-    [t, hasGitRepo, changeCount, historyBadgeCount]
+    [t, hasGitRepo, changeCount]
   );
 
   return (

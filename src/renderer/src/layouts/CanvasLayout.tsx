@@ -40,7 +40,6 @@ import type { SidebarView } from '../components/Sidebar';
 import { SettingsModal } from '../components/SettingsModal';
 import { useT } from '../lib/i18n';
 import { useUiStore } from '../stores/ui';
-import { useHistoryBadgeCount } from '../lib/use-history-badge-count';
 import { useCanvasStore } from '../stores/canvas';
 import { useCanvasViewport } from '../stores/canvas-selectors';
 import {
@@ -110,15 +109,7 @@ export function CanvasLayout(): JSX.Element {
   const [recent, setRecent] = useState<TeamHistoryEntry[]>([]);
   const [sidebarView, setSidebarView] = useState<SidebarView>('files');
   const [railChangeCount, setRailChangeCount] = useState(0);
-  const [railHistoryCount, setRailHistoryCount] = useState(0);
   const [railHasGitRepo, setRailHasGitRepo] = useState(true);
-  // Issue #387: Rail の History バッジを「総件数」ではなく「未確認件数」へ。
-  // CanvasSidebar が unmount される (= sidebarCollapsed) と件数通知が止まるため、
-  // !sidebarCollapsed かつ sidebarView==='sessions' を確認済み条件にする。
-  const railHistoryBadgeCount = useHistoryBadgeCount(
-    railHistoryCount,
-    sidebarView === 'sessions' && !sidebarCollapsed
-  );
   // git リポジトリが無いと判明 + 現在 'changes' を見ている → 'files' に退避
   useEffect(() => {
     if (!railHasGitRepo && sidebarView === 'changes') {
@@ -562,7 +553,6 @@ export function CanvasLayout(): JSX.Element {
           sidebarView={sidebarView}
           onSidebarViewChange={setSidebarView}
           changeCount={railChangeCount}
-          historyBadgeCount={railHistoryBadgeCount}
           onOpenSettings={() => setSettingsOpen(true)}
           hasGitRepo={railHasGitRepo}
         />
@@ -571,7 +561,6 @@ export function CanvasLayout(): JSX.Element {
             view={sidebarView}
             onViewChange={setSidebarView}
             onChangeCount={setRailChangeCount}
-            onHistoryCount={setRailHistoryCount}
             onGitOk={setRailHasGitRepo}
           />
         )}
