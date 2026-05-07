@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
+  Bookmark,
   CheckCircle2,
   CircleDot,
   Hourglass,
@@ -21,6 +22,7 @@ import {
   aggregateTeamSummary,
   type CardSummary
 } from '../../lib/agent-summary';
+import { TeamPresetsPanel } from './TeamPresetsPanel';
 import type { ArrangeGap } from '../../lib/canvas-arrange';
 
 /**
@@ -43,6 +45,9 @@ export function StageHud(): JSX.Element {
 
   const [arrangeOpen, setArrangeOpen] = useState(false);
   const arrangeWrapRef = useRef<HTMLDivElement | null>(null);
+  // Issue #522: team preset panel toggle. arrange popover とは独立。
+  const [presetsOpen, setPresetsOpen] = useState(false);
+  const presetsWrapRef = useRef<HTMLDivElement | null>(null);
 
   // ポップオーバー外クリック / Escape で閉じる
   useEffect(() => {
@@ -220,6 +225,21 @@ export function StageHud(): JSX.Element {
       >
         <ZoomIn size={12} strokeWidth={2} />
       </button>
+      <span className="tc__hud-sep" aria-hidden="true" />
+      <div className="tc__hud-presets" ref={presetsWrapRef}>
+        <button
+          type="button"
+          className={presetsOpen ? 'is-active' : ''}
+          onClick={() => setPresetsOpen((v) => !v)}
+          title={t('preset.button.tooltip')}
+          aria-label={t('preset.button.tooltip')}
+          aria-haspopup="dialog"
+          aria-expanded={presetsOpen}
+        >
+          <Bookmark size={12} strokeWidth={2} />
+        </button>
+        <TeamPresetsPanel open={presetsOpen} onClose={() => setPresetsOpen(false)} />
+      </div>
       <span className="tc__hud-sep" aria-hidden="true" />
       <div className="tc__hud-arrange" ref={arrangeWrapRef}>
         <button

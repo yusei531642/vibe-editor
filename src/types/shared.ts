@@ -379,6 +379,60 @@ export interface TeamCanvasState {
   viewport: { x: number; y: number; zoom: number };
 }
 
+/* ---------- Team Presets (Issue #522) ---------- */
+
+/**
+ * Team Preset の 1 ロール分。Leader 起動後に Leader 自身が `team_recruit` を順次呼ぶ
+ * 想定で、`agent` は terminal kind (claude / codex / ...)、`customInstructions` は
+ * Leader が recruit 時に渡す追加指示の生テキスト。
+ */
+export interface TeamPresetRole {
+  roleProfileId: string;
+  agent: TerminalAgent;
+  /** UI 表示用の任意ラベル (空なら role profile の i18n ラベルを使う) */
+  label?: string | null;
+  /** Leader の team_recruit 時に追加する custom_instructions */
+  customInstructions?: string | null;
+}
+
+export interface TeamPresetLayoutEntry {
+  x: number;
+  y: number;
+  width?: number | null;
+  height?: number | null;
+}
+
+/**
+ * roleProfileId をキーにした相対座標 + size。Canvas store の addCards に渡す配置ヒント。
+ * 同 roleProfileId が複数並ぶ preset は今回未対応 (UI 側で重複チェック)。
+ */
+export interface TeamPresetLayout {
+  byRole: Record<string, TeamPresetLayoutEntry>;
+}
+
+/**
+ * Issue #522: 「うまくいったチーム編成」を保存・再構築するための設計図。
+ * 1 preset = `~/.vibe-editor/presets/<id>.json`。
+ */
+export interface TeamPreset {
+  schemaVersion: 1;
+  id: string;
+  name: string;
+  description?: string | null;
+  createdAt: string;
+  updatedAt?: string | null;
+  /** UI フィルタ用の表示メタ ('claude' / 'codex' / 'mixed') */
+  enginePolicy: 'claude' | 'codex' | 'mixed' | string;
+  roles: TeamPresetRole[];
+  layout?: TeamPresetLayout | null;
+}
+
+export interface TeamPresetMutationResult {
+  ok: boolean;
+  preset?: TeamPreset | null;
+  error?: string | null;
+}
+
 export type HandoffKind = 'leader' | 'worker' | 'terminal';
 export type HandoffStatus =
   | 'created'

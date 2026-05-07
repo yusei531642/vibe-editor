@@ -10,6 +10,7 @@ type Dict = Record<string, string>;
 const ja: Dict = {
   // ---------- Common ----------
   'common.close': '閉じる',
+  'common.cancel': 'キャンセル',
 
   // ---------- Toolbar ----------
   'toolbar.restart.title': 'アプリを再起動',
@@ -321,6 +322,32 @@ const ja: Dict = {
   'canvas.hud.summary.completed': '完了',
   'canvas.hud.summary.completed.tooltip': '完了 — handoff ack 済 / 退役済のエージェントの数',
 
+  // Issue #522: Team Presets panel
+  'preset.title': 'チームプリセット',
+  'preset.button.tooltip': 'プリセット — 現在のチーム編成を保存・再構築',
+  'preset.saveCurrent': '現在のチームを保存',
+  'preset.saveCurrent.tooltip': '今 Canvas に並んでいる Agent カードをプリセットとして保存',
+  'preset.save': '保存',
+  'preset.name': '名前',
+  'preset.namePlaceholder': '例: 計画 + 実装 + レビュー チーム',
+  'preset.description': '説明',
+  'preset.descriptionPlaceholder': '任意のメモ (どんな課題に向く編成か等)',
+  'preset.apply': '適用',
+  'preset.apply.tooltip': 'このプリセットの役職構成を Canvas に展開',
+  'preset.delete': '削除',
+  'preset.delete.tooltip': 'このプリセットをディスクから削除',
+  'preset.empty': '保存されたプリセットはまだありません',
+  'preset.loading': '読み込み中…',
+  'preset.roleCount': '{count} 名',
+  'preset.saved': 'プリセット「{name}」を保存しました',
+  'preset.applied': '「{name}」のメンバー {count} 名を Canvas に追加しました',
+  'preset.deleted': 'プリセット「{name}」を削除しました',
+  'preset.error.empty': 'Canvas に Agent カードがありません。先にチームを組んでから保存してください',
+  'preset.error.noName': 'プリセット名を入力してください',
+  'preset.error.listFailed': 'プリセット一覧の読み込みに失敗しました',
+  'preset.error.saveFailed': 'プリセット保存に失敗しました: {detail}',
+  'preset.error.deleteFailed': 'プリセット削除に失敗しました: {detail}',
+
   // ---------- Sessions ----------
   'sessions.resume': 'セッション {id} に戻る',
   'sessions.messages': '{count} 件',
@@ -582,6 +609,7 @@ const ja: Dict = {
 const en: Dict = {
   // ---------- Common ----------
   'common.close': 'Close',
+  'common.cancel': 'Cancel',
 
   // ---------- Toolbar ----------
   'toolbar.restart.title': 'Restart app',
@@ -893,6 +921,32 @@ const en: Dict = {
   'canvas.hud.summary.completed': 'Completed',
   'canvas.hud.summary.completed.tooltip':
     'Completed — agents with acked handoff or retired sessions',
+
+  // Issue #522: Team Presets panel
+  'preset.title': 'Team Presets',
+  'preset.button.tooltip': 'Presets — save and reapply team formations',
+  'preset.saveCurrent': 'Save current team',
+  'preset.saveCurrent.tooltip': 'Save the agent cards currently on the canvas as a preset',
+  'preset.save': 'Save',
+  'preset.name': 'Name',
+  'preset.namePlaceholder': 'e.g. Plan + Build + Review team',
+  'preset.description': 'Description',
+  'preset.descriptionPlaceholder': 'Optional notes (what kind of work this team fits)',
+  'preset.apply': 'Apply',
+  'preset.apply.tooltip': 'Spawn this preset onto the canvas',
+  'preset.delete': 'Delete',
+  'preset.delete.tooltip': 'Delete this preset from disk',
+  'preset.empty': 'No saved presets yet',
+  'preset.loading': 'Loading…',
+  'preset.roleCount': '{count} roles',
+  'preset.saved': 'Preset "{name}" saved',
+  'preset.applied': 'Added {count} members from "{name}" to the canvas',
+  'preset.deleted': 'Preset "{name}" deleted',
+  'preset.error.empty': 'No agent cards on the canvas. Build a team first, then save it as a preset.',
+  'preset.error.noName': 'Please enter a preset name',
+  'preset.error.listFailed': 'Failed to load preset list',
+  'preset.error.saveFailed': 'Failed to save preset: {detail}',
+  'preset.error.deleteFailed': 'Failed to delete preset: {detail}',
 
   // ---------- Sessions ----------
   'sessions.resume': 'Resume session {id}',

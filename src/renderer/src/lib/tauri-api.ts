@@ -24,6 +24,7 @@ import { sessions } from './tauri-api/sessions';
 import { settings } from './tauri-api/settings';
 import { team } from './tauri-api/team';
 import { teamHistory } from './tauri-api/team-history';
+import { teamPresets } from './tauri-api/team-presets';
 import { terminal } from './tauri-api/terminal';
 
 // 既存 import { RoleProfileSummary } from '../lib/tauri-api' との互換維持。
@@ -43,6 +44,7 @@ export const api = {
   sessions,
   team,
   teamHistory,
+  teamPresets,
   handoffs,
   dialog,
   settings,
