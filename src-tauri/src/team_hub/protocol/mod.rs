@@ -17,6 +17,8 @@
 mod consts;
 mod dynamic_role;
 mod helpers;
+// Issue #519: 動的 instructions の禁止句 lint。recruit 段階で逸脱指示を弾く。
+mod instruction_lint;
 // Issue #494: `team_hub/tests/permissions.rs` の matrix integration test から
 // `check_permission` / `Permission` を参照するため、`team_hub` サブツリー全体に公開する。
 // 旧 `mod permissions;` は protocol 内でのみ可視で、外部テストからアクセスできなかった。
