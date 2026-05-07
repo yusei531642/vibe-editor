@@ -717,6 +717,49 @@ export interface RetryInjectResult {
   failedAt?: string;
 }
 
+// ---------- TeamHub delivery_status (Issue #509) ----------
+
+/**
+ * Issue #509: `team_send` レスポンスに含まれる「PTY に届いたが、まだ recipient が
+ * `team_read` を呼んでいない」状態の agent。Leader が「送ったから着手しているはず」
+ * と誤解する余地を消すため、`deliveryStatus` (delivered/failed) と並列で正規化済み配列を返す。
+ *
+ * 60s 経過後も pending のままの場合は `team_diagnostics.pendingInbox*` /
+ * `stalledInbound: true` で自動的に督促候補として浮上する設計と組み合わせて使う。
+ */
+export interface PendingRecipient {
+  agentId: string;
+  role: string;
+  /** RFC3339 配達時刻 (= inject 成功時刻)。 */
+  deliveredAt: string;
+}
+
+/**
+ * Issue #509: `team_send` 時点で既に既読印が付いていた agent。
+ * 通常は sender 自身のみ (sender は send 時に self を read_by に push する設計のため)。
+ */
+export interface ReadSoFarRecipient {
+  agentId: string;
+  role: string;
+  readAt: string;
+}
+
+/**
+ * Issue #509: Hub が `team_read` 経由で **新しく** 既読印を付けた瞬間に emit する event。
+ * Canvas 側 `useTeamInboxRead` フックがこれを受け、対象 agent の unread badge を減算する。
+ *
+ * 1 回の `team_read` で複数 message を一括既読することがあるため `messageIds` は配列。
+ */
+export interface TeamInboxReadEvent {
+  teamId: string;
+  /** 今回新たに既読化された message id の配列 (既読再呼び出しの場合は空 → event は emit されない)。 */
+  messageIds: number[];
+  readByAgentId: string;
+  readByRole: string;
+  /** RFC3339 既読時刻 (= team_read を呼んだ時刻)。 */
+  readAt: string;
+}
+
 // ---------- Window Effects (Issue #260) ----------
 
 /**

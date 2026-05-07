@@ -16,9 +16,11 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
-import { AlertTriangle, ClipboardCheck, ClipboardList, Clock, RotateCcw } from 'lucide-react';
+import { AlertTriangle, ClipboardCheck, ClipboardList, Clock, Inbox, RotateCcw } from 'lucide-react';
 import { useT } from '../../../../lib/i18n';
 import { useTeamInjectFailed } from '../../../../lib/use-team-inject-failed';
+import { useTeamInboxRead } from '../../../../lib/use-team-inbox-read';
+import { useTeamHandoff } from '../../../../lib/use-team-handoff';
 import { useSettings } from '../../../../lib/settings-context';
 import {
   useCanvasStore,
@@ -500,6 +502,62 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     setCardPayload(id, { lastInjectFailure: undefined });
   }, [id, setCardPayload]);
 
+  // ---------- Issue #509: 未読 inbox 数の event-driven 集計 ----------
+  //
+  // `team:handoff` (= delivered = inject 成功) を受けると、自分宛のメッセージは「配信済み
+  // 未読」状態になる → unreadInboxCount +1。`team:inbox_read` を受けると、recipient が
+  // `team_read` を呼んだことが確定するので、自分宛の発火なら count を減らす。
+  // 一番古い未読が 60s 以上残っている場合は警告色に切り替えて Leader に督促を促す
+  // (`team_diagnostics.stalledInbound: true` と意味的に揃えてある)。
+  useTeamHandoff(
+    useCallback(
+      (evt) => {
+        if (!payload.agentId || evt.toAgentId !== payload.agentId) return;
+        // 既存 oldestUnreadDeliveredAt は維持。新しく到着した分は last (新しい) なので
+        // oldest としては古い方を残す = undefined のときだけ初期化する。
+        const oldest = payload.oldestUnreadDeliveredAt ?? evt.timestamp;
+        setCardPayload(id, {
+          unreadInboxCount: (payload.unreadInboxCount ?? 0) + 1,
+          oldestUnreadDeliveredAt: oldest
+        });
+      },
+      [
+        id,
+        payload.agentId,
+        payload.unreadInboxCount,
+        payload.oldestUnreadDeliveredAt,
+        setCardPayload
+      ]
+    )
+  );
+  useTeamInboxRead(
+    useCallback(
+      (evt) => {
+        if (!payload.agentId || evt.readByAgentId !== payload.agentId) return;
+        const next = Math.max(
+          0,
+          (payload.unreadInboxCount ?? 0) - evt.messageIds.length
+        );
+        // 全件読了なら oldestUnreadDeliveredAt も undefined にして clean state に戻す。
+        // 部分既読 (= まだ未読が残っている) のときは oldest を維持 (本当の oldest が
+        // どれかを正確に知るには messageIds と delivered_at の照合が必要だが、現状
+        // event-driven 集計では粗い近似で十分)。
+        setCardPayload(id, {
+          unreadInboxCount: next,
+          oldestUnreadDeliveredAt:
+            next === 0 ? undefined : payload.oldestUnreadDeliveredAt
+        });
+      },
+      [
+        id,
+        payload.agentId,
+        payload.unreadInboxCount,
+        payload.oldestUnreadDeliveredAt,
+        setCardPayload
+      ]
+    )
+  );
+
   // accent は CSS 変数 --agent-accent として子孫で参照する
   const cardStyle = useMemo(
     () =>
@@ -631,6 +689,38 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
               </span>
             </div>
           ) : null}
+          {/* Issue #509: 配送済みだが team_read で確認していない message の数。 */}
+          {/* 60s 超過で stalled クラスを追加して警告色に切り替える。 */}
+          {(payload.unreadInboxCount ?? 0) > 0 ? (() => {
+            const ageMs = payload.oldestUnreadDeliveredAt
+              ? Math.max(0, nowTick - new Date(payload.oldestUnreadDeliveredAt).getTime())
+              : 0;
+            const stalled = ageMs >= 60_000;
+            const ageSec = Math.floor(ageMs / 1000);
+            return (
+              <div
+                className={
+                  'canvas-agent-card__summary-row canvas-agent-card__summary-row--unread' +
+                  (stalled
+                    ? ' canvas-agent-card__summary-row--unread-stalled'
+                    : '')
+                }
+                role="status"
+                title={t('inboxUnread.tooltip', {
+                  count: payload.unreadInboxCount ?? 0,
+                  ageSec
+                })}
+              >
+                <Inbox size={11} strokeWidth={2} aria-hidden="true" />
+                <span className="canvas-agent-card__summary-text">
+                  {t('inboxUnread.label', {
+                    count: payload.unreadInboxCount ?? 0,
+                    ageSec
+                  })}
+                </span>
+              </div>
+            );
+          })() : null}
         </div>
         {/* Issue #511: PTY inject 失敗 warning row。 */}
         {/* 通常時は何も rendering されず、`team:inject_failed` が来た瞬間に出現する。 */}
