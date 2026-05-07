@@ -3,6 +3,10 @@
 //! Issue #373 Phase 2 で `protocol.rs` から切り出し。
 //! Issue #508 で必須テンプレ / 曖昧名 / Worktree Isolation Rule の validation を追加 (deny→拒否、warn→outcome に同梱)。
 //!
+//! 呼び出し元: `tools/recruit.rs` の `team_recruit` のみ。過去の docstring に記載されていた
+//! `team_create_role` MCP tool は実装されておらず、現状は `team_recruit` (role_definition 同梱)
+//! が動的ロール登録の唯一の入口。
+//!
 //! 既存 builtin (summary 上) と被る role_id は拒否、上限超過も拒否、長さ上限も拒否する。
 
 use crate::team_hub::{CallContext, DynamicRole, TeamHub};
@@ -24,10 +28,11 @@ pub(super) struct DynamicRoleOutcome {
     pub template_warnings: Vec<TemplateFinding>,
 }
 
-/// 動的ロール定義 1 件を検証 + 登録。team_recruit の role_definition / team_create_role の両方から使う。
-/// 既存 builtin (summary 上) と被る role_id は拒否、上限超過も拒否、長さ上限も拒否する。
+/// 動的ロール定義 1 件を検証 + 登録。`team_recruit` から (role_definition 同梱時に) 呼び出される
+/// 唯一のエントリ。既存 builtin (summary 上) と被る role_id は拒否、上限超過も拒否、長さ上限も拒否する。
 /// Issue #508: instructions が必須テンプレ (4 軸 / 最低長) を満たさない場合 deny、
 /// 軽微な欠落 (1〜3 軸 / 順序不正 / Worktree Rule トークン不在 / 曖昧 label) は warn として outcome に乗せる。
+/// 戻り値の `template_warnings` は呼び出し側 (recruit.rs) が response に同梱する想定。
 pub(super) async fn validate_and_register_dynamic_role(
     hub: &TeamHub,
     ctx: &CallContext,
