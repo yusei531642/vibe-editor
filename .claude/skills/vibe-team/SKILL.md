@@ -206,7 +206,7 @@ Set-Location F:/vive-editor-worktrees/issue-<N>
 
 ### Inputs (前提・参照)
 - recruit args (label / description / instructions / instructions_ja)
-- 既存の dynamic role registry 状態 (DoS 上限など)
+- 既存の dynamic role registry 状態 (`MAX_DYNAMIC_ROLES_PER_TEAM` などの上限カウントを含む)
 
 ### Outputs (生成物)
 - 登録された DynamicRole + recruit response の templateWarnings 配列
