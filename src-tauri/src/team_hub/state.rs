@@ -49,6 +49,12 @@ pub(crate) struct HubState {
     /// `team_diagnostics` MCP ツールが leader/hr の権限ガード越しに返す。
     /// in-memory only (プロセス再起動でリセット、計画の受け入れ基準で明記済み)。
     pub(crate) member_diagnostics: HashMap<String, MemberDiagnostics>,
+    /// Issue #526: vibe-team の advisory file lock 表 (team_id × normalized_path → FileLock)。
+    /// `team_lock_files` で取得、`team_unlock_files` で解放、`team_assign_task` の
+    /// `target_paths` 引数で peek (競合検知)。in-memory only (Hub 再起動で全 clear)、
+    /// TTL は設けない (本 issue では out-of-scope)。`team_dismiss` 時には対象 agent_id の
+    /// 全 lock を `release_all_for_agent` で一括解放する想定。
+    pub(crate) file_locks: HashMap<(String, String), crate::team_hub::file_locks::FileLock>,
 }
 
 /// Issue #342 Phase 3 (3.1): `team_diagnostics` で返す診断 timestamp / counter。
@@ -398,9 +404,67 @@ impl TeamHub {
                 role_profile_summary: Vec::new(),
                 dynamic_roles: HashMap::new(),
                 member_diagnostics: HashMap::new(),
+                file_locks: HashMap::new(),
             })),
             app_handle: Arc::new(Mutex::new(None)),
         }
+    }
+
+    // ===== Issue #526: file lock helpers (TeamHub method 経由で HubState の file_locks を操作) =====
+
+    /// `paths` を team_id × agent_id でロック取得試行する。partial success (一部 conflict でも残りは locked)。
+    pub async fn try_acquire_file_locks(
+        &self,
+        team_id: &str,
+        agent_id: &str,
+        role: &str,
+        paths: &[String],
+    ) -> crate::team_hub::file_locks::LockResult {
+        let mut s = self.state.lock().await;
+        crate::team_hub::file_locks::try_acquire(&mut s.file_locks, team_id, agent_id, role, paths)
+    }
+
+    /// `paths` のうち自分が保持するロックを解放する。
+    pub async fn release_file_locks(
+        &self,
+        team_id: &str,
+        agent_id: &str,
+        paths: &[String],
+    ) -> crate::team_hub::file_locks::UnlockResult {
+        let mut s = self.state.lock().await;
+        crate::team_hub::file_locks::release(&mut s.file_locks, team_id, agent_id, paths)
+    }
+
+    /// 指定 agent が team 内で保持する全 lock を解放する。`team_dismiss` 時に呼ぶ想定。
+    pub async fn release_all_file_locks_for_agent(
+        &self,
+        team_id: &str,
+        agent_id: &str,
+    ) -> u32 {
+        let mut s = self.state.lock().await;
+        crate::team_hub::file_locks::release_all_for_agent(&mut s.file_locks, team_id, agent_id)
+    }
+
+    /// `paths` の現在の lock 保持者一覧 (assign_task の競合検知用、agent_id_filter で自分宛除外可)。
+    pub async fn peek_file_locks(
+        &self,
+        team_id: &str,
+        agent_id_filter: Option<&str>,
+        paths: &[String],
+    ) -> Vec<crate::team_hub::file_locks::LockConflict> {
+        let s = self.state.lock().await;
+        crate::team_hub::file_locks::peek(&s.file_locks, team_id, agent_id_filter, paths)
+    }
+
+    /// team 内の全 lock 一覧 (将来の team_diagnostics 拡張 / UI 表示用)。
+    /// 現在は MCP API 経由の caller が居ないので `#[allow(dead_code)]`。
+    #[allow(dead_code)]
+    pub async fn list_file_locks_for_team(
+        &self,
+        team_id: &str,
+    ) -> Vec<crate::team_hub::file_locks::FileLock> {
+        let s = self.state.lock().await;
+        crate::team_hub::file_locks::list_for_team(&s.file_locks, team_id)
     }
 
     /// 動的ロールを team_id スコープで登録。既存があれば上書き。

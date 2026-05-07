@@ -11,6 +11,8 @@ mod create_leader;
 mod diagnostics;
 mod dismiss;
 pub(super) mod error;
+// Issue #526: vibe-team の advisory file lock (team_lock_files / team_unlock_files)。
+mod file_lock;
 mod get_tasks;
 mod info;
 mod list_role_profiles;
@@ -26,6 +28,7 @@ pub use assign_task::team_assign_task;
 pub use create_leader::team_create_leader;
 pub use diagnostics::team_diagnostics;
 pub use dismiss::team_dismiss;
+pub use file_lock::{team_lock_files, team_unlock_files};
 pub use get_tasks::team_get_tasks;
 pub use info::team_info;
 pub use list_role_profiles::team_list_role_profiles;

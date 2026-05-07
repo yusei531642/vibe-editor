@@ -310,21 +310,108 @@ toast を 8 秒表示する。Canvas / IDE どちらのモードでも同じ toa
   抱えていないか」を Leader が確認する。意図的に複数 worker にまたがる task なら
   `team_assign_task` を分割するか、**意図的な重複であることを Leader メモで残す**
 
+## ファイル編集の advisory lock (Rust 側 file_locks)
+
+> Issue #526: 複数 worker が同じファイルを silent overwrite して衝突するのを防ぐため、
+> worker 間で協調的 (advisory) なロック予約システムを Hub 内に持つ。
+> `src-tauri/src/team_hub/file_locks.rs` で in-memory map (`HashMap<(team_id, normalized_path), FileLock>`)
+> を管理し、`team_lock_files` / `team_unlock_files` で取得・解放、`team_assign_task(target_paths)`
+> で peek 競合検知する。**advisory** = 取得しなくても hard fail しないので、SKILL ガイド +
+> WORKER_TEMPLATE の運用ルールで補強する設計 (#519 / #517 と同じ思想)。
+
+### Lifetime / 永続性
+
+- **in-memory のみ**。Hub 再起動 (アプリ起動し直し) で全 lock が clear される。
+- **TTL (自動解放) は設けない**。worker が release し忘れたまま停止すると、その lock は
+  team_dismiss されるまで残る。
+- `team_dismiss(agent_id)` 成立時、対象 worker が握っていた **全 lock を漏れなく一括解放**
+  する (`tools/dismiss.rs` の末尾で `release_all_file_locks_for_agent` を呼ぶ)。
+  response にも `releasedFileLocks: <count>` で返るので Leader が確認できる。
+- 永続化は本 issue の out-of-scope。再起動を跨ぐ予約管理は将来 issue で別途検討。
+
+### MCP tool: `team_lock_files`
+
+```
+team_lock_files({ paths: ["src/foo.rs", "src/bar.rs"] })
+  → { success: true, locked: ["src/foo.rs"], conflicts: [LockConflict, ...] }
+```
+
+- worker が `Edit` / `Write` / `MultiEdit` をかける **前** に必ず呼ぶ運用。
+- **partial success** (= 一部 path が conflict でも残りは locked される)。caller が
+  all-or-nothing を要するなら、`conflicts` が空でないとき `locked` を即 `team_unlock_files`
+  で手動解放する (Hub 側は automatic rollback しない設計)。
+- 同 agent_id が再 lock した path は **idempotent** (再度 `locked` に積まれる、エラーにならない)。
+- 制限: 1 リクエスト最大 64 path、1 path 最大 4 KiB。超過は `lock_files_invalid_args` で拒否。
+
+`LockConflict` shape:
+
+```
+{
+  path: "src/foo.rs",
+  holderAgentId: "vc-...",
+  holderRole: "programmer",
+  acquiredAt: "2026-05-07T..."
+}
+```
+
+### MCP tool: `team_unlock_files`
+
+```
+team_unlock_files({ paths: ["src/foo.rs"] })
+  → { success: true, unlocked: ["src/foo.rs"] }
+```
+
+- worker の編集が終わったら必ず呼ぶ (失敗パスでも `try { ... } finally { unlock }` 相当の
+  運用)。
+- 自分が保持していなかった path は silent skip (= `unlocked` に乗らない、エラーは出ない)。
+
+### `team_assign_task(target_paths=[...])` での peek
+
+- `target_paths` は任意引数。指定すると Hub が現在の lock 表を peek して、target 以外の
+  worker が握っている path を `lockConflicts` として response に同梱する。
+- 同時に `team:file-lock-conflict` event を emit するので Canvas UI 側で toast 通知できる。
+- **競合があっても assign は成功する** (advisory: 拒否しない)。Leader が `lockConflicts`
+  を読んで「タスクを分割」「先に assignee 以外を dismiss」「意図的な重複として続行」を
+  判断する。
+
+### Path 正規化
+
+`team_lock_files` / `team_unlock_files` / `target_paths` のいずれも、Hub 側で次の正規化を行う:
+
+- backslash (`\`) → forward slash (`/`)
+- 連続 slash 圧縮 (`src//foo` → `src/foo`)
+- `./` プレフィックス除去
+- 末尾 `/` 除去 (root `/` だけは残る)
+- 前後 trim
+
+これにより worker が `src\foo.rs` / `./src/foo.rs` / `src/foo.rs` のいずれを送っても同一
+path として扱われる。
+
+### Worker 運用ルール (recommended)
+
+1. ファイル編集前に `team_lock_files({ paths: ["..."] })` を呼ぶ。`conflicts` が
+   非空なら、編集を止めて `team_send("leader", "lock 競合: ... → 調整依頼")` を返す。
+2. 編集中に追加 path が必要になったら、追加で `team_lock_files` を呼ぶ。
+3. 編集が完了 (または失敗) したら必ず `team_unlock_files` で解放する。
+4. 自分が `team_dismiss` される場合は Hub が自動解放するので明示的 unlock は不要。
+
 ## 利用できるツール一覧
 
 | ツール | 用途 |
 |---|---|
 | `team_recruit` | ロール定義＋採用 (1 コール完結) / 既存ロールの再採用 |
-| `team_dismiss` | メンバー解雇 (canvas のカードを閉じる、Leader 専用) |
+| `team_dismiss` | メンバー解雇 (canvas のカードを閉じる、Leader 専用)。worker の advisory lock も自動解放 |
 | `team_send(to, message)` | 別メンバーのプロンプトに直接メッセージ注入。成功は配送であり ACK ではない |
 | `team_read({unread_only})` | 自分宛の過去メッセージを読む (未読のみがデフォルト) |
 | `team_info()` | 現在のチーム名簿と自分の identity |
 | `team_status(status)` | 自分のステータスを informational に報告 |
-| `team_assign_task(assignee, description)` | タスクを割り当て (Leader / HR) |
+| `team_assign_task(assignee, description, target_paths?)` | タスクを割り当て (Leader / HR)。`target_paths` で advisory lock 競合を peek |
 | `team_get_tasks()` | チーム全体のタスク一覧 |
 | `team_update_task(task_id, status)` | タスク状態の更新 |
 | `team_list_role_profiles()` | 利用可能ロール一覧 (builtin + 動的) |
 | `team_diagnostics()` | Leader / HR 用。pendingInbox / stalledInbound で配送済み未読を確認 |
+| `team_lock_files(paths)` | ファイル編集前に advisory lock を取得 (partial success) |
+| `team_unlock_files(paths)` | 自分が保持する advisory lock を解放 |
 
 ## 最小フロー (調査 → 実装 → 検証 → レビュー → 統合)
 

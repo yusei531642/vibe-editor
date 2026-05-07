@@ -10,6 +10,8 @@
 
 pub mod bridge;
 pub mod error;
+// Issue #526: vibe-team の advisory file locks (worker のファイル編集衝突を warn する)。
+pub mod file_locks;
 pub mod inject;
 pub mod protocol;
 // Issue #517: 動的ロール同士の責務境界 lint (recruit / assign_task で warning 発火)。
