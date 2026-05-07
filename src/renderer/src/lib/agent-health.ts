@@ -5,9 +5,11 @@
  * 経過秒の表示に変換する純粋関数。Rust 側 #524 で生えた `autoStale` を一次判定に使い、
  * 「どれくらい長く沈黙していれば dead と見なすか」だけ renderer 側で重ね判定する。
  *
- * `dead` は `lastPtyActivityAgeMs` が `DEAD_THRESHOLD_MS` を超え、かつ
- * `lastStatusAgeMs` も同様に超過しているとき。Hub の `autoStale` が true でも、
- * 「動いている (PTY 出力あり) が status 申告だけ古い」ケースは dead にしない。
+ * `dead` は `lastPtyActivityAgeMs` が `DEAD_THRESHOLD_MS` を超えるとき (PTY 出力が
+ * 15 分以上途絶した = プロセスが本当に動いていない決定的シグナル)。
+ * Hub の `autoStale` が true でも「動いている (PTY 出力あり) が status 申告だけ古い」
+ * ケースは dead にしない。`lastStatusAgeMs` は `alive` 判定の補助 (status / PTY の
+ * いずれかが観測されていれば alive 候補) としてのみ参照する。
  */
 import type { TeamDiagnosticsMemberRow } from '../../../types/shared';
 
