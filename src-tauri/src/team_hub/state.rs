@@ -965,6 +965,17 @@ impl TeamHub {
                 );
             }
         }
+
+        // Issue #512: チーム登録ごとに `<project_root>/.vibe-team/tmp/` の古い spool ファイルを
+        // best-effort で cleanup する。アプリ起動時のみだと長時間 session で TTL 超過が発生し続ける
+        // ため、register_team (= setup MCP 経路) ごとに 1 回だけ走らせる。fire-and-forget で
+        // register_team の戻りを遅延させない。
+        if let Some(root) = project_root.map(str::trim).filter(|p| !p.is_empty()) {
+            let root_owned = root.to_string();
+            tokio::spawn(async move {
+                crate::team_hub::spool::cleanup_old_spools(&root_owned).await;
+            });
+        }
     }
 
     /// チームを active list から外す。戻り値が true なら active が 0 → MCP 設定削除可

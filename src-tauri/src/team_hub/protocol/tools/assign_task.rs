@@ -94,31 +94,94 @@ pub async fn team_assign_task(
         }
         .into_err_string());
     }
-    // 「長文ペイロード・ルール」: description も SOFT_PAYLOAD_LIMIT で弾いてファイル経由を強制。
-    // bulk な指示 (21 連続 issue 起票の YAML 等) はここで必ず途中切れしないために。
+    // Issue #512: description が SOFT_PAYLOAD_LIMIT 相当 (= protocol hint reserve 引いた値) を
+    // 超過したら、Hub 側で auto-spool 化する。worker への inject 通知本文 (`team_send` 経由) は
+    // 「summary + attached: <path>」の短文に置換し、TeamTask.description には **元 description**
+    // を保持して `team_get_tasks` で Leader が full content を確認できるようにする。
+    // boundary lint (`compute_task_overlap`) も full content で判定したいので **元 description** を渡す。
+    //
     // Issue #409: 通知本文には Standard response protocol hint (~700 bytes) を後から append するため、
     // 1 KiB の安全マージンを引いてから判定し、合算後に SOFT_PAYLOAD_LIMIT (= team_send 側の上限) を
-    // 超えるリスクを避ける。
+    // 超えるリスクを避ける。spool 化の reject は project_root 不在 / write 失敗時のみ発火する
+    // fallback で、code 名は旧名 `assign_payload_threshold` を維持して後方互換を保つ
+    // (message 文で「auto-spool 失敗」の詳細を伝える)。
     const PROTOCOL_HINT_RESERVE: usize = 1024;
     let description_limit = SOFT_PAYLOAD_LIMIT.saturating_sub(PROTOCOL_HINT_RESERVE);
+    let mut spooled_description: Option<String> = None;
     if description.len() > description_limit {
-        return Err(AssignError {
-            code: "assign_payload_threshold".into(),
-            message: format!(
-                "description exceeds the long-payload threshold ({} > {} bytes). \
-                 Write the full task brief to `.vibe-team/tmp/<short_id>.md` with the Write tool first, \
-                 then call team_assign_task again with a brief summary plus the file path \
-                 (e.g. \"21 件起票。詳細は .vibe-team/tmp/issue_bulk.md を参照\"). \
-                 (Inline descriptions up to 32 KiB are now delivered via bracketed paste, but anything \
-                 beyond that should still be passed by file path.)",
-                description.len(),
-                description_limit
-            ),
-            phase: None,
-            elapsed_ms: None,
+        let project_root = {
+            let s = hub.state.lock().await;
+            s.teams
+                .get(&ctx.team_id)
+                .and_then(|t| t.project_root.clone())
+        };
+        let project_root = match project_root.as_deref().map(str::trim).filter(|p| !p.is_empty())
+        {
+            Some(p) => p.to_string(),
+            None => {
+                return Err(AssignError {
+                    // Issue #512 ↔ #545 review: error code は旧名 `assign_payload_threshold`
+                    // を維持して後方互換を保つ (= caller が code 判定で fallback handler を
+                    // 持っていても壊れない)。新挙動は「成功時に reject せず spool 化する」path
+                    // のみで、reject 時の意味は旧来の SOFT_PAYLOAD_LIMIT 超過と等価。
+                    code: "assign_payload_threshold".into(),
+                    message: format!(
+                        "description exceeds the long-payload threshold ({} > {} bytes) and \
+                         this team has no project_root configured for auto-spool. \
+                         Setup the team via Canvas (setupTeamMcp) or write the brief to a file \
+                         and call team_assign_task again with a short summary plus the path.",
+                        description.len(),
+                        description_limit
+                    ),
+                    phase: None,
+                    elapsed_ms: None,
+                }
+                .into_err_string());
+            }
+        };
+        match crate::team_hub::spool::spool_long_payload(&project_root, description, "assign")
+            .await
+        {
+            Ok(result) => {
+                tracing::info!(
+                    "[team_assign_task] auto-spooled long description ({} bytes) team={} assignee={} → {}",
+                    description.len(),
+                    ctx.team_id,
+                    assignee,
+                    result.spool_path.display()
+                );
+                spooled_description = Some(result.replacement_message);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[team_assign_task] auto-spool failed for team={}: {e:#}; falling back to reject",
+                    ctx.team_id
+                );
+                return Err(AssignError {
+                    // Issue #512 ↔ #545 review: error code は旧名 `assign_payload_threshold`
+                    // を維持して後方互換を保つ (= caller が code 判定で fallback handler を
+                    // 持っていても壊れない)。新挙動は「成功時に reject せず spool 化する」path
+                    // のみで、reject 時の意味は旧来の SOFT_PAYLOAD_LIMIT 超過と等価。
+                    code: "assign_payload_threshold".into(),
+                    message: format!(
+                        "description exceeds the long-payload threshold ({} > {} bytes) and \
+                         auto-spool to `.vibe-team/tmp/` failed: {e}. \
+                         Write the brief to a file with the Write tool and call team_assign_task \
+                         again with a brief summary plus the file path.",
+                        description.len(),
+                        description_limit
+                    ),
+                    phase: None,
+                    elapsed_ms: None,
+                }
+                .into_err_string());
+            }
         }
-        .into_err_string());
     }
+    // Worker への inject 通知に流す本文: spool 化された場合は summary + path、そうでなければ元 description。
+    // `compute_task_overlap` (lint) と TeamTask.description (= 履歴保存) は **元 description** をそのまま使う
+    // ことで、boundary 判定の精度と Leader の `team_get_tasks` review 体験を保つ。
+    let notify_description: &str = spooled_description.as_deref().unwrap_or(description);
     let task_id;
     let assigned_at = Utc::now().to_rfc3339();
     {
@@ -263,7 +326,7 @@ pub async fn team_assign_task(
     //   3) 長時間タスクでは team_status で進捗を残す
     //   4) 完了時に team_send + team_update_task("done" or "blocked") を呼ぶ
     // ことで、Leader が `team_read` 0 件だけで「無応答」と誤判定するのを防ぐ。
-    let notify_message = build_task_notification(task_id, description);
+    let notify_message = build_task_notification(task_id, notify_description);
     let notify_args = json!({ "to": assignee, "message": notify_message });
     let hub_clone = hub.clone();
     let ctx_clone = ctx.clone();
