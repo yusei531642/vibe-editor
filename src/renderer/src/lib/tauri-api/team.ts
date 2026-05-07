@@ -72,6 +72,14 @@ export const team = {
    * Issue #510: TeamHub の per-member 診断値を Leader 視点で取得する。
    * 内部で leader 役を impersonate して MCP `team_diagnostics` と同一データを返す。
    * Hub 未起動 / team 未登録時も基本的に空 members で返る (errors は reject)。
+   *
+   * 引数キー命名: 本プロジェクトは Rust 側 `#[tauri::command]` の snake_case パラメータ
+   * (`team_id: String`) に対し、JS invoke 側は **camelCase** (`{ teamId }`) を渡す
+   * 慣例で統一している。Tauri 2 のデフォルト動作で `camelCase` JS キーは自動的に
+   * `snake_case` Rust パラメータへマッピングされる (例: `teamHistory.list({ projectRoot })`,
+   * `teamState.read({ projectRoot, teamId })` 等、全 wrapper 同一パターン)。
+   * snake_case をそのまま JS から渡すと逆に名前解決が崩れる可能性があるため、
+   * ここでも他 wrapper と揃えて camelCase で送る。
    */
   diagnosticsRead: (teamId: string): Promise<TeamDiagnosticsResponse> =>
     invoke('team_diagnostics_read', { teamId })
