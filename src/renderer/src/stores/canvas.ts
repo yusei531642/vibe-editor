@@ -290,10 +290,12 @@ export const useCanvasStore = create<CanvasState>()(
     }),
     {
       name: 'vibe-editor:canvas',
-      // Issue #385: v4 へ bump し、persisted state は必ず normalizeCanvasState を経由
-      // させる。同 version の rehydrate でも `merge` で再正規化するため、runtime で
-      // 紛れ込んだ NaN viewport / 範囲外 zoom / 壊れた node も次回起動時には掃除される。
-      version: 4,
+      // Issue #385: v4 で persisted state は必ず normalizeCanvasState を経由させる。
+      // 同 version の rehydrate でも `merge` で再正規化するため、runtime で紛れ込んだ
+      // NaN viewport / 範囲外 zoom / 壊れた node も次回起動時には掃除される。
+      // Issue #497: v5 で旧既定 640x400 のカードを新既定 760x460 へ移行する
+      // (>640 / >400 の手動拡大値は尊重)。詳細は `lib/canvas-migrations.ts` の v4 step。
+      version: 5,
       // 各 version の差分は `lib/canvas-migrations.ts` の `MIGRATION_STEPS` に集約。
       // ここでは「fromVersion → 最新」を 1 行で進めるだけ。最後に必ず normalize を通すので
       // 同 version の rehydrate でも runtime に紛れ込んだ NaN viewport / 範囲外 zoom /

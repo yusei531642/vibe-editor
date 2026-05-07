@@ -18,13 +18,22 @@ import type { CardData, CardType, StageView } from '../stores/canvas';
  * カード初期幅/高さ。stores/canvas.ts と同期させること。
  * Issue #253: 旧 480x320 では Codex/Claude TUI のヘッダーが折り返しで崩れがちだったため
  * 640x400 に引き上げ。
+ * Issue #497: 640x400 でも Canvas で初回 Codex を開いた直後の TUI が窮屈だったため、
+ * 760x460 に再引き上げ。手動拡大値 (>640 / >400) は v5 migration で維持する。
  */
-export const NODE_W = 640;
-export const NODE_H = 400;
+export const NODE_W = 760;
+export const NODE_H = 460;
 
-/** persist v3 で既存ユーザーのカードを引き上げる閾値 (これ以下のサイズなら NODE_W/H に拡大) */
-const LEGACY_NODE_W_THRESHOLD = 480;
-const LEGACY_NODE_H_THRESHOLD = 320;
+/** persist v3 で既存ユーザーのカードを引き上げる閾値 (これ以下のサイズなら 640x400 に拡大) */
+const LEGACY_NODE_W_THRESHOLD_V3 = 480;
+const LEGACY_NODE_H_THRESHOLD_V3 = 320;
+/** v3 当時の既定サイズ (v3 migration の引き上げターゲット, v5 では旧既定値の閾値) */
+const LEGACY_NODE_W_V3 = 640;
+const LEGACY_NODE_H_V3 = 400;
+/** persist v5 で既存ユーザーのカードを引き上げる閾値 (これ以下のサイズなら NODE_W/H に拡大)
+ *  Issue #497: 旧既定 640x400 のみ新既定 760x460 へ移行し、>640 / >400 の手動拡大値は維持する。 */
+const LEGACY_NODE_W_THRESHOLD_V5 = LEGACY_NODE_W_V3;
+const LEGACY_NODE_H_THRESHOLD_V5 = LEGACY_NODE_H_V3;
 
 const CARD_TYPES: CardType[] = ['terminal', 'agent', 'editor', 'diff', 'fileTree', 'changes'];
 const STAGE_VIEWS: StageView[] = ['stage', 'list', 'focus'];
@@ -215,7 +224,9 @@ const MIGRATION_STEPS: Record<number, StepMigrator> = {
     };
   },
   // v2 → v3 (Issue #253): 旧 NODE_W/H (480x320) → 640x400。ユーザーが手動拡大した
-  // 値は尊重するため <= LEGACY_*_THRESHOLD のときだけ引き上げる。
+  // 値は尊重するため <= LEGACY_*_THRESHOLD_V3 のときだけ引き上げる。
+  // ※ v3 当時の引き上げ先は 640x400 で、現行 NODE_W/H ではない。v5 migration が
+  // 続けて同じ ladder で 760x460 まで持ち上げるため、ここでは v3 の既定値で止める。
   2: (p) => {
     if (!Array.isArray(p.nodes)) return p;
     return {
@@ -225,8 +236,10 @@ const MIGRATION_STEPS: Record<number, StepMigrator> = {
         const styleRaw = isRecord(n.style) ? n.style : {};
         const w = typeof styleRaw.width === 'number' ? styleRaw.width : undefined;
         const h = typeof styleRaw.height === 'number' ? styleRaw.height : undefined;
-        const nextW = w !== undefined && w <= LEGACY_NODE_W_THRESHOLD ? NODE_W : w;
-        const nextH = h !== undefined && h <= LEGACY_NODE_H_THRESHOLD ? NODE_H : h;
+        const nextW =
+          w !== undefined && w <= LEGACY_NODE_W_THRESHOLD_V3 ? LEGACY_NODE_W_V3 : w;
+        const nextH =
+          h !== undefined && h <= LEGACY_NODE_H_THRESHOLD_V3 ? LEGACY_NODE_H_V3 : h;
         if (nextW === w && nextH === h) return n;
         return {
           ...n,
@@ -240,7 +253,36 @@ const MIGRATION_STEPS: Record<number, StepMigrator> = {
     };
   },
   // v3 → v4 (Issue #385): 構造変換は不要 (normalize で吸収する)。
-  3: (p) => p
+  3: (p) => p,
+  // v4 → v5 (Issue #497): 旧 NODE_W/H (640x400) → 760x460。ユーザーが手動拡大した
+  // 値 (>640 / >400) は尊重するため <= LEGACY_*_THRESHOLD_V5 のときだけ引き上げる。
+  // 軸ごとに独立判定するので「width だけ手動拡大、height は既定」のような中間サイズも
+  // 既定軸だけ拡大される。
+  4: (p) => {
+    if (!Array.isArray(p.nodes)) return p;
+    return {
+      ...p,
+      nodes: p.nodes.map((n) => {
+        if (!isRecord(n)) return n;
+        const styleRaw = isRecord(n.style) ? n.style : {};
+        const w = typeof styleRaw.width === 'number' ? styleRaw.width : undefined;
+        const h = typeof styleRaw.height === 'number' ? styleRaw.height : undefined;
+        const nextW =
+          w !== undefined && w <= LEGACY_NODE_W_THRESHOLD_V5 ? NODE_W : w;
+        const nextH =
+          h !== undefined && h <= LEGACY_NODE_H_THRESHOLD_V5 ? NODE_H : h;
+        if (nextW === w && nextH === h) return n;
+        return {
+          ...n,
+          style: {
+            ...styleRaw,
+            ...(nextW !== undefined ? { width: nextW } : {}),
+            ...(nextH !== undefined ? { height: nextH } : {})
+          }
+        };
+      })
+    };
+  }
 };
 
 /**
