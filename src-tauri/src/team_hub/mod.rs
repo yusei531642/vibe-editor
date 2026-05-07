@@ -14,6 +14,11 @@ pub mod inject;
 pub mod protocol;
 pub mod state;
 
+/// Issue #494: TeamHub 周辺の integration test を集約する test-only module。
+/// `protocol::permissions` の matrix 検証等を `tests/permissions.rs` に置く。
+#[cfg(test)]
+mod tests;
+
 pub use state::{
     server_log_path_for_diagnostics, set_server_log_path, CallContext, DynamicRole,
     MemberDiagnostics, RecruitAckOutcome, RoleProfileSummary, TeamInfo, TeamMessage, TeamTask,

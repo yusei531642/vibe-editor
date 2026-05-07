@@ -23,7 +23,7 @@ use std::fmt;
 /// renderer 側の `RoleProfileSummary.canRecruit` 等と一致させているが、Hub 側は
 /// この enum を SSOT として扱い、renderer 文字列は信頼しない。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Permission {
+pub(in crate::team_hub) enum Permission {
     /// `canRecruit` — `team_recruit` / `team_create_leader` / `team_switch_leader` /
     /// `team_ack_handoff` で要求。
     Recruit,
@@ -41,7 +41,7 @@ pub(super) enum Permission {
 impl Permission {
     /// renderer 側 `RoleProfileSummary` フィールド名 (camelCase) と一致。
     /// 既存ログ / テストの "canXxx" 出力を維持するための文字列化。
-    pub(super) fn as_str(self) -> &'static str {
+    pub(in crate::team_hub) fn as_str(self) -> &'static str {
         match self {
             Self::Recruit => "canRecruit",
             Self::Dismiss => "canDismiss",
@@ -55,7 +55,7 @@ impl Permission {
 /// `check_permission` の失敗値。`into_message(action)` で各 tool 固有の
 /// "permission denied: role 'X' cannot {action}" エラー文を組み立てる。
 #[derive(Clone, Debug)]
-pub(super) struct PermissionError {
+pub(in crate::team_hub) struct PermissionError {
     pub role: String,
     pub permission: Permission,
 }
@@ -65,7 +65,7 @@ impl PermissionError {
     /// `action` は tool ごとに違う (例: "recruit" / "dismiss" / "assign tasks" /
     /// "create role profiles" / "view diagnostics" / "ack handoff" / "create leader" /
     /// "switch leader") ので呼び出し側で指定する。
-    pub(super) fn into_message(self, action: &str) -> String {
+    pub(in crate::team_hub) fn into_message(self, action: &str) -> String {
         format!("permission denied: role '{}' cannot {action}", self.role)
     }
 }
@@ -85,7 +85,7 @@ impl fmt::Display for PermissionError {
 ///
 /// builtin role の hardcoded 権限テーブルだけを参照する (renderer の summary は信頼しない)。
 /// 動的 role や未知 role は常に `Err(PermissionError)` を返す。
-pub(super) fn check_permission(role: &str, perm: Permission) -> Result<(), PermissionError> {
+pub(in crate::team_hub) fn check_permission(role: &str, perm: Permission) -> Result<(), PermissionError> {
     if builtin_role_permission(role, perm) {
         Ok(())
     } else {

@@ -51,7 +51,8 @@ pub fn spawn_batcher(
                     match maybe {
                         Some(chunk) => {
                             buf.extend_from_slice(&chunk);
-                            if buf.len() >= FLUSH_BYTES {
+                            // Issue #494: 閾値判定はテストと共有する pure 関数経由。
+                            if should_flush_after_recv(buf.len()) {
                                 flush(&app, &data_event_name, &mut buf, &scrollback);
                             }
                         }
@@ -63,7 +64,7 @@ pub fn spawn_batcher(
                     }
                 }
                 _ = tick.tick() => {
-                    if !buf.is_empty() {
+                    if should_flush_on_tick(buf.len()) {
                         flush(&app, &data_event_name, &mut buf, &scrollback);
                     }
                 }
@@ -73,8 +74,28 @@ pub fn spawn_batcher(
 }
 
 fn flush(app: &AppHandle, event: &str, buf: &mut BytesMut, scrollback: &Scrollback) {
-    if buf.is_empty() {
+    let Some(text) = extract_emit_payload(buf, scrollback) else {
         return;
+    };
+    let len = text.len();
+    match app.emit(event, text) {
+        Ok(_) => tracing::debug!("[batcher] emit {event} {len}B ok"),
+        Err(e) => tracing::warn!("emit {event} failed: {e}"),
+    }
+}
+
+/// Issue #494: `flush()` から Tauri `app.emit` を除いた pure な部分。
+///
+/// `buf` の先頭から「UTF-8 として完結しているバイト列」を切り出して `String` を返し、
+/// 切り出した分は `buf` から消費する。同時に `scrollback` リングバッファにも push する。
+/// emit 対象のバイト列が無い (= empty / 全部マルチバイト途中) 場合は `None`。
+///
+/// テストから直接呼べるよう `pub(super)`。spawn_batcher の流れと同じ契約に揃えてある:
+///   - 末尾がマルチバイト途中 (Issue #48) なら境界手前で切る
+///   - in-place 圧縮 (Issue #285 follow-up) で alloc を 1 件減らす
+pub(super) fn extract_emit_payload(buf: &mut BytesMut, scrollback: &Scrollback) -> Option<String> {
+    if buf.is_empty() {
+        return None;
     }
     // Issue #48: buf 末尾がマルチバイト UTF-8 文字の途中だと from_utf8_lossy が
     // U+FFFD に置換してしまう (日本語・絵文字・Box drawing が文字化けする原因)。
@@ -82,7 +103,7 @@ fn flush(app: &AppHandle, event: &str, buf: &mut BytesMut, scrollback: &Scrollba
     let safe_end = safe_utf8_boundary(buf);
     if safe_end == 0 {
         // 先頭もマルチバイト途中 → 次 flush まで保留 (emit しない)
-        return;
+        return None;
     }
     // Issue #285 follow-up: emit する確定済みバイト列を scrollback にも反映する。
     // 容量超過分は前から drop されるので、attach 経路では「最近 64 KiB」だけ replay される。
@@ -94,16 +115,37 @@ fn flush(app: &AppHandle, event: &str, buf: &mut BytesMut, scrollback: &Scrollba
     let emit_slice = &buf[..safe_end];
     append_scrollback(scrollback, emit_slice);
     let text = String::from_utf8_lossy(emit_slice).into_owned();
-    let len = safe_end;
     let remainder_len = buf.len() - safe_end;
     if remainder_len > 0 {
         buf.copy_within(safe_end.., 0);
     }
     buf.truncate(remainder_len);
-    match app.emit(event, text) {
-        Ok(_) => tracing::debug!("[batcher] emit {event} {len}B ok"),
-        Err(e) => tracing::warn!("emit {event} failed: {e}"),
-    }
+    Some(text)
+}
+
+/// Issue #494: spawn_batcher の `recv` 側 flush 判定。32 KiB を超えたらフラッシュする
+/// 単純な閾値関数。spawn_batcher 内のロジックと統一して、テスト側からも同じ関数で
+/// 検証できるようにする。
+pub(super) fn should_flush_after_recv(buf_len: usize) -> bool {
+    buf_len >= FLUSH_BYTES
+}
+
+/// Issue #494: tick (16 ms) 経路で flush するかの判定。tick 自体のタイミングは
+/// `tokio::time::interval` が司り、本関数は「buffer に何かあるか?」だけを純粋に判定する。
+pub(super) fn should_flush_on_tick(buf_len: usize) -> bool {
+    buf_len > 0
+}
+
+/// テスト経路用 const アクセサ (production code では `FLUSH_BYTES` / `FLUSH_INTERVAL_MS` を直接参照)。
+/// `#[cfg(test)]` でテストビルドにのみ含めることで、lib ビルド側に dead_code 警告を出さない。
+#[cfg(test)]
+pub(super) const fn flush_bytes_threshold() -> usize {
+    FLUSH_BYTES
+}
+
+#[cfg(test)]
+pub(super) const fn flush_interval_ms() -> u64 {
+    FLUSH_INTERVAL_MS
 }
 
 /// Issue #48: buf のうち、完結した UTF-8 文字境界までのバイト長を返す。

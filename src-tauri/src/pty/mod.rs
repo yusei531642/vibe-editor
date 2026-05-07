@@ -18,5 +18,9 @@ pub mod registry;
 pub mod scrollback;
 pub mod session;
 
+/// Issue #494: PTY (`batcher` flush 境界条件等) の integration test を集約する test-only module。
+#[cfg(test)]
+mod tests;
+
 pub use registry::SessionRegistry;
 pub use session::{spawn_session, SpawnOptions, UserWriteOutcome};

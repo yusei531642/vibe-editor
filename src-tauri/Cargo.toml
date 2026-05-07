@@ -56,6 +56,15 @@ encoding_rs = "0.8"
 # Issue #119: open 時のコンテンツハッシュで「同サイズ・1秒以内」の外部変更を検出する用
 sha2 = "0.11"
 
+[dev-dependencies]
+# Issue #494: integration test 用に tempfile を導入。fixture 用の tempdir を作成し、
+# `~/.vibe-editor/settings.json` / `~/.claude/projects/<encoded>/*.jsonl` /
+# git fixture repo を tempdir 配下にスタブする。
+tempfile = "3"
+# `Result` の `Err` variant を assert する際に backtrace 付きで panic させる用。
+# 旧 `assert_matches!` (nightly) の安定版代替。
+assert_matches = "1"
+
 [features]
 # デフォルトで dev tools 有効
 default = ["custom-protocol"]
