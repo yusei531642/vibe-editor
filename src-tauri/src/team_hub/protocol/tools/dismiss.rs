@@ -66,11 +66,23 @@ pub async fn team_dismiss(
     // dismiss された pending が孤立し、try_register_pending_recruit の人数 / singleton
     // 判定にゴミとして残り続けていた (renderer 反映の冪等性が壊れる)。
     hub.cancel_pending_recruit(&agent_id).await;
+    // Issue #526: dismiss された worker が握っていた advisory file lock を漏れなく解放する。
+    // 解放しないと「dismiss 済の worker が無限に lock を保持し続けて誰もファイル編集できない」
+    // 状態になりうる。dismiss が成立した時点で lock も自動失効と扱う。
+    let released_lock_count = hub
+        .release_all_file_locks_for_agent(&ctx.team_id, &agent_id)
+        .await;
+    if released_lock_count > 0 {
+        tracing::debug!(
+            "[team_dismiss] released {released_lock_count} file lock(s) held by '{agent_id}'"
+        );
+    }
     let dismissed_at = Utc::now().to_rfc3339();
     Ok(json!({
         "success": true,
         "agentId": agent_id,
         "dismissedAt": dismissed_at,
         "lastSeenAt": last_seen_at,
+        "releasedFileLocks": released_lock_count,
     }))
 }

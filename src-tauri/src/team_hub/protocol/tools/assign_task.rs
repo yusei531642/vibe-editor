@@ -41,6 +41,19 @@ pub async fn team_assign_task(
         }
         .into_err_string());
     }
+    // Issue #526: `target_paths: string[]` (任意) — このタスクで触る予定のファイル / dir 宣言。
+    // Hub は assign_task 時点で同 path を別 agent が握っていないか peek し、
+    // `lockConflicts` を response に乗せる (advisory: 拒否はしない、Leader が判断)。
+    let target_paths: Vec<String> = args
+        .get("target_paths")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .map(|s| s.to_string())
+                .collect()
+        })
+        .unwrap_or_default();
     // 旧実装は assignee を一切検証せずに task を作成していた。
     // Claude (LLM) が "Programmer" / "プログラマー" / 存在しない role 名を渡すと、
     // task は作成されるが team_send 通知はゼロ宛先で no-op になり、
@@ -199,6 +212,46 @@ pub async fn team_assign_task(
     let boundary_warning_strs = boundary_report.finding_strings();
     let boundary_warning_message =
         boundary_report.warn_message("task boundary warnings (continuing assign)");
+
+    // Issue #526: target_paths 宣言があれば、現在 hub に登録されている file lock と照合し、
+    // 既に他 agent が握っている path があれば `lockConflicts` として response に同梱する。
+    // `team:role-lint-warning` と並列に `team:file-lock-conflict` event も emit して
+    // Canvas UI の toast 経路に乗せる (advisory: 拒否はしない)。
+    let lock_conflicts = if !target_paths.is_empty() {
+        // assignee 自身が握る path は当然衝突ではないので filter で除外。
+        let assignee_aid_filter = if resolved.len() == 1 {
+            Some(resolved[0].0.as_str())
+        } else {
+            // 複数名宛て (同 role 複数 / "all") の場合は誰の lock かを単純に決められないので
+            // フィルタ無し (= 全 holder を返す。Leader が boundaryWarnings 同様に解釈)。
+            None
+        };
+        hub.peek_file_locks(&ctx.team_id, assignee_aid_filter, &target_paths)
+            .await
+    } else {
+        Vec::new()
+    };
+    if !lock_conflicts.is_empty() {
+        let app = hub.app_handle.lock().await.clone();
+        if let Some(app) = &app {
+            let summary = lock_conflicts
+                .iter()
+                .map(|c| format!("{} held by {} ({})", c.path, c.holder_agent_id, c.holder_role))
+                .collect::<Vec<_>>()
+                .join("; ");
+            let payload = json!({
+                "teamId": ctx.team_id,
+                "source": "assign",
+                "taskId": task_id,
+                "assignee": assignee,
+                "message": format!("タスク #{} の file lock 競合: {}", task_id, summary),
+                "conflicts": lock_conflicts,
+            });
+            if let Err(e) = app.emit("team:file-lock-conflict", payload) {
+                tracing::warn!("emit team:file-lock-conflict failed: {e}");
+            }
+        }
+    }
     // Issue #172: 通知の team_send を await せず fire-and-forget でバックグラウンド spawn する。
     // assignee="all" のとき fan-out で sleep 累積して MCP RPC を秒単位でブロックしていたのを解消。
     // 配信失敗のときも呼び出し側 (Leader) には task 作成結果だけを即返す。
@@ -244,6 +297,7 @@ pub async fn team_assign_task(
         "assignedAt": assigned_at,
         "boundaryWarnings": boundary_warning_strs,
         "boundaryWarningMessage": boundary_warning_message,
+        "lockConflicts": lock_conflicts,
     }))
 }
 

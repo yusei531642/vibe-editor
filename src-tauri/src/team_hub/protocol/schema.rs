@@ -59,12 +59,22 @@ pub(super) fn tool_defs() -> Value {
         },
         {
             "name": "team_assign_task",
-            "description": "Assign a task to a role.",
+            "description":
+                "Assign a task to a role. Optionally pass `target_paths: string[]` declaring the files this task plans to edit; \
+                 the Hub then peeks the advisory file lock table and returns any active holders in `lockConflicts`. \
+                 Lock conflicts do NOT block the assignment (advisory) — the Leader / assignee should reconcile manually. \
+                 Returns `{ success: true, taskId: number, assignedAt: string, boundaryWarnings: string[], boundaryWarningMessage: string|null, lockConflicts: LockConflict[] }`. \
+                 `LockConflict` shape: `{ path, holderAgentId, holderRole, acquiredAt }`.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "assignee": { "type": "string" },
-                    "description": { "type": "string" }
+                    "description": { "type": "string" },
+                    "target_paths": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional: file paths this task is expected to edit. Used to surface advisory file-lock conflicts in the response."
+                    }
                 },
                 "required": ["assignee", "description"]
             }
@@ -222,6 +232,41 @@ pub(super) fn tool_defs() -> Value {
                 "List all available role profiles (id, label, permissions). Includes both built-in (leader / hr) \
                  and any dynamic roles previously created with team_recruit.",
             "inputSchema": { "type": "object", "properties": {} }
+        },
+        {
+            "name": "team_lock_files",
+            "description":
+                "Acquire an advisory lock on one or more file paths within this team. Call this BEFORE editing files \
+                 (Edit / Write / MultiEdit) so other team members can detect conflicts. Returns `{ success: true, locked: string[], conflicts: LockConflict[] }` \
+                 with **partial success** semantics: paths already held by another agent are returned in `conflicts` and the rest in `locked`. \
+                 Locks are in-memory and cleared on Hub restart or `team_dismiss`. Re-locking your own paths is idempotent.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "paths": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Repository-relative or absolute paths to lock. Limit: 64 entries per call, 4 KiB per path."
+                    }
+                },
+                "required": ["paths"]
+            }
+        },
+        {
+            "name": "team_unlock_files",
+            "description":
+                "Release advisory locks previously acquired by this agent. Returns `{ success: true, unlocked: string[] }` listing only paths the caller actually held; paths held by other agents are silently skipped. Always call this AFTER your edits finish, including the failure path.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "paths": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Paths to release. Same limits as team_lock_files (64 / 4 KiB)."
+                    }
+                },
+                "required": ["paths"]
+            }
         }
     ])
 }

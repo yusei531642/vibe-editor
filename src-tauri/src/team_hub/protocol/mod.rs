@@ -39,8 +39,8 @@ use schema::tool_defs;
 use serde_json::{json, Value};
 use tools::{
     team_ack_handoff, team_assign_task, team_create_leader, team_diagnostics, team_dismiss,
-    team_get_tasks, team_info, team_list_role_profiles, team_read, team_recruit, team_send,
-    team_status, team_switch_leader, team_update_task,
+    team_get_tasks, team_info, team_list_role_profiles, team_lock_files, team_read, team_recruit,
+    team_send, team_status, team_switch_leader, team_unlock_files, team_update_task,
 };
 
 pub async fn handle(hub: &TeamHub, ctx: &CallContext, req: &Value) -> Option<Value> {
@@ -143,6 +143,9 @@ async fn dispatch_tool(
         "team_dismiss" => team_dismiss(hub, ctx, args).await,
         "team_list_role_profiles" => team_list_role_profiles(hub, ctx).await,
         "team_diagnostics" => team_diagnostics(hub, ctx).await,
+        // Issue #526: vibe-team の advisory file lock。
+        "team_lock_files" => team_lock_files(hub, ctx, args).await,
+        "team_unlock_files" => team_unlock_files(hub, ctx, args).await,
         other => Err(format!("Unknown tool: {other}")),
     }
 }
