@@ -20,6 +20,12 @@ pub mod team_state;
 pub mod terminal;
 pub mod vibe_team_skill;
 
+/// Issue #494: `commands/*.rs` の integration test を集約する test-only module。
+/// Phase 1/2 で固まった IPC 境界 (settings load/save / git status/diff / sessions list /
+/// atomic_write) を tempdir + fixture で end-to-end に走らせる。
+#[cfg(test)]
+mod tests;
+
 #[tauri::command]
 pub fn ping() -> &'static str {
     "pong"

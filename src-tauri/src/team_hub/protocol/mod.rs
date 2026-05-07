@@ -17,7 +17,10 @@
 mod consts;
 mod dynamic_role;
 mod helpers;
-mod permissions;
+// Issue #494: `team_hub/tests/permissions.rs` の matrix integration test から
+// `check_permission` / `Permission` を参照するため、`team_hub` サブツリー全体に公開する。
+// 旧 `mod permissions;` は protocol 内でのみ可視で、外部テストからアクセスできなかった。
+pub(in crate::team_hub) mod permissions;
 mod schema;
 mod tools;
 

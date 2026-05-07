@@ -143,7 +143,10 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
 ///   - message_count の「正確な数」は UI で "500+" 等と見せれば十分なので、
 ///     先頭 HEAD_LIMIT_LINES = 2000 行まで数え、超えたら上限値を返す
 ///     (正確な行数は fs::metadata の行数相当だと OS 依存で取れないので割り切る)
-async fn read_jsonl_summary(path: &std::path::Path) -> (String, u32, Option<String>) {
+///
+/// Issue #494: integration test (`commands/tests/sessions.rs`) から fixture jsonl に対して
+/// 直接呼べるよう `pub(crate)` で expose。Tauri command 経由ではないので AppHandle / State 不要。
+pub(crate) async fn read_jsonl_summary(path: &std::path::Path) -> (String, u32, Option<String>) {
     const HEAD_LIMIT_LINES: u32 = 2000;
     let Ok(f) = tokio::fs::File::open(path).await else {
         return (String::new(), 0, None);
