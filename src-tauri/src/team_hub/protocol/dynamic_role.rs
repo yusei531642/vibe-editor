@@ -12,7 +12,7 @@ use super::consts::{
     MAX_DYNAMIC_DESCRIPTION_LEN, MAX_DYNAMIC_INSTRUCTIONS_LEN, MAX_DYNAMIC_LABEL_LEN,
     MAX_DYNAMIC_ROLES_PER_TEAM,
 };
-use super::permissions::caller_has_permission;
+use super::permissions::{check_permission, Permission};
 
 /// 動的ロール定義 1 件を検証 + 登録。team_recruit の role_definition / team_create_role の両方から使う。
 /// 既存 builtin (summary 上) と被る role_id は拒否、上限超過も拒否、長さ上限も拒否する。
@@ -26,12 +26,8 @@ pub(super) async fn validate_and_register_dynamic_role(
     instructions_ja: Option<&str>,
 ) -> Result<DynamicRole, String> {
     // 権限チェック (Leader だけが動的ロールを作れる)
-    if !caller_has_permission(hub, &ctx.role, "canCreateRoleProfile").await {
-        return Err(format!(
-            "permission denied: role '{}' cannot create role profiles",
-            ctx.role
-        ));
-    }
+    check_permission(&ctx.role, Permission::CreateRoleProfile)
+        .map_err(|e| e.into_message("create role profiles"))?;
     // バリデーション: id
     let role_id = role_id.trim();
     if role_id.is_empty() {

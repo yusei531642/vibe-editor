@@ -2,7 +2,6 @@
 //!
 //! Issue #373 Phase 2 で `protocol.rs` から切り出し。
 
-use crate::team_hub::error::RecruitError;
 use crate::team_hub::{CallContext, DynamicRole, TeamHub};
 use serde_json::{json, Value};
 use std::time::Instant;
@@ -12,7 +11,8 @@ use uuid::Uuid;
 use super::super::consts::RECRUIT_ACK_TIMEOUT;
 use super::super::consts::RECRUIT_TIMEOUT;
 use super::super::dynamic_role::validate_and_register_dynamic_role;
-use super::super::permissions::caller_has_permission;
+use super::super::permissions::{check_permission, Permission};
+use super::error::RecruitError;
 
 /// team_recruit: 新メンバーをチームに追加する。Renderer に event::emit でカード生成を依頼し、
 /// その新 agentId が handshake してくるまで oneshot で待機 (timeout 30s)。
@@ -29,12 +29,8 @@ pub async fn team_recruit(
     ctx: &CallContext,
     args: &Value,
 ) -> Result<Value, String> {
-    if !caller_has_permission(hub, &ctx.role, "canRecruit").await {
-        return Err(format!(
-            "permission denied: role '{}' cannot recruit",
-            ctx.role
-        ));
-    }
+    check_permission(&ctx.role, Permission::Recruit)
+        .map_err(|e| e.into_message("recruit"))?;
     // role_id を主引数とする。後方互換のため `role_profile_id` も受け付ける。
     let role_profile_id = args
         .get("role_id")
@@ -249,13 +245,10 @@ pub async fn team_recruit(
                 } else {
                     format!("recruit failed: {reason}")
                 };
-                return Err(RecruitError {
-                    code: "recruit_failed".into(),
-                    message,
-                    phase: Some(phase_str),
-                    elapsed_ms: Some(started.elapsed().as_millis() as u64),
-                }
-                .into_err_string());
+                return Err(RecruitError::new("recruit_failed", message)
+                    .with_phase(phase_str)
+                    .with_elapsed_ms(started.elapsed().as_millis() as u64)
+                    .into_err_string());
             }
             Ok(Err(_)) => {
                 // ack_tx が drop された (renderer 側が pending を resolve せずに崩壊) — 緊急 cancel 扱い
@@ -266,12 +259,12 @@ pub async fn team_recruit(
                         json!({ "newAgentId": new_agent_id, "reason": "ack_dropped" }),
                     );
                 }
-                return Err(RecruitError {
-                    code: "recruit_ack_dropped".into(),
-                    message: "renderer ack channel was dropped before reply".into(),
-                    phase: Some("ack".into()),
-                    elapsed_ms: Some(started.elapsed().as_millis() as u64),
-                }
+                return Err(RecruitError::new(
+                    "recruit_ack_dropped",
+                    "renderer ack channel was dropped before reply",
+                )
+                .with_phase("ack")
+                .with_elapsed_ms(started.elapsed().as_millis() as u64)
                 .into_err_string());
             }
             Err(_) => {
@@ -283,15 +276,15 @@ pub async fn team_recruit(
                         json!({ "newAgentId": new_agent_id, "reason": "ack_timeout" }),
                     );
                 }
-                return Err(RecruitError {
-                    code: "recruit_ack_timeout".into(),
-                    message: format!(
+                return Err(RecruitError::new(
+                    "recruit_ack_timeout",
+                    format!(
                         "renderer did not ack recruit-request within {}s",
                         RECRUIT_ACK_TIMEOUT.as_secs()
                     ),
-                    phase: Some("ack".into()),
-                    elapsed_ms: Some(started.elapsed().as_millis() as u64),
-                }
+                )
+                .with_phase("ack")
+                .with_elapsed_ms(started.elapsed().as_millis() as u64)
                 .into_err_string());
             }
         }
@@ -321,12 +314,12 @@ pub async fn team_recruit(
             // 永久カウントされ、再起動まで採用不能化していた。
             hub.cancel_pending_recruit(&new_agent_id).await;
             // Issue #342 Phase 1: 構造化エラーで返す (cancelled は handshake 直前 cancel 等)
-            Err(RecruitError {
-                code: "recruit_cancelled".into(),
-                message: "recruit cancelled before handshake".into(),
-                phase: Some("handshake".into()),
-                elapsed_ms: Some(started.elapsed().as_millis() as u64),
-            }
+            Err(RecruitError::new(
+                "recruit_cancelled",
+                "recruit cancelled before handshake",
+            )
+            .with_phase("handshake")
+            .with_elapsed_ms(started.elapsed().as_millis() as u64)
             .into_err_string())
         }
         Err(_) => {
@@ -340,15 +333,15 @@ pub async fn team_recruit(
                 );
             }
             // Issue #342 Phase 1: 構造化エラー化
-            Err(RecruitError {
-                code: "recruit_handshake_timeout".into(),
-                message: format!(
+            Err(RecruitError::new(
+                "recruit_handshake_timeout",
+                format!(
                     "agent did not handshake within {}s",
                     RECRUIT_TIMEOUT.as_secs()
                 ),
-                phase: Some("handshake".into()),
-                elapsed_ms: Some(started.elapsed().as_millis() as u64),
-            }
+            )
+            .with_phase("handshake")
+            .with_elapsed_ms(started.elapsed().as_millis() as u64)
             .into_err_string())
         }
     }

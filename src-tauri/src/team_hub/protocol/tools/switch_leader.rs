@@ -9,30 +9,24 @@
 //! 旧 leader カードを「即座に閉じる」と MCP 応答が PTY に届く前に terminal が殺され、
 //! Claude/Codex の最終発話が消える。安全のため emit を **2 秒遅延** させて応答配送猶予を確保する。
 
-use crate::team_hub::error::ToolError;
 use crate::team_hub::{CallContext, TeamHub};
 use serde_json::{json, Value};
 use std::time::Duration;
 use tauri::Emitter;
 
-use super::super::permissions::caller_has_permission;
+use super::super::permissions::{check_permission, Permission};
+use super::error::ToolError;
 
 pub async fn team_switch_leader(
     hub: &TeamHub,
     ctx: &CallContext,
     args: &Value,
 ) -> Result<Value, String> {
-    if !caller_has_permission(hub, &ctx.role, "canRecruit").await {
-        return Err(ToolError {
-            code: "switch_leader_permission_denied".into(),
-            message: format!(
-                "permission denied: role '{}' cannot switch leader",
-                ctx.role
-            ),
-            phase: None,
-            elapsed_ms: None,
-        }
-        .into_err_string());
+    if let Err(e) = check_permission(&ctx.role, Permission::Recruit) {
+        return Err(
+            ToolError::permission_denied("switch_leader", &e.role, "switch leader")
+                .into_err_string(),
+        );
     }
 
     let new_leader_agent_id = args
