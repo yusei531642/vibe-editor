@@ -6,6 +6,7 @@
  */
 import type {
   HandoffReference,
+  InjectFailureReason,
   TeamOrganizationMeta
 } from '../../../../../../types/shared';
 
@@ -40,6 +41,25 @@ export interface AgentPayload {
   organization?: TeamOrganizationMeta;
   /** Issue #359: 本文はファイル保存し、payload には最新 handoff 参照だけ残す。 */
   latestHandoff?: HandoffReference;
+  /**
+   * Issue #511: 直近の `team_send` で **この agent への inject** が失敗したときの記録。
+   * Hub 側 `team:inject_failed` event を `use-team-inject-failed` フックが受けて、
+   * 該当 agent の payload にこのフィールドを書き込む。CardFrame は値が存在するときだけ
+   * warning row + retry button を表示する。retry が成功すると null クリアされる
+   * (= UI から失敗表示が消える)。
+   */
+  lastInjectFailure?: {
+    /** 元 message の id (retry IPC が同じ message を再 inject する用)。 */
+    messageId: number;
+    /** `inject_*` 名前空間の安定 code (例: `inject_session_replaced`)。 */
+    reason: InjectFailureReason;
+    /** RFC3339 失敗時刻。表示用。 */
+    failedAt: string;
+    /** Hub から見た送信元 role (UI tooltip の "誰からの送信か" 表示用)。 */
+    fromRole?: string;
+    /** message body の先頭プレビュー (UI tooltip 用、80 文字切り)。 */
+    preview?: string;
+  };
 }
 
 export type AgentStatus = 'idle' | 'thinking' | 'typing';

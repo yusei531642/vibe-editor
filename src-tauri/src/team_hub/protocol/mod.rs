@@ -14,7 +14,10 @@
 //!
 //! 公開 API は `pub async fn handle()` の 1 つだけ (mod.rs から外部に出る symbol)。
 
-mod consts;
+// Issue #511: `team_hub::inject` (sibling) から `INJECT_*` 定数を参照するため、
+// 旧 `mod consts` (private) を `team_hub` サブツリー全体に公開する。
+// `pub(crate)` まで広げる必要は無く、外部 (commands 等) には依然非可視のまま。
+pub(in crate::team_hub) mod consts;
 mod dynamic_role;
 mod helpers;
 // Issue #519: 動的 instructions の禁止句 lint。recruit 段階で逸脱指示を弾く。

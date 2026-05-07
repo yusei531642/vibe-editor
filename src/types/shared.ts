@@ -646,6 +646,77 @@ export interface TerminalExitInfo {
   signal?: number;
 }
 
+// ---------- TeamHub inject failure (Issue #511) ----------
+
+/**
+ * Issue #511: PTY inject 失敗の reason を機械的に分岐する用の安定 code 名前空間。
+ * Rust 側 `team_hub::inject::InjectError::code()` と完全に一致させる。
+ *
+ * - `inject_no_session`: 該当 agent_id の PTY session が存在しない (1 byte も書いていない)。安全に retry 可。
+ * - `inject_write_initial_failed`: 最初のチャンク write 失敗 (1 byte も書いていない)。安全に retry 可。
+ * - `inject_write_partial`: 途中チャンクで write 失敗 (本文の一部が届いている)。retry すると二重 paste になる可能性あり。
+ * - `inject_session_replaced`: 注入中に同 agent_id の PTY が別 session に置き換わった (本文の一部が旧 PTY に残った可能性)。
+ * - `inject_final_cr_failed`: 全チャンク届いたが末尾 `\r` (送信確定) が失敗。受信側は bracketed-paste 入力欄のまま。
+ * - `inject_task_join_failed`: tokio::task::spawn_blocking が join 失敗 (panic 等、稀)。phase により retry 可否が異なる。
+ */
+export type InjectFailureCode =
+  | 'inject_no_session'
+  | 'inject_write_initial_failed'
+  | 'inject_write_partial'
+  | 'inject_session_replaced'
+  | 'inject_final_cr_failed'
+  | 'inject_task_join_failed';
+
+/**
+ * `team:inject_failed` event payload の `reason` フィールド、および `team_send_retry_inject`
+ * の戻り値 `reasonCode` / `error` の構造化形。
+ */
+export interface InjectFailureReason {
+  code: InjectFailureCode;
+  message: string;
+}
+
+/**
+ * Rust 側 `app.emit("team:inject_failed", payload)` の payload。
+ * Canvas 側 `useTeamInjectFailed` フックがこれを受けて該当 agent の `lastInjectFailure` を更新する。
+ */
+export interface TeamInjectFailedEvent {
+  teamId: string;
+  fromAgentId: string;
+  fromRole: string;
+  toAgentId: string;
+  toRole: string;
+  messageId: number;
+  reasonCode: InjectFailureCode;
+  reasonMessage: string;
+  failedAt: string;
+  /** retry IPC 経由の再失敗かどうか。true なら UI に「retry も失敗」と表示する。 */
+  retried?: boolean;
+}
+
+/**
+ * `window.api.team.retryInject(...)` の引数 (renderer → Rust)。Rust 側 `RetryInjectArgs` と camelCase で一致。
+ */
+export interface RetryInjectArgs {
+  teamId: string;
+  /** Hub 側 `TeamMessage.id` (u32 だが TS は number でカバー)。 */
+  messageId: number;
+  /** 再 inject 対象の agent_id。元 message の resolved_recipient_ids に含まれている必要あり。 */
+  agentId: string;
+}
+
+/**
+ * Rust 側 `RetryInjectResult` の TS 表現。`ok=true` は inject 完了 (delivered_at 入り)、
+ * `ok=false` は再失敗 (`reasonCode` / `error` / `failedAt` 入り)。
+ */
+export interface RetryInjectResult {
+  ok: boolean;
+  error?: string;
+  reasonCode?: InjectFailureCode;
+  deliveredAt?: string;
+  failedAt?: string;
+}
+
 // ---------- Window Effects (Issue #260) ----------
 
 /**
