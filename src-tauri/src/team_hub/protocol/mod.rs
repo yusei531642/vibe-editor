@@ -23,6 +23,8 @@ mod instruction_lint;
 // `check_permission` / `Permission` を参照するため、`team_hub` サブツリー全体に公開する。
 // 旧 `mod permissions;` は protocol 内でのみ可視で、外部テストからアクセスできなかった。
 pub(in crate::team_hub) mod permissions;
+// Issue #508: 動的ロール定義の必須テンプレ + 曖昧名 + Worktree Isolation Rule の validation。
+mod role_template;
 mod schema;
 mod tools;
 

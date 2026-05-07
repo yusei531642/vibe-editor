@@ -10,9 +10,10 @@ use uuid::Uuid;
 
 use super::super::consts::RECRUIT_ACK_TIMEOUT;
 use super::super::consts::RECRUIT_TIMEOUT;
-use super::super::dynamic_role::validate_and_register_dynamic_role;
+use super::super::dynamic_role::{validate_and_register_dynamic_role, DynamicRoleOutcome};
 use super::super::instruction_lint::{lint_all, LintReport};
 use super::super::permissions::{check_permission, Permission};
+use super::super::role_template::TemplateFinding;
 use super::error::RecruitError;
 
 /// team_recruit: 新メンバーをチームに追加する。Renderer に event::emit でカード生成を依頼し、
@@ -108,9 +109,16 @@ pub async fn team_recruit(
     // 動的ロール定義が揃っていれば「設計 + 採用」を 1 ステップで実行。
     // - Leader が「役職を考える」と「採用する」を別ターンで分けると LLM の往復が増えてエラーが増える。
     //   1 コール完結にすることで、Leader の発話オーバーヘッドとエラーリスクを最小化する。
-    let dynamic_role: Option<DynamicRole> = if all_def_fields {
-        Some(
-            validate_and_register_dynamic_role(
+    //
+    // Issue #508: validate_and_register_dynamic_role は内部で必須テンプレ validation を行い、
+    // deny 句があれば構造化エラー (recruit_role_too_vague) を Err で返す。warn は outcome の
+    // template_warnings に乗って戻ってくるので、recruit response に同梱する。
+    let (dynamic_role, template_warnings): (Option<DynamicRole>, Vec<TemplateFinding>) =
+        if all_def_fields {
+            let DynamicRoleOutcome {
+                role,
+                template_warnings,
+            } = validate_and_register_dynamic_role(
                 hub,
                 ctx,
                 &role_profile_id,
@@ -119,11 +127,11 @@ pub async fn team_recruit(
                 &instructions,
                 instructions_ja.as_deref(),
             )
-            .await?,
-        )
-    } else {
-        None
-    };
+            .await?;
+            (Some(role), template_warnings)
+        } else {
+            (None, Vec::new())
+        };
 
     // role profile の検証: builtin (summary) もしくは team スコープの動的ロールに在籍していること。
     let summary = hub.get_role_profile_summary().await;
@@ -328,6 +336,19 @@ pub async fn team_recruit(
                 .map(|f| format!("'{}' ({})", f.phrase, f.category))
                 .collect();
             let lint_warning_message = lint_report.warn_message();
+            // Issue #508: template validation の warn findings も同梱。lint と同じ構造で渡す。
+            let template_warning_strs: Vec<String> = template_warnings
+                .iter()
+                .map(|f| format!("[{}] {}", f.category, f.detail))
+                .collect();
+            let template_warning_message = if template_warnings.is_empty() {
+                None
+            } else {
+                Some(format!(
+                    "dynamic role template warnings (continuing recruit): {}",
+                    template_warning_strs.join("; ")
+                ))
+            };
             Ok(json!({
                 "success": true,
                 "agentId": outcome.agent_id,
@@ -336,6 +357,8 @@ pub async fn team_recruit(
                 "handshakeAt": handshake_at,
                 "lintWarnings": lint_warnings,
                 "lintWarningMessage": lint_warning_message,
+                "templateWarnings": template_warning_strs,
+                "templateWarningMessage": template_warning_message,
             }))
         }
         Ok(Err(_)) => {
