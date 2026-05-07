@@ -230,6 +230,86 @@ git worktree add F:/vive-editor-worktrees/issue-508 -b enhancement/issue-508-dyn
 Set-Location F:/vive-editor-worktrees/issue-508
 ```
 
+## 動的ロール責務境界 lint (Rust 側 role_lint)
+
+> Issue #517: `instruction_lint` (#519) が「禁止句が含まれているか」、`role_template`
+> (#508) が「必須要素が欠けていないか」を見るのに対し、本ルールは **「他の既存メンバーと
+> 責務範囲が重複していないか」** を見る逆責務のモジュール。Leader / HR が同質ロールの
+> 重複を量産するのを `team_recruit` / `team_assign_task` 段階で warn する。
+> `src-tauri/src/team_hub/role_lint.rs` で char trigram の Jaccard 類似度を計算する
+> language-agnostic な実装 (英語 / 日本語混在テキストでも閾値が安定)。
+
+### 設計方針
+
+- **WARN のみ** (DENY しない)。偽陽性で正当な採用 / 割り振りを妨げない方針。
+- recruit / assign 両方で warn が出ても **採用 / 割り当ては成立する**。Leader が response の
+  `boundaryWarnings` / `boundaryWarningMessage` を読んで判断する。renderer 側は同時に
+  `team:role-lint-warning` event を受け、Canvas の toast 通知で Leader / 観察者に通知する。
+- 5 軸 (`investigate / implement / verify / review / integrate`) のどこに偏っているかは
+  Leader の編成判断に任せ、本 lint は「重複の有無」だけを機械的に検出する分担。
+
+### Recruit 時のチェック (`compute_role_overlap`)
+
+- 新規 `team_recruit` で **動的ロール定義を同梱した場合のみ** 評価する (既存 role 再採用は対象外)。
+- 同 team の既存動的ロール群と新ロールの (label + description + instructions) を文字 3-gram に
+  分解し、Jaccard `|A∩B| / |A∪B|` を計算。
+- 閾値 `RECRUIT_OVERLAP_THRESHOLD = 0.45` を超えたペアは `recruit_role_overlap` warn。
+
+| カテゴリ | 条件 |
+|---|---|
+| `vague_keyword` | role_id / label / description / instructions のいずれかに #508 `vague_label` と同じ曖昧パターン (`Support` / `サポート係` / `汎用` / `便利屋` / `何でもやる` 等) **に加えて** `general` / `general purpose` / `miscellaneous` / `なんでも` / `何でも屋` / `万屋` も含む |
+| `recruit_role_overlap` | 既存メンバーとの Jaccard 類似度 ≥ 0.45 (具体的な相手 role_id が `other_role_id` に乗る) |
+
+> #508 の `vague_label` (label のみ検査) に対し、#517 の `vague_keyword` は **role_id / label / description / instructions の全テキスト** を検査する点が異なる。リストは #508 のものを完全継承して `general` 系の英語表記を追加した superset。
+
+### Assign Task 時のチェック (`compute_task_overlap`)
+
+- `team_assign_task(assignee, description)` の description を 3-gram 分解。
+- 同 team の他 worker 全員の (description + instructions) と Jaccard を計算。
+- 閾値 `ASSIGN_OVERLAP_THRESHOLD = 0.30` (description は短くなりがちなので RECRUIT より緩め)。
+- target 以外で閾値超過の worker が居れば「task が target 以外にも重なっている」warn を返す。
+
+| カテゴリ | 条件 |
+|---|---|
+| `assign_task_overlap` | description が target 以外の worker 責務と Jaccard ≥ 0.30 (相手 role_id を `other_role_id` に同梱) |
+
+### 「責務境界」と「Responsibilities (4 軸見出し)」の使い分け
+
+> 用語ゆれ防止のため明示しておく:
+>
+> - **責務 (Responsibilities)** = 1 ロール **内部の** 4 軸見出しの 1 つ。「このロール自身が
+>   何をやるか」を書くセクション (#508 の必須テンプレ参照)。
+> - **責務境界 (role boundary)** = **複数ロール間で** 担当範囲が重ならないこと。本セクションの
+>   lint が見る対象。
+> - 同じ「責務」という日本語が登場するが、前者は **ロール内** 、後者は **ロール間** という
+>   軸の違いがある。Leader が編成を考えるときは両方を意識する。
+
+### Renderer 側の表示
+
+`team:role-lint-warning` event (payload: `{ source: "recruit"|"assign", message, findings, ... }`)
+は `ToastProvider` (`src/renderer/src/lib/toast-context.tsx`) が listen して warning tone の
+toast を 8 秒表示する。Canvas / IDE どちらのモードでも同じ toast 経路に乗る。
+
+> Rust struct field 名は **`boundaryWarnings`** / **`boundaryWarningMessage`**、renderer
+> event 名は **`team:role-lint-warning`** で意図的に分かれている (前者は payload 内の意味的
+> フィールド名、後者は emit 側のモジュール名 prefix `role_lint` を継承した命名慣習)。
+> 後続 PR で UI 側を触る worker は両方の命名を覚えておくこと。
+
+### 採用後チェックでの活かし方 (Leader 行動規約 / 6 番目の補完判断)
+
+`## 役職分担テンプレ (5 軸)` の **「採用前チェック (5 行ルール)」を通過した上で** 、recruit
+レスポンスの `boundaryWarnings` を読んで以下を確認する。**「採用前チェック」5 行ルールは
+#507 で確定済の invariant**なのでそれ自体は変更せず、本 lint は「採用直後 / assign 直後の
+判断軸」として 6 番目の補完位置に置く:
+
+- `boundaryWarnings` が空であること、または含まれていても Leader が「重複は意図的 (例:
+  ペアレビュー目的の二重採用、A/B test の同質ロール 2 名併走)」と判断できること
+- warn が unintended なら役職を `team_dismiss` し、role_id / label / instructions を
+  絞り直してから再 recruit する
+- assign 時の `assign_task_overlap` warn も同様に「target 以外の worker が同じ description を
+  抱えていないか」を Leader が確認する。意図的に複数 worker にまたがる task なら
+  `team_assign_task` を分割するか、**意図的な重複であることを Leader メモで残す**
+
 ## 利用できるツール一覧
 
 | ツール | 用途 |

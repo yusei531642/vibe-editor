@@ -12,6 +12,8 @@ pub mod bridge;
 pub mod error;
 pub mod inject;
 pub mod protocol;
+// Issue #517: 動的ロール同士の責務境界 lint (recruit / assign_task で warning 発火)。
+pub mod role_lint;
 pub mod state;
 
 /// Issue #494: TeamHub 周辺の integration test を集約する test-only module。

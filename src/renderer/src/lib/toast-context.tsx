@@ -11,6 +11,7 @@ import {
 import { X } from 'lucide-react';
 import { useT } from './i18n';
 import { registerToastBridge } from './toast-bridge';
+import { subscribeEvent } from './subscribe-event';
 
 /**
  * グローバルなトースト通知（Undoアクション付き）基盤。
@@ -129,6 +130,20 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
   // 自分の showToast を bridge に register する。Provider 外コードは `bridgedToast()`
   // 経由で同じ表示パスに乗る。
   useEffect(() => registerToastBridge(showToast), [showToast]);
+
+  // Issue #517: Rust TeamHub の `team:role-lint-warning` を購読し、責務境界 lint の
+  // warning (recruit / assign 両方) を warning tone のトーストで可視化する。
+  // 表示時間を長め (8s) にして Leader が読み取りやすくする。
+  useEffect(() => {
+    return subscribeEvent<{ message?: string; source?: string }>(
+      'team:role-lint-warning',
+      (payload) => {
+        const message = payload?.message ?? '';
+        if (!message) return;
+        showToast(message, { tone: 'warning', duration: 8000 });
+      }
+    );
+  }, [showToast]);
 
   return (
     <ToastContext.Provider value={value}>

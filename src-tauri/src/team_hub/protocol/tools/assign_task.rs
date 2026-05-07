@@ -5,12 +5,14 @@
 use crate::team_hub::{CallContext, TeamHub, TeamTask};
 use chrono::Utc;
 use serde_json::{json, Value};
+use tauri::Emitter;
 
 use super::super::consts::{MAX_TASKS_PER_TEAM, SOFT_PAYLOAD_LIMIT};
 use super::super::helpers::resolve_targets;
 use super::super::permissions::{check_permission, Permission};
 use super::error::AssignError;
 use super::send::team_send;
+use crate::team_hub::role_lint::{compute_task_overlap, MemberSnapshot};
 
 pub async fn team_assign_task(
     hub: &TeamHub,
@@ -150,6 +152,53 @@ pub async fn team_assign_task(
     if let Err(e) = hub.persist_team_state(&ctx.team_id).await {
         tracing::warn!("[team_assign_task] persist team-state failed: {e}");
     }
+
+    // Issue #517: 宛先 worker と他 worker の責務範囲が同領域に重なっていれば warn する。
+    // 拒否はせず assign は通す (偽陽性での操作妨害を避ける)。
+    // 同 role 複数名 / "all" / agentId 指定の場合は最初に解決された role_id を target として
+    // 評価する (代表値で十分。複数 role が混じる場合のみ後で拡張)。
+    let target_role_id = resolved
+        .first()
+        .map(|(_, role)| role.clone())
+        .unwrap_or_default();
+    let boundary_report = if !target_role_id.is_empty() {
+        let members: Vec<MemberSnapshot> = hub
+            .get_dynamic_roles(&ctx.team_id)
+            .await
+            .into_iter()
+            .map(|r| MemberSnapshot {
+                role_id: r.id,
+                instructions: r.instructions,
+                description: r.description,
+            })
+            .collect();
+        compute_task_overlap(description, &target_role_id, &members)
+    } else {
+        Default::default()
+    };
+    if !boundary_report.is_empty() {
+        // renderer 側 toast 通知用に event emit
+        let app = hub.app_handle.lock().await.clone();
+        if let Some(app) = &app {
+            let summary = boundary_report
+                .warn_message(&format!("タスク #{} の責務境界 warning", task_id))
+                .unwrap_or_default();
+            let payload = json!({
+                "teamId": ctx.team_id,
+                "source": "assign",
+                "taskId": task_id,
+                "assignee": assignee,
+                "message": summary,
+                "findings": boundary_report.findings,
+            });
+            if let Err(e) = app.emit("team:role-lint-warning", payload) {
+                tracing::warn!("emit team:role-lint-warning (assign) failed: {e}");
+            }
+        }
+    }
+    let boundary_warning_strs = boundary_report.finding_strings();
+    let boundary_warning_message =
+        boundary_report.warn_message("task boundary warnings (continuing assign)");
     // Issue #172: 通知の team_send を await せず fire-and-forget でバックグラウンド spawn する。
     // assignee="all" のとき fan-out で sleep 累積して MCP RPC を秒単位でブロックしていたのを解消。
     // 配信失敗のときも呼び出し側 (Leader) には task 作成結果だけを即返す。
@@ -193,6 +242,8 @@ pub async fn team_assign_task(
         "success": true,
         "taskId": task_id,
         "assignedAt": assigned_at,
+        "boundaryWarnings": boundary_warning_strs,
+        "boundaryWarningMessage": boundary_warning_message,
     }))
 }
 
