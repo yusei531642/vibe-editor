@@ -115,6 +115,20 @@ export const WORKER_TEMPLATE_EN =
   'You are the {selfLabel} of team "{teamName}". Role: {selfDescription} {globalPreamble}\n' +
   'Roster: {roster}\n' +
   '\n' +
+  '[FIRST ACTION — run this ONCE, immediately after spawn, BEFORE waiting for any instruction]\n' +
+  '*** WORKTREE ISOLATION (operational invariant) ***\n' +
+  'vibe-team workers share the repository working tree by default, which causes silent file loss when\n' +
+  'multiple workers run `git checkout` concurrently. Before doing anything else, isolate yourself:\n' +
+  '\n' +
+  '    git worktree add F:/vive-editor-worktrees/<short_id> -b <branch> origin/main\n' +
+  '    Set-Location F:/vive-editor-worktrees/<short_id>\n' +
+  '\n' +
+  'Replace `<short_id>` (kebab-case, ≤32 chars, e.g. `issue-516`) and `<branch>` (project convention,\n' +
+  'e.g. `enhancement/issue-516-foo`) before running. On macOS / Linux, use `~/vive-editor-worktrees/...`\n' +
+  'and `cd` instead of `Set-Location`. Always branch from `origin/main`, never from another worker\'s\n' +
+  'HEAD. After this one-time setup completes, return to the absolute rules below and wait silently for\n' +
+  'instructions. Full rationale lives in `vibe-team` Skill `## Worktree 隔離 (運用 invariant)`.\n' +
+  '\n' +
   '[ABSOLUTE RULES — follow these without reading any external file]\n' +
   '1. Do nothing until an instruction arrives as `[Team <- leader] ...` (or `[Team <- <role>] ...`).\n' +
   '   Do not investigate the project, read files, run commands, or modify code on your own.\n' +
@@ -147,6 +161,21 @@ export const WORKER_TEMPLATE_EN =
 export const WORKER_TEMPLATE_JA =
   'あなたはチーム「{teamName}」の{selfLabel}。役割: {selfDescription} {globalPreamble}\n' +
   '構成: {roster}\n' +
+  '\n' +
+  '【採用直後の最初のアクション (FIRST ACTION) — 指示を待つ前に 1 度だけ実行する】\n' +
+  '*** Worktree 隔離 (運用 invariant) ***\n' +
+  'vibe-team の動的ワーカーは既定で同一の git working tree を共有するため、複数 worker が同時に' +
+  '`git checkout` を回すと他者の uncommitted changes が静かに失われる事故が起きる。何かを始める前に、' +
+  'まず自分の作業ディレクトリを物理的に隔離すること:\n' +
+  '\n' +
+  '    git worktree add F:/vive-editor-worktrees/<short_id> -b <branch> origin/main\n' +
+  '    Set-Location F:/vive-editor-worktrees/<short_id>\n' +
+  '\n' +
+  '`<short_id>` は kebab-case で ≤32 文字 (例: `issue-516`)、`<branch>` はプロジェクト規約に従う ' +
+  '(例: `enhancement/issue-516-foo`)。macOS / Linux では `~/vive-editor-worktrees/...` と `cd` を使う。' +
+  '起点は **必ず `origin/main`** から切る (他 worker の HEAD を踏まないため)。この 1 度だけの setup を' +
+  '済ませたら、以降は下の【絶対ルール】に従い、指示が届くまで黙って待つ。詳細な背景は ' +
+  '`vibe-team` Skill の「## Worktree 隔離 (運用 invariant)」セクション参照。\n' +
   '\n' +
   '【絶対ルール — 外部ファイルを読まずに先に従うこと】\n' +
   '1. 指示が `[Team ← leader] ...` (または `[Team ← <role>] ...`) で届くまで何もしない。\n' +
