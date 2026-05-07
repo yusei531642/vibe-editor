@@ -77,6 +77,12 @@ pub struct MemberDiagnostics {
     pub current_status: Option<String>,
     /// Issue #409: `current_status` を更新した最終時刻 (RFC3339)。
     pub last_status_at: Option<String>,
+    /// Issue #524: PTY から最後に出力 byte が流れた時刻 (RFC3339)。
+    /// agent process が「ハングしているか / 単に待機中か」を Leader が判定する物理シグナルとして使う。
+    /// `team_status` の自己申告と乖離した場合 (例: status は "running tests" だが PTY 出力が 5 分間無い)
+    /// に diagnostics 側で `autoStale: true` を立てる元データ。
+    /// 大量出力で hub の lock 競合を避けるため、PTY batcher が 1 秒間隔で dedup して update する。
+    pub last_pty_output_at: Option<String>,
 }
 
 /// Issue #342 Phase 3 (3.11): tracing-appender が書き出すログファイルの絶対パスを

@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
+use super::super::consts::STATUS_STALE_THRESHOLD_SECS;
 use super::super::helpers::message_is_for_me;
 use super::super::permissions::{check_permission, Permission};
 
@@ -80,6 +81,31 @@ fn build_member_diagnostics_row(
 ) -> Value {
     let pending = pending_inbox_summary(messages, agent_id, role, now);
     let pending_count = pending.ids.len();
+
+    // Issue #524: 自己申告 (`team_status`) と物理シグナル (PTY 出力) の age を計算。
+    // age が無い (= 一度も観測されていない) ケースは `None` のまま JSON `null` として返す。
+    let last_status_age_ms = diagnostics
+        .last_status_at
+        .as_deref()
+        .and_then(parse_rfc3339_utc)
+        .map(|t| (now - t).num_milliseconds().max(0));
+    let last_pty_activity_age_ms = diagnostics
+        .last_pty_output_at
+        .as_deref()
+        .and_then(parse_rfc3339_utc)
+        .map(|t| (now - t).num_milliseconds().max(0));
+
+    // `autoStale` の意味的定義:
+    //   - 自己申告が無い / 古い (`last_status_at` が None または age が threshold 超過)
+    //   - **かつ** PTY も物理的に動いていない (`last_pty_output_at` の age が threshold 超過か None)
+    // PTY が直近に活動している場合は「動いてはいるが status 申告だけ古い」だけなので
+    // `autoStale: false` を維持する (= Leader が脅威認識を起こさない)。これにより、
+    // 「team_status は忘れがちだが実は cargo build を回している worker」を誤って退場させない。
+    let stale_threshold_ms: i64 = (STATUS_STALE_THRESHOLD_SECS as i64) * 1000;
+    let status_is_stale = last_status_age_ms.is_none_or(|s| s >= stale_threshold_ms);
+    let pty_is_recently_active = last_pty_activity_age_ms.is_some_and(|p| p < stale_threshold_ms);
+    let auto_stale = status_is_stale && !pty_is_recently_active;
+
     json!({
         "agentId": agent_id,
         "role": role,
@@ -100,6 +126,12 @@ fn build_member_diagnostics_row(
         "stalledInbound": pending.stalled,
         "currentStatus": diagnostics.current_status,
         "lastStatusAt": diagnostics.last_status_at,
+        // Issue #524: PTY 出力アクティビティ + staleness 自動判定
+        "lastPtyOutputAt": diagnostics.last_pty_output_at,
+        "lastStatusAgeMs": last_status_age_ms,
+        "lastPtyActivityAgeMs": last_pty_activity_age_ms,
+        "autoStale": auto_stale,
+        "stalenessThresholdMs": stale_threshold_ms,
     })
 }
 

@@ -3,7 +3,7 @@
 // 旧 ipc/terminal.ts の `pty.spawn(...)` 部分を移植。
 // portable-pty + tokio + tauri::Emitter で同等機能を再現。
 
-use crate::pty::batcher::spawn_batcher;
+use crate::pty::batcher::{spawn_batcher, PtyOutputObserver};
 use crate::pty::scrollback::{
     scrollback_to_string, Scrollback, WriteBudget, MAX_TERMINAL_WRITE_BYTES_PER_CALL,
     MAX_TERMINAL_WRITE_BYTES_PER_SEC, TERMINAL_WRITE_WINDOW,
@@ -14,9 +14,9 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
 #[derive(Serialize, Clone)]
@@ -390,7 +390,54 @@ pub fn spawn_session(
     // Issue #285 follow-up: scrollback リングバッファ。batcher と SessionHandle で共有。
     let scrollback = crate::pty::scrollback::new_scrollback();
 
-    spawn_batcher(app.clone(), data_event, rx, scrollback.clone());
+    // Issue #524: agent カードに紐付く PTY のみ、出力 batch flush ごとに TeamHub の
+    // `member_diagnostics[agent_id].last_pty_output_at` を update する observer を渡す。
+    // ターミナルタブ等の agent_id 無し PTY では None で no-op。
+    //
+    // closure 内 dedup: 1 秒間隔でしか hub.state lock を取らない。flush は最短 16ms 間隔
+    // (FLUSH_INTERVAL_MS) で起こり得るので、生の flush ごとに lock 取得すると `inject` /
+    // `team_send` 等の MCP tool と競合して latency 悪化を招く。
+    let on_output: Option<PtyOutputObserver> = opts.agent_id.as_ref().map(|aid| {
+        let aid = aid.clone();
+        let app_for_obs = app.clone();
+        let last_update: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
+        Arc::new(move || {
+            // dedup: 1 秒以内の連続 flush は no-op
+            {
+                let now = Instant::now();
+                let mut guard = match last_update.try_lock() {
+                    Ok(g) => g,
+                    // 別 worker が ちょうど update 中なら今回はスキップ (1s 後に拾える)
+                    Err(_) => return,
+                };
+                match *guard {
+                    Some(prev) if now.duration_since(prev) < Duration::from_secs(1) => return,
+                    _ => *guard = Some(now),
+                }
+            }
+            // hub.state.lock() は async なので tokio task に逃がす (flush は同期 callback)
+            let aid = aid.clone();
+            let app = app_for_obs.clone();
+            tauri::async_runtime::spawn(async move {
+                let state = match app.try_state::<crate::state::AppState>() {
+                    Some(s) => s,
+                    None => {
+                        tracing::trace!(
+                            "[pty-observer] AppState not available; skipping last_pty_output_at update"
+                        );
+                        return;
+                    }
+                };
+                let hub = state.team_hub.clone();
+                let now_iso = chrono::Utc::now().to_rfc3339();
+                let mut s = hub.state.lock().await;
+                let diag = s.member_diagnostics.entry(aid).or_default();
+                diag.last_pty_output_at = Some(now_iso);
+            });
+        }) as PtyOutputObserver
+    });
+
+    spawn_batcher(app.clone(), data_event, rx, scrollback.clone(), on_output);
 
     // exit watcher (blocking child.wait → emit exit event)
     // Issue #152: child.wait() の後に registry からも remove して、孤立 entry が
