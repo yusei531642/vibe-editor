@@ -1693,6 +1693,20 @@ body.is-resizing * {
   background: var(--fg) !important;
 }
 
+/* Issue #496: IDE モードのターミナルでも xterm v6 の custom scrollbar を「常時表示」にする。
+   xterm の SmoothScrollableElement は `vertical: ScrollbarVisibility.Auto` で生成され、
+   JS が `.visible` / `.invisible` クラスを切替えて opacity / pointer-events を絞るため、
+   hover で消えて掴めない症状が発生する (Canvas 側は Issue #272 v4 で同等対策済み)。
+   `.terminal-pane .terminal-view` スコープに限定して IDE のターミナル本体だけ常時表示にし、
+   Canvas (`.react-flow__node` 配下) の既存ルールには触れない。transition も無効化して
+   即時表示にし、フェードによるチラつきを避ける。 */
+.terminal-pane .terminal-view .xterm-scrollable-element > .scrollbar.vertical {
+  opacity: 1 !important;
+  visibility: visible !important;
+  pointer-events: auto !important;
+  transition: none !important;
+}
+
 /* Glass テーマ時は xterm を透過させて親の backdrop-filter を活かす (Issue #89)。
    `.xterm-viewport` の透過は Issue #365 の修正で全テーマ共通になったため、ここでは
    `.terminal-view` の solid 背景のみを打ち消す。 */
