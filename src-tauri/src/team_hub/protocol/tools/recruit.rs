@@ -15,6 +15,7 @@ use super::super::instruction_lint::{lint_all, LintReport};
 use super::super::permissions::{check_permission, Permission};
 use super::super::role_template::TemplateFinding;
 use super::error::RecruitError;
+use crate::team_hub::role_lint::{compute_role_overlap, RoleSnapshot};
 
 /// team_recruit: 新メンバーをチームに追加する。Renderer に event::emit でカード生成を依頼し、
 /// その新 agentId が handshake してくるまで oneshot で待機 (timeout 30s)。
@@ -132,6 +133,55 @@ pub async fn team_recruit(
         } else {
             (None, Vec::new())
         };
+
+    // Issue #517: 採用時の責務境界 lint。新規動的ロール登録時のみ実行 (既存 role 再採用は対象外)。
+    // 同 team の既存 dynamic role 群との Jaccard 類似度を計算し、閾値超過なら warn を返す。
+    // 拒否はせず recruit を続行する (偽陽性での操作妨害を避けるため)。
+    let boundary_report = if let Some(d) = &dynamic_role {
+        let new_snapshot = RoleSnapshot {
+            role_id: d.id.clone(),
+            label: d.label.clone(),
+            description: d.description.clone(),
+            instructions: d.instructions.clone(),
+        };
+        // 同 team の既存動的ロールを snapshot 化 (validate_and_register が register 済なので
+        // new_snapshot 自体もこの list に含まれている可能性がある — compute_role_overlap が
+        // role_id 一致で skip するので二重カウントはしない)。
+        let existing: Vec<RoleSnapshot> = hub
+            .get_dynamic_roles(&ctx.team_id)
+            .await
+            .into_iter()
+            .map(|r| RoleSnapshot {
+                role_id: r.id,
+                label: r.label,
+                description: r.description,
+                instructions: r.instructions,
+            })
+            .collect();
+        compute_role_overlap(&new_snapshot, &existing)
+    } else {
+        Default::default()
+    };
+
+    // 警告があれば renderer に event 通知 (Canvas UI で toast 表示)。
+    if !boundary_report.is_empty() {
+        let app = hub.app_handle.lock().await.clone();
+        if let Some(app) = &app {
+            let summary = boundary_report
+                .warn_message("採用時の責務境界 warning")
+                .unwrap_or_default();
+            let payload = json!({
+                "teamId": ctx.team_id,
+                "source": "recruit",
+                "roleId": role_profile_id,
+                "message": summary,
+                "findings": boundary_report.findings,
+            });
+            if let Err(e) = app.emit("team:role-lint-warning", payload) {
+                tracing::warn!("emit team:role-lint-warning failed: {e}");
+            }
+        }
+    }
 
     // role profile の検証: builtin (summary) もしくは team スコープの動的ロールに在籍していること。
     let summary = hub.get_role_profile_summary().await;
@@ -349,6 +399,10 @@ pub async fn team_recruit(
                     template_warning_strs.join("; ")
                 ))
             };
+            // Issue #517: 責務境界 lint の warn findings も同梱。
+            let boundary_warning_strs = boundary_report.finding_strings();
+            let boundary_warning_message =
+                boundary_report.warn_message("role boundary warnings (continuing recruit)");
             Ok(json!({
                 "success": true,
                 "agentId": outcome.agent_id,
@@ -359,6 +413,8 @@ pub async fn team_recruit(
                 "lintWarningMessage": lint_warning_message,
                 "templateWarnings": template_warning_strs,
                 "templateWarningMessage": template_warning_message,
+                "boundaryWarnings": boundary_warning_strs,
+                "boundaryWarningMessage": boundary_warning_message,
             }))
         }
         Ok(Err(_)) => {
