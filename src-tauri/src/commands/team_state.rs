@@ -40,6 +40,31 @@ pub struct TeamTaskSnapshot {
     pub required_human_decision: Option<String>,
 }
 
+/// Issue #516: 統合フェーズで Leader が複数 worker の成果を突き合わせるための構造化フィールド。
+///
+/// 既存の単発フィールド (`summary` / `next_action` / `artifact_path`) と重複しても構わない設計で、
+/// 後方互換性のため全フィールドが optional。Leader が integrate するときに findings/proposal/risks
+/// を横断比較しやすくすることが目的。
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerReportPayload {
+    /// 調査・実装で得られた発見・観察結果 (markdown / プレーンテキスト)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub findings: Option<String>,
+    /// 採用方針の推奨 (Leader 向けの提案)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposal: Option<String>,
+    /// リスク・既知の懸念事項 (Leader が他 worker と突き合わせる)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub risks: Vec<String>,
+    /// 次にやるべき具体的な行動 (top-level next_action と重複可)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_action: Option<String>,
+    /// 複数の生成物パス (top-level artifact_path より柔軟)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifacts: Vec<String>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkerReportSnapshot {
@@ -56,6 +81,9 @@ pub struct WorkerReportSnapshot {
     pub next_action: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifact_path: Option<String>,
+    /// Issue #516: 構造化 report_payload (integrator が複数 worker の成果を突き合わせるため)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<WorkerReportPayload>,
     pub created_at: String,
 }
 

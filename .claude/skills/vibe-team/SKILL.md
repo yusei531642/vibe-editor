@@ -181,6 +181,45 @@ Leader が `team_recruit` を始める前に、必ず以下の 5 軸のうち **
 
 このチェックを通してから `team_recruit` を実行する。実装途中で軸の偏りが顕在化したら、その時点で 1 から再評価して `team_dismiss` / 追加 recruit で調整する。
 
+## 統合フェーズ (Leader が最後に通す 4 ステップ)
+
+5 軸の最終段「**統合 (integrate)**」は Leader (もしくは Leader が任命した integrator ロール) が責任を持って通す。複数 worker の成果が散逸しないよう、必ず以下 4 ステップを順に踏む。
+
+### Step 1: 収集 (gather)
+
+- すべての担当 worker から **構造化 report** を吸い上げる。
+- 各 worker は `team_update_task(task_id, "done", { ..., report_payload: { findings, proposal, risks, next_action, artifacts } })` で構造化レポートを返す (Issue #516)。
+  - `findings` — 調査・実装で得られた発見 (1〜数段落の markdown)
+  - `proposal` — 採用方針の推奨 (1 行で良い)
+  - `risks` — リスク・既知の懸念事項のリスト
+  - `next_action` — 次の handoff 先の作業 (top-level `next_action` と重複可)
+  - `artifacts` — 生成物のパス配列 (PR 番号 / ファイル / 計測結果 JSON 等)
+- 収集の起点は `team_get_tasks()` と Rust 側 `team-state/<project>/<team_id>.json` の `worker_reports[]`。Leader はチャット履歴ではなくこれらの構造化データを **唯一の正** とする。
+
+### Step 2: 矛盾抽出 (diff)
+
+- 複数 report を **軸ごとに横並び** にして読む (findings / proposal / risks / artifacts)。
+- 矛盾しやすい典型パターン:
+  - **proposal の対立** — 「memoize で解決」vs「アーキテクチャ作り直し」
+  - **risks の盲点** — A の findings に出ているリスクが B では未言及
+  - **artifacts のスコープ食い違い** — 同じファイルを 2 名以上が独立に変更して衝突
+- 矛盾が見つかったら、Leader はその 2〜3 名に `team_send` で **相互に共有** する (`[diff: A の proposal vs B の proposal]` と明示)。1 名に「他者の findings を読んで再評価して」と依頼してもよい。
+
+### Step 3: 優先度判定 (prioritize)
+
+- 残った提案を以下の 3 軸で優先度づけする:
+  1. **ユーザー要求への直接性** — 当初の指示にどれだけ直接答えているか
+  2. **リスクの残量** — risks が解消されているか / 受容可能か
+  3. **コスト** — 実装工数 / レビュー工数 / マージ後の保守負担
+- 同点なら「2. リスク残量が小さい方」を優先する。
+
+### Step 4: 採用方針 (decide & execute)
+
+- 採用する proposal を 1 つに確定し、`team_send('leader→all', "採用方針: ... (理由 1 行)")` で全員に通達する。
+- 採用された worker (もしくは integrator) が単一の PR にまとめて push する。**複数 worker の小 PR を並列に出さない** — bot レビューと merge が直列になり統合判断が崩れる。
+- PR 本文の `## Summary` には Step 2 で見つかった主要な矛盾と Step 4 の採用根拠を 2〜3 行で残す。後から「なぜこの選択をしたか」が辿れるようにする。
+- 統合専任の `integrator` ロールを使う場合のサンプル instructions は `src/renderer/src/lib/role-profiles-builtin.ts` の `INTEGRATOR_TEMPLATE_INSTRUCTIONS_JA` / `_EN` を参照 (`team_recruit({role_id:"integrator", instructions: ...})` でそのまま使える)。
+
 ## 名前空間 (vibe-editor 独自)
 
 - 環境変数: `VIBE_TEAM_*` / `VIBE_AGENT_ID`

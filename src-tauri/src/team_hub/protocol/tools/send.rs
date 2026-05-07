@@ -174,6 +174,7 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
                 blocked_reason: None,
                 next_action: None,
                 artifact_path: None,
+                payload: None,
                 created_at: timestamp.clone(),
             });
         while team.worker_reports.len() > 50 {

@@ -21,6 +21,61 @@ fn optional_bool(args: &Value, snake: &str, camel: &str) -> Option<bool> {
         .and_then(|v| v.as_bool())
 }
 
+/// Issue #516: `report_payload` をネスト JSON / フラット object どちらでも受けてパースする。
+fn optional_report_payload(
+    args: &Value,
+) -> Option<crate::commands::team_state::WorkerReportPayload> {
+    let payload = args
+        .get("report_payload")
+        .or_else(|| args.get("reportPayload"))?;
+    if !payload.is_object() {
+        return None;
+    }
+    let pick_string = |snake: &str, camel: &str| -> Option<String> {
+        payload
+            .get(snake)
+            .or_else(|| payload.get(camel))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(ToOwned::to_owned)
+    };
+    let pick_string_array = |key: &str| -> Vec<String> {
+        payload
+            .get(key)
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(ToOwned::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default()
+    };
+    let findings = pick_string("findings", "findings");
+    let proposal = pick_string("proposal", "proposal");
+    let next_action = pick_string("next_action", "nextAction");
+    let risks = pick_string_array("risks");
+    let artifacts = pick_string_array("artifacts");
+    let all_empty = findings.is_none()
+        && proposal.is_none()
+        && next_action.is_none()
+        && risks.is_empty()
+        && artifacts.is_empty();
+    if all_empty {
+        return None;
+    }
+    Some(crate::commands::team_state::WorkerReportPayload {
+        findings,
+        proposal,
+        risks,
+        next_action,
+        artifacts,
+    })
+}
+
 fn looks_like_human_gate(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
     lower.contains("human")
@@ -40,8 +95,19 @@ pub async fn team_update_task(
     let status = args.get("status").and_then(|v| v.as_str()).unwrap_or("");
     let summary = optional_string(args, "summary", "summary");
     let blocked_reason = optional_string(args, "blocked_reason", "blockedReason");
-    let next_action = optional_string(args, "next_action", "nextAction");
-    let artifact_path = optional_string(args, "artifact_path", "artifactPath");
+    let report_payload = optional_report_payload(args);
+    // Issue #516: top-level next_action が無いとき report_payload.next_action を昇格させる。
+    let next_action = optional_string(args, "next_action", "nextAction").or_else(|| {
+        report_payload
+            .as_ref()
+            .and_then(|p| p.next_action.clone())
+    });
+    // Issue #516: top-level artifact_path が無いとき report_payload.artifacts[0] を昇格させる。
+    let artifact_path = optional_string(args, "artifact_path", "artifactPath").or_else(|| {
+        report_payload
+            .as_ref()
+            .and_then(|p| p.artifacts.first().cloned())
+    });
     let required_human_decision =
         optional_string(args, "required_human_decision", "requiredHumanDecision");
     let explicit_human_gate =
@@ -121,6 +187,7 @@ pub async fn team_update_task(
                     blocked_reason: blocked_reason.clone().or(task_blocked_reason),
                     next_action: next_action.clone().or(task_next_action),
                     artifact_path: artifact_path.clone().or(task_artifact_path),
+                    payload: report_payload.clone(),
                     created_at: now_iso.clone(),
                 });
             while team.worker_reports.len() > 50 {
@@ -254,5 +321,154 @@ mod tests {
             team.next_actions.back().map(String::as_str),
             Some("Wait for QA")
         );
+    }
+
+    /// Issue #516: `report_payload` (findings/proposal/risks/next_action/artifacts[]) を渡したとき
+    /// WorkerReportSnapshot.payload に保存され、artifacts[0] が top-level artifact_path に昇格し、
+    /// payload.next_action が top-level next_action に昇格することを確認する。
+    #[tokio::test]
+    async fn update_task_persists_structured_report_payload() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let team_id = "team-516".to_string();
+        {
+            let mut state = hub.state.lock().await;
+            let team = state
+                .teams
+                .entry(team_id.clone())
+                .or_insert_with(TeamInfo::default);
+            team.tasks.push_back(TeamTask {
+                id: 11,
+                assigned_to: "researcher".into(),
+                description: "investigate canvas perf".into(),
+                status: "pending".into(),
+                created_by: "leader".into(),
+                created_at: "2026-05-07T10:00:00Z".into(),
+                updated_at: None,
+                summary: None,
+                blocked_reason: None,
+                next_action: None,
+                artifact_path: None,
+                blocked_by_human_gate: false,
+                required_human_decision: None,
+            });
+        }
+
+        let ctx = CallContext {
+            team_id: team_id.clone(),
+            role: "researcher".into(),
+            agent_id: "vc-r-1".into(),
+        };
+
+        team_update_task(
+            &hub,
+            &ctx,
+            &json!({
+                "task_id": 11,
+                "status": "done",
+                "summary": "Found 3 hot paths in canvas store selectors",
+                "report_payload": {
+                    "findings": "selectorA / selectorB / selectorC are recomputed every frame",
+                    "proposal": "memoize via zustand shallow + add equality fn",
+                    "risks": [
+                        "shallow ではネスト object の差分を取り損ねる可能性",
+                        "memoize の TTL を入れないと stale に読まれる"
+                    ],
+                    "next_action": "実装担当に hand off (selectorA から)",
+                    "artifacts": [
+                        "tasks/issue-516/findings.md",
+                        "tasks/issue-516/profile.json"
+                    ]
+                }
+            }),
+        )
+        .await
+        .expect("team_update_task ok");
+
+        let state = hub.state.lock().await;
+        let team = state.teams.get(&team_id).unwrap();
+        assert_eq!(team.worker_reports.len(), 1);
+        let report = team.worker_reports.back().unwrap();
+        let payload = report
+            .payload
+            .as_ref()
+            .expect("payload should be persisted");
+        assert_eq!(
+            payload.findings.as_deref(),
+            Some("selectorA / selectorB / selectorC are recomputed every frame")
+        );
+        assert_eq!(
+            payload.proposal.as_deref(),
+            Some("memoize via zustand shallow + add equality fn")
+        );
+        assert_eq!(payload.risks.len(), 2);
+        assert_eq!(payload.artifacts.len(), 2);
+        assert_eq!(
+            payload.next_action.as_deref(),
+            Some("実装担当に hand off (selectorA から)")
+        );
+        // top-level next_action / artifact_path への昇格を確認
+        assert_eq!(
+            report.next_action.as_deref(),
+            Some("実装担当に hand off (selectorA から)")
+        );
+        assert_eq!(
+            report.artifact_path.as_deref(),
+            Some("tasks/issue-516/findings.md")
+        );
+        // next_actions queue にも積まれているはず (payload.next_action 昇格経由)
+        assert_eq!(
+            team.next_actions.back().map(String::as_str),
+            Some("実装担当に hand off (selectorA から)")
+        );
+    }
+
+    /// Issue #516: `report_payload` 全フィールドが空 / 未指定なら payload を保存しない (None のまま)。
+    #[tokio::test]
+    async fn update_task_skips_empty_report_payload() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let team_id = "team-516-empty".to_string();
+        {
+            let mut state = hub.state.lock().await;
+            let team = state
+                .teams
+                .entry(team_id.clone())
+                .or_insert_with(TeamInfo::default);
+            team.tasks.push_back(TeamTask {
+                id: 12,
+                assigned_to: "worker".into(),
+                description: "no payload".into(),
+                status: "pending".into(),
+                created_by: "leader".into(),
+                created_at: "2026-05-07T10:00:00Z".into(),
+                updated_at: None,
+                summary: None,
+                blocked_reason: None,
+                next_action: None,
+                artifact_path: None,
+                blocked_by_human_gate: false,
+                required_human_decision: None,
+            });
+        }
+        let ctx = CallContext {
+            team_id: team_id.clone(),
+            role: "worker".into(),
+            agent_id: "vc-w-1".into(),
+        };
+        team_update_task(
+            &hub,
+            &ctx,
+            &json!({
+                "task_id": 12,
+                "status": "done",
+                "summary": "trivial fix",
+                "report_payload": { "risks": [], "artifacts": [] }
+            }),
+        )
+        .await
+        .expect("team_update_task ok");
+        let state = hub.state.lock().await;
+        let team = state.teams.get(&team_id).unwrap();
+        let report = team.worker_reports.back().unwrap();
+        assert!(report.payload.is_none(), "empty payload should not persist");
     }
 }
