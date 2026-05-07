@@ -290,6 +290,29 @@ const ja: Dict = {
   'agentStatus.thinking': '思考中',
   'agentStatus.typing': '応答中',
 
+  // Issue #521: Agent カード 3 行サマリ
+  'agentCard.summary.region': 'エージェントの状態サマリ',
+  'agentCard.summary.noTask': '現在のタスクは未割当',
+  'agentCard.summary.needsLeader': 'Leader の入力待ち',
+  'agentCard.summary.ago.unobserved': '出力はまだ観測されていません',
+  'agentCard.summary.ago.now': '直前に出力',
+  'agentCard.summary.ago.sec': '最終出力から {value} 秒前',
+  'agentCard.summary.ago.min': '最終出力から {value} 分前',
+  'agentCard.summary.ago.hour': '最終出力から {value} 時間前',
+  'agentCard.summary.ago.day': '最終出力から {value} 日前',
+
+  // Issue #521: Canvas 全体サマリ HUD
+  'canvas.hud.summary.label': 'Canvas 全体の状態サマリ',
+  'canvas.hud.summary.active': '進行中',
+  'canvas.hud.summary.active.tooltip': '進行中 — 直近に出力があったエージェントの数',
+  'canvas.hud.summary.blocked': 'Leader 待ち',
+  'canvas.hud.summary.blocked.tooltip':
+    'Leader 待ち — Leader の入力 / handoff ack を待っているエージェントの数',
+  'canvas.hud.summary.stale': '停滞',
+  'canvas.hud.summary.stale.tooltip': '停滞 — 5 分以上出力が無いエージェントの数',
+  'canvas.hud.summary.completed': '完了',
+  'canvas.hud.summary.completed.tooltip': '完了 — handoff ack 済 / 退役済のエージェントの数',
+
   // ---------- Sessions ----------
   'sessions.resume': 'セッション {id} に戻る',
   'sessions.messages': '{count} 件',
@@ -830,6 +853,30 @@ const en: Dict = {
   'agentStatus.idle': 'Idle',
   'agentStatus.thinking': 'Thinking',
   'agentStatus.typing': 'Typing',
+
+  // Issue #521: Agent card 3-line summary
+  'agentCard.summary.region': 'Agent status summary',
+  'agentCard.summary.noTask': 'No task assigned',
+  'agentCard.summary.needsLeader': 'Awaiting leader input',
+  'agentCard.summary.ago.unobserved': 'No output observed yet',
+  'agentCard.summary.ago.now': 'Output just now',
+  'agentCard.summary.ago.sec': 'Last output {value}s ago',
+  'agentCard.summary.ago.min': 'Last output {value}m ago',
+  'agentCard.summary.ago.hour': 'Last output {value}h ago',
+  'agentCard.summary.ago.day': 'Last output {value}d ago',
+
+  // Issue #521: Canvas-wide summary HUD
+  'canvas.hud.summary.label': 'Canvas team summary',
+  'canvas.hud.summary.active': 'Active',
+  'canvas.hud.summary.active.tooltip': 'Active — agents with recent output',
+  'canvas.hud.summary.blocked': 'Awaiting leader',
+  'canvas.hud.summary.blocked.tooltip':
+    'Awaiting leader — agents waiting for leader input or handoff ack',
+  'canvas.hud.summary.stale': 'Stale',
+  'canvas.hud.summary.stale.tooltip': 'Stale — agents with no output for 5+ minutes',
+  'canvas.hud.summary.completed': 'Completed',
+  'canvas.hud.summary.completed.tooltip':
+    'Completed — agents with acked handoff or retired sessions',
 
   // ---------- Sessions ----------
   'sessions.resume': 'Resume session {id}',

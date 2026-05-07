@@ -1,9 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { LayoutGrid, List, Maximize2, Ruler, Users, ZoomIn, ZoomOut } from 'lucide-react';
+import {
+  AlertTriangle,
+  CheckCircle2,
+  CircleDot,
+  Hourglass,
+  LayoutGrid,
+  List,
+  Maximize2,
+  Ruler,
+  Users,
+  ZoomIn,
+  ZoomOut
+} from 'lucide-react';
 import { useReactFlow } from '@xyflow/react';
 import { useT } from '../../lib/i18n';
 import { useCanvasStore, type StageView } from '../../stores/canvas';
-import { useCanvasStageView } from '../../stores/canvas-selectors';
+import { useCanvasNodes, useCanvasStageView } from '../../stores/canvas-selectors';
+import { useAgentActivityStore } from '../../stores/agent-activity';
+import {
+  aggregateTeamSummary,
+  type CardSummary
+} from '../../lib/agent-summary';
 import type { ArrangeGap } from '../../lib/canvas-arrange';
 
 /**
@@ -84,8 +101,87 @@ export function StageHud(): JSX.Element {
     [t]
   );
 
+  // Issue #521: Canvas 全体の状態 (active / blocked / stale / completed) を 1 行で見せる。
+  // 0 件のときは表示しない (HUD が肥大化しない)。集計は agent-activity store + canvas store
+  // を購読して派生する純粋関数 aggregateTeamSummary に委譲。
+  const allNodes = useCanvasNodes();
+  const agentNodes = useMemo(
+    () => allNodes.filter((n) => n.type === 'agent'),
+    [allNodes]
+  );
+  const cardSummariesByCard = useAgentActivityStore((s) => s.byCard);
+  const cardSummaries = useMemo<Record<string, CardSummary>>(() => {
+    const out: Record<string, CardSummary> = {};
+    for (const [cardId, runtime] of Object.entries(cardSummariesByCard)) {
+      if (runtime.summary) out[cardId] = runtime.summary;
+    }
+    return out;
+  }, [cardSummariesByCard]);
+  const teamSummary = useMemo(
+    () => aggregateTeamSummary({ agentNodes, cardSummaries }),
+    [agentNodes, cardSummaries]
+  );
+  const showTeamSummary = teamSummary.total > 0;
+
   return (
-    <div className="tc__hud" role="toolbar" aria-label="Canvas view">
+    <div className="tc__hud glass-surface" role="toolbar" aria-label="Canvas view">
+      {showTeamSummary ? (
+        <>
+          <div
+            className="tc__hud-summary"
+            role="group"
+            aria-label={t('canvas.hud.summary.label')}
+          >
+            <span
+              className="tc__hud-summary-pill tc__hud-summary-pill--active"
+              title={t('canvas.hud.summary.active.tooltip')}
+            >
+              <CircleDot size={11} strokeWidth={2.2} aria-hidden="true" />
+              <span className="tc__hud-summary-num">{teamSummary.active}</span>
+              <span className="tc__hud-summary-text">
+                {t('canvas.hud.summary.active')}
+              </span>
+            </span>
+            <span
+              className={
+                'tc__hud-summary-pill tc__hud-summary-pill--blocked' +
+                (teamSummary.blocked > 0 ? ' is-on' : '')
+              }
+              title={t('canvas.hud.summary.blocked.tooltip')}
+            >
+              <AlertTriangle size={11} strokeWidth={2.2} aria-hidden="true" />
+              <span className="tc__hud-summary-num">{teamSummary.blocked}</span>
+              <span className="tc__hud-summary-text">
+                {t('canvas.hud.summary.blocked')}
+              </span>
+            </span>
+            <span
+              className={
+                'tc__hud-summary-pill tc__hud-summary-pill--stale' +
+                (teamSummary.stale > 0 ? ' is-on' : '')
+              }
+              title={t('canvas.hud.summary.stale.tooltip')}
+            >
+              <Hourglass size={11} strokeWidth={2.2} aria-hidden="true" />
+              <span className="tc__hud-summary-num">{teamSummary.stale}</span>
+              <span className="tc__hud-summary-text">
+                {t('canvas.hud.summary.stale')}
+              </span>
+            </span>
+            <span
+              className="tc__hud-summary-pill tc__hud-summary-pill--completed"
+              title={t('canvas.hud.summary.completed.tooltip')}
+            >
+              <CheckCircle2 size={11} strokeWidth={2.2} aria-hidden="true" />
+              <span className="tc__hud-summary-num">{teamSummary.completed}</span>
+              <span className="tc__hud-summary-text">
+                {t('canvas.hud.summary.completed')}
+              </span>
+            </span>
+          </div>
+          <span className="tc__hud-sep" aria-hidden="true" />
+        </>
+      ) : null}
       {views.map((v) => (
         <button
           key={v.id}

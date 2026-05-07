@@ -22,6 +22,7 @@ import { logs } from './tauri-api/logs';
 import { roleProfiles } from './tauri-api/role-profiles';
 import { sessions } from './tauri-api/sessions';
 import { settings } from './tauri-api/settings';
+import { team } from './tauri-api/team';
 import { teamHistory } from './tauri-api/team-history';
 import { terminal } from './tauri-api/terminal';
 
@@ -40,6 +41,7 @@ export const api = {
   git,
   files,
   sessions,
+  team,
   teamHistory,
   handoffs,
   dialog,
