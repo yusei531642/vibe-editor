@@ -11,6 +11,7 @@ use uuid::Uuid;
 use super::super::consts::RECRUIT_ACK_TIMEOUT;
 use super::super::consts::RECRUIT_TIMEOUT;
 use super::super::dynamic_role::validate_and_register_dynamic_role;
+use super::super::instruction_lint::{lint_all, LintReport};
 use super::super::permissions::{check_permission, Permission};
 use super::error::RecruitError;
 
@@ -83,6 +84,26 @@ pub async fn team_recruit(
             "to define a new role, all of label / description / instructions must be provided".into(),
         );
     }
+
+    // Issue #519: 動的ロール定義の instructions に「報告は不要」「ユーザー確認なしで」等の
+    // 禁止句 (= 絶対ルール上書き / 報告経路切断 / 確認スキップ / 破壊的自走) が含まれていれば
+    // 登録前に弾く。warn 段階のフレーズは登録は通すが lint_warnings として response に同梱する。
+    //
+    // 既存 role_id 再採用 (instructions が空文字) では findings は出ない。
+    let lint_report: LintReport = if all_def_fields {
+        let report = lint_all(&instructions, instructions_ja.as_deref());
+        if report.has_deny() {
+            return Err(RecruitError::new(
+                "recruit_lint_denied",
+                report.deny_message(),
+            )
+            .with_phase("lint")
+            .into_err_string());
+        }
+        report
+    } else {
+        LintReport::default()
+    };
 
     // 動的ロール定義が揃っていれば「設計 + 採用」を 1 ステップで実行。
     // - Leader が「役職を考える」と「採用する」を別ターンで分けると LLM の往復が増えてエラーが増える。
@@ -299,12 +320,22 @@ pub async fn team_recruit(
             let diag = hub.get_member_diagnostics(&outcome.agent_id).await;
             let recruited_at = diag.as_ref().map(|d| d.recruited_at.clone()).unwrap_or_default();
             let handshake_at = diag.and_then(|d| d.last_handshake_at);
+            // Issue #519: warn 段階の lint findings を response に同梱。renderer / Leader が
+            // この警告を読み取り、必要なら Leader 自身が dismiss/再採用で訂正できるようにする。
+            let lint_warnings: Vec<String> = lint_report
+                .warnings()
+                .into_iter()
+                .map(|f| format!("'{}' ({})", f.phrase, f.category))
+                .collect();
+            let lint_warning_message = lint_report.warn_message();
             Ok(json!({
                 "success": true,
                 "agentId": outcome.agent_id,
                 "roleProfileId": outcome.role_profile_id,
                 "recruitedAt": recruited_at,
                 "handshakeAt": handshake_at,
+                "lintWarnings": lint_warnings,
+                "lintWarningMessage": lint_warning_message,
             }))
         }
         Ok(Err(_)) => {
