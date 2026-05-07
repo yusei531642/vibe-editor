@@ -261,7 +261,17 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         targets.iter().map(|(aid, _)| (aid.clone(), None)).collect();
     let mut delivery_status: serde_json::Map<String, Value> = serde_json::Map::new();
     let mut failed_recipients: Vec<Value> = Vec::new();
+    // Issue #509: 「配送 (delivered) と読了 (read) の状態」を機械的に区別できるよう、
+    // delivery_status に加えて pending / read_so_far の正規化リストを返す。
+    //   - pending_recipients: PTY 配達は成功したが、send 時点でまだ `team_read` を呼んでいない
+    //     recipient (= 大半の宛先がここに入る。delivered と同集合だが、用途が「経過時間で
+    //     催促判断する」なので別配列として明示する)。
+    //   - read_so_far_recipients: send 時点で既に read_by に含まれていた agent。送信者自身
+    //     (sender 自身が send 時に self を read_by に push する設計のため、通常 1 件) と、
+    //     稀に「同 agent_id が既に読了印を持っていた稀ケース」を保持する。
+    // どちらも shape `{agentId, role, deliveredAt? | readAt?}` で UI が即時集計できる。
     let mut delivered: Vec<String> = Vec::new();
+    let mut pending_recipients: Vec<Value> = Vec::new();
     while let Some(joined) = join_set.join_next().await {
         if let Ok((target_aid, target_role, result)) = joined {
             match result {
@@ -281,6 +291,13 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
                             "deliveredAt": delivered_at,
                         }),
                     );
+                    // Issue #509: send 直後は read_by に sender 自身しか居ないので、
+                    // delivered な recipient はすべて pending として加えてよい。
+                    pending_recipients.push(json!({
+                        "agentId": target_aid.clone(),
+                        "role": target_role.clone(),
+                        "deliveredAt": delivered_at.clone(),
+                    }));
                     // Issue #378: read_by/read_at は触らない。delivered_to/delivered_at だけを更新する。
                     // (旧実装は inject 成功で recipient まで read_by に入れていたため、worker が実際に
                     //  Enter を確認していない 1 回目の指示も「既読」扱いになり、`team_read({unread_only: true})`
@@ -459,6 +476,16 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         // 失敗 agent_id の正規化済みリスト。UI が「再送候補」を一覧する用途。
         // 成功のみのときは空配列を返す (`null` ではない、JS 側で `.length === 0` で分岐できる)。
         "failedRecipients": Value::Array(failed_recipients),
+        // Issue #509: 「配送 (delivered) と読了 (read) の状態」を区別できるよう、
+        // pending (delivered だが send 時点で未読) と readSoFar (send 時点で既読) を正規化済みリストで返す。
+        //   - pendingRecipients: 送信直後に Leader が「相手が読んだか」を 60s 後に確認するための候補リスト。
+        //     `team_diagnostics.pendingInbox*` と組み合わせて督促判断する。
+        //   - readSoFarRecipients: 送信時点で既読の agent (通常は sender 自身のみ)。caller 側 UI で
+        //     send→read を相関させやすいよう含める (空でも配列は返す)。
+        "pendingRecipients": Value::Array(pending_recipients),
+        "readSoFarRecipients": json!([
+            { "agentId": ctx.agent_id, "role": ctx.role, "readAt": timestamp }
+        ]),
     }))
 }
 

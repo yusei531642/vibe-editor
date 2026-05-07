@@ -770,6 +770,21 @@
 .canvas-agent-card__summary-row--leader svg {
   color: var(--accent-warning, #d97706);
 }
+/* Issue #509: 「配送済みだが team_read で確認していない」 message の row。 */
+/* 通常時は subtle 色だが、60s 超過で `--unread-stalled` クラスが追加されて警告色に切り替わる。 */
+.canvas-agent-card__summary-row--unread {
+  color: var(--fg-subtle);
+}
+.canvas-agent-card__summary-row--unread svg {
+  color: var(--fg-subtle);
+}
+.canvas-agent-card__summary-row--unread-stalled {
+  color: var(--accent-warning, #d97706);
+  font-weight: 600;
+}
+.canvas-agent-card__summary-row--unread-stalled svg {
+  color: var(--accent-warning, #d97706);
+}
 .canvas-agent-card__summary-text {
   flex: 1 1 auto;
   min-width: 0;

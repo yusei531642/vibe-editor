@@ -60,6 +60,19 @@ export interface AgentPayload {
     /** message body の先頭プレビュー (UI tooltip 用、80 文字切り)。 */
     preview?: string;
   };
+  /**
+   * Issue #509: 「PTY に届いたが `team_read` で確認していない」message の数。
+   * Canvas 起動以後に観測した `team:handoff` (= delivered) と `team:inbox_read`
+   * (= read) を集計した event-driven な値で、初期値は 0。
+   * CardFrame の `__summary-row--unread` がこの値を見て badge と「経過秒数」を出す。
+   */
+  unreadInboxCount?: number;
+  /**
+   * Issue #509: 一番古い未読 message が delivered された時刻 (RFC3339)。
+   * 60s 超過で `__summary--alert` に切り替えて警告色にする閾値判定に使う。
+   * `unreadInboxCount === 0` のときは undefined。
+   */
+  oldestUnreadDeliveredAt?: string;
 }
 
 export type AgentStatus = 'idle' | 'thinking' | 'typing';

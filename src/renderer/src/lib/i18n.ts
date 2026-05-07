@@ -294,6 +294,10 @@ const ja: Dict = {
   'injectFailure.retryFailed': '再送信に失敗しました ({reason})',
   'injectFailure.retryError': '再送信中にエラーが発生しました: {detail}',
   'injectFailure.dismiss': '閉じる',
+  // Issue #509: 配送済みだが team_read で確認していない message の表示
+  'inboxUnread.label': '未読 {count} 件 ({ageSec}s 経過)',
+  'inboxUnread.tooltip':
+    'この agent は配送済みのメッセージ {count} 件を {ageSec} 秒間 team_read で確認していません。60s 超過時は督促を検討してください。',
   'agentStatus.idle': '待機中',
   'agentStatus.thinking': '思考中',
   'agentStatus.typing': '応答中',
@@ -866,6 +870,10 @@ const en: Dict = {
   'injectFailure.retryFailed': 'Retry failed ({reason})',
   'injectFailure.retryError': 'Error during retry: {detail}',
   'injectFailure.dismiss': 'Dismiss',
+  // Issue #509: delivered-but-not-read message indicator
+  'inboxUnread.label': '{count} unread ({ageSec}s elapsed)',
+  'inboxUnread.tooltip':
+    'This agent has {count} delivered message(s) that have not been confirmed via team_read for {ageSec} seconds. Consider nudging if it exceeds 60s.',
   'agentStatus.idle': 'Idle',
   'agentStatus.thinking': 'Thinking',
   'agentStatus.typing': 'Typing',

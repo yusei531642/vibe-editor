@@ -5,6 +5,7 @@
 use crate::team_hub::{CallContext, TeamHub};
 use chrono::Utc;
 use serde_json::{json, Value};
+use tauri::Emitter;
 
 use super::super::helpers::message_is_for_me;
 
@@ -18,6 +19,10 @@ pub async fn team_read(
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
     let now_iso = Utc::now().to_rfc3339();
+    // Issue #509: read_by に **新しく** 追加した message id を集める。
+    // (元々 read_by に居る = 既読再 read のケースは inbox_read event で通知しない:
+    //  既読フラグの状態は変わっておらず、UI 側 unread badge も再描画不要なため。)
+    let mut newly_read_ids: Vec<u32> = Vec::new();
     let mut state = hub.state.lock().await;
     let team = state
         .teams
@@ -42,8 +47,10 @@ pub async fn team_read(
         if unread_only && m.read_by.contains(&ctx.agent_id) {
             continue;
         }
-        if !m.read_by.contains(&ctx.agent_id) {
+        let was_unread = !m.read_by.contains(&ctx.agent_id);
+        if was_unread {
             m.read_by.push(ctx.agent_id.clone());
+            newly_read_ids.push(m.id);
         }
         // Issue #342 Phase 3 (3.8): 自分が読んだ時刻を記録。
         // 旧実装では inject 成功で read_at に値が入ることがあり、それを尊重する optional 設計
@@ -72,7 +79,26 @@ pub async fn team_read(
         .member_diagnostics
         .entry(ctx.agent_id.clone())
         .or_default();
-    reader_diag.last_seen_at = Some(now_iso);
+    reader_diag.last_seen_at = Some(now_iso.clone());
+    drop(state);
+    // Issue #509: 「読了」を Canvas 側 UI に live で通知する。
+    // 配送と読了を分離した指標を CardFrame の unread badge に反映する用途。
+    // post-subscribe race は構造的に発生しない (read は send 後にしか来ない)。
+    if !newly_read_ids.is_empty() {
+        let app = hub.app_handle.lock().await.clone();
+        if let Some(app) = app {
+            let payload = json!({
+                "teamId": ctx.team_id,
+                "messageIds": newly_read_ids,
+                "readByAgentId": ctx.agent_id,
+                "readByRole": ctx.role,
+                "readAt": now_iso,
+            });
+            if let Err(e) = app.emit("team:inbox_read", payload) {
+                tracing::warn!("emit team:inbox_read failed: {e}");
+            }
+        }
+    }
     Ok(json!({ "messages": out, "count": count }))
 }
 
