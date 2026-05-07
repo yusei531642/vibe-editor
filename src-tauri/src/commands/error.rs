@@ -1,4 +1,8 @@
 //! Centralized error type for IPC commands.
+//!
+//! Renderer 側 (`src/renderer/src/lib/tauri-api.ts`) は `Err` payload を string として
+//! 受け取り続ける必要があるため、`Serialize` impl は意図的に variant tag を含めず
+//! `message` のみをシリアライズする。新規 variant を追加する際は同じ契約を維持すること。
 use serde::ser::{Serialize, Serializer};
 use std::fmt;
 
