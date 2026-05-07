@@ -785,6 +785,33 @@
 .canvas-agent-card__summary-row--unread-stalled svg {
   color: var(--accent-warning, #d97706);
 }
+
+/* Issue #510: TeamHub diagnostics 由来の health badge (●alive / ◐stale / ○dead).
+ * alive はトーン控えめ (動いている時に視覚負荷を上げない)、stale / dead は彩度を上げる. */
+.canvas-agent-card__summary-row--health {
+  color: var(--fg-subtle);
+}
+.canvas-agent-card__summary-row--health-alive {
+  color: var(--accent-success, var(--accent));
+}
+.canvas-agent-card__summary-row--health-alive svg {
+  color: var(--accent-success, var(--accent));
+}
+.canvas-agent-card__summary-row--health-stale {
+  color: var(--accent-warning, #d97706);
+  font-weight: 600;
+}
+.canvas-agent-card__summary-row--health-stale svg {
+  color: var(--accent-warning, #d97706);
+}
+.canvas-agent-card__summary-row--health-dead {
+  color: var(--accent-danger, #ef4444);
+  font-weight: 700;
+}
+.canvas-agent-card__summary-row--health-dead svg {
+  color: var(--accent-danger, #ef4444);
+}
+
 .canvas-agent-card__summary-text {
   flex: 1 1 auto;
   min-width: 0;
@@ -794,9 +821,10 @@
 }
 
 /* Issue #260 PR-3 互換: density=compact ではサマリ占有を抑え、
- * 1 行目 (タスク) のみ表示する。残り 2 行は折りたたんでカード密度を維持。 */
+ * 1 行目 (タスク) のみ表示する。残り行は折りたたんでカード密度を維持。 */
 [data-density='compact'] .canvas-agent-card__summary-row--clock,
-[data-density='compact'] .canvas-agent-card__summary-row--leader {
+[data-density='compact'] .canvas-agent-card__summary-row--leader,
+[data-density='compact'] .canvas-agent-card__summary-row--health {
   display: none;
 }
 [data-density='compact'] .canvas-agent-card__summary {
@@ -1159,6 +1187,15 @@
 }
 .tc__hud-summary-pill--completed .tc__hud-summary-num {
   color: var(--accent-success, var(--accent));
+}
+/* Issue #510: dead worker count pill。0 件のとき muted、1 件以上で danger 色を強調する。 */
+.tc__hud-summary-pill--dead.is-on {
+  background: color-mix(in srgb, var(--accent-danger, #ef4444) 18%, transparent);
+  border-color: color-mix(in srgb, var(--accent-danger, #ef4444) 35%, transparent);
+}
+.tc__hud-summary-pill--dead.is-on .tc__hud-summary-num,
+.tc__hud-summary-pill--dead.is-on svg {
+  color: var(--accent-danger, #ef4444);
 }
 /* compact 密度ではテキストを折りたたんで数値+アイコンだけ残す。 */
 [data-density='compact'] .tc__hud-summary-text {

@@ -16,8 +16,20 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
-import { AlertTriangle, ClipboardCheck, ClipboardList, Clock, Inbox, RotateCcw } from 'lucide-react';
+import {
+  AlertTriangle,
+  ClipboardCheck,
+  ClipboardList,
+  Clock,
+  Heart,
+  HeartPulse,
+  Inbox,
+  RotateCcw,
+  Skull
+} from 'lucide-react';
 import { useT } from '../../../../lib/i18n';
+import { useTeamHealth } from '../../../../lib/use-team-health';
+import { deriveHealth, type HealthState } from '../../../../lib/agent-health';
 import { useTeamInjectFailed } from '../../../../lib/use-team-inject-failed';
 import { useTeamInboxRead } from '../../../../lib/use-team-inbox-read';
 import { useTeamHandoff } from '../../../../lib/use-team-handoff';
@@ -133,6 +145,41 @@ function formatAgoLabel(
   if (ago === null) return t('agentCard.summary.ago.unobserved');
   if (ago.unit === 'now') return t('agentCard.summary.ago.now');
   return t(`agentCard.summary.ago.${ago.unit}`, { value: ago.value });
+}
+
+/**
+ * Issue #510: 「●alive | ◐stale | ○dead」 + 経過秒/分 + 自己申告ステータスを 1 行に整形する。
+ * - alive: status があれば status を出す。なければ 'alive' のみ。
+ * - stale / dead: 経過時間を強調 ('沈黙 N 分')。
+ */
+function formatHealthLabel(
+  state: HealthState,
+  ageMs: number | null,
+  currentStatus: string | null,
+  t: (key: string, params?: Record<string, string | number>) => string
+): string {
+  const stateLabel = t(`agentCard.summary.health.state.${state}`);
+  if (state === 'alive') {
+    if (currentStatus && currentStatus.trim().length > 0) {
+      const status = currentStatus.length > 32 ? currentStatus.slice(0, 31) + '…' : currentStatus;
+      return `${stateLabel} · ${status}`;
+    }
+    return stateLabel;
+  }
+  if (ageMs === null) return stateLabel;
+  // 沈黙時間: 1 分未満は秒、それ以上は分単位 (停滞は「N 分」が直感的)。
+  const sec = Math.floor(ageMs / 1000);
+  if (sec < 60) {
+    return t('agentCard.summary.health.silent.sec', {
+      state: stateLabel,
+      value: sec
+    });
+  }
+  const min = Math.floor(sec / 60);
+  return t('agentCard.summary.health.silent.min', {
+    state: stateLabel,
+    value: min
+  });
 }
 
 function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
@@ -596,6 +643,15 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   }, [id, summary, publishSummary]);
   const summaryAgoLabel = formatAgoLabel(summary.lastOutputAgo, t);
 
+  // Issue #510: TeamHub diagnostics を 5s poll し、自カードの per-agent 行から
+  // health (alive / stale / dead) と現在 status / pendingInbox を抽出する。
+  // teamId / agentId が両方揃っているカードのみ意味がある (standalone agent は null)。
+  const healthSnapshot = useTeamHealth(payload.teamId ?? null);
+  const healthRow = payload.agentId
+    ? healthSnapshot.byAgentId[payload.agentId] ?? null
+    : null;
+  const health = useMemo(() => deriveHealth(healthRow), [healthRow]);
+
   return (
     <>
       <NodeResizer
@@ -686,6 +742,34 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
               <AlertTriangle size={11} strokeWidth={2} aria-hidden="true" />
               <span className="canvas-agent-card__summary-text">
                 {t('agentCard.summary.needsLeader')}
+              </span>
+            </div>
+          ) : null}
+          {/* Issue #510: 自カードに対応する TeamHub diagnostics 行から health badge を表示する。 */}
+          {/* teamId / agentId が無いスタンドアロンカードでは何も出さない (= state==='unknown' は描画しない)。 */}
+          {payload.agentId && payload.teamId && health.state !== 'unknown' ? (
+            <div
+              className={
+                'canvas-agent-card__summary-row canvas-agent-card__summary-row--health' +
+                ' canvas-agent-card__summary-row--health-' + health.state
+              }
+              role="status"
+              title={
+                t('agentCard.summary.health.tooltip', {
+                  state: t(`agentCard.summary.health.state.${health.state}`),
+                  status: health.currentStatus ?? t('agentCard.summary.health.noStatus')
+                })
+              }
+            >
+              {health.state === 'alive' ? (
+                <Heart size={11} strokeWidth={2.2} aria-hidden="true" />
+              ) : health.state === 'stale' ? (
+                <HeartPulse size={11} strokeWidth={2.2} aria-hidden="true" />
+              ) : (
+                <Skull size={11} strokeWidth={2.2} aria-hidden="true" />
+              )}
+              <span className="canvas-agent-card__summary-text">
+                {formatHealthLabel(health.state, health.ageMs, health.currentStatus, t)}
               </span>
             </div>
           ) : null}

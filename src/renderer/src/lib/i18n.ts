@@ -314,6 +314,16 @@ const ja: Dict = {
   'agentCard.summary.ago.hour': '最終出力から {value} 時間前',
   'agentCard.summary.ago.day': '最終出力から {value} 日前',
 
+  // Issue #510: Agent カード health badge (TeamHub diagnostics 由来)
+  'agentCard.summary.health.state.alive': '稼働中',
+  'agentCard.summary.health.state.stale': '沈黙中',
+  'agentCard.summary.health.state.dead': '応答なし',
+  'agentCard.summary.health.state.unknown': '不明',
+  'agentCard.summary.health.silent.sec': '{state} ({value} 秒沈黙)',
+  'agentCard.summary.health.silent.min': '{state} ({value} 分沈黙)',
+  'agentCard.summary.health.tooltip': 'Health: {state} / 直近自己申告: {status}',
+  'agentCard.summary.health.noStatus': '自己申告なし',
+
   // Issue #521: Canvas 全体サマリ HUD
   'canvas.hud.summary.label': 'Canvas 全体の状態サマリ',
   'canvas.hud.summary.active': '進行中',
@@ -325,6 +335,9 @@ const ja: Dict = {
   'canvas.hud.summary.stale.tooltip': '停滞 — 5 分以上出力が無いエージェントの数',
   'canvas.hud.summary.completed': '完了',
   'canvas.hud.summary.completed.tooltip': '完了 — handoff ack 済 / 退役済のエージェントの数',
+  'canvas.hud.summary.dead': '応答なし',
+  'canvas.hud.summary.dead.tooltip':
+    '応答なし — 15 分以上 PTY 出力なしのエージェントの数 (Hub diagnostics 由来)',
 
   // Issue #522: Team Presets panel
   'preset.title': 'チームプリセット',
@@ -938,6 +951,16 @@ const en: Dict = {
   'agentCard.summary.ago.hour': 'Last output {value}h ago',
   'agentCard.summary.ago.day': 'Last output {value}d ago',
 
+  // Issue #510: Agent card health badge (sourced from TeamHub diagnostics)
+  'agentCard.summary.health.state.alive': 'Alive',
+  'agentCard.summary.health.state.stale': 'Stale',
+  'agentCard.summary.health.state.dead': 'Unresponsive',
+  'agentCard.summary.health.state.unknown': 'Unknown',
+  'agentCard.summary.health.silent.sec': '{state} (silent for {value}s)',
+  'agentCard.summary.health.silent.min': '{state} (silent for {value}m)',
+  'agentCard.summary.health.tooltip': 'Health: {state} · last self-status: {status}',
+  'agentCard.summary.health.noStatus': 'no self-reported status',
+
   // Issue #521: Canvas-wide summary HUD
   'canvas.hud.summary.label': 'Canvas team summary',
   'canvas.hud.summary.active': 'Active',
@@ -950,6 +973,9 @@ const en: Dict = {
   'canvas.hud.summary.completed': 'Completed',
   'canvas.hud.summary.completed.tooltip':
     'Completed — agents with acked handoff or retired sessions',
+  'canvas.hud.summary.dead': 'Unresponsive',
+  'canvas.hud.summary.dead.tooltip':
+    'Unresponsive — agents with no PTY output for 15+ minutes (sourced from hub diagnostics)',
 
   // Issue #522: Team Presets panel
   'preset.title': 'Team Presets',

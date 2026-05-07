@@ -130,6 +130,8 @@ pub fn run() {
             commands::team_history::team_history_save_batch,
             commands::team_history::team_history_delete,
             commands::team_state::team_state_read,
+            // ---- team diagnostics read (Issue #510) ----
+            commands::team_diagnostics::team_diagnostics_read,
             // ---- team inject retry (Issue #511) ----
             commands::team_inject::team_send_retry_inject,
             // ---- team_presets (Issue #522) ----
