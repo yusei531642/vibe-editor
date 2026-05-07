@@ -14,9 +14,9 @@
  *
  * 挙動は元 AgentNodeCard.tsx と完全一致。構造のみ整理。
  */
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
-import { ClipboardCheck } from 'lucide-react';
+import { AlertTriangle, ClipboardCheck, ClipboardList, Clock } from 'lucide-react';
 import { useT } from '../../../../lib/i18n';
 import { useSettings } from '../../../../lib/settings-context';
 import {
@@ -24,6 +24,7 @@ import {
   NODE_MIN_W,
   NODE_MIN_H
 } from '../../../../stores/canvas';
+import { useAgentActivityStore } from '../../../../stores/agent-activity';
 import { useConfirmRemoveCard } from '../../../../lib/use-confirm-remove-card';
 import {
   renderSystemPrompt,
@@ -33,6 +34,10 @@ import { resolveAgentVisual } from '../../../../lib/agent-visual';
 import { parseShellArgs } from '../../../../lib/parse-args';
 import { resolveAgentConfig } from '../../../../lib/agent-resolver';
 import { useToast } from '../../../../lib/toast-context';
+import {
+  deriveCardSummary,
+  type CardSummary
+} from '../../../../lib/agent-summary';
 import type { TerminalViewHandle } from '../../../TerminalView';
 import type {
   HandoffCheckpoint,
@@ -113,6 +118,20 @@ function wrapBracketedPaste(text: string): string {
   return `\x1b[200~${text}\x1b[201~`;
 }
 
+/**
+ * Issue #521: deriveCardSummary が返す `{ unit, value }` を i18n キーに変換する。
+ * unit が 'now' の時は値を埋め込まないキー、それ以外は `{value}` パラメータを渡す。
+ * lastOutputAgo が null (= 起動直後で未観測) のときは「観測なし」のキーへフォールバック。
+ */
+function formatAgoLabel(
+  ago: { unit: 'now' | 'sec' | 'min' | 'hour' | 'day'; value: number } | null,
+  t: (key: string, params?: Record<string, string | number>) => string
+): string {
+  if (ago === null) return t('agentCard.summary.ago.unobserved');
+  if (ago.unit === 'now') return t('agentCard.summary.ago.now');
+  return t(`agentCard.summary.ago.${ago.unit}`, { value: ago.value });
+}
+
 function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const termRef = useRef<TerminalViewHandle | null>(null);
   const { settings } = useSettings();
@@ -133,7 +152,31 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const title = (data?.title as string) ?? visual.label;
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [status, setStatus] = useState<string>('');
-  const [activity, setActivity] = useState<AgentStatus>('idle');
+  const [activity, setActivityState] = useState<AgentStatus>('idle');
+
+  // Issue #521: agent-activity store に書き出して StageHud 側からも観測できるようにする。
+  // CardFrame が unmount されても store にレコードを残さないよう effect で掃除する。
+  const publishActivity = useAgentActivityStore((s) => s.setActivity);
+  const clearActivity = useAgentActivityStore((s) => s.clearCard);
+  // setActivity wrapper: useState 更新 + store 通知を 1 関数にまとめる。
+  // TerminalOverlay は React.Dispatch<SetStateAction<AgentStatus>> を期待するので、
+  // 関数形 updater を素通しできる shape を保つ。
+  const setActivity: React.Dispatch<React.SetStateAction<AgentStatus>> = useCallback(
+    (next) => {
+      setActivityState((prev) => {
+        const resolved =
+          typeof next === 'function'
+            ? (next as (p: AgentStatus) => AgentStatus)(prev)
+            : next;
+        publishActivity(id, resolved, Date.now());
+        return resolved;
+      });
+    },
+    [id, publishActivity]
+  );
+  useEffect(() => {
+    return () => clearActivity(id);
+  }, [id, clearActivity]);
 
   // Issue #23 + カスタムエージェント対応:
   // agent-resolver 経由で built-in (claude/codex) + customAgents のコマンド/引数/cwd を解決する。
@@ -389,6 +432,34 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     [accent, organizationAccent]
   );
 
+  // Issue #521: 3 行サマリ算出 + Canvas 全体集計用に store へ書き戻す。
+  // 経過時間表示を生かすために 15 秒間隔で now を更新する (long-poll は不要)。
+  const lastActivityAt = useAgentActivityStore(
+    (s) => s.byCard[id]?.lastActivityAt ?? null
+  );
+  const publishSummary = useAgentActivityStore((s) => s.setSummary);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNowTick(Date.now()), 15_000);
+    return () => window.clearInterval(t);
+  }, []);
+  const summary = useMemo<CardSummary>(
+    () =>
+      deriveCardSummary({
+        payload,
+        roleProfileId,
+        title,
+        activity,
+        lastActivityAt,
+        now: nowTick
+      }),
+    [payload, roleProfileId, title, activity, lastActivityAt, nowTick]
+  );
+  useEffect(() => {
+    publishSummary(id, summary);
+  }, [id, summary, publishSummary]);
+  const summaryAgoLabel = formatAgoLabel(summary.lastOutputAgo, t);
+
   return (
     <>
       <NodeResizer
@@ -447,6 +518,42 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
             </button>
           </span>
         </header>
+        <div
+          className={
+            'canvas-agent-card__summary' +
+            (summary.needsLeaderInput
+              ? ' canvas-agent-card__summary--alert'
+              : '')
+          }
+          aria-label={t('agentCard.summary.region')}
+        >
+          <div
+            className="canvas-agent-card__summary-row canvas-agent-card__summary-row--task"
+            title={summary.taskTitle || t('agentCard.summary.noTask')}
+          >
+            <ClipboardList size={11} strokeWidth={2} aria-hidden="true" />
+            <span className="canvas-agent-card__summary-text">
+              {summary.taskTitle || t('agentCard.summary.noTask')}
+            </span>
+          </div>
+          <div className="canvas-agent-card__summary-row canvas-agent-card__summary-row--clock">
+            <Clock size={11} strokeWidth={2} aria-hidden="true" />
+            <span className="canvas-agent-card__summary-text">
+              {summaryAgoLabel}
+            </span>
+          </div>
+          {summary.needsLeaderInput ? (
+            <div
+              className="canvas-agent-card__summary-row canvas-agent-card__summary-row--leader"
+              role="status"
+            >
+              <AlertTriangle size={11} strokeWidth={2} aria-hidden="true" />
+              <span className="canvas-agent-card__summary-text">
+                {t('agentCard.summary.needsLeader')}
+              </span>
+            </div>
+          ) : null}
+        </div>
         <TerminalOverlay
           cardId={id}
           termRef={termRef}

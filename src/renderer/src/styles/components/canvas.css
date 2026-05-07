@@ -726,6 +726,71 @@
   color: var(--fg);
 }
 
+/* ----------
+ * Issue #521: 状態 3 行サマリ。
+ *   1 行目: 現在のタスク (ClipboardList)
+ *   2 行目: 最終出力からの経過 (Clock)
+ *   3 行目: needsLeaderInput=true のとき警告 (AlertTriangle, conditional)
+ * 既存 header の右端アクション群を壊さないよう、`<header>` の sibling として置く。
+ * ---------- */
+.canvas-agent-card__summary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px 12px 6px 14px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev, var(--bg-panel)) 70%, transparent);
+  font-size: var(--text-xs, 11px);
+  line-height: 1.35;
+  color: var(--fg-subtle);
+  user-select: none;
+  pointer-events: none; /* 行はクリック対象では無いのでドラッグ抜けを許す */
+}
+.canvas-agent-card__summary--alert {
+  background: color-mix(
+    in srgb,
+    var(--accent-warning, #d97706) 10%,
+    var(--bg-elev, var(--bg-panel)) 90%
+  );
+}
+.canvas-agent-card__summary-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.canvas-agent-card__summary-row--task {
+  color: var(--fg);
+  font-weight: 500;
+}
+.canvas-agent-card__summary-row--leader {
+  color: var(--accent-warning, #d97706);
+  font-weight: 600;
+}
+.canvas-agent-card__summary-row--leader svg {
+  color: var(--accent-warning, #d97706);
+}
+.canvas-agent-card__summary-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Issue #260 PR-3 互換: density=compact ではサマリ占有を抑え、
+ * 1 行目 (タスク) のみ表示する。残り 2 行は折りたたんでカード密度を維持。 */
+[data-density='compact'] .canvas-agent-card__summary-row--clock,
+[data-density='compact'] .canvas-agent-card__summary-row--leader {
+  display: none;
+}
+[data-density='compact'] .canvas-agent-card__summary {
+  padding: 2px 12px 3px 14px;
+}
+
+/* Issue #511 (rust_team_hub_ops 担当) の inject warning 用の予約スロット。
+ * 当該 PR で `__inject-warning` クラスが append される。位置は __summary 直下。 */
+
 .canvas-agent-card__term {
   flex: 1;
   min-height: 0;
@@ -956,6 +1021,64 @@
   height: 16px;
   background: var(--border);
   margin: 0 3px;
+}
+
+/* ----------
+ * Issue #521: HUD 左端の Canvas 全体サマリ (active / blocked / stale / completed)。
+ * 既存 view ボタン群と並ぶピル型バッジ。0 件のときは render 側で非表示。
+ * 視認性を保つため数値を強調、ラベルは muted 色で添える。
+ * ---------- */
+.tc__hud-summary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+}
+.tc__hud-summary-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-elev) 70%, transparent);
+  color: var(--text-mute);
+  border: 1px solid transparent;
+  line-height: 1;
+  white-space: nowrap;
+}
+.tc__hud-summary-num {
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.tc__hud-summary-text {
+  color: var(--text-mute);
+}
+/* 状態別の強調色。0 件のときは無強調 (muted) のまま。 */
+.tc__hud-summary-pill--active .tc__hud-summary-num {
+  color: var(--accent-success, var(--accent));
+}
+.tc__hud-summary-pill--blocked.is-on {
+  background: color-mix(in srgb, var(--accent-warning, #d97706) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent-warning, #d97706) 35%, transparent);
+}
+.tc__hud-summary-pill--blocked.is-on .tc__hud-summary-num,
+.tc__hud-summary-pill--blocked.is-on svg {
+  color: var(--accent-warning, #d97706);
+}
+.tc__hud-summary-pill--stale.is-on {
+  background: color-mix(in srgb, var(--text-mute) 18%, transparent);
+}
+.tc__hud-summary-pill--stale.is-on .tc__hud-summary-num,
+.tc__hud-summary-pill--stale.is-on svg {
+  color: var(--text);
+}
+.tc__hud-summary-pill--completed .tc__hud-summary-num {
+  color: var(--accent-success, var(--accent));
+}
+/* compact 密度ではテキストを折りたたんで数値+アイコンだけ残す。 */
+[data-density='compact'] .tc__hud-summary-text {
+  display: none;
 }
 
 /* Issue #369: arrange popover anchored to HUD */
