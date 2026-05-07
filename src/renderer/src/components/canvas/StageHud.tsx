@@ -69,6 +69,29 @@ export function StageHud(): JSX.Element {
     };
   }, [arrangeOpen]);
 
+  // Issue #522: presets popover も同じく「ボタン + popover」を内包する親 ref で
+  // 外クリック判定する。子コンポーネント (TeamPresetsPanel) 側で同じ処理をすると、
+  // toggle ボタン押下の pointerdown が「外クリック扱い→close」 → onClick で再 open
+  // という競合が起きるため、判定責務を親 (HUD) に集約する。
+  useEffect(() => {
+    if (!presetsOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!presetsWrapRef.current) return;
+      if (!presetsWrapRef.current.contains(e.target as Node)) {
+        setPresetsOpen(false);
+      }
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPresetsOpen(false);
+    };
+    window.addEventListener('pointerdown', onPointerDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [presetsOpen]);
+
   // 翻訳結果の配列は `t` 依存。zustand store 変化 (stageView / arrangeGap) のたびに
   // 配列リテラル + JSX を作り直すと map 配下の Lucide アイコン (memo されない子) も
   // 全て新しい props で識別され、Chrome DevTools React profiler 上で目立つ flicker

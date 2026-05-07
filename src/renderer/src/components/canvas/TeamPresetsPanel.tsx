@@ -12,7 +12,7 @@
  * Apply は canvasStore.addCards で agent カードを順次配置するだけの最小実装。
  * Leader の team_recruit を自動で叩くフロー (plan の Step 4) は別 issue で扱う。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Hand, Plus, Save, Trash2 } from 'lucide-react';
 import { useT } from '../../lib/i18n';
 import { useToast } from '../../lib/toast-context';
@@ -115,7 +115,6 @@ export function TeamPresetsPanel({ open, onClose }: TeamPresetsPanelProps): JSX.
   const [saveOpen, setSaveOpen] = useState(false);
   const [draftName, setDraftName] = useState('');
   const [draftDescription, setDraftDescription] = useState('');
-  const wrapRef = useRef<HTMLDivElement | null>(null);
 
   // open 時に preset 一覧をリロード。Rust 側はディレクトリ走査だけなので軽量。
   useEffect(() => {
@@ -142,23 +141,10 @@ export function TeamPresetsPanel({ open, onClose }: TeamPresetsPanelProps): JSX.
     };
   }, [open, showToast, t]);
 
-  // popover 外クリック / Escape で閉じる
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (!wrapRef.current) return;
-      if (!wrapRef.current.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    window.addEventListener('pointerdown', onPointerDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('pointerdown', onPointerDown);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open, onClose]);
+  // 外クリック / Escape ハンドリングは「ボタン + popover」を内包する親 (StageHud 側の
+  // `.tc__hud-presets` ref) で実施する。本コンポーネント内に持つと、トグルボタン押下の
+  // pointerdown が「外クリック扱い→close」に解釈され、続く onClick で再 open される
+  // 競合 (open→close→open のチラつき) になるため、判定責務を親へ委譲する。
 
   const handleSaveCurrent = useCallback(() => {
     if (agentNodes.length === 0) {
@@ -259,7 +245,6 @@ export function TeamPresetsPanel({ open, onClose }: TeamPresetsPanelProps): JSX.
 
   return (
     <div
-      ref={wrapRef}
       className="tc__preset-panel glass-surface"
       role="dialog"
       aria-label={t('preset.title')}

@@ -1247,7 +1247,7 @@
   position: absolute;
   bottom: calc(100% + 10px);
   /* HUD は中央配置なので、preset panel は HUD ボタンの中心ではなく右寄せにすることで
-     画面右端からはみ出さない。長 preset 名でも幅 320px 内に収まる。 */
+     画面右端からはみ出さない。長い preset 名でも幅 320px 内に収まる。 */
   right: 0;
   width: 320px;
   max-height: 60vh;
