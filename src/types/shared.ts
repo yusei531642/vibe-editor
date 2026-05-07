@@ -467,6 +467,60 @@ export interface TeamOrchestrationSummary {
   updatedAt: string;
 }
 
+/**
+ * Issue #516: Leader が複数 worker の成果を統合フェーズで突き合わせるための構造化フィールド。
+ * 既存の単発 `summary` / `nextAction` / `artifactPath` と重複してもよい (後方互換目的)。
+ * 全フィールド optional で、必要な軸だけ埋めて返してよい。
+ */
+export interface WorkerReportPayload {
+  /** 調査・実装で得られた発見・観察結果 (markdown / プレーンテキスト) */
+  findings?: string;
+  /** 採用方針の推奨 (Leader 向けの提案) */
+  proposal?: string;
+  /** リスク・既知の懸念事項 (Leader が他 worker と突き合わせるリスト) */
+  risks?: string[];
+  /** 次にやるべき具体的な行動 (top-level nextAction と重複可) */
+  nextAction?: string;
+  /** 複数の生成物パス (top-level artifactPath より柔軟) */
+  artifacts?: string[];
+}
+
+/**
+ * `team_update_task` の引数スキーマ (TS 側でも参照できるよう再掲)。
+ * Issue #516 で `reportPayload` を追加。
+ */
+export interface UpdateTaskArgs {
+  taskId: number;
+  status: 'pending' | 'in_progress' | 'done' | 'completed' | 'blocked' | string;
+  summary?: string;
+  blockedReason?: string;
+  nextAction?: string;
+  artifactPath?: string;
+  blockedByHumanGate?: boolean;
+  requiredHumanDecision?: string;
+  reportKind?: string;
+  /** Issue #516: 構造化された worker report */
+  reportPayload?: WorkerReportPayload;
+}
+
+/**
+ * `worker_reports` の TS 投影。Rust 側 `WorkerReportSnapshot` (camelCase) と完全に一致させる。
+ */
+export interface WorkerReport {
+  id: string;
+  taskId?: number;
+  fromRole: string;
+  fromAgentId: string;
+  kind: string;
+  summary: string;
+  blockedReason?: string;
+  nextAction?: string;
+  artifactPath?: string;
+  /** Issue #516: 構造化 payload (Leader の統合フェーズで使う) */
+  payload?: WorkerReportPayload;
+  createdAt: string;
+}
+
 // ---------- ファイルツリー / 簡易エディタ ----------
 
 export interface FileNode {
