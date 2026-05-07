@@ -5,10 +5,20 @@
 
 use crate::pty::scrollback::{append_scrollback, Scrollback};
 use bytes::BytesMut;
+use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 use tokio::time::interval;
+
+/// Issue #524: PTY から実際に出力 byte が flush されたタイミングを呼び出し側に通知する callback。
+/// `spawn_session` が agent_id を持っているとき、ここで TeamHub の `member_diagnostics`
+/// `last_pty_output_at` を update する closure を構築して渡す。pty/ レイヤから直接
+/// team_hub を呼ばないことで、循環依存と layer 違反を避ける。
+///
+/// callback は flush ごとに呼ばれるが、頻度を抑えるための dedup (例: 1 秒間隔) は呼び出し側
+/// (closure 内部) の責務 — batcher は単に「データが流れた」事実だけを通知する。
+pub type PtyOutputObserver = Arc<dyn Fn() + Send + Sync>;
 
 const FLUSH_INTERVAL_MS: u64 = 16;
 const FLUSH_BYTES: usize = 32 * 1024;
@@ -38,6 +48,7 @@ pub fn spawn_batcher(
     data_event_name: String,
     mut rx: mpsc::Receiver<Vec<u8>>,
     scrollback: Scrollback,
+    on_output: Option<PtyOutputObserver>,
 ) {
     tokio::spawn(async move {
         // 旧 post-subscribe 経路互換のための短い猶予 (詳細は STARTUP_DELAY_MS コメント)。
@@ -53,19 +64,19 @@ pub fn spawn_batcher(
                             buf.extend_from_slice(&chunk);
                             // Issue #494: 閾値判定はテストと共有する pure 関数経由。
                             if should_flush_after_recv(buf.len()) {
-                                flush(&app, &data_event_name, &mut buf, &scrollback);
+                                flush(&app, &data_event_name, &mut buf, &scrollback, on_output.as_ref());
                             }
                         }
                         None => {
                             // reader thread が exit。最後にまとめて flush。
-                            flush(&app, &data_event_name, &mut buf, &scrollback);
+                            flush(&app, &data_event_name, &mut buf, &scrollback, on_output.as_ref());
                             break;
                         }
                     }
                 }
                 _ = tick.tick() => {
                     if should_flush_on_tick(buf.len()) {
-                        flush(&app, &data_event_name, &mut buf, &scrollback);
+                        flush(&app, &data_event_name, &mut buf, &scrollback, on_output.as_ref());
                     }
                 }
             }
@@ -73,7 +84,13 @@ pub fn spawn_batcher(
     });
 }
 
-fn flush(app: &AppHandle, event: &str, buf: &mut BytesMut, scrollback: &Scrollback) {
+fn flush(
+    app: &AppHandle,
+    event: &str,
+    buf: &mut BytesMut,
+    scrollback: &Scrollback,
+    on_output: Option<&PtyOutputObserver>,
+) {
     let Some(text) = extract_emit_payload(buf, scrollback) else {
         return;
     };
@@ -81,6 +98,12 @@ fn flush(app: &AppHandle, event: &str, buf: &mut BytesMut, scrollback: &Scrollba
     match app.emit(event, text) {
         Ok(_) => tracing::debug!("[batcher] emit {event} {len}B ok"),
         Err(e) => tracing::warn!("emit {event} failed: {e}"),
+    }
+    // Issue #524: 「実際に PTY 出力 byte が renderer に向けて流れた」事実を呼び出し側に通知する。
+    // emit 失敗時もデータは届いていない可能性が高いが、PTY → batcher 受信は起きているので
+    // 「PTY 上で agent process が動いている」物理シグナルとして扱える。
+    if let Some(observer) = on_output {
+        observer();
     }
 }
 

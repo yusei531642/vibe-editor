@@ -814,6 +814,60 @@ export interface TeamInboxReadEvent {
   readAt: string;
 }
 
+// ---------- TeamHub diagnostics staleness (Issue #524) ----------
+
+/**
+ * Issue #524: `team_diagnostics` MCP tool の `members[i]` row 形 (camelCase JSON)。
+ * Leader / HR が member の活動状況・自己申告と物理シグナル (PTY 出力) の乖離を判定する。
+ *
+ * `team_diagnostics` 自体は MCP tool で agent process が呼ぶ形 (renderer 側 IPC ではない)
+ * だが、将来 Canvas Dashboard (#514) で Tauri IPC 経由でも露出するため、型の正本としてここに置く。
+ * 既存フィールドは Issue #409 (`currentStatus` / `lastStatusAt`) と Issue #511 / #509 で
+ * 整備した `pendingInbox*` / `stalledInbound` を踏襲。
+ */
+export interface TeamDiagnosticsMemberRow {
+  agentId: string;
+  role: string;
+  online: boolean;
+  inconsistent: boolean;
+  recruitedAt: string;
+  lastHandshakeAt: string | null;
+  lastSeenAt: string | null;
+  lastAgentActivityAt: string | null;
+  lastMessageInAt: string | null;
+  lastMessageOutAt: string | null;
+  messagesInCount: number;
+  messagesOutCount: number;
+  tasksClaimedCount: number;
+  pendingInbox: number[];
+  pendingInboxCount: number;
+  oldestPendingInboxAgeMs: number | null;
+  stalledInbound: boolean;
+  /** Issue #409: `team_status(status)` で agent が自己申告した最新ステータス文字列。 */
+  currentStatus: string | null;
+  /** Issue #409: `currentStatus` を更新した最終時刻 (RFC3339)。 */
+  lastStatusAt: string | null;
+  /**
+   * Issue #524: PTY から最後に出力 byte が流れた時刻 (RFC3339)。
+   * agent process がハングしているか / 動いているかの物理シグナル。
+   * batcher 側で 1 秒間隔の dedup を経て update されるので、`null` のまま長時間 (分単位)
+   * 続いた場合は実際にプロセスが動いていない可能性が高い。
+   */
+  lastPtyOutputAt: string | null;
+  /** `lastStatusAt` から現在までの経過 ms (`null` なら一度も自己申告がない)。 */
+  lastStatusAgeMs: number | null;
+  /** `lastPtyOutputAt` から現在までの経過 ms (`null` なら一度も PTY 出力が観測されていない)。 */
+  lastPtyActivityAgeMs: number | null;
+  /**
+   * 自動 stale 判定: 自己申告が古く / 無く、かつ PTY 出力も threshold を超過 (or 無い) ならば true。
+   * PTY が直近に活動している場合は「動いている」ので false (= 誤検知防止)。
+   * Leader / Canvas dashboard の警告バッジに使う。
+   */
+  autoStale: boolean;
+  /** `autoStale` の閾値 (ms)。Hub 側の `STATUS_STALE_THRESHOLD_SECS` を ms 換算したもの。 */
+  stalenessThresholdMs: number;
+}
+
 // ---------- Window Effects (Issue #260) ----------
 
 /**

@@ -56,3 +56,11 @@ pub(crate) const INJECT_MAX_PAYLOAD: usize = 32 * 1024;
 pub(crate) const INJECT_MAX_RETRY: u32 = 1;
 /// リトライ前の backoff (millis)。session が ack されきっていない初期 race 用。
 pub(crate) const INJECT_RETRY_BACKOFF_MS: u64 = 200;
+
+// ---------- Issue #524: status staleness threshold ----------
+
+/// `team_status` 自己申告 (= `last_status_at`) からこの秒数以上更新が無ければ、
+/// `team_diagnostics` の `autoStale: true` を立てる。
+/// 5 分は「主要 shell コマンド (cargo build / npm test / 長めの Claude 思考) より長く、
+/// かつ 30 分のような長すぎる threshold で督促が遅れる事故を避けた中間値」。
+pub(crate) const STATUS_STALE_THRESHOLD_SECS: u64 = 300;
