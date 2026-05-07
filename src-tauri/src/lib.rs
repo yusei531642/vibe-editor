@@ -86,6 +86,12 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state::AppState::new())
+        // IPC コマンド登録一覧。`commands::app::window::*` / `commands::app::team_mcp::*` のように
+        // submodule path で参照しているコマンドは、リファクタで `commands/app.rs` から
+        // `commands/app/window.rs` および `commands/app/team_mcp.rs` に分割された結果。
+        // renderer 側 (`tauri-api.ts` の `invoke()` 呼び出し) は元のコマンド名のままなので、
+        // ここで列挙する `#[tauri::command]` 関数名と renderer 側 invoke 文字列が一致していれば
+        // IPC 契約は維持される。
         .invoke_handler(tauri::generate_handler![
             // ---- root ----
             commands::ping,
