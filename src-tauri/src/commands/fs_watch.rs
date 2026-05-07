@@ -79,7 +79,9 @@ fn is_safe_watch_root(root: &Path) -> bool {
             return false;
         }
         let lower = canon.to_string_lossy();
-        for prefix in ["/etc", "/sys", "/proc", "/dev", "/usr", "/bin", "/sbin", "/boot"] {
+        for prefix in [
+            "/etc", "/sys", "/proc", "/dev", "/usr", "/bin", "/sbin", "/boot",
+        ] {
             if lower.starts_with(prefix) {
                 return false;
             }
@@ -97,7 +99,11 @@ fn is_safe_watch_root(root: &Path) -> bool {
 static ACTIVE_WATCHER_GEN: Lazy<Mutex<(u64, Option<String>)>> = Lazy::new(|| Mutex::new((0, None)));
 
 fn current_active() -> (u64, Option<String>) {
-    ACTIVE_WATCHER_GEN.lock().ok().map(|g| g.clone()).unwrap_or((0, None))
+    ACTIVE_WATCHER_GEN
+        .lock()
+        .ok()
+        .map(|g| g.clone())
+        .unwrap_or((0, None))
 }
 
 /// `root` 配下を監視開始する。既に別 root で動いていたら停止する。
@@ -183,10 +189,8 @@ pub fn start_for_root(app: AppHandle, root: String) {
                         // pending を維持して次ループへ
                     } else {
                         // 除外ディレクトリのみのイベントはスキップ
-                        let all_ignored = event
-                            .paths
-                            .iter()
-                            .all(|p| path_is_ignored(p, &root_path));
+                        let all_ignored =
+                            event.paths.iter().all(|p| path_is_ignored(p, &root_path));
                         if !all_ignored {
                             pending = true;
                             last_event_at = Instant::now();

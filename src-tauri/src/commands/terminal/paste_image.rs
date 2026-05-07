@@ -51,10 +51,7 @@ async fn cleanup_old_paste_images(dir: &std::path::Path) {
 /// 一般的なクリップボード画像 (4K スクショ PNG) は 5〜15 MB 程度なので余裕を持った上限。
 const MAX_PASTED_IMAGE_BYTES: usize = 32 * 1024 * 1024;
 
-pub async fn save(
-    base64: String,
-    mime_type: String,
-) -> SavePastedImageResult {
+pub async fn save(base64: String, mime_type: String) -> SavePastedImageResult {
     // Issue #138 (Security):
     //   1. base64 文字列の段階で max を超えるなら decode せずに reject (DoS / disk full 防止)
     //   2. MIME を allowlist (image/png|jpeg|webp|gif|bmp|tiff) に限定。SVG は禁止
@@ -93,10 +90,7 @@ pub async fn save(
             error: Some("pasted image exceeds size limit (32 MB)".into()),
         };
     }
-    let dir = dirs::home_dir()
-        .unwrap_or_default()
-        .join(".vibe-editor")
-        .join("paste-images");
+    let dir = crate::util::config_paths::vibe_root().join("paste-images");
     if let Err(e) = tokio::fs::create_dir_all(&dir).await {
         return SavePastedImageResult {
             ok: false,

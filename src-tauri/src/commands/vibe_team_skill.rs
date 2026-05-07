@@ -43,7 +43,10 @@ pub struct InstallSkillResult {
 }
 
 fn skill_dir(project_root: &Path) -> PathBuf {
-    project_root.join(".claude").join("skills").join("vibe-team")
+    project_root
+        .join(".claude")
+        .join("skills")
+        .join("vibe-team")
 }
 
 fn skill_path(project_root: &Path) -> PathBuf {
@@ -145,7 +148,7 @@ pub async fn app_install_vibe_team_skill(
     state: State<'_, AppState>,
     project_root: String,
     force_overwrite: Option<bool>,
-) -> Result<InstallSkillResult, String> {
+) -> crate::commands::error::CommandResult<InstallSkillResult> {
     let force = force_overwrite.unwrap_or(false);
     let trimmed = project_root.trim();
     if trimmed.is_empty() {

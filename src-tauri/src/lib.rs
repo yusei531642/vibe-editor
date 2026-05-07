@@ -86,6 +86,12 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(state::AppState::new())
+        // IPC コマンド登録一覧。`commands::app::window::*` / `commands::app::team_mcp::*` のように
+        // submodule path で参照しているコマンドは、リファクタで `commands/app.rs` から
+        // `commands/app/window.rs` および `commands/app/team_mcp.rs` に分割された結果。
+        // renderer 側 (`tauri-api.ts` の `invoke()` 呼び出し) は元のコマンド名のままなので、
+        // ここで列挙する `#[tauri::command]` 関数名と renderer 側 invoke 文字列が一致していれば
+        // IPC 契約は維持される。
         .invoke_handler(tauri::generate_handler![
             // ---- root ----
             commands::ping,
@@ -93,22 +99,22 @@ pub fn run() {
             commands::app::app_get_project_root,
             commands::app::app_set_project_root,
             commands::app::app_restart,
-            commands::app::app_set_window_title,
-            commands::app::app_check_claude,
-            commands::app::app_set_zoom_level,
-            commands::app::app_set_window_effects,
-            commands::app::app_setup_team_mcp,
-            commands::app::app_cleanup_team_mcp,
-            commands::app::app_set_active_leader,
-            commands::app::app_get_team_file_path,
-            commands::app::app_get_mcp_server_path,
-            commands::app::app_get_team_hub_info,
-            commands::app::app_set_role_profile_summary,
-            commands::app::app_cancel_recruit,
-            commands::app::app_recruit_ack,
+            commands::app::window::app_set_window_title,
+            commands::app::window::app_check_claude,
+            commands::app::window::app_set_zoom_level,
+            commands::app::window::app_set_window_effects,
+            commands::app::team_mcp::app_setup_team_mcp,
+            commands::app::team_mcp::app_cleanup_team_mcp,
+            commands::app::team_mcp::app_set_active_leader,
+            commands::app::team_mcp::app_get_team_file_path,
+            commands::app::team_mcp::app_get_mcp_server_path,
+            commands::app::team_mcp::app_get_team_hub_info,
+            commands::app::team_mcp::app_set_role_profile_summary,
+            commands::app::team_mcp::app_cancel_recruit,
+            commands::app::team_mcp::app_recruit_ack,
             commands::app::app_get_user_info,
-            commands::app::app_open_external,
-            commands::app::app_reveal_in_file_manager,
+            commands::app::window::app_open_external,
+            commands::app::window::app_reveal_in_file_manager,
             // ---- git ----
             commands::git::git_status,
             commands::git::git_diff,

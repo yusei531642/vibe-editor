@@ -6,20 +6,14 @@
 use crate::commands::atomic_write::atomic_write;
 use once_cell::sync::Lazy;
 use serde_json::Value;
-use std::path::PathBuf;
 use tokio::fs;
 use tokio::sync::Mutex;
-
-fn role_profiles_path() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_default();
-    home.join(".vibe-editor").join("role-profiles.json")
-}
 
 static SAVE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
 #[tauri::command]
 pub async fn role_profiles_load() -> Value {
-    let path = role_profiles_path();
+    let path = crate::util::config_paths::role_profiles_path();
     let Ok(bytes) = fs::read(&path).await else {
         return Value::Null;
     };
@@ -40,12 +34,14 @@ pub async fn role_profiles_load() -> Value {
 }
 
 #[tauri::command]
-pub async fn role_profiles_save(file: Value) -> Result<(), String> {
+pub async fn role_profiles_save(file: Value) -> crate::commands::error::CommandResult<()> {
     let _g = SAVE_LOCK.lock().await;
-    let path = role_profiles_path();
+    let path = crate::util::config_paths::role_profiles_path();
     if let Some(dir) = path.parent() {
         let _ = fs::create_dir_all(dir).await;
     }
     let json = serde_json::to_vec_pretty(&file).map_err(|e| e.to_string())?;
-    atomic_write(&path, &json).await.map_err(|e| e.to_string())
+    Ok(atomic_write(&path, &json)
+        .await
+        .map_err(|e| e.to_string())?)
 }

@@ -7,10 +7,7 @@ use tauri_plugin_dialog::DialogExt;
 use tokio::sync::oneshot;
 
 #[tauri::command]
-pub async fn dialog_open_folder(
-    app: AppHandle,
-    title: Option<String>,
-) -> Option<String> {
+pub async fn dialog_open_folder(app: AppHandle, title: Option<String>) -> Option<String> {
     let (tx, rx) = oneshot::channel();
     let mut builder = app.dialog().file();
     if let Some(t) = title {
@@ -23,10 +20,7 @@ pub async fn dialog_open_folder(
 }
 
 #[tauri::command]
-pub async fn dialog_open_file(
-    app: AppHandle,
-    title: Option<String>,
-) -> Option<String> {
+pub async fn dialog_open_file(app: AppHandle, title: Option<String>) -> Option<String> {
     let (tx, rx) = oneshot::channel();
     let mut builder = app.dialog().file();
     if let Some(t) = title {
@@ -66,7 +60,9 @@ fn is_path_safe_to_query(path: &std::path::Path) -> bool {
     #[cfg(unix)]
     {
         let lower = canon.to_string_lossy().to_string();
-        for prefix in ["/etc", "/sys", "/proc", "/dev", "/var", "/usr", "/bin", "/sbin", "/boot"] {
+        for prefix in [
+            "/etc", "/sys", "/proc", "/dev", "/var", "/usr", "/bin", "/sbin", "/boot",
+        ] {
             if lower.starts_with(prefix) {
                 return false;
             }

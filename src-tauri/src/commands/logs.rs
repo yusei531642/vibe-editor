@@ -9,8 +9,7 @@ use tokio::fs;
 
 /// `~/.vibe-editor/logs/` ディレクトリ
 pub fn log_dir() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_default();
-    home.join(".vibe-editor").join("logs")
+    crate::util::config_paths::logs_dir()
 }
 
 /// ログファイル本体のパス
@@ -38,7 +37,9 @@ pub struct ReadLogTailResponse {
 /// - ファイルが存在しない場合は empty=true で空文字列を返す (エラーにはしない)。
 /// - ログは tracing-appender が UTF-8 で書いているので lossy decode で十分。
 #[tauri::command]
-pub async fn logs_read_tail(max_bytes: Option<u64>) -> Result<ReadLogTailResponse, String> {
+pub async fn logs_read_tail(
+    max_bytes: Option<u64>,
+) -> crate::commands::error::CommandResult<ReadLogTailResponse> {
     const DEFAULT_MAX: u64 = 256 * 1024;
     let cap = max_bytes.filter(|n| *n > 0).unwrap_or(DEFAULT_MAX);
     let path = log_file_path();
@@ -74,7 +75,10 @@ pub async fn logs_read_tail(max_bytes: Option<u64>) -> Result<ReadLogTailRespons
             .await
             .map_err(|e| e.to_string())?;
         let mut buf = Vec::with_capacity(cap as usize);
-        f.take(cap).read_to_end(&mut buf).await.map_err(|e| e.to_string())?;
+        f.take(cap)
+            .read_to_end(&mut buf)
+            .await
+            .map_err(|e| e.to_string())?;
         buf
     };
 
@@ -97,7 +101,7 @@ pub async fn logs_read_tail(max_bytes: Option<u64>) -> Result<ReadLogTailRespons
 /// ログディレクトリを OS のファイルマネージャで開く。
 /// tauri-plugin-opener を使用 (lib.rs で plugin 登録済み)。
 #[tauri::command]
-pub async fn logs_open_dir(app: tauri::AppHandle) -> Result<(), String> {
+pub async fn logs_open_dir(app: tauri::AppHandle) -> crate::commands::error::CommandResult<()> {
     use tauri_plugin_opener::OpenerExt;
     let dir = log_dir();
     // ディレクトリが無ければ best-effort で作成 (初回起動直後対策)
@@ -105,7 +109,8 @@ pub async fn logs_open_dir(app: tauri::AppHandle) -> Result<(), String> {
         tracing::warn!("[logs] mkdir failed: {e}");
     }
     let path_str = dir.to_string_lossy().to_string();
-    app.opener()
+    Ok(app
+        .opener()
         .open_path(path_str, None::<&str>)
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?)
 }

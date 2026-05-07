@@ -106,7 +106,9 @@ pub async fn files_list(project_root: String, rel_path: String) -> FileListResul
     // Windows の junction / symlink / 大文字小文字違いで raw と real が食い違うと strip_prefix
     // が失敗して entry.path が空文字に落ちる。
     let canonical_root = Path::new(&project_root).canonicalize().ok();
-    let root_ref = canonical_root.as_deref().unwrap_or_else(|| Path::new(&project_root));
+    let root_ref = canonical_root
+        .as_deref()
+        .unwrap_or_else(|| Path::new(&project_root));
     while let Ok(Some(entry)) = rd.next_entry().await {
         let p = entry.path();
         let is_dir = p.is_dir();
@@ -189,7 +191,11 @@ pub async fn files_read(project_root: String, rel_path: String) -> FileReadResul
     // 場合に mtime/size 両方で見逃しても、内容ハッシュの不一致で conflict を確定できる。
     let mtime_ms = mtime_ms_of(&meta);
     let size_bytes = Some(meta.len());
-    let content_hash = if !is_binary { Some(sha256_hex(&bytes)) } else { None };
+    let content_hash = if !is_binary {
+        Some(sha256_hex(&bytes))
+    } else {
+        None
+    };
     FileReadResult {
         ok: true,
         error: None,
@@ -311,7 +317,9 @@ pub async fn files_write(
     let target_path = match tokio::fs::symlink_metadata(&abs).await {
         Ok(m) if m.file_type().is_symlink() => {
             // symlink を辿って実体を解決する。失敗時は元の path にフォールバック。
-            tokio::fs::canonicalize(&abs).await.unwrap_or_else(|_| abs.clone())
+            tokio::fs::canonicalize(&abs)
+                .await
+                .unwrap_or_else(|_| abs.clone())
         }
         _ => abs.clone(),
     };

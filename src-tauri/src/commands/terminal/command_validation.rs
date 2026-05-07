@@ -11,7 +11,8 @@ use std::collections::HashSet;
 pub fn is_valid_terminal_id(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 64
-        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 pub fn command_basename(command: &str) -> String {
@@ -25,10 +26,7 @@ pub fn command_basename(command: &str) -> String {
 
 pub fn configured_terminal_commands() -> HashSet<String> {
     let mut out = HashSet::new();
-    let Some(home) = dirs::home_dir() else {
-        return out;
-    };
-    let path = home.join(".vibe-editor").join("settings.json");
+    let path = crate::util::config_paths::settings_path();
     let Ok(bytes) = std::fs::read(path) else {
         return out;
     };
@@ -83,7 +81,11 @@ pub fn is_allowed_terminal_command(command: &str) -> bool {
 pub fn reject_immediate_exec_args(command: &str, args: &[String]) -> Option<&'static str> {
     let basename = command_basename(command);
     let lower_args: Vec<String> = args.iter().map(|a| a.trim().to_ascii_lowercase()).collect();
-    let has_any = |candidates: &[&str]| lower_args.iter().any(|arg| candidates.contains(&arg.as_str()));
+    let has_any = |candidates: &[&str]| {
+        lower_args
+            .iter()
+            .any(|arg| candidates.contains(&arg.as_str()))
+    };
     match basename.as_str() {
         "bash" | "sh" | "zsh" | "fish" => {
             if has_any(&["-c", "-lc"]) {

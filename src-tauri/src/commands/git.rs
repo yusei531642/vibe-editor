@@ -25,14 +25,22 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// CVE-2022-39253 系の経路も塞ぐ。
 fn new_git_command() -> Command {
     let mut cmd = Command::new("git");
-    cmd.arg("-c").arg("core.fsmonitor=")
-        .arg("-c").arg("core.hooksPath=")
-        .arg("-c").arg("core.editor=:")
-        .arg("-c").arg("core.askpass=:")
-        .arg("-c").arg("commit.gpgsign=false")
-        .arg("-c").arg("tag.gpgsign=false")
-        .arg("-c").arg("gpg.program=:")
-        .arg("-c").arg("protocol.version=2");
+    cmd.arg("-c")
+        .arg("core.fsmonitor=")
+        .arg("-c")
+        .arg("core.hooksPath=")
+        .arg("-c")
+        .arg("core.editor=:")
+        .arg("-c")
+        .arg("core.askpass=:")
+        .arg("-c")
+        .arg("commit.gpgsign=false")
+        .arg("-c")
+        .arg("tag.gpgsign=false")
+        .arg("-c")
+        .arg("gpg.program=:")
+        .arg("-c")
+        .arg("protocol.version=2");
     // GIT_TERMINAL_PROMPT=0 で credential prompt が無限待機しないように
     cmd.env("GIT_TERMINAL_PROMPT", "0");
     cmd.env("GIT_OPTIONAL_LOCKS", "0");
@@ -240,18 +248,19 @@ pub async fn git_status(project_root: String) -> GitStatus {
         .map(|s| s.trim().to_string());
     // Issue #19: -z (NUL 区切り) を使わないと rename が "old -> new" の 1 行として返り
     //            parser が解釈できない。`--porcelain=v1 -z` でバイト単位にパースする。
-    let porcelain_bytes = match run_git_bytes(&["status", "--porcelain=v1", "-z"], &project_root).await {
-        Ok(b) => b,
-        Err(e) => {
-            return GitStatus {
-                ok: false,
-                error: Some(e),
-                repo_root: Some(repo_root),
-                branch,
-                ..Default::default()
+    let porcelain_bytes =
+        match run_git_bytes(&["status", "--porcelain=v1", "-z"], &project_root).await {
+            Ok(b) => b,
+            Err(e) => {
+                return GitStatus {
+                    ok: false,
+                    error: Some(e),
+                    repo_root: Some(repo_root),
+                    branch,
+                    ..Default::default()
+                }
             }
-        }
-    };
+        };
     let files = parse_porcelain_z(&porcelain_bytes);
 
     GitStatus {
@@ -282,7 +291,8 @@ pub async fn git_diff(
     //   - 加えて head_path が "-" で始まる場合 (CLI option 偽装) も拒否する。
     //     `HEAD:-foo` は git 的には rev spec の一部だが、防御的に弾いておく。
     let head_path = original_rel_path.as_deref().unwrap_or(&rel_path);
-    if head_path.starts_with('-') || head_path.contains("..")
+    if head_path.starts_with('-')
+        || head_path.contains("..")
         || crate::commands::files::safe_join(&project_root, head_path).is_none()
     {
         return GitDiffResult {
@@ -329,12 +339,9 @@ pub async fn git_diff(
 
     // Issue #154 #3: is_new 判定を i18n 不依存にする。
     // `git ls-tree HEAD -- <path>` の stdout が空なら HEAD に存在しない。
-    let ls_tree = run_git(
-        &["ls-tree", "HEAD", "--", &head_path_for_git],
-        &repo_root,
-    )
-    .await
-    .unwrap_or_default();
+    let ls_tree = run_git(&["ls-tree", "HEAD", "--", &head_path_for_git], &repo_root)
+        .await
+        .unwrap_or_default();
     let is_new = ls_tree.trim().is_empty();
 
     // Issue #154 #2: 巨大ファイルでの OOM 防止。`git cat-file -s HEAD:<path>` でサイズを
@@ -354,11 +361,7 @@ pub async fn git_diff(
         // 大きすぎ / 新規 → HEAD 取得しない (binary placeholder で表示)
         Err("(skipped: file too large or new)".to_string())
     } else {
-        run_git(
-            &["show", &format!("HEAD:{head_path_for_git}")],
-            &repo_root,
-        )
-        .await
+        run_git(&["show", &format!("HEAD:{head_path_for_git}")], &repo_root).await
     };
     let original = head.clone().unwrap_or_default();
     // Issue #35: read_to_string() は非 UTF-8 で失敗し、worktree 側が空文字になって
