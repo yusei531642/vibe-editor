@@ -2,8 +2,9 @@
 //!
 //! Issue #373 Phase 2 で `protocol.rs` から切り出し。
 
-use crate::team_hub::error::SendError;
 use crate::team_hub::{inject, CallContext, MemberDiagnostics, TeamHub, TeamMessage};
+
+use super::error::SendError;
 use chrono::Utc;
 use serde_json::{json, Value};
 use std::collections::HashMap;

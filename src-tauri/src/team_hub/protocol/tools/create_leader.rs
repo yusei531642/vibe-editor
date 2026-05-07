@@ -8,7 +8,6 @@
 //! 旧 leader はこの tool で新 leader を作ったあと `team_switch_leader` で
 //! active leader を切り替え、自身のカードを retire する流れを想定する。
 
-use crate::team_hub::error::RecruitError;
 use crate::team_hub::{CallContext, TeamHub};
 use serde_json::{json, Value};
 use std::time::Instant;
@@ -16,7 +15,8 @@ use tauri::Emitter;
 use uuid::Uuid;
 
 use super::super::consts::{RECRUIT_ACK_TIMEOUT, RECRUIT_TIMEOUT};
-use super::super::permissions::caller_has_permission;
+use super::super::permissions::{check_permission, Permission};
+use super::error::RecruitError;
 
 /// `team_create_leader` — 引き継ぎ用に同 teamId へ追加の leader カードを spawn する。
 ///
@@ -34,17 +34,11 @@ pub async fn team_create_leader(
     ctx: &CallContext,
     args: &Value,
 ) -> Result<Value, String> {
-    if !caller_has_permission(hub, &ctx.role, "canRecruit").await {
-        return Err(RecruitError {
-            code: "create_leader_permission_denied".into(),
-            message: format!(
-                "permission denied: role '{}' cannot create leader",
-                ctx.role
-            ),
-            phase: None,
-            elapsed_ms: None,
-        }
-        .into_err_string());
+    if let Err(e) = check_permission(&ctx.role, Permission::Recruit) {
+        return Err(
+            RecruitError::permission_denied("create_leader", &e.role, "create leader")
+                .into_err_string(),
+        );
     }
 
     let role_profile_id = "leader".to_string();

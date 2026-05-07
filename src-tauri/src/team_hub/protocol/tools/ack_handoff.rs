@@ -1,24 +1,20 @@
 //! tool: `team_ack_handoff` — mark a handoff as read/acked by the replacement leader.
 
-use crate::team_hub::error::ToolError;
 use crate::team_hub::{CallContext, TeamHub};
 use serde_json::{json, Value};
 
-use super::super::permissions::caller_has_permission;
+use super::super::permissions::{check_permission, Permission};
+use super::error::ToolError;
 
 pub async fn team_ack_handoff(
     hub: &TeamHub,
     ctx: &CallContext,
     args: &Value,
 ) -> Result<Value, String> {
-    if !caller_has_permission(hub, &ctx.role, "canRecruit").await {
-        return Err(ToolError {
-            code: "ack_handoff_permission_denied".into(),
-            message: format!("permission denied: role '{}' cannot ack handoff", ctx.role),
-            phase: None,
-            elapsed_ms: None,
-        }
-        .into_err_string());
+    if let Err(e) = check_permission(&ctx.role, Permission::Recruit) {
+        return Err(
+            ToolError::permission_denied("ack_handoff", &e.role, "ack handoff").into_err_string(),
+        );
     }
 
     let handoff_id = args

@@ -210,19 +210,12 @@ pub fn run() {
             // までの空白で「透過 conf.json なのに effect 未適用 → 完全透明」になるのを防ぐ)。
             let app_handle_for_root = app.handle().clone();
             spawn_observed("settings_restore", async move {
+                // Issue #493: settings_load は Settings struct を返すようになった。
+                // last_opened_root を優先し、空なら claudeCwd を fallback。
                 let settings = commands::settings::settings_load().await;
-                let root = settings
-                    .get("lastOpenedRoot")
-                    .and_then(|v| v.as_str())
-                    .map(str::to_owned)
+                let root = Some(settings.last_opened_root.clone())
                     .filter(|s| !s.trim().is_empty())
-                    .or_else(|| {
-                        settings
-                            .get("claudeCwd")
-                            .and_then(|v| v.as_str())
-                            .map(str::to_owned)
-                            .filter(|s| !s.trim().is_empty())
-                    });
+                    .or_else(|| Some(settings.claude_cwd.clone()).filter(|s| !s.trim().is_empty()));
                 if let Some(root) = root {
                     let state = app_handle_for_root.state::<state::AppState>();
                     // Issue #147: poison でも recovery
@@ -239,8 +232,7 @@ pub fn run() {
                 // - glass テーマは renderer のテーマ適用直後に Acrylic が乗るが、settings_load の
                 //   disk read を待つ僅かな時間だけ「不透明 #171716 の上に panel が薄く乗る」状態
                 //   になる。実機検証で気になるなら PR-2 でカスタム title bar 化と同時に再評価する。
-                let theme = settings.get("theme").and_then(|v| v.as_str()).unwrap_or("");
-                if theme == "glass" {
+                if settings.theme == "glass" {
                     if let Some(win) = app_handle_for_root.get_webview_window("main") {
                         let res = commands::app::apply_window_effects_for_startup(&win, true);
                         tracing::info!(

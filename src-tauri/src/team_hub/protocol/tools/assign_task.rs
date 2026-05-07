@@ -2,14 +2,14 @@
 //!
 //! Issue #373 Phase 2 で `protocol.rs` から切り出し。
 
-use crate::team_hub::error::AssignError;
 use crate::team_hub::{CallContext, TeamHub, TeamTask};
 use chrono::Utc;
 use serde_json::{json, Value};
 
 use super::super::consts::{MAX_TASKS_PER_TEAM, SOFT_PAYLOAD_LIMIT};
 use super::super::helpers::resolve_targets;
-use super::super::permissions::caller_has_permission;
+use super::super::permissions::{check_permission, Permission};
+use super::error::AssignError;
 use super::send::team_send;
 
 pub async fn team_assign_task(
@@ -19,14 +19,10 @@ pub async fn team_assign_task(
 ) -> Result<Value, String> {
     // Issue #114: 旧実装は assignee / description の空チェックだけで権限を見ておらず、
     // canAssignTasks=false のロールでも task を作成できてしまっていた。先頭で必ず権限検証する。
-    if !caller_has_permission(hub, &ctx.role, "canAssignTasks").await {
-        return Err(AssignError {
-            code: "assign_permission_denied".into(),
-            message: format!("permission denied: role '{}' cannot assign tasks", ctx.role),
-            phase: None,
-            elapsed_ms: None,
-        }
-        .into_err_string());
+    if let Err(e) = check_permission(&ctx.role, Permission::AssignTasks) {
+        return Err(
+            AssignError::permission_denied("assign", &e.role, "assign tasks").into_err_string(),
+        );
     }
     let assignee_raw = args.get("assignee").and_then(|v| v.as_str()).unwrap_or("");
     let assignee = assignee_raw.trim();
