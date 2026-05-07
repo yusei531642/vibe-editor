@@ -88,8 +88,9 @@ describe('normalizeCanvasState (Issue #385)', () => {
     const n = out.nodes[0]!;
     expect(Number.isFinite(n.position.x)).toBe(true);
     expect(Number.isFinite(n.position.y)).toBe(true);
-    expect((n.style as { width: number }).width).toBe(640);
-    expect((n.style as { height: number }).height).toBe(400);
+    // Issue #497: 既定サイズは 760x460 (旧 640x400 から再引き上げ)
+    expect((n.style as { width: number }).width).toBe(760);
+    expect((n.style as { height: number }).height).toBe(460);
     expect(n.data.title).toBe('Card'); // 空タイトル → 'Card'
   });
 
