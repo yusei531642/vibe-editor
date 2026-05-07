@@ -40,6 +40,14 @@ team_recruit({ role_id: "hr", engine: "claude" })
 team_recruit({ role_id: "marketing_chief", engine: "claude" })  // 2 人目を採用
 ```
 
+> **動的ロールは永続化されます** (Issue #513): `team_recruit({ role_definition: ... })` で
+> 作成した動的ロールの label / description / instructions / instructionsJa は
+> `~/.vibe-editor/role-profiles.json#dynamic[]` に保存され、アプリ再起動 / Canvas 復元時に
+> 自動的に Hub の `dynamic_roles` map へ replay されます。なので **再起動後も同じ
+> `role_definition` を再投入する必要はなく**、`team_recruit({ role_id: "marketing_chief" })` のように
+> id だけ指定すれば既存定義をそのまま使えます。古い定義の意味的更新が必要なときだけ、
+> 同 `role_id` で新しい `role_definition` を渡して上書きしてください。
+
 ## 役割別の振る舞い
 
 ### 1. Leader

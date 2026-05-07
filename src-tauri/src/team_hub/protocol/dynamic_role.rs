@@ -2,6 +2,7 @@
 //!
 //! Issue #373 Phase 2 で `protocol.rs` から切り出し。
 //! Issue #508 で必須テンプレ / 曖昧名 / Worktree Isolation Rule の validation を追加 (deny→拒否、warn→outcome に同梱)。
+//! Issue #513 で永続化 (`role-profiles.json#dynamic[]`) からの replay hook を追加 (`replay_persisted_dynamic_roles_for_team`)。
 //!
 //! 呼び出し元: `tools/recruit.rs` の `team_recruit` のみ。過去の docstring に記載されていた
 //! `team_create_role` MCP tool は実装されておらず、現状は `team_recruit` (role_definition 同梱)
@@ -10,6 +11,7 @@
 //! 既存 builtin (summary 上) と被る role_id は拒否、上限超過も拒否、長さ上限も拒否する。
 
 use crate::team_hub::{CallContext, DynamicRole, TeamHub};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::Emitter;
 
@@ -159,4 +161,181 @@ pub(super) async fn validate_and_register_dynamic_role(
         role,
         template_warnings,
     })
+}
+
+/// Issue #513: `~/.vibe-editor/role-profiles.json#dynamic[]` の 1 件分エントリ (Rust 側 view)。
+///
+/// renderer 側 `DynamicRoleEntry` (camelCase) と `#[serde(rename_all = "camelCase")]` で対応。
+/// `register_team` 経路で「該当 team_id の entry だけ」を抽出して `replay_persisted_dynamic_roles_for_team`
+/// に渡し、Hub の `dynamic_roles` map を再構成する。validation は **意図的に走らせない**:
+/// 永続化済みの entry は過去の `validate_and_register_dynamic_role` を通っているはずなので、
+/// 二度の検証で「既存 dynamic ロールを使っているチームを起動したら lint 規約変更で弾かれた」
+/// 事故を避ける (= 永続化されたデータは新検証ルールに対し forward-compatible に扱う)。
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedDynamicRoleEntry {
+    pub id: String,
+    pub team_id: String,
+    pub label: String,
+    pub description: String,
+    pub instructions: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions_ja: Option<String>,
+    pub created_by_role: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    /// 任意の有効期限 (RFC3339)。経過済みの entry は `replay` でスキップされる。
+    /// 現状の writer 側は設定しない (= 永続的扱い)、future scope の自動 GC 用予備。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>,
+}
+
+impl PersistedDynamicRoleEntry {
+    /// `expires_at` が現在時刻 (RFC3339 解釈) より過去なら `true`。`None` / parse 失敗時は `false`。
+    /// `replay_persisted_dynamic_roles_for_team` で expired entry をスキップする判定に使う。
+    fn is_expired(&self, now_iso: &str) -> bool {
+        let Some(expires_at) = self.expires_at.as_deref() else {
+            return false;
+        };
+        let Ok(expires) = chrono::DateTime::parse_from_rfc3339(expires_at) else {
+            return false;
+        };
+        let Ok(now) = chrono::DateTime::parse_from_rfc3339(now_iso) else {
+            return false;
+        };
+        expires < now
+    }
+
+    /// Hub の in-memory `DynamicRole` 形に変換 (永続化外フィールドである `created_at` /
+    /// `expires_at` は drop される — そちらは再 save 時に renderer 側 cache から再構成する)。
+    fn to_dynamic_role(&self) -> DynamicRole {
+        DynamicRole {
+            id: self.id.clone(),
+            label: self.label.clone(),
+            description: self.description.clone(),
+            instructions: self.instructions.clone(),
+            instructions_ja: self.instructions_ja.clone(),
+            team_id: self.team_id.clone(),
+            created_by_role: self.created_by_role.clone(),
+        }
+    }
+}
+
+/// Issue #513: 起動時 / `register_team` 経路で永続化された動的ロール定義を Hub に投入する。
+///
+/// 呼び出し側 (`state::TeamHub::register_team`) が role-profiles.json から **該当 team_id の
+/// entry だけ抽出した** Vec を渡し、本関数は expired を除外してから `replace_dynamic_roles`
+/// で Hub state に流し込む。`replace_dynamic_roles` は既存 `dynamic_roles[team_id]` を
+/// 完全置換するため、再起動時に「同 team_id だけど persistent と in-memory が混在」
+/// する race を起こさない (= permission check も走らせず、信頼境界内の永続化データを直接投入)。
+///
+/// 戻り値はスキップされた entry 数 (= 期限切れ + 例外的に id 重複した数の合計)。
+/// caller 側でログに残す目的のみで、エラー状態としては扱わない。
+pub async fn replay_persisted_dynamic_roles_for_team(
+    hub: &TeamHub,
+    team_id: &str,
+    entries: Vec<PersistedDynamicRoleEntry>,
+) -> usize {
+    if team_id.trim().is_empty() {
+        return 0;
+    }
+    let now_iso = chrono::Utc::now().to_rfc3339();
+    let mut skipped: usize = 0;
+    let mut roles: Vec<DynamicRole> = Vec::with_capacity(entries.len());
+    let mut seen_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for entry in entries {
+        // 永続化された team_id と register_team の team_id がズレていたらスキップ
+        // (renderer 側で誤って混入した entry を防御的に弾く)
+        if entry.team_id != team_id {
+            tracing::warn!(
+                "[dynamic-role/replay] entry team_id '{}' does not match register_team '{}', skipping role_id '{}'",
+                entry.team_id,
+                team_id,
+                entry.id
+            );
+            skipped += 1;
+            continue;
+        }
+        if entry.is_expired(&now_iso) {
+            tracing::info!(
+                "[dynamic-role/replay] skipping expired entry team={team_id} role_id={} (expires_at={:?})",
+                entry.id,
+                entry.expires_at
+            );
+            skipped += 1;
+            continue;
+        }
+        if !seen_ids.insert(entry.id.clone()) {
+            tracing::warn!(
+                "[dynamic-role/replay] duplicate role_id '{}' in persisted dynamic[] for team {}, keeping first",
+                entry.id,
+                team_id
+            );
+            skipped += 1;
+            continue;
+        }
+        roles.push(entry.to_dynamic_role());
+    }
+    let role_count = roles.len();
+    hub.replace_dynamic_roles(team_id, roles).await;
+    tracing::info!(
+        "[dynamic-role/replay] team={team_id} replayed {role_count} dynamic role(s) (skipped {skipped})"
+    );
+    skipped
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(id: &str, team_id: &str, expires_at: Option<&str>) -> PersistedDynamicRoleEntry {
+        PersistedDynamicRoleEntry {
+            id: id.to_string(),
+            team_id: team_id.to_string(),
+            label: format!("{id}-label"),
+            description: format!("{id}-description"),
+            instructions: "do work".into(),
+            instructions_ja: None,
+            created_by_role: "leader".into(),
+            created_at: Some("2026-05-07T00:00:00Z".into()),
+            expires_at: expires_at.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn is_expired_returns_false_for_no_expiry() {
+        let e = entry("r1", "team-a", None);
+        assert!(!e.is_expired("2026-05-07T12:00:00Z"));
+    }
+
+    #[test]
+    fn is_expired_returns_true_when_expires_before_now() {
+        let e = entry("r1", "team-a", Some("2026-05-01T00:00:00Z"));
+        assert!(e.is_expired("2026-05-07T12:00:00Z"));
+    }
+
+    #[test]
+    fn is_expired_returns_false_when_expires_after_now() {
+        let e = entry("r1", "team-a", Some("2026-06-01T00:00:00Z"));
+        assert!(!e.is_expired("2026-05-07T12:00:00Z"));
+    }
+
+    #[test]
+    fn is_expired_returns_false_for_unparseable_expires_at() {
+        let e = entry("r1", "team-a", Some("not-a-date"));
+        assert!(!e.is_expired("2026-05-07T12:00:00Z"));
+    }
+
+    #[test]
+    fn to_dynamic_role_round_trips_core_fields() {
+        let e = entry("planner", "team-a", None);
+        let role = e.to_dynamic_role();
+        assert_eq!(role.id, "planner");
+        assert_eq!(role.team_id, "team-a");
+        assert_eq!(role.label, "planner-label");
+        assert_eq!(role.description, "planner-description");
+        assert_eq!(role.instructions, "do work");
+        assert_eq!(role.created_by_role, "leader");
+        assert!(role.instructions_ja.is_none());
+    }
 }

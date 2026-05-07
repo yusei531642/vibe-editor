@@ -18,6 +18,7 @@ import {
 } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
+  DynamicRoleEntry,
   Language,
   RoleProfile,
   RoleProfilesFile
@@ -30,22 +31,14 @@ import {
 } from './role-profiles-builtin';
 
 /**
- * Leader が team_create_role / team_recruit(role_definition=...) で動的に作成したワーカーロール。
- * RoleProfilesContext の memory 内 cache に保持され、`compose()` 時に builtin/custom と合成される。
- * 永続化はしない (プロセス再起動で消える) ので、canvas 復元時には Tauri 側 TeamHub にも
- * 再投入する必要がある (現状は recruit-request payload に同梱される dynamicRole 経由で受け取る)。
+ * Issue #513: 旧 local 定義 `DynamicRoleEntry` を shared.ts に集約。
+ * `createdByRole` / `createdAt` / `expiresAt` が増えたが、`composeWorkerProfile()` は
+ * `id / label / description / instructions / instructionsJa` しか参照しないので互換維持。
+ * 永続化のため `team:role-created` 受信時に file.dynamic[] にも append し、
+ * 起動時に file.dynamic[] を memory cache へ投入することで、再起動 / Canvas 復元後も
+ * Hub 側の `replay_persisted_dynamic_roles_for_team` (state.rs) と協調して動的ロールが生き続ける。
  */
-export interface DynamicRoleEntry {
-  /** 通常 snake_case (例: "marketing_chief") */
-  id: string;
-  /** 表示名 */
-  label: string;
-  description: string;
-  instructions: string;
-  instructionsJa?: string;
-  /** どのチームスコープか (チーム間で id 衝突を許容するため必要) */
-  teamId: string;
-}
+export type { DynamicRoleEntry };
 
 interface RoleProfilesContextValue {
   /** 合成後の effective profiles (id → profile) */
@@ -155,7 +148,8 @@ export function RoleProfilesProvider({ children }: { children: ReactNode }): JSX
    */
   const [dynamic, setDynamic] = useState<Record<string, DynamicRoleEntry>>({});
 
-  // 起動時に 1 回ロード
+  // 起動時に 1 回ロード。Issue #513: file.dynamic[] (= 永続化された Leader 動的ロール)
+  // も同時に memory cache (dynamic state) に投入する。再起動後も `team_recruit` で参照可能になる。
   useEffect(() => {
     let cancelled = false;
     void window.api.roleProfiles
@@ -168,8 +162,20 @@ export function RoleProfilesProvider({ children }: { children: ReactNode }): JSX
             overrides: loaded.overrides ?? {},
             custom: loaded.custom ?? [],
             globalPreamble: loaded.globalPreamble,
-            messageTagFormat: loaded.messageTagFormat
+            messageTagFormat: loaded.messageTagFormat,
+            dynamic: loaded.dynamic ?? []
           });
+          // Issue #513: 永続化された動的ロールを memory cache に投入。
+          // `compose()` 時に dynamic state が builtin/custom と合成されて effective profiles に乗る。
+          // file.dynamic[] と memory cache (dynamic) は同じ Source of Truth (= file 側) を反映する
+          // 形で同期する。後続の `team:role-created` event はその up-to-date な状態に追加する。
+          if (Array.isArray(loaded.dynamic) && loaded.dynamic.length > 0) {
+            const seeded: Record<string, DynamicRoleEntry> = {};
+            for (const entry of loaded.dynamic) {
+              seeded[entry.id] = entry;
+            }
+            setDynamic((prev) => ({ ...seeded, ...prev }));
+          }
         }
       })
       .catch((err) => {
@@ -181,7 +187,10 @@ export function RoleProfilesProvider({ children }: { children: ReactNode }): JSX
     };
   }, []);
 
-  // Tauri 側 TeamHub からの team:role-created を購読してメモリキャッシュへ反映
+  // Tauri 側 TeamHub からの team:role-created を購読してメモリキャッシュ + file.dynamic[] に反映。
+  // Issue #513: 旧実装は memory cache のみで再起動時に動的ロールが消える事故が起きていた
+  // (= worker 復元時に `roleProfileId` が「未知のロール」へ fallback)。本フックで file.dynamic[]
+  // にも append + saveFile() で persist することで、再起動後も同一動的ロールを使える。
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
     let disposed = false;
@@ -193,21 +202,45 @@ export function RoleProfilesProvider({ children }: { children: ReactNode }): JSX
         description: string;
         instructions: string;
         instructionsJa?: string;
+        createdByRole?: string;
       };
     }>('team:role-created', (e) => {
       if (disposed) return;
       const { role, teamId } = e.payload;
+      const createdAt = new Date().toISOString();
+      const entry: DynamicRoleEntry = {
+        id: role.id,
+        label: role.label,
+        description: role.description,
+        instructions: role.instructions,
+        instructionsJa: role.instructionsJa,
+        teamId,
+        createdByRole: role.createdByRole ?? 'leader',
+        createdAt
+      };
       setDynamic((prev) => ({
         ...prev,
-        [role.id]: {
-          id: role.id,
-          label: role.label,
-          description: role.description,
-          instructions: role.instructions,
-          instructionsJa: role.instructionsJa,
-          teamId
-        }
+        [role.id]: entry
       }));
+      // file.dynamic[] にも append。同 (teamId, id) の重複は新しい方で上書き
+      // (= Leader が同じ id で role_definition を再投入した場合の意味的に正しい動作)。
+      setFile((prevFile) => {
+        const prevDynamic = prevFile.dynamic ?? [];
+        const filtered = prevDynamic.filter(
+          (d) => !(d.teamId === teamId && d.id === role.id)
+        );
+        const next: RoleProfilesFile = {
+          ...prevFile,
+          dynamic: [...filtered, entry]
+        };
+        // 永続化は fire-and-forget (UI block しない)。失敗しても memory cache は最新なので
+        // 当該プロセス内では問題なく動く。次回起動時は最新 entry が無いだけで old entry が
+        // 残るリスクはあるが、その場合も `team:role-created` の再 emit で復旧する。
+        void window.api.roleProfiles.save(next).catch((err) => {
+          console.warn('[role-profiles] persist dynamic entry failed:', err);
+        });
+        return next;
+      });
     }).then((u) => {
       if (disposed) {
         u();
