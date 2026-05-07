@@ -16,8 +16,9 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
-import { AlertTriangle, ClipboardCheck, ClipboardList, Clock } from 'lucide-react';
+import { AlertTriangle, ClipboardCheck, ClipboardList, Clock, RotateCcw } from 'lucide-react';
 import { useT } from '../../../../lib/i18n';
+import { useTeamInjectFailed } from '../../../../lib/use-team-inject-failed';
 import { useSettings } from '../../../../lib/settings-context';
 import {
   useCanvasStore,
@@ -422,6 +423,83 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   // 新フローでは `team_switch_leader` MCP tool が active leader 切替 + 旧カード retire を
   // 行うため、renderer 側で ack を listen する必要は無い。
 
+  // ---------- Issue #511: inject 失敗の警告表示 + 手動リトライ ----------
+  //
+  // `team_send` (またはリトライ後の `team_send_retry_inject`) が PTY inject に失敗した
+  // 瞬間、Hub から `team:inject_failed` event が emit される。Canvas 側はそれを受けて
+  // 該当 agent の payload.lastInjectFailure に reason を書き込む → CardFrame が warning
+  // row を render する。retry button で `window.api.team.retryInject` を呼び、成功すれば
+  // payload.lastInjectFailure を undefined クリアして warning を消す。
+  const [retryBusy, setRetryBusy] = useState(false);
+  useTeamInjectFailed(
+    useCallback(
+      (evt) => {
+        if (!payload.agentId || evt.toAgentId !== payload.agentId) return;
+        setCardPayload(id, {
+          lastInjectFailure: {
+            messageId: evt.messageId,
+            reason: { code: evt.reasonCode, message: evt.reasonMessage },
+            failedAt: evt.failedAt,
+            fromRole: evt.fromRole
+          }
+        });
+      },
+      [id, payload.agentId, setCardPayload]
+    )
+  );
+  const handleRetryInject = useCallback(() => {
+    if (retryBusy) return;
+    const failure = payload.lastInjectFailure;
+    if (!failure || !payload.teamId || !payload.agentId) return;
+    setRetryBusy(true);
+    void window.api.team
+      .retryInject({
+        teamId: payload.teamId,
+        messageId: failure.messageId,
+        agentId: payload.agentId
+      })
+      .then((result) => {
+        if (result.ok) {
+          // 成功時は warning row を消す。Hub からは team:handoff event が来るので
+          // 配信成功は Canvas 側 ActivityFeed / HandoffEdge が拾う。
+          setCardPayload(id, { lastInjectFailure: undefined });
+          showToast(t('injectFailure.retrySuccess'), {
+            tone: 'success',
+            duration: 5000
+          });
+        } else {
+          // 再失敗。Hub が `team:inject_failed` を再 emit するので useTeamInjectFailed が
+          // 新しい reason を payload に書き込む (= warning row はそのまま、内容だけ更新)。
+          const reason = result.reasonCode ?? result.error ?? 'unknown';
+          showToast(t('injectFailure.retryFailed', { reason }), {
+            tone: 'error',
+            duration: 8000
+          });
+        }
+      })
+      .catch((err) => {
+        // unknown_team / unknown_message / invalid_recipient の構造化エラーはここに来る。
+        const detail = err instanceof Error ? err.message : String(err);
+        showToast(t('injectFailure.retryError', { detail }), {
+          tone: 'error',
+          duration: 8000
+        });
+      })
+      .finally(() => setRetryBusy(false));
+  }, [
+    retryBusy,
+    payload.lastInjectFailure,
+    payload.teamId,
+    payload.agentId,
+    id,
+    setCardPayload,
+    showToast,
+    t
+  ]);
+  const handleDismissInjectWarning = useCallback(() => {
+    setCardPayload(id, { lastInjectFailure: undefined });
+  }, [id, setCardPayload]);
+
   // accent は CSS 変数 --agent-accent として子孫で参照する
   const cardStyle = useMemo(
     () =>
@@ -554,6 +632,56 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
             </div>
           ) : null}
         </div>
+        {/* Issue #511: PTY inject 失敗 warning row。 */}
+        {/* 通常時は何も rendering されず、`team:inject_failed` が来た瞬間に出現する。 */}
+        {/* `__summary` block の sibling として置き、既存 header の flex レイアウトを破壊しない。 */}
+        {payload.lastInjectFailure ? (
+          <div
+            className="canvas-agent-card__inject-warning"
+            role="alert"
+            aria-live="polite"
+          >
+            <AlertTriangle
+              size={12}
+              strokeWidth={2}
+              className="canvas-agent-card__inject-warning__icon"
+              aria-hidden="true"
+            />
+            <span
+              className="canvas-agent-card__inject-warning__text"
+              title={payload.lastInjectFailure.reason.message}
+            >
+              {t('injectFailure.title', {
+                code: payload.lastInjectFailure.reason.code,
+                message: payload.lastInjectFailure.reason.message
+              })}
+            </span>
+            <button
+              type="button"
+              className="nodrag canvas-agent-card__inject-warning__retry"
+              onClick={handleRetryInject}
+              disabled={retryBusy}
+              title={t('injectFailure.retry')}
+              aria-label={t('injectFailure.retry')}
+            >
+              <RotateCcw size={11} strokeWidth={2} aria-hidden="true" />
+              <span>
+                {retryBusy
+                  ? t('injectFailure.retryBusy')
+                  : t('injectFailure.retry')}
+              </span>
+            </button>
+            <button
+              type="button"
+              className="nodrag canvas-agent-card__inject-warning__dismiss"
+              onClick={handleDismissInjectWarning}
+              title={t('injectFailure.dismiss')}
+              aria-label={t('injectFailure.dismiss')}
+            >
+              ×
+            </button>
+          </div>
+        ) : null}
         <TerminalOverlay
           cardId={id}
           termRef={termRef}

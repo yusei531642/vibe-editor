@@ -233,8 +233,8 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         let msg = message.to_string();
         let role_clone = target_role.clone();
         join_set.spawn(async move {
-            let ok = inject::inject(reg, &aid, &from_role, &msg).await;
-            (aid, role_clone, ok)
+            let result = inject::inject(reg, &aid, &from_role, &msg).await;
+            (aid, role_clone, result)
         });
     }
 
@@ -243,60 +243,137 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
     //   旧 `receivedAtPerRecipient` は意味的に「PTY に届いた」≒「読まれた」を混同させていたため、
     //   Issue #378 では `deliveredAtPerRecipient` を新設して payload の正本にする。
     //   `receivedAtPerRecipient` は legacy alias として同じ値を残し、外部 UI / 解析ツールの後方互換を保つ。
+    //
+    // Issue #511: 旧実装は `inject()` の戻り値を `bool` に丸めていたため、partial failure
+    // (session_replaced / final_cr_failed / write_partial 等) と「単に届かなかった」を区別できず、
+    // Leader 視点で「届いたつもり」のまま再送ループに入る事故が起きていた。
+    // 新実装は `Result<(), InjectError>` を受け取り、agent ごとの最終状態を 3 種類に分けて返す:
+    //   - delivered: PTY に書ききって `\r` (送信確定) が成功した
+    //   - failed: いずれかの phase で失敗した (reason.code に `inject_*` 名前空間)
+    // 以下のフィールドを payload に追加する (既存 field はそのまま legacy として残す):
+    //   - `deliveryStatus`: { agentId → { state: "delivered"|"failed", deliveredAt?, reason? } }
+    //   - `failedRecipients`: 失敗した agent_id の配列 (UI が一覧表示しやすいよう正規化)
+    // 失敗 agent ごとに `team:inject_failed` event を AppHandle へ emit し、Canvas 側 UI が
+    // リアルタイムで warning indicator を出せるようにする。
     let mut delivered_at_per_recipient: HashMap<String, Option<String>> =
         targets.iter().map(|(aid, _)| (aid.clone(), None)).collect();
     let acknowledged_at_per_recipient: HashMap<String, Option<String>> =
         targets.iter().map(|(aid, _)| (aid.clone(), None)).collect();
+    let mut delivery_status: serde_json::Map<String, Value> = serde_json::Map::new();
+    let mut failed_recipients: Vec<Value> = Vec::new();
     let mut delivered: Vec<String> = Vec::new();
     while let Some(joined) = join_set.join_next().await {
-        if let Ok((target_aid, target_role, ok)) = joined {
-            if !ok {
-                continue;
-            }
-            delivered.push(if target_role.is_empty() {
-                target_aid.clone()
-            } else {
-                target_role.clone()
-            });
-            let delivered_at = Utc::now().to_rfc3339();
-            delivered_at_per_recipient.insert(target_aid.clone(), Some(delivered_at.clone()));
-            // Issue #378: read_by/read_at は触らない。delivered_to/delivered_at だけを更新する。
-            // (旧実装は inject 成功で recipient まで read_by に入れていたため、worker が実際に
-            //  Enter を確認していない 1 回目の指示も「既読」扱いになり、`team_read({unread_only: true})`
-            //  fallback で再取得できなかった。delivered/read を分離することで、worker が処理した
-            //  ことの真の証拠 (= team_read 呼び出し) でしか read_by に印が付かなくなる。)
-            {
-                let mut state = hub.state.lock().await;
-                if let Some(t) = state.teams.get_mut(&ctx.team_id) {
-                    if let Some(m) = t.messages.iter_mut().find(|m| m.id == msg_id) {
-                        if !m.delivered_to.iter().any(|id| id == &target_aid) {
-                            m.delivered_to.push(target_aid.clone());
+        if let Ok((target_aid, target_role, result)) = joined {
+            match result {
+                Ok(()) => {
+                    delivered.push(if target_role.is_empty() {
+                        target_aid.clone()
+                    } else {
+                        target_role.clone()
+                    });
+                    let delivered_at = Utc::now().to_rfc3339();
+                    delivered_at_per_recipient
+                        .insert(target_aid.clone(), Some(delivered_at.clone()));
+                    delivery_status.insert(
+                        target_aid.clone(),
+                        json!({
+                            "state": "delivered",
+                            "deliveredAt": delivered_at,
+                        }),
+                    );
+                    // Issue #378: read_by/read_at は触らない。delivered_to/delivered_at だけを更新する。
+                    // (旧実装は inject 成功で recipient まで read_by に入れていたため、worker が実際に
+                    //  Enter を確認していない 1 回目の指示も「既読」扱いになり、`team_read({unread_only: true})`
+                    //  fallback で再取得できなかった。delivered/read を分離することで、worker が処理した
+                    //  ことの真の証拠 (= team_read 呼び出し) でしか read_by に印が付かなくなる。)
+                    {
+                        let mut state = hub.state.lock().await;
+                        if let Some(t) = state.teams.get_mut(&ctx.team_id) {
+                            if let Some(m) = t.messages.iter_mut().find(|m| m.id == msg_id) {
+                                if !m.delivered_to.iter().any(|id| id == &target_aid) {
+                                    m.delivered_to.push(target_aid.clone());
+                                }
+                                m.delivered_at
+                                    .insert(target_aid.clone(), delivered_at.clone());
+                            }
                         }
-                        m.delivered_at
-                            .insert(target_aid.clone(), delivered_at.clone());
+                        // Issue #342 Phase 3 (3.3): 受信側 diagnostics 更新
+                        let recipient_diag = state
+                            .member_diagnostics
+                            .entry(target_aid.clone())
+                            .or_default();
+                        record_recipient_delivery_diagnostics(recipient_diag, &delivered_at);
+                    }
+                    // Phase 3: hand-off イベントを Canvas にブロードキャスト
+                    if let Some(app) = &app {
+                        let payload = json!({
+                            "teamId": ctx.team_id,
+                            "fromAgentId": ctx.agent_id,
+                            "fromRole": ctx.role,
+                            "toAgentId": target_aid,
+                            "toRole": target_role,
+                            "preview": preview,
+                            "messageId": msg_id,
+                            "timestamp": timestamp,
+                        });
+                        if let Err(e) = app.emit("team:handoff", payload) {
+                            tracing::warn!("emit team:handoff failed: {e}");
+                        }
                     }
                 }
-                // Issue #342 Phase 3 (3.3): 受信側 diagnostics 更新
-                let recipient_diag = state
-                    .member_diagnostics
-                    .entry(target_aid.clone())
-                    .or_default();
-                record_recipient_delivery_diagnostics(recipient_diag, &delivered_at);
-            }
-            // Phase 3: hand-off イベントを Canvas にブロードキャスト
-            if let Some(app) = &app {
-                let payload = json!({
-                    "teamId": ctx.team_id,
-                    "fromAgentId": ctx.agent_id,
-                    "fromRole": ctx.role,
-                    "toAgentId": target_aid,
-                    "toRole": target_role,
-                    "preview": preview,
-                    "messageId": msg_id,
-                    "timestamp": timestamp,
-                });
-                if let Err(e) = app.emit("team:handoff", payload) {
-                    tracing::warn!("emit team:handoff failed: {e}");
+                Err(err) => {
+                    // Issue #511: inject 失敗は一切無視せず、code (machine-readable) と
+                    // message (human-readable) を両方残す。Leader / UI 側の分岐で使う。
+                    let failed_at = Utc::now().to_rfc3339();
+                    let reason_code = err.code();
+                    let reason_message = err.to_string();
+                    tracing::warn!(
+                        "[team_send] inject failed for agent {} role={} code={} msg={}",
+                        target_aid,
+                        target_role,
+                        reason_code,
+                        reason_message
+                    );
+                    delivery_status.insert(
+                        target_aid.clone(),
+                        json!({
+                            "state": "failed",
+                            "failedAt": failed_at.clone(),
+                            "reason": {
+                                "code": reason_code,
+                                "message": reason_message.clone(),
+                            },
+                        }),
+                    );
+                    failed_recipients.push(json!({
+                        "agentId": target_aid.clone(),
+                        "role": target_role.clone(),
+                        "reason": {
+                            "code": reason_code,
+                            "message": reason_message.clone(),
+                        },
+                        "failedAt": failed_at.clone(),
+                    }));
+                    // Canvas 側 UI に live で警告アイコンを出すための event。
+                    // post-subscribe race を許容する `subscribeEvent` 経路で受ける想定 (vibeeditor
+                    // skill の guidelines 参照): inject_failed は send 後にしか来ないため、
+                    // listener 登録前に emit が走る race は構造的に発生しない。
+                    if let Some(app) = &app {
+                        let payload = json!({
+                            "teamId": ctx.team_id,
+                            "fromAgentId": ctx.agent_id,
+                            "fromRole": ctx.role,
+                            "toAgentId": target_aid,
+                            "toRole": target_role,
+                            "messageId": msg_id,
+                            "reasonCode": reason_code,
+                            "reasonMessage": reason_message,
+                            "failedAt": failed_at,
+                        });
+                        if let Err(e) = app.emit("team:inject_failed", payload) {
+                            tracing::warn!("emit team:inject_failed failed: {e}");
+                        }
+                    }
                 }
             }
         }
@@ -324,7 +401,7 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         }
     }
 
-    let note = if delivered.is_empty() {
+    let note = if delivered.is_empty() && failed_recipients.is_empty() {
         // 受信者ゼロは「サイレント失敗」を起こしがちなので、現在のメンバーを文字列でヒントする。
         // 同 role 複数名がいる場合に "[programmer, programmer]" のような重複表示を避けるため
         // sort + dedup で一意化する (順序を安定させたいので HashSet ではなく Vec で処理)。
@@ -344,8 +421,21 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
                 "宛先 '{to}' に該当するメンバーが居ません。現在のメンバーロール: {hint:?} (role 名 / agentId / 'all' で指定してください)"
             )
         }
-    } else {
+    } else if failed_recipients.is_empty() {
         format!("{} 名に直接配信しました。", delivered.len())
+    } else if delivered.is_empty() {
+        // Issue #511: 全送信先が失敗。caller に「送ったけど誰にも届いていない」が伝わる文言にする。
+        format!(
+            "{} 名への配信が失敗しました (delivered=0)。failedRecipients[].reason.code を確認してください。",
+            failed_recipients.len()
+        )
+    } else {
+        // Issue #511: partial failure。delivered と failed の数を両方明示する。
+        format!(
+            "{} 名に配信、{} 名は失敗 (failedRecipients[].reason.code を確認してください)。",
+            delivered.len(),
+            failed_recipients.len()
+        )
     };
     Ok(json!({
         "success": true,
@@ -361,6 +451,14 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         "receivedAtPerRecipient": delivered_at_per_recipient,
         "acknowledged": false,
         "acknowledgedAtPerRecipient": acknowledged_at_per_recipient,
+        // Issue #511: agent_id ごとの最終 inject 結果。caller (Leader / UI) が delivered/failed
+        // を 1 か所で機械的に分岐できる正本フィールド。`deliveredAtPerRecipient` は legacy として残す。
+        // shape: { [agentId]: { state: "delivered", deliveredAt }
+        //        | { state: "failed", failedAt, reason: { code, message } } }
+        "deliveryStatus": Value::Object(delivery_status),
+        // 失敗 agent_id の正規化済みリスト。UI が「再送候補」を一覧する用途。
+        // 成功のみのときは空配列を返す (`null` ではない、JS 側で `.length === 0` で分岐できる)。
+        "failedRecipients": Value::Array(failed_recipients),
     }))
 }
 

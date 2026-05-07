@@ -788,8 +788,77 @@
   padding: 2px 12px 3px 14px;
 }
 
-/* Issue #511 (rust_team_hub_ops 担当) の inject warning 用の予約スロット。
- * 当該 PR で `__inject-warning` クラスが append される。位置は __summary 直下。 */
+/* Issue #511: PTY inject 失敗の警告 row。`__summary` block の sibling として置かれ、
+ * `payload.lastInjectFailure` が存在する間だけ render される。retry button + dismiss を含む。
+ * `__summary` と違って **クリック可能** なので `pointer-events: auto` を明示する
+ * (xyflow のドラッグ抜けは `.nodrag` クラス側で対応済み)。 */
+.canvas-agent-card__inject-warning {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(
+    in srgb,
+    var(--accent-danger, #dc2626) 12%,
+    var(--bg-elev, var(--bg-panel)) 88%
+  );
+  color: var(--accent-danger, #dc2626);
+  font-size: var(--text-xs, 11px);
+  line-height: 1.35;
+  pointer-events: auto;
+}
+.canvas-agent-card__inject-warning__icon {
+  flex: 0 0 auto;
+  color: var(--accent-danger, #dc2626);
+}
+.canvas-agent-card__inject-warning__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-weight: 500;
+}
+.canvas-agent-card__inject-warning__retry,
+.canvas-agent-card__inject-warning__dismiss {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 6px;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--accent-danger, #dc2626) 35%, transparent);
+  border-radius: 3px;
+  color: var(--accent-danger, #dc2626);
+  font-size: 10px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.canvas-agent-card__inject-warning__retry:hover:not(:disabled),
+.canvas-agent-card__inject-warning__dismiss:hover {
+  background: color-mix(
+    in srgb,
+    var(--accent-danger, #dc2626) 18%,
+    transparent
+  );
+  border-color: var(--accent-danger, #dc2626);
+}
+.canvas-agent-card__inject-warning__retry:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+.canvas-agent-card__inject-warning__dismiss {
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  font-size: 13px;
+  line-height: 1;
+}
+[data-density='compact'] .canvas-agent-card__inject-warning {
+  padding: 2px 12px;
+  gap: 4px;
+}
 
 .canvas-agent-card__term {
   flex: 1;
