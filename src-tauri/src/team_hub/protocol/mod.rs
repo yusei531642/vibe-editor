@@ -18,7 +18,10 @@
 // 旧 `mod consts` (private) を `team_hub` サブツリー全体に公開する。
 // `pub(crate)` まで広げる必要は無く、外部 (commands 等) には依然非可視のまま。
 pub(in crate::team_hub) mod consts;
-mod dynamic_role;
+// Issue #513: `state::TeamHub::register_team` (sibling 親 module) から
+// `replay_persisted_dynamic_roles_for_team` / `PersistedDynamicRoleEntry` を参照するため、
+// `team_hub` サブツリー全体に公開する。`pub(crate)` まで広げる必要は無い。
+pub(in crate::team_hub) mod dynamic_role;
 mod helpers;
 // Issue #519: 動的 instructions の禁止句 lint。recruit 段階で逸脱指示を弾く。
 mod instruction_lint;

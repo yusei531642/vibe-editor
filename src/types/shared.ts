@@ -295,6 +295,44 @@ export interface RoleProfile {
   singleton?: boolean;
 }
 
+/**
+ * Issue #513: 動的ロール (Leader が `team_recruit({ role_definition: ... })` で生成した
+ * ロール定義) を永続化する 1 件分のエントリ。
+ *
+ * Hub state 内の `DynamicRole` (Rust struct) と camelCase 互換 (`#[serde(rename_all =
+ * "camelCase")]`)。`team_id` を持つことで「どのチームで作られたか」を保持し、再起動時の
+ * `register_team` 経路で該当 team_id の entries だけを `replace_dynamic_roles()` で
+ * Hub に投入する。
+ *
+ * `expiresAt` は将来的な「使い捨てロールの自動 GC」用予備フィールド (現状未使用)。
+ */
+export interface DynamicRoleEntry {
+  /** ロール識別子 (ASCII alnum + `_-`、最大 80 byte) */
+  id: string;
+  /** どのチームで作られたか (再起動時の Hub 投入で team 単位に振り分けるため) */
+  teamId: string;
+  /** 表示ラベル (英語) */
+  label: string;
+  /** 概要説明 */
+  description: string;
+  /** 役職特有の振る舞い (worker テンプレの `{dynamicInstructions}` に流し込まれる) */
+  instructions: string;
+  /** 日本語 instructions (任意)。未指定なら instructions が両言語に使われる */
+  instructionsJa?: string;
+  /** 作成者 role (例: `leader`) */
+  createdByRole: string;
+  /**
+   * 作成時刻 (RFC3339)。後方互換のため optional だが、新規 persist 時は必ず保存する。
+   * 古い JSON (このフィールドを持たない) を読む場合は load 側で `null` 扱いで継続。
+   */
+  createdAt?: string;
+  /**
+   * 有効期限 (RFC3339)。設定された場合、Hub 起動時に経過済み entry をスキップして load する。
+   * 現状の writer 側は使わない (= 任意フィールド扱い、将来 settings UI から手動設定可能にする予定)。
+   */
+  expiresAt?: string;
+}
+
 /** ~/.vibe-editor/role-profiles.json のスキーマ */
 export interface RoleProfilesFile {
   schemaVersion: 1;
@@ -306,6 +344,13 @@ export interface RoleProfilesFile {
   globalPreamble?: { en?: string; ja?: string };
   /** 受信時のメッセージタグ書式。default = "[Team <- {fromLabel}] {message}" */
   messageTagFormat?: string;
+  /**
+   * Issue #513: 動的ロール定義の永続化リスト。
+   * Leader が `team_recruit({ role_definition: ... })` で生成した entry がここに保存され、
+   * アプリ再起動 / Canvas 復元時に Hub の `dynamic_roles` map に replay される。
+   * 古い JSON (このフィールドが無い) は空配列として扱われ、後方互換性を保つ。
+   */
+  dynamic?: DynamicRoleEntry[];
 }
 
 /** ランタイムのみ（永続化不要）。チーム所属タブは teamId で紐付く */

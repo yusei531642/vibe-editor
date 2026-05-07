@@ -836,6 +836,12 @@ impl TeamHub {
             }
             None => None,
         };
+        // Issue #513: ~/.vibe-editor/role-profiles.json#dynamic[] から該当 team_id の entry を抽出。
+        // role-profiles.json は user-global (project_root 非依存) なので、project_root の有無に
+        // 関わらず実行する。読み込み失敗 / 古い JSON (dynamic フィールドなし) は空配列扱い。
+        // state.lock の前に async I/O を済ませ、lock を保持中に file read をしないようにしている。
+        let persisted_dynamic_entries = load_persisted_dynamic_for_team(team_id).await;
+
         let mut s = self.state.lock().await;
         s.active_teams.insert(team_id.to_string());
         let team = s
@@ -874,6 +880,25 @@ impl TeamHub {
             }
             if persisted.human_gate.blocked {
                 team.human_gate = persisted.human_gate;
+            }
+        }
+        drop(s);
+        // Issue #513: state.lock を drop した後で `replay_persisted_dynamic_roles_for_team` を呼ぶ。
+        // この関数は内部で hub.state.lock() を取るので、外側 lock を保持したまま呼ぶと deadlock する。
+        // 永続化が空 (entry 0 件) のチームは `replace_dynamic_roles` で空集合を投入することになるが、
+        // 既存 in-memory が空のままなら no-op、既存に entry が居れば「永続化済 = 真の状態」として
+        // 完全置換する設計 (= renderer 側 cache が永続化と乖離していた場合に永続化を勝者とする)。
+        if !persisted_dynamic_entries.is_empty() {
+            let skipped = crate::team_hub::protocol::dynamic_role::replay_persisted_dynamic_roles_for_team(
+                self,
+                team_id,
+                persisted_dynamic_entries,
+            )
+            .await;
+            if skipped > 0 {
+                tracing::warn!(
+                    "[register_team] team={team_id}: {skipped} persisted dynamic entries skipped (expired / mismatch)"
+                );
             }
         }
     }
@@ -991,4 +1016,58 @@ impl TeamHub {
         }
         self.persist_team_state(team_id).await
     }
+}
+
+/// Issue #513: `~/.vibe-editor/role-profiles.json#dynamic[]` から **指定 team_id に紐付く
+/// entry だけ** を抽出して返す内部 helper。`register_team` の前段で呼び、Hub state.lock を
+/// 取らずに async I/O を済ませてから replay する設計。
+///
+/// 失敗時 (file 不在 / parse 失敗 / dynamic フィールドなし) は **空配列** を返す
+/// (= 「永続化された動的ロールがない」と意味的に等価)。parse 失敗時は警告ログを残すが、
+/// チーム起動自体は失敗させない (= ユーザーが旧 builtin / custom フィールドだけで運用していた
+/// 環境で、dynamic フィールドの有無に依存して team が立ち上がらないのを防ぐ)。
+///
+/// `tokio::fs::read` を使うので state.lock を保持中に呼ばないこと (deadlock はしないが
+/// blocking I/O で hub の lock holder time が伸びるため)。
+async fn load_persisted_dynamic_for_team(
+    team_id: &str,
+) -> Vec<crate::team_hub::protocol::dynamic_role::PersistedDynamicRoleEntry> {
+    if team_id.trim().is_empty() {
+        return Vec::new();
+    }
+    let path = crate::util::config_paths::role_profiles_path();
+    let bytes = match tokio::fs::read(&path).await {
+        Ok(b) => b,
+        Err(_) => return Vec::new(), // file 不在は normal (初回起動 / 動的ロールを使わない運用)
+    };
+    let value: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!(
+                "[register_team] role-profiles.json parse failed when loading dynamic[]: {e}"
+            );
+            return Vec::new();
+        }
+    };
+    let Some(arr) = value.get("dynamic").and_then(|v| v.as_array()) else {
+        // 古い JSON (dynamic フィールドなし) は no-op で OK。新規 save 時に renderer が追加する。
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for item in arr {
+        let entry: crate::team_hub::protocol::dynamic_role::PersistedDynamicRoleEntry =
+            match serde_json::from_value(item.clone()) {
+                Ok(e) => e,
+                Err(e) => {
+                    tracing::warn!(
+                        "[register_team] skipping malformed dynamic[] entry: {e}"
+                    );
+                    continue;
+                }
+            };
+        if entry.team_id == team_id {
+            out.push(entry);
+        }
+    }
+    out
 }
