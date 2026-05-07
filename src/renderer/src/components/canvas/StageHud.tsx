@@ -10,6 +10,7 @@ import {
   List,
   Maximize2,
   Ruler,
+  Skull,
   Users,
   ZoomIn,
   ZoomOut
@@ -24,6 +25,8 @@ import {
   aggregateTeamSummary,
   type CardSummary
 } from '../../lib/agent-summary';
+import { useTeamHealth } from '../../lib/use-team-health';
+import { deriveHealth } from '../../lib/agent-health';
 import { TeamPresetsPanel } from './TeamPresetsPanel';
 import { TeamDashboard } from './TeamDashboard';
 import type { AgentPayload } from './cards/AgentNodeCard/types';
@@ -178,6 +181,34 @@ export function StageHud(): JSX.Element {
   );
   const showTeamSummary = teamSummary.total > 0;
 
+  // Issue #510: TeamHub diagnostics から dead 数を集計し、HUD に 5 番目のピルとして出す。
+  // teamId は activeTeamId 1 件しか想定しないので、agent ノード群の最頻 teamId を採る。
+  // teamId が無い (= スタンドアロンカードのみ) なら null で hook が no-op になる。
+  const aggregatedTeamId = useMemo<string | null>(() => {
+    let leader: string | null = null;
+    let first: string | null = null;
+    for (const node of agentNodes) {
+      const payload = (node.data as CardData | undefined)?.payload as AgentPayload | undefined;
+      if (!payload?.teamId) continue;
+      if (first === null) first = payload.teamId;
+      const role = payload.roleProfileId ?? payload.role;
+      if (role === 'leader' && leader === null) leader = payload.teamId;
+    }
+    return leader ?? first;
+  }, [agentNodes]);
+  const healthSnapshot = useTeamHealth(aggregatedTeamId);
+  const deadCount = useMemo(() => {
+    let n = 0;
+    for (const node of agentNodes) {
+      const payload = (node.data as CardData | undefined)?.payload as AgentPayload | undefined;
+      if (!payload?.agentId) continue;
+      const row = healthSnapshot.byAgentId[payload.agentId];
+      const h = deriveHealth(row);
+      if (h.state === 'dead') n += 1;
+    }
+    return n;
+  }, [agentNodes, healthSnapshot]);
+
   // Issue #514: dashboard に渡す teamId / projectRoot を canvas state + settings から導出。
   // 複数 team が並ぶ稀なケースは「Leader カードがある team を優先」、無ければ最初の agent team を採る。
   const { settings } = useSettings();
@@ -238,6 +269,19 @@ export function StageHud(): JSX.Element {
               <span className="tc__hud-summary-num">{teamSummary.stale}</span>
               <span className="tc__hud-summary-text">
                 {t('canvas.hud.summary.stale')}
+              </span>
+            </span>
+            <span
+              className={
+                'tc__hud-summary-pill tc__hud-summary-pill--dead' +
+                (deadCount > 0 ? ' is-on' : '')
+              }
+              title={t('canvas.hud.summary.dead.tooltip')}
+            >
+              <Skull size={11} strokeWidth={2.2} aria-hidden="true" />
+              <span className="tc__hud-summary-num">{deadCount}</span>
+              <span className="tc__hud-summary-text">
+                {t('canvas.hud.summary.dead')}
               </span>
             </span>
             <span

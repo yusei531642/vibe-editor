@@ -19,7 +19,24 @@ import {
   type CardSummary,
   type TeamSummaryAggregate
 } from '../agent-summary';
-import type { RetryInjectArgs, RetryInjectResult } from '../../../../types/shared';
+import type {
+  RetryInjectArgs,
+  RetryInjectResult,
+  TeamDiagnosticsMemberRow
+} from '../../../../types/shared';
+
+/**
+ * Issue #510: `team_diagnostics_read` IPC の戻り値。Rust 側 `team_diagnostics` 関数の
+ * outer JSON shape (`{ myAgentId, myRole, teamId, serverLogPath, members[] }`) を
+ * そのまま投影する。renderer は基本 `members` だけを使う。
+ */
+export interface TeamDiagnosticsResponse {
+  myAgentId: string;
+  myRole: string;
+  teamId: string;
+  serverLogPath: string | null;
+  members: TeamDiagnosticsMemberRow[];
+}
 
 export interface TeamSummaryRequest {
   /** 集計対象の agent ノード (caller 側で type === 'agent' フィルタ済み) */
@@ -50,5 +67,20 @@ export const team = {
    *   reject されたエラー文字列は JSON `{"code":"retry_*","message":"..."}` 形式。caller は `JSON.parse()` で分岐できる。
    */
   retryInject: (args: RetryInjectArgs): Promise<RetryInjectResult> =>
-    invoke('team_send_retry_inject', { args })
+    invoke('team_send_retry_inject', { args }),
+  /**
+   * Issue #510: TeamHub の per-member 診断値を Leader 視点で取得する。
+   * 内部で leader 役を impersonate して MCP `team_diagnostics` と同一データを返す。
+   * Hub 未起動 / team 未登録時も基本的に空 members で返る (errors は reject)。
+   *
+   * 引数キー命名: 本プロジェクトは Rust 側 `#[tauri::command]` の snake_case パラメータ
+   * (`team_id: String`) に対し、JS invoke 側は **camelCase** (`{ teamId }`) を渡す
+   * 慣例で統一している。Tauri 2 のデフォルト動作で `camelCase` JS キーは自動的に
+   * `snake_case` Rust パラメータへマッピングされる (例: `teamHistory.list({ projectRoot })`,
+   * `teamState.read({ projectRoot, teamId })` 等、全 wrapper 同一パターン)。
+   * snake_case をそのまま JS から渡すと逆に名前解決が崩れる可能性があるため、
+   * ここでも他 wrapper と揃えて camelCase で送る。
+   */
+  diagnosticsRead: (teamId: string): Promise<TeamDiagnosticsResponse> =>
+    invoke('team_diagnostics_read', { teamId })
 };

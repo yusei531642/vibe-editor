@@ -15,6 +15,7 @@ pub mod logs;
 pub mod role_profiles;
 pub mod sessions;
 pub mod settings;
+pub mod team_diagnostics;
 pub mod team_history;
 pub mod team_inject;
 pub mod team_presets;

@@ -32,7 +32,10 @@ pub(in crate::team_hub) mod permissions;
 // Issue #508: 動的ロール定義の必須テンプレ + 曖昧名 + Worktree Isolation Rule の validation。
 mod role_template;
 mod schema;
-mod tools;
+// Issue #510: tools::diagnostics を `commands/team_diagnostics.rs` (Tauri IPC) から
+// 呼び出すため crate 内可視に緩める。renderer は Leader 役で薄い wrapper を介して
+// MCP と同一データを取得する。external (extra-crate) 公開は意図しないので `pub(crate)` 維持。
+pub(crate) mod tools;
 
 use crate::team_hub::{CallContext, TeamHub};
 use schema::tool_defs;
