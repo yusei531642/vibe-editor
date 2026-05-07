@@ -31,8 +31,21 @@ const TOOLS_JA =
   '利用可能 MCP ツール: team_recruit / team_dismiss / team_send / team_read / team_info / team_status / team_assign_task / team_get_tasks / team_update_task / team_list_role_profiles。' +
   '詳しい使い方と行動規範は `vibe-team` Skill (`.claude/skills/vibe-team/SKILL.md`) を参照してください。';
 
+const LEADER_TEAM_COMPOSITION_RULE =
+  '9. Pre-recruit team-composition check (run BEFORE the first specialist `team_recruit`).\n' +
+  '   Hold the 5-axis template in mind — investigate / implement / verify / review / integrate —\n' +
+  '   and verify all 5 boxes have an owner (yourself counts). No empty axis is allowed before any\n' +
+  '   specialist hire.\n' +
+  '   (a) If 3+ specialists are needed, recruit `hr` first (rule 4) and pass the 5-axis assignment\n' +
+  '       to HR alongside the role definitions.\n' +
+  '   (b) Do NOT let one teammate own implement + review + integrate at the same time. Split the\n' +
+  '       review axis off to a separate role for cross-checking.\n' +
+  '   (c) For 6+ members, add a dedicated project_manager role so the Leader can focus on\n' +
+  '       integrate + final-call only.\n' +
+  '   The full template lives in the `vibe-team` Skill (see "## 役職分担テンプレ (5 軸)").\n';
+
 const LEADER_ENGINE_CONSTRAINT_RULE =
-  '9. Engine constraint preservation: If the user says Codex-only, multiple Codex, Codex only, or asks for a same-engine organization, every `team_recruit` call MUST carry `engine:"codex"` for HR and workers unless the user explicitly asks to mix Claude. For 3+ Codex-only specialists, recruit HR with `team_recruit({role_id:"hr", engine:"codex"})` and tell HR this is a same-engine Codex-only team.\n';
+  '10. Engine constraint preservation: If the user says Codex-only, multiple Codex, Codex only, or asks for a same-engine organization, every `team_recruit` call MUST carry `engine:"codex"` for HR and workers unless the user explicitly asks to mix Claude. For 3+ Codex-only specialists, recruit HR with `team_recruit({role_id:"hr", engine:"codex"})` and tell HR this is a same-engine Codex-only team.\n';
 
 const HR_ENGINE_CONSTRAINT_RULE =
   '6. Leader engine constraint: preserve the Leader request exactly. For Codex-only / same-engine hiring, every seat MUST use `engine:"codex"`. Do NOT substitute Claude or omit engine unless the Leader explicitly asks for Claude or mixed engines.\n';
@@ -180,6 +193,7 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         'Read tool AFTER you have already recruited the first member. It is supplementary, not required\n' +
         'for the mandatory rules above.\n' +
         '\n' +
+        LEADER_TEAM_COMPOSITION_RULE +
         LEADER_ENGINE_CONSTRAINT_RULE +
         '{tools}',
       templateJa:
@@ -234,6 +248,7 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         '設計思想や応用パターンの詳細は `.claude/skills/vibe-team/SKILL.md` を Read ツールで読めば参照できる。' +
         'ただし最初の 1 名を採用した後の補助情報であり、上記の絶対ルールに従うために読む必要はない。\n' +
         '\n' +
+        LEADER_TEAM_COMPOSITION_RULE +
         LEADER_ENGINE_CONSTRAINT_RULE +
         '{tools}'
     },
