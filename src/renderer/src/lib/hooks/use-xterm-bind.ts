@@ -24,6 +24,7 @@ import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
 import type { TerminalExitInfo } from '../../../../types/shared';
 import { computeUnscaledGrid } from '../compute-unscaled-grid';
+import { getXtermRuntimeCellSize } from '../get-xterm-runtime-cell-size';
 import type { CellSize } from '../measure-cell-size';
 import {
   createTerminalInputGate,
@@ -263,7 +264,15 @@ export function useXtermBind(options: UseXtermBindOptions): void {
       try {
         if (unscaledFitRef.current) {
           const container = containerRefRef.current?.current;
-          const cell = getCellSizeRef.current?.();
+          // Issue #503: 初回 spawn でも use-fit-to-container と同じ runtime-first 優先順序にする。
+          //   xterm 自身が保持する実 cell px (CharSizeService の measureText 結果) を
+          //   優先して使い、取得不能なときだけ Canvas 2D measureText ベースの fallback を
+          //   使う。これで初回 spawn 時点の cellW が xterm 内部 cellW と一致し、
+          //   computeUnscaledGrid が返す cols/rows が PTY 起動直後から正しい値になる。
+          //   既存 use-fit-to-container.ts:141-143 と同じ pattern。
+          const runtimeCell = getXtermRuntimeCellSize(term);
+          const fallbackCell = getCellSizeRef.current?.() ?? null;
+          const cell = runtimeCell ?? fallbackCell;
           if (container && cell) {
             const grid = computeUnscaledGrid(
               container.clientWidth,
