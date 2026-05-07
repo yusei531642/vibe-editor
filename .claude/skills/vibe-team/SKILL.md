@@ -323,6 +323,75 @@ Leader が `team_recruit` を始める前に、必ず以下の 5 軸のうち **
 - PR 本文の `## Summary` には Step 2 で見つかった主要な矛盾と Step 4 の採用根拠を 2〜3 行で残す。後から「なぜこの選択をしたか」が辿れるようにする。
 - 統合専任の `integrator` ロールを使う場合のサンプル instructions は `src/renderer/src/lib/role-profiles-builtin.ts` の `INTEGRATOR_TEMPLATE_INSTRUCTIONS_JA` / `_EN` を参照 (`team_recruit({role_id:"integrator", instructions: ...})` でそのまま使える)。
 
+## Worktree 隔離 (運用 invariant)
+
+> **これは vibe-team 全 worker (Leader / HR / 動的ワーカー) に適用される最優先の運用 invariant**。
+> 「## 全エージェント共通の絶対ルール」よりさらに前 — 「採用直後、`[Team ← leader]` を待つよりも先」に実行する。
+
+### なぜ必須か (背景)
+
+vibe-team の動的ワーカーはそれぞれ独立した Claude セッションだが、**ファイルシステムは vibe-editor リポジトリの単一 working tree を共有する**。複数 worker が同時に `git checkout` を回すと、以下の事故が発生する:
+
+- 他 worker の **uncommitted changes が静かに失われる** (working tree から消える / stash で上書きされる)
+- 別 branch の状態を踏んでビルドや typecheck が誤った結果を返す
+- どの worker の作業がどの commit に入ったか **追跡不能**になる
+
+実際 #507 / #508 / #511 / #516 / #521 を並走した際に、`#511` の inject.rs ~300 行が一時消失 (rescue 済) し、`#521` の renderer 4 ファイルが消失確定した観測事例がある。`team_diagnostics.lastSeenAt` 等の活性監視では **file-level の損失は検知できない** ため、運用 invariant としてここに固定化する。
+
+### 採用直後の最初のアクション (FIRST ACTION)
+
+worker は採用された直後 (= `[ABSOLUTE RULES]` を読んだ次の瞬間)、**指示を待つよりも先に** 以下 2 行を順に実行する:
+
+```
+git worktree add F:/vive-editor-worktrees/<short_id> -b <branch> origin/main
+Set-Location F:/vive-editor-worktrees/<short_id>
+```
+
+これは **1 度だけの setup**。setup 完了後は通常の絶対ルール (rule 1: 指示が届くまで何もしない) に戻る。指示が届く前にコード調査・編集を始めるのは禁止だが、自分の作業ディレクトリを物理的に隔離する setup だけは例外として許可する。
+
+### placeholder の意味
+
+| placeholder | 形式 | 例 |
+|---|---|---|
+| `<short_id>` | kebab-case、英数字 + `-`、≤ 32 文字 | `issue-516` / `worktree-isolation-rule` |
+| `<branch>` | プロジェクト規約通り (`<type>/issue-<N>-<slug>` 等) | `enhancement/issue-516-update-task-report-payload` |
+
+固定要素 (Leader が instructions を書くときも変えない / Rust 側 #508 validation でトークン照合する):
+
+- `git worktree add` — 動詞句
+- `origin/main` — 起点を必ず origin/main に固定 (他 worker の HEAD を踏まない)
+- `Set-Location` — PowerShell 規約。Bash 環境なら `cd` 同義
+- `-b <branch>` — 既存 branch checkout 禁止 = 必ず新規 branch を切る
+- `vive-editor-worktrees` — 親 dir 名 (de-facto root)
+
+### 解雇時のクリーンアップ
+
+worker が `team_dismiss` された (もしくは作業完了して PR が merge された) ときは、自分が作った worktree を削除する。Leader / HR は dismiss 直前に対象 worker へ次を `team_send` で促す:
+
+```
+git worktree remove F:/vive-editor-worktrees/<short_id>
+git branch -D <branch>   # ローカル branch も使い終わっていれば
+```
+
+worktree を残すと `git worktree list` が肥大化するが、誤って残しても害はない (orphan は `git worktree prune` で掃除可能)。
+
+### 非 Windows 環境
+
+vibe-editor は Windows-first だが、worktree path の親 dir 名 (`vive-editor-worktrees`) だけ守れば置く場所は自由:
+
+| 環境 | 推奨 path |
+|---|---|
+| Windows | `F:/vive-editor-worktrees/<short_id>` (本 SKILL.md の default) |
+| macOS / Linux | `~/vive-editor-worktrees/<short_id>` または `<repo-parent>/vive-editor-worktrees/<short_id>` |
+
+forward slash で書けば msys git / native git どちらも解釈する。Windows 上で backslash を使うと PowerShell の escape と衝突しやすいので避ける。
+
+### Rust 側 validation との整合 (#508)
+
+`#508 (PR #533)` で Rust 側に `validate_template` が実装され、recruit 時に Worktree Isolation Rule の 5 トークンが instructions に含まれているかをチェックする。トークンが欠落していても **WARN** に留まり recruit は止まらないが、`templateWarnings` に `missing_worktree_rule` が乗るので Leader は気付ける。Leader が instructions を書くとき、本セクションの「FIRST ACTION」コードブロック (5 トークンを全部含む) をそのまま貼り付ければ validation は確実に pass する。
+
+詳細な validation 仕様 (alias / 順序チェック / 各セクション本文長) は `## 動的ロール instructions の必須テンプレ (Rust 側 validation)` (上方) を参照。
+
 ## 名前空間 (vibe-editor 独自)
 
 - 環境変数: `VIBE_TEAM_*` / `VIBE_AGENT_ID`
