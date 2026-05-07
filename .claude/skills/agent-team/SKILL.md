@@ -115,6 +115,34 @@ teammate が「完了」と言っても、lead が `git diff` / `npm run typeche
 
 ---
 
+## 推奨チーム構成 (5 軸モデル)
+
+vibe-team skill と整合する **5 軸モデル** で teammate を割り当てると、領域分担と DoD 設計が自然に揃う。
+
+| 軸 | teammate 役割 | 主な触る場所 (vibe-editor 例) |
+|---|---|---|
+| 調査 | researcher / explorer | issue・仕様書・既存実装の grep / read のみ |
+| 実装 | implementer | 担当領域 1 つ (Canvas / PTY / Settings 等) を独占的に編集 |
+| 検証 | verifier | typecheck / build / 単体テスト / 手動再現 |
+| レビュー | reviewer | 実装者と別人。設計・命名・セキュリティ・a11y を指摘 |
+| 統合 | integrator (= 多くの場合 lead) | 5 点同期 / 4 層同期 / commit / PR / bot レビューループ |
+
+### 推奨組み合わせ (team size 別)
+
+- **3 人体制 (最小)**: lead 兼統合 + 実装 1 + レビュー 1。調査と検証は実装者と兼任。短時間タスク向け。
+- **4 人体制 (定番)**: lead 兼統合 + 調査 1 + 実装 1 + レビュー 1。検証は実装者またはレビュアーが流す。
+- **5 人体制 (上限)**: lead 兼統合 + 調査 1 + 実装 2 (領域分担) + レビュー 1。検証は各実装者が走らせる。
+
+> 6 人以上にしたくなったら **タスクを 2 イテレーションに割って team を 2 回回す** ほうが coordination overhead が低い。
+
+### lead が統合を専任する効用
+
+- 5 点同期 (`tauri-ipc-commands`) や 4 層同期 (`theme-customization`) は teammate 間に分散させると壊れやすい
+- 各 teammate の出力差分を読み、commit / PR メッセージを書き、bot レビューを回すのは lead 1 人に集約するほうが速い
+- レビュー指摘の取り込みも lead 経由のほうが「再 push 後の整合性」が崩れにくい
+
+---
+
 ## アンチパターン
 
 - ❌ **3 人とも同じファイルを編集** — merge hell
