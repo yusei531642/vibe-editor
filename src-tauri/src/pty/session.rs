@@ -16,9 +16,7 @@ use std::collections::HashMap;
 #[cfg(windows)]
 use std::collections::HashSet;
 use std::io::{Read, Write};
-use std::path::Path;
-#[cfg(windows)]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
