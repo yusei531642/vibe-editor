@@ -29,6 +29,11 @@ pub async fn team_get_tasks(hub: &TeamHub, ctx: &CallContext) -> Result<Value, S
                         "artifactPath": snapshot.artifact_path,
                         "blockedByHumanGate": snapshot.blocked_by_human_gate,
                         "requiredHumanDecision": snapshot.required_human_decision,
+                        "targetPaths": snapshot.target_paths,
+                        "lockConflicts": snapshot.lock_conflicts,
+                        "preApproval": snapshot.pre_approval,
+                        "doneCriteria": snapshot.done_criteria,
+                        "doneEvidence": snapshot.done_evidence,
                     })
                 })
                 .collect::<Vec<_>>()

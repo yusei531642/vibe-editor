@@ -28,6 +28,52 @@ impl MessageBodyKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MessageKind {
+    Advisory,
+    Request,
+    Report,
+}
+
+impl MessageKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Advisory => "advisory",
+            Self::Request => "request",
+            Self::Report => "report",
+        }
+    }
+
+    fn inject_from_label(self, from_role: &str) -> String {
+        if self == Self::Advisory {
+            from_role.to_string()
+        } else {
+            format!("{}:{}", from_role, self.as_str())
+        }
+    }
+}
+
+fn parse_message_kind(args: &Value) -> Result<MessageKind, String> {
+    let raw = args
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("advisory");
+    match raw {
+        "advisory" => Ok(MessageKind::Advisory),
+        "request" => Ok(MessageKind::Request),
+        "report" => Ok(MessageKind::Report),
+        other => Err(SendError {
+            code: "send_invalid_args".into(),
+            message: format!("kind must be advisory, request, or report (got {other:?})"),
+            phase: None,
+            elapsed_ms: None,
+        }
+        .into_err_string()),
+    }
+}
+
 fn non_empty_optional_field(
     obj: &serde_json::Map<String, Value>,
     field: &str,
@@ -128,6 +174,62 @@ fn report_kind(message: &str) -> &'static str {
     }
 }
 
+fn is_leader_role(role: &str) -> bool {
+    role.trim().eq_ignore_ascii_case("leader")
+}
+
+fn should_record_leader_summary_feed(
+    raw_to: &str,
+    message: &str,
+    from_role: &str,
+    targets: &[(String, String)],
+    message_kind: MessageKind,
+) -> bool {
+    if is_leader_report(raw_to, message, from_role) || message_kind == MessageKind::Report {
+        return true;
+    }
+
+    // Issue #515: worker 間の advisory は Leader に直接 inject しないが、裏チャネル化を
+    // 防ぐため worker_reports に軽量ログとして残す。Leader 発信や Leader 宛ては既に見える。
+    message_kind == MessageKind::Advisory
+        && !is_leader_role(from_role)
+        && !targets.iter().any(|(_, role)| is_leader_role(role))
+}
+
+fn leader_summary_kind(message_kind: MessageKind, message: &str) -> String {
+    if message_kind == MessageKind::Advisory {
+        "advisory".to_string()
+    } else if message_kind == MessageKind::Report {
+        "report".to_string()
+    } else {
+        report_kind(message).to_string()
+    }
+}
+
+fn resolve_targets_with_request_cc(
+    members: &[(String, String)],
+    self_agent_id: &str,
+    raw_to: &str,
+    active_leader_agent_id: Option<&str>,
+    message_kind: MessageKind,
+) -> (Vec<(String, String)>, Vec<String>) {
+    let mut targets = resolve_targets(members, self_agent_id, raw_to, active_leader_agent_id);
+    let mut leader_cc_agent_ids = Vec::new();
+    if message_kind != MessageKind::Request {
+        return (targets, leader_cc_agent_ids);
+    }
+
+    let leader_targets = resolve_targets(members, self_agent_id, "leader", active_leader_agent_id);
+    for (leader_aid, leader_role) in leader_targets {
+        if targets.iter().any(|(aid, _)| aid == &leader_aid) {
+            continue;
+        }
+        leader_cc_agent_ids.push(leader_aid.clone());
+        targets.push((leader_aid, leader_role));
+    }
+    (targets, leader_cc_agent_ids)
+}
+
 pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
     // trim は resolve_targets 内で行うので、ここでは生文字列を保持して履歴 / 検証に使う。
     let to = args
@@ -136,6 +238,7 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         .unwrap_or("")
         .to_string();
     let (message, message_body_kind) = parse_message_body(args)?;
+    let message_kind = parse_message_kind(args)?;
     let message = message.as_str();
     let handoff_id = optional_string(args, "handoff_id", "handoffId");
     if to.trim().is_empty() || message.is_empty() {
@@ -268,17 +371,19 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
             .get(&ctx.team_id)
             .and_then(|team| team.active_leader_agent_id.clone())
     };
-    let targets = resolve_targets(
+    let (targets, leader_cc_agent_ids) = resolve_targets_with_request_cc(
         &team_members,
         &ctx.agent_id,
         &to,
         active_leader_agent_id.as_deref(),
+        message_kind,
     );
     let resolved_recipient_ids: Vec<String> = targets.iter().map(|(aid, _)| aid.clone()).collect();
 
     // メッセージ履歴に追加
     let timestamp = Utc::now().to_rfc3339();
-    let should_record_report = is_leader_report(&to, message, &ctx.role);
+    let should_record_summary_feed =
+        should_record_leader_summary_feed(&to, message, &ctx.role, &targets, message_kind);
     let mut state = hub.state.lock().await;
     let team = state
         .teams
@@ -296,6 +401,7 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         from: ctx.role.clone(),
         from_agent_id: ctx.agent_id.clone(),
         to: to.clone(),
+        kind: message_kind.as_str().to_string(),
         resolved_recipient_ids: resolved_recipient_ids.clone(),
         message: effective_message.to_string(),
         timestamp: timestamp.clone(),
@@ -312,7 +418,7 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
     while team.messages.len() > MAX_MESSAGES_PER_TEAM {
         let _ = team.messages.pop_front();
     }
-    if should_record_report {
+    if should_record_summary_feed {
         // Issue #512: worker_reports は **元 `message`** (spool 化 **前**) の先頭 500 文字を保持する。
         // worker_reports は Leader が後で「完了報告 / blocked の経緯」を読み返すための診断ログで、
         // 「summary + attached: <path>」だけが残ると情報量が著しく落ちる。spool ファイル本体は
@@ -326,7 +432,7 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
                 task_id: None,
                 from_role: ctx.role.clone(),
                 from_agent_id: ctx.agent_id.clone(),
-                kind: report_kind(message).to_string(),
+                kind: leader_summary_kind(message_kind, message),
                 summary,
                 blocked_reason: None,
                 next_action: None,
@@ -347,9 +453,9 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
     sender_diag.last_seen_at = Some(timestamp.clone());
     sender_diag.messages_out_count = sender_diag.messages_out_count.saturating_add(1);
     drop(state);
-    if should_record_report {
+    if should_record_summary_feed {
         if let Err(e) = hub.persist_team_state(&ctx.team_id).await {
-            tracing::warn!("[team_send] persist worker report failed: {e}");
+            tracing::warn!("[team_send] persist leader summary feed failed: {e}");
         }
     }
 
@@ -366,10 +472,11 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         .cloned()
         .collect();
     tracing::debug!(
-        "[team_send] from agent={} role={} to={} kind={} → targets={}/{} other_members",
+        "[team_send] from agent={} role={} to={} kind={} body_kind={} → targets={}/{} other_members",
         ctx.agent_id,
         ctx.role,
         to,
+        message_kind.as_str(),
         message_body_kind.as_str(),
         targets.len(),
         other_members.len()
@@ -387,7 +494,7 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
     for (target_aid, target_role) in &targets {
         let reg = registry.clone();
         let aid = target_aid.clone();
-        let from_role = ctx.role.clone();
+        let from_role = message_kind.inject_from_label(&ctx.role);
         let msg = effective_message.to_string();
         let role_clone = target_role.clone();
         join_set.spawn(async move {
@@ -615,7 +722,9 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
     Ok(json!({
         "success": true,
         "messageId": msg_id,
+        "kind": message_kind.as_str(),
         "messageBodyKind": message_body_kind.as_str(),
+        "leaderCcAgentIds": leader_cc_agent_ids,
         "delivered": delivered,
         "note": note,
         "sentAt": timestamp,
@@ -681,6 +790,108 @@ mod tests {
 
         assert_eq!(kind, MessageBodyKind::Plain);
         assert_eq!(message, "plain instruction");
+    }
+
+    #[test]
+    fn parse_message_kind_defaults_to_advisory() {
+        assert_eq!(
+            parse_message_kind(&json!({ "message": "plain instruction" })).unwrap(),
+            MessageKind::Advisory
+        );
+    }
+
+    #[test]
+    fn parse_message_kind_rejects_unknown_kind() {
+        let err = parse_message_kind(&json!({ "kind": "delegate" })).unwrap_err();
+
+        assert!(err.contains("send_invalid_args"));
+        assert!(err.contains("kind must be advisory, request, or report"));
+    }
+
+    #[test]
+    fn request_kind_adds_active_leader_as_cc_once() {
+        let members = vec![
+            ("leader-1".to_string(), "leader".to_string()),
+            ("worker-1".to_string(), "worker".to_string()),
+            ("reviewer-1".to_string(), "reviewer".to_string()),
+        ];
+
+        let (targets, leader_cc) = resolve_targets_with_request_cc(
+            &members,
+            "worker-1",
+            "reviewer",
+            Some("leader-1"),
+            MessageKind::Request,
+        );
+
+        assert_eq!(
+            targets,
+            vec![
+                ("reviewer-1".to_string(), "reviewer".to_string()),
+                ("leader-1".to_string(), "leader".to_string()),
+            ]
+        );
+        assert_eq!(leader_cc, vec!["leader-1".to_string()]);
+    }
+
+    #[test]
+    fn request_kind_does_not_duplicate_leader_target() {
+        let members = vec![
+            ("leader-1".to_string(), "leader".to_string()),
+            ("worker-1".to_string(), "worker".to_string()),
+        ];
+
+        let (targets, leader_cc) = resolve_targets_with_request_cc(
+            &members,
+            "worker-1",
+            "leader",
+            Some("leader-1"),
+            MessageKind::Request,
+        );
+
+        assert_eq!(
+            targets,
+            vec![("leader-1".to_string(), "leader".to_string())]
+        );
+        assert!(leader_cc.is_empty());
+    }
+
+    #[test]
+    fn peer_advisory_is_recorded_for_leader_summary_feed() {
+        let targets = vec![("reviewer-1".to_string(), "reviewer".to_string())];
+
+        assert!(should_record_leader_summary_feed(
+            "reviewer",
+            "この設計でよいか相談です",
+            "programmer",
+            &targets,
+            MessageKind::Advisory
+        ));
+        assert_eq!(
+            leader_summary_kind(MessageKind::Advisory, "相談"),
+            "advisory"
+        );
+    }
+
+    #[test]
+    fn leader_visible_advisory_is_not_duplicated_in_summary_feed() {
+        let leader_target = vec![("leader-1".to_string(), "leader".to_string())];
+        let worker_target = vec![("worker-1".to_string(), "worker".to_string())];
+
+        assert!(!should_record_leader_summary_feed(
+            "leader",
+            "相談です",
+            "programmer",
+            &leader_target,
+            MessageKind::Advisory
+        ));
+        assert!(!should_record_leader_summary_feed(
+            "programmer",
+            "作業してください",
+            "leader",
+            &worker_target,
+            MessageKind::Advisory
+        ));
     }
 
     #[test]

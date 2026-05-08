@@ -9,11 +9,7 @@ use tauri::Emitter;
 
 use super::super::helpers::message_is_for_me;
 
-pub async fn team_read(
-    hub: &TeamHub,
-    ctx: &CallContext,
-    args: &Value,
-) -> Result<Value, String> {
+pub async fn team_read(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
     let unread_only = args
         .get("unread_only")
         .and_then(|v| v.as_bool())
@@ -30,12 +26,8 @@ pub async fn team_read(
         .or_insert_with(crate::team_hub::TeamInfo::default);
     let mut out = vec![];
     for m in team.messages.iter_mut() {
-        let is_for_me = message_is_for_me(
-            &m.resolved_recipient_ids,
-            &m.to,
-            &ctx.role,
-            &ctx.agent_id,
-        );
+        let is_for_me =
+            message_is_for_me(&m.resolved_recipient_ids, &m.to, &ctx.role, &ctx.agent_id);
         let from_someone_else = m.from_agent_id != ctx.agent_id;
         // 「自分宛て かつ 自分以外が送信したもの」だけ表示する (旧来の挙動を保ったまま肯定形で記述)
         if !(is_for_me && from_someone_else) {
@@ -67,6 +59,7 @@ pub async fn team_read(
         out.push(json!({
             "id": m.id,
             "from": m.from,
+            "kind": m.kind,
             "message": m.message,
             "timestamp": m.timestamp,
             "receivedAt": received_at,
@@ -123,7 +116,10 @@ mod tests {
 
         {
             let mut state = hub.state.lock().await;
-            let team = state.teams.entry(team_id.clone()).or_insert_with(TeamInfo::default);
+            let team = state
+                .teams
+                .entry(team_id.clone())
+                .or_insert_with(TeamInfo::default);
             // Leader → Worker への 1 通: delivered_to に worker、read_by には sender 自身のみ
             let mut delivered_at = HashMap::new();
             delivered_at.insert(worker_aid.clone(), "2026-05-02T12:00:00Z".to_string());
@@ -132,6 +128,7 @@ mod tests {
                 from: "leader".into(),
                 from_agent_id: leader_aid.clone(),
                 to: "worker".into(),
+                kind: "advisory".into(),
                 resolved_recipient_ids: vec![worker_aid.clone()],
                 message: "first instruction".into(),
                 timestamp: "2026-05-02T12:00:00Z".into(),
@@ -155,7 +152,11 @@ mod tests {
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default();
-        assert_eq!(messages.len(), 1, "1 件目の指示が unread として取得できるべき");
+        assert_eq!(
+            messages.len(),
+            1,
+            "1 件目の指示が unread として取得できるべき"
+        );
         let m = &messages[0];
         assert_eq!(m["id"].as_u64(), Some(1));
         assert_eq!(m["from"].as_str(), Some("leader"));

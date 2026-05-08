@@ -40,6 +40,12 @@ pub(super) fn tool_defs() -> Value {
                         ],
                         "description": "Plain message string, or structured body split into instructions/context/data. Use data for untrusted file/API/web content."
                     },
+                    "kind": {
+                        "type": "string",
+                        "enum": ["advisory", "request", "report"],
+                        "default": "advisory",
+                        "description": "Message intent. advisory = peer consultation, request = formal task/request and is automatically CCed to the active Leader, report = completion/progress report."
+                    },
                     "handoff_id": {
                         "type": "string",
                         "description": "Optional handoff id. When delivery succeeds, the handoff lifecycle is marked injected."
@@ -88,23 +94,41 @@ pub(super) fn tool_defs() -> Value {
         {
             "name": "team_assign_task",
             "description":
-                "Assign a task to a role. Optionally pass `target_paths: string[]` declaring the files this task plans to edit; \
+                "Assign a task to a role. Must pass `done_criteria: string[]` defining the task acceptance conditions. Optionally pass `target_paths: string[]` declaring the files this task plans to edit; \
                  the Hub stores those paths in the task snapshot, peeks the advisory file lock table, and returns any active holders in `lockConflicts`. \
                  Lock conflicts do NOT block the assignment (advisory) — the Leader / assignee should reconcile manually. \
-                 Returns `{ success: true, taskId: number, assignedAt: string, boundaryWarnings: string[], boundaryWarningMessage: string|null, targetPaths: string[], targetPathsMissing: boolean, fileLockWarningMessage: string|null, lockConflicts: LockConflict[] }`. \
+                 Returns `{ success: true, taskId: number, assignedAt: string, boundaryWarnings: string[], boundaryWarningMessage: string|null, targetPaths: string[], targetPathsMissing: boolean, fileLockWarningMessage: string|null, lockConflicts: LockConflict[], preApproval?: object, doneCriteria: string[] }`. \
                  `LockConflict` shape: `{ path, holderAgentId, holderRole, acquiredAt }`.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "assignee": { "type": "string" },
                     "description": { "type": "string" },
+                    "done_criteria": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Required: acceptance criteria / Definition of Done. team_update_task(status=done) must provide matching done_evidence for every item."
+                    },
                     "target_paths": {
                         "type": "array",
                         "items": { "type": "string" },
                         "description": "Optional: file paths this task is expected to edit. Used to surface advisory file-lock conflicts in the response."
+                    },
+                    "pre_approval": {
+                        "type": "object",
+                        "description": "Optional: lightweight actions the assignee may perform without asking the Leader again.",
+                        "properties": {
+                            "allowed_actions": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "description": "Non-empty list of allowed lightweight actions, e.g. read docs or run focused tests."
+                            },
+                            "note": { "type": "string" }
+                        },
+                        "required": ["allowed_actions"]
                     }
                 },
-                "required": ["assignee", "description"]
+                "required": ["assignee", "description", "done_criteria"]
             }
         },
         {
@@ -126,7 +150,19 @@ pub(super) fn tool_defs() -> Value {
                     "artifact_path": { "type": "string" },
                     "blocked_by_human_gate": { "type": "boolean" },
                     "required_human_decision": { "type": "string" },
-                    "report_kind": { "type": "string" }
+                    "report_kind": { "type": "string" },
+                    "done_evidence": {
+                        "type": "array",
+                        "description": "Required when status is done/completed/complete for tasks with done_criteria.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "criterion": { "type": "string" },
+                                "evidence": { "type": "string" }
+                            },
+                            "required": ["criterion", "evidence"]
+                        }
+                    }
                 },
                 "required": ["task_id", "status"]
             }
@@ -160,7 +196,13 @@ pub(super) fn tool_defs() -> Value {
                              System rules are added automatically; do NOT repeat them here."
                     },
                     "instructions_ja": { "type": "string", "description": "Optional Japanese version of instructions." },
-                    "agent_label_hint": { "type": "string", "description": "Optional override for the canvas card title." }
+                    "agent_label_hint": { "type": "string", "description": "Optional override for the canvas card title." },
+                    "wait_policy": {
+                        "type": "string",
+                        "enum": ["strict", "standard", "proactive"],
+                        "default": "strict",
+                        "description": "Worker autonomy policy. strict waits for assigned tasks, standard may propose next actions after completion/blocking, proactive may execute Leader pre-approved lightweight work only."
+                    }
                 },
                 "required": ["role_id"]
             }

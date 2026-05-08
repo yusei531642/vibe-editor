@@ -381,12 +381,58 @@ export interface TeamSendStructuredMessageBody {
 }
 
 export type TeamSendMessageBody = string | TeamSendStructuredMessageBody;
+export type TeamMessageKind = 'advisory' | 'request' | 'report';
+export type WaitPolicy = 'strict' | 'standard' | 'proactive';
 
 export interface TeamSendArgs {
   to: string;
   message: TeamSendMessageBody;
+  /**
+   * Issue #515: worker 間メッセージの意味。
+   * `request` は Hub 側で active Leader にも自動 CC される。
+   */
+  kind?: TeamMessageKind;
   handoffId?: string;
   handoff_id?: string;
+}
+
+export interface TaskPreApproval {
+  allowedActions: string[];
+  note?: string | null;
+}
+
+export interface TaskDoneEvidence {
+  criterion: string;
+  evidence: string;
+}
+
+export interface TeamRecruitArgs {
+  roleId?: string;
+  role_id?: string;
+  engine?: 'claude' | 'codex';
+  label?: string;
+  description?: string;
+  instructions?: string;
+  instructionsJa?: string;
+  instructions_ja?: string;
+  agentLabelHint?: string;
+  agent_label_hint?: string;
+  waitPolicy?: WaitPolicy;
+  wait_policy?: WaitPolicy;
+}
+
+export interface TeamAssignTaskArgs {
+  assignee: string;
+  description: string;
+  doneCriteria?: string[];
+  done_criteria?: string[];
+  targetPaths?: string[];
+  target_paths?: string[];
+  preApproval?: TaskPreApproval;
+  pre_approval?: {
+    allowed_actions: string[];
+    note?: string | null;
+  };
 }
 
 /**
@@ -647,6 +693,9 @@ export interface TeamTaskSnapshot {
   requiredHumanDecision?: string | null;
   targetPaths?: string[];
   lockConflicts?: FileLockConflictSnapshot[];
+  preApproval?: TaskPreApproval | null;
+  doneCriteria?: string[];
+  doneEvidence?: TaskDoneEvidence[];
 }
 
 export interface FileLockConflictSnapshot {
@@ -719,6 +768,8 @@ export interface UpdateTaskArgs {
   blockedByHumanGate?: boolean;
   requiredHumanDecision?: string;
   reportKind?: string;
+  doneEvidence?: TaskDoneEvidence[];
+  done_evidence?: TaskDoneEvidence[];
   /** Issue #516: 構造化された worker report */
   reportPayload?: WorkerReportPayload;
 }

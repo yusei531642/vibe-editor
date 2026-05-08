@@ -6,8 +6,9 @@ use super::{bridge, handle_client, hex_encode, TeamHub, MAX_CONCURRENT_CLIENTS};
 use super::{create_pipe_server, new_pipe_endpoint};
 use crate::commands::team_history::HandoffReference;
 use crate::commands::team_state::{
-    FileLockConflictSnapshot, HandoffLifecycleEvent, HumanGateState, TeamOrchestrationState,
-    TeamTaskSnapshot, WorkerReportSnapshot, TEAM_STATE_SCHEMA_VERSION,
+    FileLockConflictSnapshot, HandoffLifecycleEvent, HumanGateState, TaskDoneEvidenceSnapshot,
+    TaskPreApprovalSnapshot, TeamOrchestrationState, TeamTaskSnapshot, WorkerReportSnapshot,
+    TEAM_STATE_SCHEMA_VERSION,
 };
 use crate::pty::SessionRegistry;
 use anyhow::Result;
@@ -369,6 +370,9 @@ pub struct TeamMessage {
     pub from: String,
     pub from_agent_id: String,
     pub to: String,
+    /// Issue #515: worker 間メッセージの意味。`advisory` は相談、`request` は正式依頼、
+    /// `report` は完了・進捗報告。配送先解決と UI / read payload の両方で使う。
+    pub kind: String,
     /// Issue #342 Phase 2: 送信時点で `resolve_targets` が解決した宛先 agent_id 群。
     /// `team_read` の `is_for_me` 判定はこれを SSOT として使う (raw `to` を read 時に
     /// `ctx.role` / `ctx.agent_id` で再解釈する旧設計は identity 分離 (HMR / 再接続 /
@@ -414,6 +418,9 @@ pub struct TeamTask {
     pub required_human_decision: Option<String>,
     pub target_paths: Vec<String>,
     pub lock_conflicts: Vec<FileLockConflictSnapshot>,
+    pub pre_approval: Option<TaskPreApprovalSnapshot>,
+    pub done_criteria: Vec<String>,
+    pub done_evidence: Vec<TaskDoneEvidenceSnapshot>,
 }
 
 impl TeamTask {
@@ -434,6 +441,9 @@ impl TeamTask {
             required_human_decision: self.required_human_decision.clone(),
             target_paths: self.target_paths.clone(),
             lock_conflicts: self.lock_conflicts.clone(),
+            pre_approval: self.pre_approval.clone(),
+            done_criteria: self.done_criteria.clone(),
+            done_evidence: self.done_evidence.clone(),
         }
     }
 
@@ -454,6 +464,9 @@ impl TeamTask {
             required_human_decision: snapshot.required_human_decision,
             target_paths: snapshot.target_paths,
             lock_conflicts: snapshot.lock_conflicts,
+            pre_approval: snapshot.pre_approval,
+            done_criteria: snapshot.done_criteria,
+            done_evidence: snapshot.done_evidence,
         }
     }
 }
@@ -461,7 +474,9 @@ impl TeamTask {
 #[cfg(test)]
 mod task_snapshot_tests {
     use super::TeamTask;
-    use crate::commands::team_state::FileLockConflictSnapshot;
+    use crate::commands::team_state::{
+        FileLockConflictSnapshot, TaskDoneEvidenceSnapshot, TaskPreApprovalSnapshot,
+    };
 
     #[test]
     fn team_task_snapshot_roundtrips_file_ownership_fields() {
@@ -486,17 +501,50 @@ mod task_snapshot_tests {
                 holder_role: "programmer".into(),
                 acquired_at: "2026-05-08T00:01:00Z".into(),
             }],
+            pre_approval: Some(TaskPreApprovalSnapshot {
+                allowed_actions: vec!["read docs".into()],
+                note: Some("lightweight investigation only".into()),
+            }),
+            done_criteria: vec!["focused test passes".into()],
+            done_evidence: vec![TaskDoneEvidenceSnapshot {
+                criterion: "focused test passes".into(),
+                evidence: "cargo test assign_task --lib passed".into(),
+            }],
         };
 
         let snapshot = task.to_snapshot();
         assert_eq!(snapshot.target_paths, vec!["src/foo.rs"]);
         assert_eq!(snapshot.lock_conflicts.len(), 1);
         assert_eq!(snapshot.lock_conflicts[0].holder_agent_id, "agent-a");
+        assert_eq!(
+            snapshot
+                .pre_approval
+                .as_ref()
+                .expect("pre approval snapshot")
+                .allowed_actions,
+            vec!["read docs"]
+        );
+        assert_eq!(snapshot.done_criteria, vec!["focused test passes"]);
+        assert_eq!(snapshot.done_evidence[0].criterion, "focused test passes");
 
         let restored = TeamTask::from_snapshot(snapshot);
         assert_eq!(restored.target_paths, vec!["src/foo.rs"]);
         assert_eq!(restored.lock_conflicts.len(), 1);
         assert_eq!(restored.lock_conflicts[0].path, "src/foo.rs");
+        assert_eq!(
+            restored
+                .pre_approval
+                .as_ref()
+                .expect("pre approval")
+                .note
+                .as_deref(),
+            Some("lightweight investigation only")
+        );
+        assert_eq!(restored.done_criteria, vec!["focused test passes"]);
+        assert_eq!(
+            restored.done_evidence[0].evidence,
+            "cargo test assign_task --lib passed"
+        );
     }
 }
 

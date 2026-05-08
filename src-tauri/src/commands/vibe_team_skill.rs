@@ -24,7 +24,7 @@ use tokio::fs;
 
 /// Skill ファイル本文の現行バージョン。SKILL.md 先頭に埋め込んでおき、
 /// Rust 側がファイルを見たときに「ユーザーが手で編集したか / 古いバンドル版か」を判別できるようにする。
-const SKILL_VERSION: &str = "1.6.0";
+const SKILL_VERSION: &str = "1.6.3";
 
 /// vibe-team Skill 本文。Claude Code の Skill 形式 (frontmatter + Markdown body) で書く。
 const SKILL_BODY: &str = include_str!("./vibe_team_skill_body.md");

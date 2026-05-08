@@ -2,7 +2,7 @@
 //!
 //! Issue #373 Phase 2 で `protocol.rs` から切り出し。
 
-use crate::commands::team_state::FileLockConflictSnapshot;
+use crate::commands::team_state::{FileLockConflictSnapshot, TaskPreApprovalSnapshot};
 use crate::team_hub::file_locks::{normalize_path, LockConflict};
 use crate::team_hub::{CallContext, TeamHub, TeamTask};
 use chrono::Utc;
@@ -30,6 +30,111 @@ fn parse_target_paths(args: &Value) -> Vec<String> {
         }
     }
     out
+}
+
+fn assign_invalid_done_criteria(message: impl Into<String>) -> String {
+    AssignError {
+        code: "assign_done_criteria_required".into(),
+        message: message.into(),
+        phase: None,
+        elapsed_ms: None,
+    }
+    .into_err_string()
+}
+
+fn parse_done_criteria(args: &Value) -> Result<Vec<String>, String> {
+    let arr = args
+        .get("done_criteria")
+        .or_else(|| args.get("doneCriteria"))
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| {
+            assign_invalid_done_criteria(
+                "done_criteria must be a non-empty string array for new tasks",
+            )
+        })?;
+    let mut out = Vec::new();
+    for criterion in arr {
+        let Some(raw) = criterion.as_str() else {
+            return Err(assign_invalid_done_criteria(
+                "done_criteria must contain only strings",
+            ));
+        };
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() && !out.iter().any(|v| v == trimmed) {
+            out.push(trimmed.to_string());
+        }
+    }
+    if out.is_empty() {
+        return Err(assign_invalid_done_criteria(
+            "done_criteria must contain at least one non-empty criterion",
+        ));
+    }
+    Ok(out)
+}
+
+fn optional_text_field(
+    obj: &serde_json::Map<String, Value>,
+    snake: &str,
+    camel: &str,
+) -> Option<String> {
+    obj.get(snake)
+        .or_else(|| obj.get(camel))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToOwned::to_owned)
+}
+
+fn assign_invalid_pre_approval(message: impl Into<String>) -> String {
+    AssignError {
+        code: "assign_invalid_pre_approval".into(),
+        message: message.into(),
+        phase: None,
+        elapsed_ms: None,
+    }
+    .into_err_string()
+}
+
+fn parse_pre_approval(args: &Value) -> Result<Option<TaskPreApprovalSnapshot>, String> {
+    let Some(raw) = args.get("pre_approval").or_else(|| args.get("preApproval")) else {
+        return Ok(None);
+    };
+    if raw.is_null() {
+        return Ok(None);
+    }
+    let obj = raw.as_object().ok_or_else(|| {
+        assign_invalid_pre_approval("pre_approval must be an object with allowed_actions")
+    })?;
+    let actions = obj
+        .get("allowed_actions")
+        .or_else(|| obj.get("allowedActions"))
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| {
+            assign_invalid_pre_approval(
+                "pre_approval.allowed_actions must be a non-empty string array",
+            )
+        })?;
+    let mut allowed_actions = Vec::new();
+    for action in actions {
+        let Some(raw) = action.as_str() else {
+            return Err(assign_invalid_pre_approval(
+                "pre_approval.allowed_actions must contain only strings",
+            ));
+        };
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() && !allowed_actions.iter().any(|a| a == trimmed) {
+            allowed_actions.push(trimmed.to_string());
+        }
+    }
+    if allowed_actions.is_empty() {
+        return Err(assign_invalid_pre_approval(
+            "pre_approval.allowed_actions must contain at least one non-empty action",
+        ));
+    }
+    Ok(Some(TaskPreApprovalSnapshot {
+        allowed_actions,
+        note: optional_text_field(obj, "note", "note"),
+    }))
 }
 
 fn to_lock_conflict_snapshots(conflicts: &[LockConflict]) -> Vec<FileLockConflictSnapshot> {
@@ -101,7 +206,9 @@ pub async fn team_assign_task(
     // Issue #526: `target_paths: string[]` (任意) — このタスクで触る予定のファイル / dir 宣言。
     // Hub は assign_task 時点で同 path を別 agent が握っていないか peek し、
     // `lockConflicts` を response に乗せる (advisory: 拒否はしない、Leader が判断)。
+    let done_criteria = parse_done_criteria(args)?;
     let target_paths = parse_target_paths(args);
+    let pre_approval = parse_pre_approval(args)?;
     let target_paths_missing = target_paths.is_empty();
     // 旧実装は assignee を一切検証せずに task を作成していた。
     // Claude (LLM) が "Programmer" / "プログラマー" / 存在しない role 名を渡すと、
@@ -281,6 +388,9 @@ pub async fn team_assign_task(
             required_human_decision: None,
             target_paths: target_paths.clone(),
             lock_conflicts: lock_conflict_snapshots.clone(),
+            pre_approval: pre_approval.clone(),
+            done_criteria: done_criteria.clone(),
+            done_evidence: Vec::new(),
         });
         // Issue #107 / #216: tasks も件数上限で古い順に O(1) で破棄
         while team.tasks.len() > MAX_TASKS_PER_TEAM {
@@ -386,7 +496,13 @@ pub async fn team_assign_task(
     //   3) 長時間タスクでは team_status で進捗を残す
     //   4) 完了時に team_send + team_update_task("done" or "blocked") を呼ぶ
     // ことで、Leader が `team_read` 0 件だけで「無応答」と誤判定するのを防ぐ。
-    let notify_message = build_task_notification(task_id, notify_description, &target_paths);
+    let notify_message = build_task_notification(
+        task_id,
+        notify_description,
+        &target_paths,
+        pre_approval.as_ref(),
+        &done_criteria,
+    );
     let notify_args = json!({ "to": assignee, "message": notify_message });
     let hub_clone = hub.clone();
     let ctx_clone = ctx.clone();
@@ -424,6 +540,8 @@ pub async fn team_assign_task(
         "targetPathsMissing": target_paths_missing,
         "fileLockWarningMessage": file_lock_warning_message,
         "lockConflicts": lock_conflict_snapshots,
+        "preApproval": pre_approval,
+        "doneCriteria": done_criteria,
     }))
 }
 
@@ -439,6 +557,8 @@ pub(super) fn build_task_notification(
     task_id: u32,
     description: &str,
     target_paths: &[String],
+    pre_approval: Option<&TaskPreApprovalSnapshot>,
+    done_criteria: &[String],
 ) -> String {
     let file_lock_section = if target_paths.is_empty() {
         String::new()
@@ -460,8 +580,52 @@ pub(super) fn build_task_notification(
              After finishing or failing, call `team_unlock_files({{\"paths\":{target_paths_json}}})`."
         )
     };
+    let pre_approval_section = pre_approval
+        .map(|approval| {
+            let actions = approval
+                .allowed_actions
+                .iter()
+                .map(|action| format!("         - {action}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let note = approval
+                .note
+                .as_deref()
+                .map(|n| format!("\n             Note: {n}"))
+                .unwrap_or_default();
+            format!(
+                "\n\n\
+                 [Pre-approval — limited autonomy]\n\
+                 You may perform only these lightweight actions without asking the Leader first:\n{actions}{note}\n\
+                 Anything outside this list requires a `team_send({{\"to\":\"leader\",\"kind\":\"request\",\"message\":\"...\"}})` \
+                 proposal before execution."
+            )
+        })
+        .unwrap_or_default();
+    let done_criteria_list = done_criteria
+        .iter()
+        .map(|criterion| format!("         - {criterion}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let done_evidence_example = done_criteria
+        .iter()
+        .map(|criterion| {
+            json!({
+                "criterion": criterion,
+                "evidence": "<test/log/review/artifact proving this criterion>"
+            })
+        })
+        .collect::<Vec<_>>();
+    let done_evidence_json =
+        serde_json::to_string(&done_evidence_example).unwrap_or_else(|_| "[]".to_string());
+    let done_section = format!(
+        "\n\n\
+         [Definition of Done — required before status done]\n\
+         You cannot mark this task done until every criterion has concrete evidence:\n{done_criteria_list}\n\
+         When complete, call `team_update_task({{\"task_id\":{task_id},\"status\":\"done\",\"done_evidence\":{done_evidence_json}}})`."
+    );
     format!(
-        "[Task #{task_id}] {description}{file_lock_section}\n\n\
+        "[Task #{task_id}] {description}{file_lock_section}{pre_approval_section}{done_section}\n\n\
          [Standard response protocol — follow even if not repeated in the task body]\n\
          1. Reply immediately with `team_send(\"leader\", \"ACK: Task #{task_id} received, starting...\")`.\n\
          2. Call `team_update_task({task_id}, \"in_progress\")`.\n\
@@ -474,13 +638,17 @@ pub(super) fn build_task_notification(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_task_notification, parse_target_paths};
+    use super::{
+        build_task_notification, parse_done_criteria, parse_pre_approval, parse_target_paths,
+    };
+    use crate::commands::team_state::TaskPreApprovalSnapshot;
     use serde_json::json;
 
     /// Issue #409: 通知 payload に ACK / in_progress / status / 完了プロトコルが含まれること。
     #[test]
     fn notification_embeds_standard_response_protocol() {
-        let msg = build_task_notification(42u32, "リポジトリ clone & 調査", &[]);
+        let criteria = vec!["focused test passes".to_string()];
+        let msg = build_task_notification(42u32, "リポジトリ clone & 調査", &[], None, &criteria);
         // 元の description が落ちていない
         assert!(msg.starts_with("[Task #42] リポジトリ clone & 調査"));
         // プロトコル節 4 項目が含まれる
@@ -500,7 +668,9 @@ mod tests {
             "src/renderer/src/lib/role-profiles-builtin.ts".to_string(),
             "src-tauri/src/team_hub/protocol/tools/assign_task.rs".to_string(),
         ];
-        let msg = build_task_notification(525u32, "file ownership を補強する", &paths);
+        let criteria = vec!["file lock warning is visible".to_string()];
+        let msg =
+            build_task_notification(525u32, "file ownership を補強する", &paths, None, &criteria);
         assert!(msg.contains("File ownership protocol"));
         assert!(msg.contains("team_lock_files"));
         assert!(msg.contains("team_unlock_files"));
@@ -523,5 +693,84 @@ mod tests {
             ]
         }));
         assert_eq!(paths, vec!["src/foo.rs", "src/bar.rs"]);
+    }
+
+    #[test]
+    fn parse_done_criteria_accepts_camel_and_dedups() {
+        let criteria = parse_done_criteria(&json!({
+            "doneCriteria": ["test passes", "test passes", "review done"]
+        }))
+        .unwrap();
+
+        assert_eq!(criteria, vec!["test passes", "review done"]);
+    }
+
+    #[test]
+    fn parse_done_criteria_rejects_missing_or_empty() {
+        let missing = parse_done_criteria(&json!({})).unwrap_err();
+        let empty = parse_done_criteria(&json!({ "done_criteria": [" "] })).unwrap_err();
+
+        assert!(missing.contains("assign_done_criteria_required"));
+        assert!(empty.contains("at least one non-empty criterion"));
+    }
+
+    #[test]
+    fn parse_pre_approval_accepts_camel_and_dedups_actions() {
+        let pre_approval = parse_pre_approval(&json!({
+            "preApproval": {
+                "allowedActions": ["read docs", "read docs", "run focused test"],
+                "note": "no edits"
+            }
+        }))
+        .unwrap()
+        .expect("pre approval");
+
+        assert_eq!(
+            pre_approval.allowed_actions,
+            vec!["read docs", "run focused test"]
+        );
+        assert_eq!(pre_approval.note.as_deref(), Some("no edits"));
+    }
+
+    #[test]
+    fn parse_pre_approval_rejects_empty_actions() {
+        let err = parse_pre_approval(&json!({
+            "pre_approval": { "allowed_actions": [" ", ""] }
+        }))
+        .unwrap_err();
+
+        assert!(err.contains("assign_invalid_pre_approval"));
+        assert!(err.contains("at least one non-empty action"));
+    }
+
+    #[test]
+    fn notification_embeds_pre_approval_protocol() {
+        let approval = TaskPreApprovalSnapshot {
+            allowed_actions: vec!["read docs".into(), "run focused test".into()],
+            note: Some("no file edits".into()),
+        };
+        let criteria = vec!["investigation summary is reported".to_string()];
+        let msg = build_task_notification(523u32, "軽量調査", &[], Some(&approval), &criteria);
+
+        assert!(msg.contains("Pre-approval"));
+        assert!(msg.contains("read docs"));
+        assert!(msg.contains("run focused test"));
+        assert!(msg.contains("no file edits"));
+        assert!(msg.contains("\"kind\":\"request\""));
+    }
+
+    #[test]
+    fn notification_embeds_done_criteria_and_evidence_example() {
+        let criteria = vec![
+            "tests pass".to_string(),
+            "security risk reviewed".to_string(),
+        ];
+        let msg = build_task_notification(527u32, "品質ゲート", &[], None, &criteria);
+
+        assert!(msg.contains("Definition of Done"));
+        assert!(msg.contains("tests pass"));
+        assert!(msg.contains("security risk reviewed"));
+        assert!(msg.contains("\"done_evidence\""));
+        assert!(msg.contains("team_update_task"));
     }
 }

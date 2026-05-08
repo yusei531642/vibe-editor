@@ -27,7 +27,8 @@ describe('Issue #409: worker template enforces ACK / progress / completion proto
   });
 
   it('English worker template requires done/blocked update on completion', () => {
-    expect(WORKER_TEMPLATE_EN).toMatch(/team_update_task\(N, "done"\)/);
+    expect(WORKER_TEMPLATE_EN).toMatch(/team_update_task\(N, "done", \{ done_evidence: \[\.\.\.\] \}\)/);
+    expect(WORKER_TEMPLATE_EN).toMatch(/done_evidence/);
     expect(WORKER_TEMPLATE_EN).toMatch(/"blocked"/);
   });
 
@@ -42,7 +43,8 @@ describe('Issue #409: worker template enforces ACK / progress / completion proto
   });
 
   it('Japanese worker template requires done/blocked update on completion', () => {
-    expect(WORKER_TEMPLATE_JA).toMatch(/team_update_task\(N, "done"\)/);
+    expect(WORKER_TEMPLATE_JA).toMatch(/team_update_task\(N, "done", \{ done_evidence: \[\.\.\.\] \}\)/);
+    expect(WORKER_TEMPLATE_JA).toMatch(/done_evidence/);
     expect(WORKER_TEMPLATE_JA).toMatch(/"blocked"/);
   });
 });
