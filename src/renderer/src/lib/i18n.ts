@@ -489,7 +489,7 @@ const ja: Dict = {
   // Issue #578: Canvas 非表示中に recruit が走った件数を可視化時に警告する
   'toast.recruitWhileHidden':
     'Canvas を非表示の間にメンバー採用が {count} 件走りました。失敗していたら再実行してください',
-  'toast.recruitRescued': '採用 (遅延救済): timeout 後 {ms}ms で受領しました',
+  'toast.recruitRescued': '採用 (遅着救済): timeout 後 {ms}ms で受領しました',
 
   // ---------- Terminal (pasteエラー等) ----------
   'terminal.pasteImageFailed': '画像保存失敗',
