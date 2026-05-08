@@ -11,6 +11,7 @@ import { CardFrame } from '../CardFrame';
 import { TerminalView, type TerminalViewHandle } from '../../TerminalView';
 import { useSettings } from '../../../lib/settings-context';
 import { useCanvasStore, NODE_MIN_W, NODE_MIN_H } from '../../../stores/canvas';
+import { useUiStore } from '../../../stores/ui';
 import { useCanvasTerminalFit } from '../../../lib/use-canvas-terminal-fit';
 import { useXtermScrollToBottomOnResize } from '../../../lib/use-xterm-scroll-on-resize';
 
@@ -41,6 +42,7 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
   const title = (data?.title as string) ?? 'Terminal';
   const [, setStatus] = useState<string>('');
   const setCardPayload = useCanvasStore((s) => s.setCardPayload);
+  const isCanvasActive = useUiStore((s) => s.viewMode === 'canvas');
   // Issue #253: Canvas zoom 下でも論理 px ベースで cols/rows を確定させる
   const fit = useCanvasTerminalFit(settings);
 
@@ -101,7 +103,9 @@ function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
             fallbackCwd={cwd}
             command={command}
             args={args}
-            visible={true}
+            // Issue #564: IDE モードでは CanvasLayout が非表示のまま mount される。
+            // その状態で PTY を起動しないよう、Canvas 表示中だけ TerminalView を起動可能にする。
+            visible={isCanvasActive}
             teamId={payload.teamId}
             agentId={payload.agentId}
             role={payload.role}

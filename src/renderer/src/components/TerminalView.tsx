@@ -47,7 +47,7 @@ interface TerminalViewProps {
   env?: Record<string, string>;
   /** TeamHub 用のチーム識別子 */
   teamId?: string;
-  /** 現在このペインが表示されているか（非表示時は fit をスキップ） */
+  /** 現在このペインが表示されているか（非表示時は PTY spawn / fit をスキップ） */
   visible: boolean;
   /** 起動後に自動送信するメッセージ（配列なら順番に送信） */
   initialMessage?: string | string[];
@@ -233,6 +233,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       cwd,
       fallbackCwd,
       command,
+      spawnEnabled: visible,
       // Issue #271: HMR remount 時に同じ PTY へ再 bind するための論理キー。
       sessionKey,
       termRef,

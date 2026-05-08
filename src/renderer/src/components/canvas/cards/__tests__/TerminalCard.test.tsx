@@ -12,6 +12,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 
+const terminalViewProps = vi.hoisted(() => [] as Array<{ visible?: boolean }>);
+
 vi.mock('@xyflow/react', () => ({
   Handle: () => null,
   NodeResizer: () => null,
@@ -20,12 +22,16 @@ vi.mock('@xyflow/react', () => ({
 }));
 
 vi.mock('../../../TerminalView', () => ({
-  TerminalView: () => <div data-testid="terminal-view-stub" />
+  TerminalView: (props: { visible?: boolean }) => {
+    terminalViewProps.push(props);
+    return <div data-testid="terminal-view-stub" data-visible={String(props.visible)} />;
+  }
 }));
 
 import TerminalCard from '../TerminalCard';
 import { SettingsProvider } from '../../../../lib/settings-context';
 import { ToastProvider } from '../../../../lib/toast-context';
+import { useUiStore } from '../../../../stores/ui';
 import { DEFAULT_SETTINGS } from '../../../../../../types/shared';
 
 type TestWindow = Window &
@@ -84,6 +90,8 @@ describe('TerminalCard (smoke)', () => {
   beforeEach(() => {
     originalApi = (window as TestWindow).api;
     installApi();
+    terminalViewProps.length = 0;
+    useUiStore.setState({ viewMode: 'ide' });
   });
 
   afterEach(() => {
@@ -100,5 +108,19 @@ describe('TerminalCard (smoke)', () => {
     renderCard();
     expect(await screen.findByText('Terminal A')).toBeInTheDocument();
     expect(screen.getByTestId('terminal-view-stub')).toBeInTheDocument();
+  });
+
+  it('IDE モードでは TerminalView を非表示扱いにして PTY 起動を抑止する', async () => {
+    useUiStore.setState({ viewMode: 'ide' });
+    renderCard();
+    expect(await screen.findByTestId('terminal-view-stub')).toHaveAttribute('data-visible', 'false');
+    expect(terminalViewProps.at(-1)?.visible).toBe(false);
+  });
+
+  it('Canvas モードでは TerminalView を表示扱いにする', async () => {
+    useUiStore.setState({ viewMode: 'canvas' });
+    renderCard();
+    expect(await screen.findByTestId('terminal-view-stub')).toHaveAttribute('data-visible', 'true');
+    expect(terminalViewProps.at(-1)?.visible).toBe(true);
   });
 });

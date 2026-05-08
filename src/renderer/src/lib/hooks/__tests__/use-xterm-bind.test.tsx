@@ -206,4 +206,81 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
     // ptyId を持っていないので kill は呼ばれない (orphan kill 防止)。
     expect(kill).not.toHaveBeenCalled();
   });
+
+  it('spawnEnabled=false では PTY 起動を延期し、true になった時点で起動する', async () => {
+    const term = makeTerminal();
+    const fit = { fit: vi.fn() } as unknown as FitAddon;
+    const create = vi.fn(async (opts: { id?: string }) => ({
+      ok: true,
+      id: opts.id ?? 'pty-test-deferred'
+    }));
+    const kill = vi.fn(async () => undefined);
+
+    (window as TestWindow).api = {
+      terminal: {
+        onDataReady: vi.fn(async () => vi.fn()),
+        onExitReady: vi.fn(async () => vi.fn()),
+        onSessionIdReady: vi.fn(async () => vi.fn()),
+        onData: vi.fn(() => vi.fn()),
+        onExit: vi.fn(() => vi.fn()),
+        onSessionId: vi.fn(() => vi.fn()),
+        create,
+        write: vi.fn(async () => undefined),
+        resize: vi.fn(async () => undefined),
+        kill
+      }
+    };
+
+    const ptyIdRef = makeRef<string | null>(null);
+    const termRef = makeRef<Terminal | null>(term);
+    const fitRef = makeRef<FitAddon | null>(fit);
+    const snapRef = makeRef<PtySpawnSnapshot>({});
+    const callbacksRef = makeRef<PtySessionCallbacks>({});
+    const disposedRef = makeRef(false);
+    const observeChunk = vi.fn();
+
+    const { rerender, unmount } = renderHook(
+      ({ enabled }) =>
+        useXtermBind({
+          cwd: '/tmp/work',
+          command: 'claude',
+          spawnEnabled: enabled,
+          termRef,
+          fitRef,
+          snapRef,
+          callbacksRef,
+          ptyIdRef,
+          disposedRef,
+          observeChunk,
+          unscaledFit: false
+        }),
+      { initialProps: { enabled: false } }
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(create).not.toHaveBeenCalled();
+
+    await act(async () => {
+      rerender({ enabled: true });
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    const spawnedId = create.mock.calls[0][0].id as string;
+    await waitFor(() => expect(ptyIdRef.current).toBe(spawnedId));
+
+    await act(async () => {
+      rerender({ enabled: false });
+      await Promise.resolve();
+    });
+    expect(kill).not.toHaveBeenCalled();
+
+    await act(async () => {
+      unmount();
+      await Promise.resolve();
+    });
+    expect(kill).toHaveBeenCalledWith(spawnedId);
+  });
 });

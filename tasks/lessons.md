@@ -191,6 +191,15 @@ codex exec --sandbox read-only --color never --ephemeral \
 - advisory lock を強化するときは、新しい lock engine を足す前に、既存 tool を「必ず使われる導線」へ接続する。
 - Tauri event helper を React effect から使う場合は、jsdom の `listen()` reject が未処理 rejection にならないよう helper 側で noop cleanup を返す。
 
+## Issue #564 - IDE initial terminal auto-start
+
+- IDE 初期画面では terminal tab を 0 件のまま表示する。`claudeReady && projectRoot && tabs.length === 0` のような effect で `addTerminalTab()` を呼ばない。
+- 最後の terminal tab を閉じた時や project switch reset 時も、代替の `Claude #1` を自動生成しない。
+- `CanvasLayout` は IDE モードでも非表示 mount されるため、Canvas / Team の TerminalView に `visible=true` を固定しない。
+- TerminalView は「非表示なら fit だけ止める」では不十分。`visible=false` の間は PTY spawn も延期する。
+- terminal / PTY の起動は、ユーザーの明示操作、team recruit、session resume のような明示イベントだけに限定する。
+- 再発防止テストでは「初期表示」「last-tab close」「project switch reset」「hidden Canvas / Team spawn」の 4 経路を必ず固定する。
+
 ## Issue #520 - team_send untrusted data boundary
 
 - 外部 API / ファイル / Web スクレイプ本文を agent へ渡すときは、通常の `message` 文字列に混ぜず、`data` として構造化する。

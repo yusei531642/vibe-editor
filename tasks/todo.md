@@ -1762,3 +1762,45 @@ Plan: `tasks/release-v1.5.4.md`
 - [x] Release: https://github.com/yusei531642/vibe-editor/releases/tag/v1.5.4
 - [x] Assets: Windows `.exe`、macOS `.dmg` / `.app.tar.gz`、Linux `.AppImage` / `.deb` / `.rpm`、SBOM、signatures、`latest.json`
 - [x] Published at: 2026-05-08T07:37:39Z
+
+## Issue #564 IDE initial screen must not auto-start terminals (2026-05-08 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/564
+Plan: `tasks/issue-564-plan.md`
+
+### 計画
+
+- [x] #443 との差分を整理する。#443 は初期ターミナルの表示崩れ、#564 は初期ターミナル生成そのもの。
+- [x] `use-terminal-tabs.ts` の自動生成経路を調査する。
+- [x] IDE 初期表示で `addTerminalTab()` を自動実行しない。
+- [x] 最後のタブを閉じた時に `Claude #1` を自動生成しない。
+- [x] project switch reset で `Claude #1` を自動生成しない。
+- [x] Canvas / Team 側の hidden TerminalView が IDE 初期表示で PTY を起動しないようにする。
+- [x] 回帰テストで IDE tabs 3 経路と Canvas hidden spawn 経路を固定する。
+- [x] ローカル dev で IDE 初期表示時に `terminal_create` が起きないことを確認する。
+
+### Next Steps
+
+- [x] `src/renderer/src/lib/hooks/use-terminal-tabs.ts` を最小修正する。
+- [x] `src/renderer/src/lib/hooks/__tests__/use-terminal-tabs.test.tsx` を追加する。
+- [x] Canvas hidden spawn の回帰テストを追加する。
+- [x] `tasks/lessons.md` に再発防止を追記する。
+
+### 進捗
+
+- [x] 初期 effect、last-tab close、project switch reset の 3 経路を原因候補として確認。
+- [x] ローカル dev で初回仮説が不足していることを確認。IDE 起動直後に Canvas / Team 側から `terminal_create command=claude` と `terminal_create command=codex` が出ていた。
+- [x] `TerminalView` は `visible=false` なら PTY spawn を延期する。
+- [x] `TerminalCard` / `TerminalOverlay` は `viewMode === 'canvas'` の時だけ `visible=true` を渡す。
+- [x] 通常 dev profile は persisted `viewMode=canvas` だったため Canvas agent が起動した。isolated dev identifier で IDE 初期表示を再現して検証した。
+
+### 検証結果
+
+- [x] `npx vitest run src/renderer/src/lib/hooks/__tests__/use-terminal-tabs.test.tsx`: PASS
+- [x] `npx vitest run src/renderer/src/lib/hooks/__tests__/use-xterm-bind.test.tsx`: PASS
+- [x] `npx vitest run src/renderer/src/components/canvas/cards/__tests__/TerminalCard.test.tsx src/renderer/src/components/canvas/cards/AgentNodeCard/__tests__/TerminalOverlay.test.tsx`: PASS
+- [x] `npx vitest run src/renderer/src/lib/hooks/__tests__/use-terminal-tabs.test.tsx src/renderer/src/lib/hooks/__tests__/use-xterm-bind.test.tsx src/renderer/src/components/canvas/cards/__tests__/TerminalCard.test.tsx src/renderer/src/components/canvas/cards/AgentNodeCard/__tests__/TerminalOverlay.test.tsx`: PASS (12 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
+- [x] Tauri dev 起動確認: isolated dev identifier / port 5174 で起動後 10 秒、`terminal_create` / `spawn command requested` / `[起動エラー]` なし。

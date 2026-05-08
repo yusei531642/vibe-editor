@@ -127,7 +127,7 @@ export interface UseTerminalTabsResult {
   nextTerminalIdRef: React.MutableRefObject<number>;
 
   // ---- project switch lifecycle ----
-  /** projectSwitchedRef.current から呼ぶ。新規 Claude #1 を 1 つ自動生成して active に。 */
+  /** projectSwitchedRef.current から呼ぶ。ターミナルは自動生成せず空の初期画面に戻す。 */
   resetForProjectSwitch: () => void;
 }
 
@@ -262,24 +262,8 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
     setTerminalTabs((prev) => {
       const next = prev.filter((t) => t.id !== tabId);
       if (next.length === 0) {
-        // 最後の1個 → 新しいスタンドアロンタブを自動生成
-        const newId = nextTerminalIdRef.current++;
-        const fresh: TerminalTab = {
-          id: newId,
-          version: 1,
-          agent: 'claude',
-          role: null,
-          teamId: null,
-          agentId: `agent-${newId}`,
-          status: '',
-          exited: false,
-          resumeSessionId: null,
-          teamHistoryMemberIdx: null,
-          label: 'Claude #1',
-          customLabel: null
-        };
-        setActiveTerminalTabId(newId);
-        return [fresh];
+        setActiveTerminalTabId(0);
+        return [];
       }
       setActiveTerminalTabId((active) => {
         if (active !== tabId) return active;
@@ -325,20 +309,8 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
     restartTerminalTab(activeTerminalTabId);
   }, [activeTerminalTabId, restartTerminalTab]);
 
-  // 初回タブ作成: Claude OK かつ projectRoot 設定済みでタブなし。
-  // Canvas モードでは App は不可視の裏マウントなので、ここでターミナルを生やすと
-  // Rust 側で無駄な PTY が常駐し、IDE へ切り替えたときにも "迷子ターミナル" として現れる。
-  // → viewMode === 'ide' のときだけ自動生成する。
-  useEffect(() => {
-    if (
-      opts.claudeReady &&
-      opts.projectRoot &&
-      terminalTabs.length === 0 &&
-      opts.viewMode === 'ide'
-    ) {
-      addTerminalTab();
-    }
-  }, [opts.claudeReady, opts.projectRoot, terminalTabs.length, addTerminalTab, opts.viewMode]);
+  // Issue #564: IDE 初期画面ではターミナルを自動生成しない。
+  // ターミナル起動はユーザーの明示操作、team recruit、session resume だけに限定する。
 
   const getDnDProps = useCallback(
     (tabId: number): DnDHandlers => ({
@@ -382,24 +354,8 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
   );
 
   const resetForProjectSwitch = useCallback(() => {
-    const newId = nextTerminalIdRef.current++;
-    setTerminalTabs([
-      {
-        id: newId,
-        version: 0,
-        agent: 'claude',
-        role: null,
-        teamId: null,
-        agentId: `agent-${newId}`,
-        status: '起動中…',
-        exited: false,
-        resumeSessionId: null,
-        teamHistoryMemberIdx: null,
-        label: 'Claude #1',
-        customLabel: null
-      }
-    ]);
-    setActiveTerminalTabId(newId);
+    setTerminalTabs([]);
+    setActiveTerminalTabId(0);
   }, []);
 
   return {
