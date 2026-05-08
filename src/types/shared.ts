@@ -382,6 +382,7 @@ export interface TeamSendStructuredMessageBody {
 
 export type TeamSendMessageBody = string | TeamSendStructuredMessageBody;
 export type TeamMessageKind = 'advisory' | 'request' | 'report';
+export type WaitPolicy = 'strict' | 'standard' | 'proactive';
 
 export interface TeamSendArgs {
   to: string;
@@ -393,6 +394,38 @@ export interface TeamSendArgs {
   kind?: TeamMessageKind;
   handoffId?: string;
   handoff_id?: string;
+}
+
+export interface TaskPreApproval {
+  allowedActions: string[];
+  note?: string | null;
+}
+
+export interface TeamRecruitArgs {
+  roleId?: string;
+  role_id?: string;
+  engine?: 'claude' | 'codex';
+  label?: string;
+  description?: string;
+  instructions?: string;
+  instructionsJa?: string;
+  instructions_ja?: string;
+  agentLabelHint?: string;
+  agent_label_hint?: string;
+  waitPolicy?: WaitPolicy;
+  wait_policy?: WaitPolicy;
+}
+
+export interface TeamAssignTaskArgs {
+  assignee: string;
+  description: string;
+  targetPaths?: string[];
+  target_paths?: string[];
+  preApproval?: TaskPreApproval;
+  pre_approval?: {
+    allowed_actions: string[];
+    note?: string | null;
+  };
 }
 
 /**
@@ -653,6 +686,7 @@ export interface TeamTaskSnapshot {
   requiredHumanDecision?: string | null;
   targetPaths?: string[];
   lockConflicts?: FileLockConflictSnapshot[];
+  preApproval?: TaskPreApproval | null;
 }
 
 export interface FileLockConflictSnapshot {

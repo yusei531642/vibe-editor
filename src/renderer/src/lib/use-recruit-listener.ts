@@ -14,6 +14,7 @@ import type { Node } from '@xyflow/react';
 import type { CardData } from '../stores/canvas';
 import { useRoleProfiles } from './role-profiles-context';
 import { ackRecruit } from './recruit-ack';
+import type { WaitPolicy } from '../../../types/shared';
 
 interface RecruitRequestPayload {
   teamId: string;
@@ -24,6 +25,7 @@ interface RecruitRequestPayload {
   engine: 'claude' | 'codex';
   agentLabelHint?: string;
   customInstructions?: string;
+  waitPolicy?: WaitPolicy;
   /** Leader が team_recruit(role_definition=...) で 1 ステップ採用した場合に同梱される */
   dynamicRole?: {
     id: string;
@@ -73,6 +75,41 @@ const GRID_PLACEMENT_THRESHOLD = 6;
 const GRID_COLS = 2;
 const GRID_COL_GAP = 32;
 const GRID_ROW_GAP = 32;
+
+function waitPolicyInstructions(policy: WaitPolicy | undefined): string {
+  const resolved = policy ?? 'strict';
+  const header = `--- Worker wait_policy: ${resolved} ---`;
+  if (resolved === 'proactive') {
+    return [
+      header,
+      '- You may execute only lightweight actions explicitly listed in the current task Pre-approval section.',
+      '- If the task has no Pre-approval section, behave as standard.',
+      '- Do not edit files, run destructive commands, spend money, or contact external services unless that exact action is pre-approved.',
+      '- Report what you did with team_send({ to: "leader", kind: "report", message: "..." }).'
+    ].join('\n');
+  }
+  if (resolved === 'standard') {
+    return [
+      header,
+      '- Wait for Leader-assigned tasks before executing work.',
+      '- After completion or blocking, you may propose the next obvious action to the Leader.',
+      '- Proposals are not permission to execute. Use team_send({ to: "leader", kind: "request", message: "..." }) and wait for assignment or Pre-approval.'
+    ].join('\n');
+  }
+  return [
+    header,
+    '- Wait for Leader-assigned tasks.',
+    '- Do not start follow-up investigation or code changes on your own.',
+    '- After reporting completion or blocking, return to idle and wait for the next Leader message.'
+  ].join('\n');
+}
+
+function mergeCustomInstructions(
+  raw: string | undefined,
+  waitPolicy: WaitPolicy | undefined
+): string {
+  return [raw?.trim(), waitPolicyInstructions(waitPolicy)].filter(Boolean).join('\n\n');
+}
 
 /** requester の周囲で空いている角度を見つけて配置位置を返す。
  *  既存メンバーの方角をスキャンし、最も空いている角度をピック。 */
@@ -229,7 +266,8 @@ export function useRecruitListener(): void {
             organization: requesterPayload.organization,
             // Issue #117: AgentNodeCard が拾って Claude(--append-system-prompt) /
             // Codex(model_instructions_file) 両方の経路に注入する正本フィールド。
-            customInstructions: p.customInstructions || undefined
+            customInstructions: mergeCustomInstructions(p.customInstructions, p.waitPolicy),
+            waitPolicy: p.waitPolicy ?? 'strict'
           }
         });
         // Issue #253 / #372: 新メンバー配置後、Canvas 側で「新しい worker」を中心に

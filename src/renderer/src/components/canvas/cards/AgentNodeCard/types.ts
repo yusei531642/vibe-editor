@@ -7,7 +7,8 @@
 import type {
   HandoffReference,
   InjectFailureReason,
-  TeamOrganizationMeta
+  TeamOrganizationMeta,
+  WaitPolicy
 } from '../../../../../../types/shared';
 
 export interface AgentPayload {
@@ -35,6 +36,8 @@ export interface AgentPayload {
   customInstructions?: string;
   /** @deprecated `customInstructions` の旧名。互換のため受理だけする (後方互換)。 */
   codexInstructions?: string;
+  /** Issue #523: worker の待機・自律バランス。採用時に Hub から渡される。 */
+  waitPolicy?: WaitPolicy;
   /** Issue #359: handoff から新セッションを起動するときに初手で送るプロンプト。 */
   initialMessage?: string;
   /** Issue #370: 複数組織同時運用時の所属表示・履歴復元用情報。 */

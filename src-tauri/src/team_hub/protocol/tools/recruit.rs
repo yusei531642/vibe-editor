@@ -17,6 +17,27 @@ use super::super::role_template::TemplateFinding;
 use super::error::RecruitError;
 use crate::team_hub::role_lint::{compute_role_overlap, RoleSnapshot};
 
+const DEFAULT_WAIT_POLICY: &str = "strict";
+
+fn parse_wait_policy(args: &Value) -> Result<String, String> {
+    let raw = args
+        .get("wait_policy")
+        .or_else(|| args.get("waitPolicy"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or(DEFAULT_WAIT_POLICY);
+    match raw {
+        "strict" | "standard" | "proactive" => Ok(raw.to_string()),
+        other => Err(RecruitError::new(
+            "recruit_invalid_wait_policy",
+            format!("wait_policy must be strict, standard, or proactive (got {other:?})"),
+        )
+        .with_phase("args")
+        .into_err_string()),
+    }
+}
+
 /// team_recruit: 新メンバーをチームに追加する。Renderer に event::emit でカード生成を依頼し、
 /// その新 agentId が handshake してくるまで oneshot で待機 (timeout 30s)。
 ///
@@ -27,13 +48,8 @@ use crate::team_hub::role_lint::{compute_role_overlap, RoleSnapshot};
 ///     既存 role_id と被る場合は「既に存在する」エラーになる。
 ///   - instructions_ja: 任意の日本語版 instructions。
 ///   - agent_label_hint: 任意。canvas カードのタイトル上書き。
-pub async fn team_recruit(
-    hub: &TeamHub,
-    ctx: &CallContext,
-    args: &Value,
-) -> Result<Value, String> {
-    check_permission(&ctx.role, Permission::Recruit)
-        .map_err(|e| e.into_message("recruit"))?;
+pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
+    check_permission(&ctx.role, Permission::Recruit).map_err(|e| e.into_message("recruit"))?;
     // role_id を主引数とする。後方互換のため `role_profile_id` も受け付ける。
     let role_profile_id = args
         .get("role_id")
@@ -54,6 +70,7 @@ pub async fn team_recruit(
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
+    let wait_policy = parse_wait_policy(args)?;
 
     // フラット引数で動的ロール定義が同梱されているか判定。
     // label / description / instructions が「いずれか」あれば「全て揃っている必要がある」とみなしてバリデート。
@@ -77,13 +94,12 @@ pub async fn team_recruit(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    let any_def_field =
-        !label.is_empty() || !description.is_empty() || !instructions.is_empty();
-    let all_def_fields =
-        !label.is_empty() && !description.is_empty() && !instructions.is_empty();
+    let any_def_field = !label.is_empty() || !description.is_empty() || !instructions.is_empty();
+    let all_def_fields = !label.is_empty() && !description.is_empty() && !instructions.is_empty();
     if any_def_field && !all_def_fields {
         return Err(
-            "to define a new role, all of label / description / instructions must be provided".into(),
+            "to define a new role, all of label / description / instructions must be provided"
+                .into(),
         );
     }
 
@@ -95,12 +111,11 @@ pub async fn team_recruit(
     let lint_report: LintReport = if all_def_fields {
         let report = lint_all(&instructions, instructions_ja.as_deref());
         if report.has_deny() {
-            return Err(RecruitError::new(
-                "recruit_lint_denied",
-                report.deny_message(),
-            )
-            .with_phase("lint")
-            .into_err_string());
+            return Err(
+                RecruitError::new("recruit_lint_denied", report.deny_message())
+                    .with_phase("lint")
+                    .into_err_string(),
+            );
         }
         report
     } else {
@@ -273,7 +288,7 @@ pub async fn team_recruit(
     let ack_rx = channels.ack;
 
     // 動的ロールであれば、その定義もペイロードに同梱する。renderer 側はこの payload を見て
-     // RoleProfilesContext のメモリキャッシュへ追加し、worker template に instructions を流し込む。
+    // RoleProfilesContext のメモリキャッシュへ追加し、worker template に instructions を流し込む。
     // (team:role-created を別 emit でも届けているが、recruit-request と同梱しておくと到達順に依存しない)
     let dynamic_role_payload = match (&dynamic_role, &dynamic_match) {
         (Some(d), _) | (_, Some(d)) => Some(json!({
@@ -297,6 +312,7 @@ pub async fn team_recruit(
             "roleProfileId": role_profile_id,
             "engine": resolved_engine,
             "agentLabelHint": agent_label_hint,
+            "waitPolicy": wait_policy.clone(),
             "dynamicRole": dynamic_role_payload,
         });
         if let Err(e) = app.emit("team:recruit-request", payload) {
@@ -310,8 +326,7 @@ pub async fn team_recruit(
 
     // Issue #342 Phase 1 (1.11): 環境変数 `VIBE_TEAM_DISABLE_RECRUIT_ACK=1` で旧 fire-and-forget
     // 動作にフォールバック (ack 待ちをスキップしていきなり handshake 30s 待機)。緊急ロールバック用。
-    let disable_ack =
-        std::env::var("VIBE_TEAM_DISABLE_RECRUIT_ACK").as_deref() == Ok("1");
+    let disable_ack = std::env::var("VIBE_TEAM_DISABLE_RECRUIT_ACK").as_deref() == Ok("1");
 
     if !disable_ack {
         // Issue #342 Phase 1: ack 短期待機 (5s)。renderer が `team:recruit-request` を受領して
@@ -393,7 +408,10 @@ pub async fn team_recruit(
             // recruited_at は registry 登録時刻、handshakeAt は handshake 完了時刻。
             // どちらも `resolve_pending_recruit` で member_diagnostics に書き込み済み。
             let diag = hub.get_member_diagnostics(&outcome.agent_id).await;
-            let recruited_at = diag.as_ref().map(|d| d.recruited_at.clone()).unwrap_or_default();
+            let recruited_at = diag
+                .as_ref()
+                .map(|d| d.recruited_at.clone())
+                .unwrap_or_default();
             let handshake_at = diag.and_then(|d| d.last_handshake_at);
             // Issue #519: warn 段階の lint findings を response に同梱。renderer / Leader が
             // この警告を読み取り、必要なら Leader 自身が dismiss/再採用で訂正できるようにする。
@@ -432,6 +450,7 @@ pub async fn team_recruit(
                 "templateWarningMessage": template_warning_message,
                 "boundaryWarnings": boundary_warning_strs,
                 "boundaryWarningMessage": boundary_warning_message,
+                "waitPolicy": wait_policy,
             }))
         }
         Ok(Err(_)) => {
@@ -441,13 +460,12 @@ pub async fn team_recruit(
             // 永久カウントされ、再起動まで採用不能化していた。
             hub.cancel_pending_recruit(&new_agent_id).await;
             // Issue #342 Phase 1: 構造化エラーで返す (cancelled は handshake 直前 cancel 等)
-            Err(RecruitError::new(
-                "recruit_cancelled",
-                "recruit cancelled before handshake",
+            Err(
+                RecruitError::new("recruit_cancelled", "recruit cancelled before handshake")
+                    .with_phase("handshake")
+                    .with_elapsed_ms(started.elapsed().as_millis() as u64)
+                    .into_err_string(),
             )
-            .with_phase("handshake")
-            .with_elapsed_ms(started.elapsed().as_millis() as u64)
-            .into_err_string())
         }
         Err(_) => {
             // timeout
@@ -471,5 +489,35 @@ pub async fn team_recruit(
             .with_elapsed_ms(started.elapsed().as_millis() as u64)
             .into_err_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_wait_policy, DEFAULT_WAIT_POLICY};
+    use serde_json::json;
+
+    #[test]
+    fn parse_wait_policy_defaults_to_strict() {
+        assert_eq!(
+            parse_wait_policy(&json!({})).unwrap(),
+            DEFAULT_WAIT_POLICY.to_string()
+        );
+    }
+
+    #[test]
+    fn parse_wait_policy_accepts_camel_case_key() {
+        assert_eq!(
+            parse_wait_policy(&json!({ "waitPolicy": "proactive" })).unwrap(),
+            "proactive"
+        );
+    }
+
+    #[test]
+    fn parse_wait_policy_rejects_unknown_value() {
+        let err = parse_wait_policy(&json!({ "wait_policy": "autonomous" })).unwrap_err();
+
+        assert!(err.contains("recruit_invalid_wait_policy"));
+        assert!(err.contains("strict, standard, or proactive"));
     }
 }

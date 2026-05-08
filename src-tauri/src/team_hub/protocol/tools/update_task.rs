@@ -238,6 +238,7 @@ mod tests {
                 required_human_decision: None,
                 target_paths: Vec::new(),
                 lock_conflicts: Vec::new(),
+                pre_approval: None,
             });
         }
 
@@ -286,6 +287,7 @@ mod tests {
                 required_human_decision: None,
                 target_paths: Vec::new(),
                 lock_conflicts: Vec::new(),
+                pre_approval: None,
             });
         }
 
@@ -353,6 +355,7 @@ mod tests {
                 required_human_decision: None,
                 target_paths: Vec::new(),
                 lock_conflicts: Vec::new(),
+                pre_approval: None,
             });
         }
 
@@ -452,6 +455,7 @@ mod tests {
                 required_human_decision: None,
                 target_paths: Vec::new(),
                 lock_conflicts: Vec::new(),
+                pre_approval: None,
             });
         }
         let ctx = CallContext {

@@ -1469,7 +1469,7 @@ Plan: `tasks/release-v1.4.12.md`
 - [x] #510 は PR #544 で `main` に merge 済みと確認する。今回は重複実装せず、Issue 整理対象にする。
 - [x] #515 / #523 / #527 を `planned` から `implementing` へ移す。
 - [x] #515: `team_send` に `kind` を追加し、`request` は Leader に自動 CC する。
-- [ ] #523: worker 単位の `wait_policy` と task の `pre_approval` を追加する。
+- [x] #523: worker 単位の `wait_policy` と task の `pre_approval` を追加する。
 - [ ] #527: task の Definition of Done と done evidence gate を追加する。
 - [ ] 1 Issue = 1 commit の形で差分を分ける。
 - [ ] Rust / TypeScript / skill 文言 / schema / UI 型を同期する。
@@ -1479,5 +1479,5 @@ Plan: `tasks/release-v1.4.12.md`
 
 - [x] 既存の `team_send` / `team_assign_task` / `team_update_task` / `team_recruit` の構造体とテストを読む。
 - [x] #515 の配送仕様を最小差分で実装する。
-- [ ] #523 の policy / pre_approval を後方互換を保って追加する。
+- [x] #523 の policy / pre_approval を後方互換を保って追加する。
 - [ ] #527 の DoD gate は新規タスクに強制し、既存 task 互換を壊さない。

@@ -26,6 +26,15 @@ pub struct FileLockConflictSnapshot {
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct TaskPreApprovalSnapshot {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allowed_actions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct TeamTaskSnapshot {
     pub id: u32,
     pub assigned_to: String,
@@ -51,6 +60,8 @@ pub struct TeamTaskSnapshot {
     pub target_paths: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub lock_conflicts: Vec<FileLockConflictSnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pre_approval: Option<TaskPreApprovalSnapshot>,
 }
 
 /// Issue #516: 統合フェーズで Leader が複数 worker の成果を突き合わせるための構造化フィールド。

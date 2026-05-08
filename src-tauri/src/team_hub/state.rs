@@ -6,8 +6,8 @@ use super::{bridge, handle_client, hex_encode, TeamHub, MAX_CONCURRENT_CLIENTS};
 use super::{create_pipe_server, new_pipe_endpoint};
 use crate::commands::team_history::HandoffReference;
 use crate::commands::team_state::{
-    FileLockConflictSnapshot, HandoffLifecycleEvent, HumanGateState, TeamOrchestrationState,
-    TeamTaskSnapshot, WorkerReportSnapshot, TEAM_STATE_SCHEMA_VERSION,
+    FileLockConflictSnapshot, HandoffLifecycleEvent, HumanGateState, TaskPreApprovalSnapshot,
+    TeamOrchestrationState, TeamTaskSnapshot, WorkerReportSnapshot, TEAM_STATE_SCHEMA_VERSION,
 };
 use crate::pty::SessionRegistry;
 use anyhow::Result;
@@ -417,6 +417,7 @@ pub struct TeamTask {
     pub required_human_decision: Option<String>,
     pub target_paths: Vec<String>,
     pub lock_conflicts: Vec<FileLockConflictSnapshot>,
+    pub pre_approval: Option<TaskPreApprovalSnapshot>,
 }
 
 impl TeamTask {
@@ -437,6 +438,7 @@ impl TeamTask {
             required_human_decision: self.required_human_decision.clone(),
             target_paths: self.target_paths.clone(),
             lock_conflicts: self.lock_conflicts.clone(),
+            pre_approval: self.pre_approval.clone(),
         }
     }
 
@@ -457,6 +459,7 @@ impl TeamTask {
             required_human_decision: snapshot.required_human_decision,
             target_paths: snapshot.target_paths,
             lock_conflicts: snapshot.lock_conflicts,
+            pre_approval: snapshot.pre_approval,
         }
     }
 }
@@ -464,7 +467,7 @@ impl TeamTask {
 #[cfg(test)]
 mod task_snapshot_tests {
     use super::TeamTask;
-    use crate::commands::team_state::FileLockConflictSnapshot;
+    use crate::commands::team_state::{FileLockConflictSnapshot, TaskPreApprovalSnapshot};
 
     #[test]
     fn team_task_snapshot_roundtrips_file_ownership_fields() {
@@ -489,17 +492,38 @@ mod task_snapshot_tests {
                 holder_role: "programmer".into(),
                 acquired_at: "2026-05-08T00:01:00Z".into(),
             }],
+            pre_approval: Some(TaskPreApprovalSnapshot {
+                allowed_actions: vec!["read docs".into()],
+                note: Some("lightweight investigation only".into()),
+            }),
         };
 
         let snapshot = task.to_snapshot();
         assert_eq!(snapshot.target_paths, vec!["src/foo.rs"]);
         assert_eq!(snapshot.lock_conflicts.len(), 1);
         assert_eq!(snapshot.lock_conflicts[0].holder_agent_id, "agent-a");
+        assert_eq!(
+            snapshot
+                .pre_approval
+                .as_ref()
+                .expect("pre approval snapshot")
+                .allowed_actions,
+            vec!["read docs"]
+        );
 
         let restored = TeamTask::from_snapshot(snapshot);
         assert_eq!(restored.target_paths, vec!["src/foo.rs"]);
         assert_eq!(restored.lock_conflicts.len(), 1);
         assert_eq!(restored.lock_conflicts[0].path, "src/foo.rs");
+        assert_eq!(
+            restored
+                .pre_approval
+                .as_ref()
+                .expect("pre approval")
+                .note
+                .as_deref(),
+            Some("lightweight investigation only")
+        );
     }
 }
 

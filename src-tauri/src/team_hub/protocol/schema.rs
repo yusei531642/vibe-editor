@@ -97,7 +97,7 @@ pub(super) fn tool_defs() -> Value {
                 "Assign a task to a role. Optionally pass `target_paths: string[]` declaring the files this task plans to edit; \
                  the Hub stores those paths in the task snapshot, peeks the advisory file lock table, and returns any active holders in `lockConflicts`. \
                  Lock conflicts do NOT block the assignment (advisory) — the Leader / assignee should reconcile manually. \
-                 Returns `{ success: true, taskId: number, assignedAt: string, boundaryWarnings: string[], boundaryWarningMessage: string|null, targetPaths: string[], targetPathsMissing: boolean, fileLockWarningMessage: string|null, lockConflicts: LockConflict[] }`. \
+                 Returns `{ success: true, taskId: number, assignedAt: string, boundaryWarnings: string[], boundaryWarningMessage: string|null, targetPaths: string[], targetPathsMissing: boolean, fileLockWarningMessage: string|null, lockConflicts: LockConflict[], preApproval?: object }`. \
                  `LockConflict` shape: `{ path, holderAgentId, holderRole, acquiredAt }`.",
             "inputSchema": {
                 "type": "object",
@@ -108,6 +108,19 @@ pub(super) fn tool_defs() -> Value {
                         "type": "array",
                         "items": { "type": "string" },
                         "description": "Optional: file paths this task is expected to edit. Used to surface advisory file-lock conflicts in the response."
+                    },
+                    "pre_approval": {
+                        "type": "object",
+                        "description": "Optional: lightweight actions the assignee may perform without asking the Leader again.",
+                        "properties": {
+                            "allowed_actions": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "description": "Non-empty list of allowed lightweight actions, e.g. read docs or run focused tests."
+                            },
+                            "note": { "type": "string" }
+                        },
+                        "required": ["allowed_actions"]
                     }
                 },
                 "required": ["assignee", "description"]
@@ -166,7 +179,13 @@ pub(super) fn tool_defs() -> Value {
                              System rules are added automatically; do NOT repeat them here."
                     },
                     "instructions_ja": { "type": "string", "description": "Optional Japanese version of instructions." },
-                    "agent_label_hint": { "type": "string", "description": "Optional override for the canvas card title." }
+                    "agent_label_hint": { "type": "string", "description": "Optional override for the canvas card title." },
+                    "wait_policy": {
+                        "type": "string",
+                        "enum": ["strict", "standard", "proactive"],
+                        "default": "strict",
+                        "description": "Worker autonomy policy. strict waits for assigned tasks, standard may propose next actions after completion/blocking, proactive may execute Leader pre-approved lightweight work only."
+                    }
                 },
                 "required": ["role_id"]
             }
