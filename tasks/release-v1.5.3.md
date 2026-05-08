@@ -24,6 +24,12 @@
 - [x] `package.json` / `package-lock.json` を `1.5.3` に更新。
 - [x] `src-tauri/Cargo.toml` / `src-tauri/Cargo.lock` / `src-tauri/tauri.conf.json` を `1.5.3` に更新。
 - [x] 品質ゲートを実行。
+- [x] Release PR #558 を作成し、CI と reviewer bot approval を確認。
+- [x] PR #558 の bot merge 後に `main` を同期。
+- [x] `v1.5.3` annotated tag を push。
+- [x] Release workflow run `25540716934` を監視し、全 matrix build の成功を確認。
+- [x] Draft release の assets と `latest.json` を確認。
+- [x] Draft release を publish。
 
 ## 検証結果
 
@@ -33,10 +39,20 @@
 - [x] `npm run test`: PASS (45 files / 288 tests)
 - [x] `npm run build:vite`: PASS
 - [x] `git diff --check`: PASS
+- [x] GitHub Actions `ci / verify`: PASS (run `25540482890`)
+- [x] Release workflow: PASS (run `25540716934`)
+- [x] `latest.json`: `version` が `1.5.3`、platforms が `darwin-aarch64` / `linux-x86_64` / `windows-x86_64`
 
 ## Next Tasks
 
-- [ ] release PR を作成し、CI と reviewer bot を確認する。
-- [ ] PR merge 後に `main` を同期し、`v1.5.3` tag を push する。
-- [ ] release workflow を監視し、draft release の assets と `latest.json` を確認する。
-- [ ] draft release を publish する。
+- [x] release PR を作成し、CI と reviewer bot を確認する。
+- [x] PR merge 後に `main` を同期し、`v1.5.3` tag を push する。
+- [x] release workflow を監視し、draft release の assets と `latest.json` を確認する。
+- [x] draft release を publish する。
+
+## 完了結果
+
+- [x] PR #558: https://github.com/yusei531642/vibe-editor/pull/558
+- [x] Release: https://github.com/yusei531642/vibe-editor/releases/tag/v1.5.3
+- [x] Assets: Windows `.exe`、macOS `.dmg` / `.app.tar.gz`、Linux `.AppImage` / `.deb` / `.rpm`、SBOM、signatures、`latest.json`
+- [x] Published at: 2026-05-08T06:38:55Z
