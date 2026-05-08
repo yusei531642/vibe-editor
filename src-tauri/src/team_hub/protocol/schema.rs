@@ -63,6 +63,80 @@ pub(super) fn tool_defs() -> Value {
             }
         },
         {
+            "name": "team_report",
+            "description":
+                "Submit a structured completion / interruption report to the team. \
+                 Use this **in addition to** any team_send confirmation, so the Hub can persist \
+                 the result as JSON instead of free text. The report is stored in the team-state \
+                 backlog (`team_reports[]`), surfaced to the active Leader via team_get_tasks, and \
+                 a one-line human-readable summary is injected into the Leader's terminal for live \
+                 awareness. `task_id` may be either the numeric `team_assign_task` id or an external \
+                 string id; if it parses as a u32 and matches an existing TeamTask **assigned to the \
+                 caller** (role match or agent_id match), that task's `summary` and `updated_at` are \
+                 refreshed. State transitions (`status`) and `next_action` / `artifact_path` are NOT \
+                 modified by this tool — call `team_update_task` for those, which validates \
+                 `done_evidence` against `done_criteria`.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "description": "Task identifier. Pass a numeric task id from team_assign_task, or any external string id.",
+                        "oneOf": [
+                            { "type": "string" },
+                            { "type": "integer", "minimum": 0 }
+                        ]
+                    },
+                    "status": {
+                        "type": "string",
+                        "enum": ["done", "blocked", "needs_input", "failed"],
+                        "description": "Final / current state of the task being reported."
+                    },
+                    "summary": {
+                        "type": "string",
+                        "description": "Required short human-readable summary (≥ 1 non-whitespace char)."
+                    },
+                    "findings": {
+                        "type": "array",
+                        "description": "Optional structured findings (bug observations / risks / review notes).",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "severity": {
+                                    "type": "string",
+                                    "enum": ["high", "medium", "low"]
+                                },
+                                "file": {
+                                    "type": "string",
+                                    "description": "Repository-relative path, or empty string when not file-scoped."
+                                },
+                                "message": {
+                                    "type": "string",
+                                    "description": "Required non-empty description."
+                                }
+                            },
+                            "required": ["severity", "message"]
+                        }
+                    },
+                    "changed_files": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional list of files this task modified."
+                    },
+                    "artifact_refs": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional list of generated artifacts (PR links, file paths, JSON reports)."
+                    },
+                    "next_actions": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional next-step suggestions for the Leader / next worker."
+                    }
+                },
+                "required": ["task_id", "status", "summary"]
+            }
+        },
+        {
             "name": "team_info",
             "description":
                 "Get the current team roster and your identity. \

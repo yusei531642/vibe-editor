@@ -7,8 +7,8 @@ use super::{create_pipe_server, new_pipe_endpoint};
 use crate::commands::team_history::HandoffReference;
 use crate::commands::team_state::{
     FileLockConflictSnapshot, HandoffLifecycleEvent, HumanGateState, TaskDoneEvidenceSnapshot,
-    TaskPreApprovalSnapshot, TeamOrchestrationState, TeamTaskSnapshot, WorkerReportSnapshot,
-    TEAM_STATE_SCHEMA_VERSION,
+    TaskPreApprovalSnapshot, TeamOrchestrationState, TeamReportSnapshot, TeamTaskSnapshot,
+    WorkerReportSnapshot, TEAM_STATE_SCHEMA_VERSION,
 };
 use crate::pty::SessionRegistry;
 use anyhow::Result;
@@ -278,6 +278,8 @@ pub struct TeamInfo {
     pub messages: VecDeque<TeamMessage>,
     pub tasks: VecDeque<TeamTask>,
     pub worker_reports: VecDeque<WorkerReportSnapshot>,
+    /// Issue #572: `team_report` で受け取った構造化レポートのバックログ。FIFO 50 件で上限。
+    pub team_reports: VecDeque<TeamReportSnapshot>,
     pub latest_handoff: Option<HandoffReference>,
     pub handoff_events: VecDeque<HandoffLifecycleEvent>,
     pub human_gate: HumanGateState,
@@ -1120,6 +1122,11 @@ impl TeamHub {
             if team.worker_reports.is_empty() {
                 team.worker_reports = persisted.worker_reports.into_iter().collect();
             }
+            // Issue #572: `team_report` 由来の構造化レポート backlog を永続化から復元する。
+            // worker_reports と独立した channel として持つ (= structured report の意味的分離)。
+            if team.team_reports.is_empty() {
+                team.team_reports = persisted.team_reports.into_iter().collect();
+            }
             if team.handoff_events.is_empty() {
                 team.handoff_events = persisted.handoff_events.into_iter().collect();
             }
@@ -1215,6 +1222,8 @@ impl TeamHub {
                 tasks: team.tasks.iter().map(TeamTask::to_snapshot).collect(),
                 pending_tasks: Vec::new(),
                 worker_reports: team.worker_reports.iter().cloned().collect(),
+                // Issue #572: `team_report` 由来の構造化レポート backlog を永続化対象に含める。
+                team_reports: team.team_reports.iter().cloned().collect(),
                 human_gate: team.human_gate.clone(),
                 next_actions: team.next_actions.iter().cloned().collect(),
                 handoff_events: team.handoff_events.iter().cloned().collect(),
