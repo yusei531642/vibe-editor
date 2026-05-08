@@ -1567,10 +1567,16 @@ Plan: `tasks/release-v1.4.12.md`
 - [x] 現行 `main` の `normalize_terminal_command()` が Claude / Codex 共通で使われることを確認する。
 - [x] Claude Code の `--dangerously-skip-permissions --chrome --append-system-prompt` 実例を回帰テストに追加する。
 - [x] Rust targeted test と diff check を通す。
-- [ ] PR を作成し、Bot merge を確認する。
+- [x] PR を作成し、Bot merge を確認する。
 
 ### 検証結果
 
 - [x] `cargo test --manifest-path src-tauri\Cargo.toml claude_inline_command_args --lib`: PASS (1 test)
 - [x] `cargo test --manifest-path src-tauri\Cargo.toml command_normalization_tests --lib`: PASS (7 tests)
 - [x] `git diff --check`: PASS
+- [x] GitHub Actions `ci / verify`: PASS (run `25535950692`)
+
+### 完了結果
+
+- [x] PR #554: https://github.com/yusei531642/vibe-editor/pull/554
+- [x] Issue #553: Bot merge 後に close、`implemented` ラベルへ更新
