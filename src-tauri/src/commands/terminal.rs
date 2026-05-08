@@ -78,12 +78,8 @@ pub struct SavePastedImageResult {
     pub error: Option<String>,
 }
 
-/// 旧 resolveCommand 相当の最小実装。Phase 1 では「未指定なら 'claude'」だけ。
 fn resolve_command(command: Option<String>, args: Option<Vec<String>>) -> (String, Vec<String>) {
-    let cmd = command
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "claude".to_string());
-    (cmd, args.unwrap_or_default())
+    command_validation::normalize_terminal_command(command, args)
 }
 
 /// Codex の system prompt を、PTY (TUI) に直接「最初の入力」として注入する fallback 経路。
