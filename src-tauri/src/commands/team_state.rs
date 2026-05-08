@@ -122,6 +122,49 @@ pub struct WorkerReportSnapshot {
     pub created_at: String,
 }
 
+/// Issue #572: `team_report` の findings 1 件分。`severity` は `high` / `medium` / `low` の
+/// いずれか (Hub 側で trim + lowercase 後に validate)。`file` は repository-relative を推奨だが
+/// 自由文字列。`message` は人間可読な要約。
+#[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamReportFinding {
+    pub severity: String,
+    pub file: String,
+    pub message: String,
+}
+
+/// Issue #572: `team_report` で worker → Leader へ返す構造化レポート 1 件。
+///
+/// 既存の `WorkerReportSnapshot` (= `team_send` / `team_update_task` が積む完了経過ログ) とは
+/// 別 channel として独立した struct を持つ。`team_report` は「task 単位での完成形 / blocked 形」
+/// を明示するためのもので、Leader が `team_get_tasks` で task に紐付けて読む。
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TeamReportSnapshot {
+    /// 一意 id (`report-<task_id>-<timestamp>` 形式、Hub が採番)
+    pub id: String,
+    /// caller が指定した task_id 文字列。`team_assign_task` 経由の task と紐付けるなら数値文字列、
+    /// 外部 planner の id (string) なら任意文字列のまま保持する。
+    pub task_id: String,
+    /// `task_id` を u32 として parse できた場合だけ Some。`team_get_tasks` の attach 判定で使う。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id_num: Option<u32>,
+    pub from_role: String,
+    pub from_agent_id: String,
+    /// `done` / `blocked` / `needs_input` / `failed` のいずれか (Hub 側で validate 済み)。
+    pub status: String,
+    pub summary: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub findings: Vec<TeamReportFinding>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub changed_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub artifact_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub next_actions: Vec<String>,
+    pub created_at: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct HumanGateState {
@@ -165,6 +208,11 @@ pub struct TeamOrchestrationState {
     pub pending_tasks: Vec<TeamTaskSnapshot>,
     #[serde(default)]
     pub worker_reports: Vec<WorkerReportSnapshot>,
+    /// Issue #572: `team_report` で受け取った構造化レポートのバックログ (新しい順に積む)。
+    /// 既存 JSON ファイル (schema_version=1) には存在しないため `#[serde(default)]` で
+    /// 空配列扱いし、書き出し時はフィールドが空ならスキップして無駄な diff を出さない。
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub team_reports: Vec<TeamReportSnapshot>,
     #[serde(default)]
     pub human_gate: HumanGateState,
     #[serde(default)]
@@ -185,6 +233,7 @@ impl Default for TeamOrchestrationState {
             tasks: Vec::new(),
             pending_tasks: Vec::new(),
             worker_reports: Vec::new(),
+            team_reports: Vec::new(),
             human_gate: HumanGateState::default(),
             next_actions: Vec::new(),
             handoff_events: Vec::new(),

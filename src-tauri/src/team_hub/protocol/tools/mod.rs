@@ -18,6 +18,8 @@ mod info;
 mod list_role_profiles;
 mod read;
 mod recruit;
+// Issue #572: worker → Leader の構造化完了/中断報告。
+mod report;
 mod send;
 mod status;
 mod switch_leader;
@@ -34,6 +36,7 @@ pub use info::team_info;
 pub use list_role_profiles::team_list_role_profiles;
 pub use read::team_read;
 pub use recruit::team_recruit;
+pub use report::team_report;
 pub use send::team_send;
 pub use status::team_status;
 pub use switch_leader::team_switch_leader;

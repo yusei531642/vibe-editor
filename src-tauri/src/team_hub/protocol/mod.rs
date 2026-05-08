@@ -43,7 +43,7 @@ use serde_json::{json, Value};
 use tools::{
     team_ack_handoff, team_assign_task, team_create_leader, team_diagnostics, team_dismiss,
     team_get_tasks, team_info, team_list_role_profiles, team_lock_files, team_read, team_recruit,
-    team_send, team_status, team_switch_leader, team_unlock_files, team_update_task,
+    team_report, team_send, team_status, team_switch_leader, team_unlock_files, team_update_task,
 };
 
 pub async fn handle(hub: &TeamHub, ctx: &CallContext, req: &Value) -> Option<Value> {
@@ -134,6 +134,8 @@ async fn dispatch_tool(
     match name {
         "team_send" => team_send(hub, ctx, args).await,
         "team_read" => team_read(hub, ctx, args).await,
+        // Issue #572: 構造化完了/中断報告。worker から any role が呼べる (permission check 無し)。
+        "team_report" => team_report(hub, ctx, args).await,
         "team_info" => team_info(hub, ctx).await,
         "team_status" => team_status(hub, ctx, args).await,
         "team_assign_task" => team_assign_task(hub, ctx, args).await,
