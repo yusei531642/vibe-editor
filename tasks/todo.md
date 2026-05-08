@@ -1532,7 +1532,7 @@ Plan: `tasks/release-v1.4.12.md`
 - [x] Rust 側で `command` 欄に混ざった flags を起動前に `args` へ分離する。
 - [x] `cmd /c` などの即時実行拒否が、分離後の args にも効くことをテストする。
 - [x] Rust test / cargo check / diff check を通す。
-- [ ] PR を作成し、Bot merge 後に `v1.5.2` をリリースする。
+- [x] PR を作成し、Bot merge 後に `v1.5.2` をリリースする。
 
 ### Next Steps
 
@@ -1549,3 +1549,12 @@ Plan: `tasks/release-v1.4.12.md`
 - [x] `cargo test --manifest-path src-tauri\Cargo.toml --lib`: PASS (289 tests / 既存 warning: `unused variable: home`)
 - [x] `npm run test`: PASS (45 files / 288 tests、jsdom の Tauri `listen()` cleanup warning は既存)
 - [x] `npm run build:vite`: PASS
+- [x] GitHub Actions `ci / verify`: PASS (run `25535071998`)
+- [x] GitHub Actions `release`: PASS (run `25535273228`, Windows / macOS / Linux)
+
+### 完了結果
+
+- [x] PR #551: https://github.com/yusei531642/vibe-editor/pull/551
+- [x] Issue #550: Bot merge 後に close、`implemented` ラベルへ更新
+- [x] Release `v1.5.2`: https://github.com/yusei531642/vibe-editor/releases/tag/v1.5.2
+- [x] `latest.json`: `version` が `1.5.2` を返すことを確認
