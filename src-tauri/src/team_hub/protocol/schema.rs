@@ -94,16 +94,21 @@ pub(super) fn tool_defs() -> Value {
         {
             "name": "team_assign_task",
             "description":
-                "Assign a task to a role. Optionally pass `target_paths: string[]` declaring the files this task plans to edit; \
+                "Assign a task to a role. Must pass `done_criteria: string[]` defining the task acceptance conditions. Optionally pass `target_paths: string[]` declaring the files this task plans to edit; \
                  the Hub stores those paths in the task snapshot, peeks the advisory file lock table, and returns any active holders in `lockConflicts`. \
                  Lock conflicts do NOT block the assignment (advisory) — the Leader / assignee should reconcile manually. \
-                 Returns `{ success: true, taskId: number, assignedAt: string, boundaryWarnings: string[], boundaryWarningMessage: string|null, targetPaths: string[], targetPathsMissing: boolean, fileLockWarningMessage: string|null, lockConflicts: LockConflict[], preApproval?: object }`. \
+                 Returns `{ success: true, taskId: number, assignedAt: string, boundaryWarnings: string[], boundaryWarningMessage: string|null, targetPaths: string[], targetPathsMissing: boolean, fileLockWarningMessage: string|null, lockConflicts: LockConflict[], preApproval?: object, doneCriteria: string[] }`. \
                  `LockConflict` shape: `{ path, holderAgentId, holderRole, acquiredAt }`.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "assignee": { "type": "string" },
                     "description": { "type": "string" },
+                    "done_criteria": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Required: acceptance criteria / Definition of Done. team_update_task(status=done) must provide matching done_evidence for every item."
+                    },
                     "target_paths": {
                         "type": "array",
                         "items": { "type": "string" },
@@ -123,7 +128,7 @@ pub(super) fn tool_defs() -> Value {
                         "required": ["allowed_actions"]
                     }
                 },
-                "required": ["assignee", "description"]
+                "required": ["assignee", "description", "done_criteria"]
             }
         },
         {
@@ -145,7 +150,19 @@ pub(super) fn tool_defs() -> Value {
                     "artifact_path": { "type": "string" },
                     "blocked_by_human_gate": { "type": "boolean" },
                     "required_human_decision": { "type": "string" },
-                    "report_kind": { "type": "string" }
+                    "report_kind": { "type": "string" },
+                    "done_evidence": {
+                        "type": "array",
+                        "description": "Required when status is done/completed/complete for tasks with done_criteria.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "criterion": { "type": "string" },
+                                "evidence": { "type": "string" }
+                            },
+                            "required": ["criterion", "evidence"]
+                        }
+                    }
                 },
                 "required": ["task_id", "status"]
             }

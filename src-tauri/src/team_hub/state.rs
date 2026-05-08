@@ -6,8 +6,9 @@ use super::{bridge, handle_client, hex_encode, TeamHub, MAX_CONCURRENT_CLIENTS};
 use super::{create_pipe_server, new_pipe_endpoint};
 use crate::commands::team_history::HandoffReference;
 use crate::commands::team_state::{
-    FileLockConflictSnapshot, HandoffLifecycleEvent, HumanGateState, TaskPreApprovalSnapshot,
-    TeamOrchestrationState, TeamTaskSnapshot, WorkerReportSnapshot, TEAM_STATE_SCHEMA_VERSION,
+    FileLockConflictSnapshot, HandoffLifecycleEvent, HumanGateState, TaskDoneEvidenceSnapshot,
+    TaskPreApprovalSnapshot, TeamOrchestrationState, TeamTaskSnapshot, WorkerReportSnapshot,
+    TEAM_STATE_SCHEMA_VERSION,
 };
 use crate::pty::SessionRegistry;
 use anyhow::Result;
@@ -418,6 +419,8 @@ pub struct TeamTask {
     pub target_paths: Vec<String>,
     pub lock_conflicts: Vec<FileLockConflictSnapshot>,
     pub pre_approval: Option<TaskPreApprovalSnapshot>,
+    pub done_criteria: Vec<String>,
+    pub done_evidence: Vec<TaskDoneEvidenceSnapshot>,
 }
 
 impl TeamTask {
@@ -439,6 +442,8 @@ impl TeamTask {
             target_paths: self.target_paths.clone(),
             lock_conflicts: self.lock_conflicts.clone(),
             pre_approval: self.pre_approval.clone(),
+            done_criteria: self.done_criteria.clone(),
+            done_evidence: self.done_evidence.clone(),
         }
     }
 
@@ -460,6 +465,8 @@ impl TeamTask {
             target_paths: snapshot.target_paths,
             lock_conflicts: snapshot.lock_conflicts,
             pre_approval: snapshot.pre_approval,
+            done_criteria: snapshot.done_criteria,
+            done_evidence: snapshot.done_evidence,
         }
     }
 }
@@ -467,7 +474,9 @@ impl TeamTask {
 #[cfg(test)]
 mod task_snapshot_tests {
     use super::TeamTask;
-    use crate::commands::team_state::{FileLockConflictSnapshot, TaskPreApprovalSnapshot};
+    use crate::commands::team_state::{
+        FileLockConflictSnapshot, TaskDoneEvidenceSnapshot, TaskPreApprovalSnapshot,
+    };
 
     #[test]
     fn team_task_snapshot_roundtrips_file_ownership_fields() {
@@ -496,6 +505,11 @@ mod task_snapshot_tests {
                 allowed_actions: vec!["read docs".into()],
                 note: Some("lightweight investigation only".into()),
             }),
+            done_criteria: vec!["focused test passes".into()],
+            done_evidence: vec![TaskDoneEvidenceSnapshot {
+                criterion: "focused test passes".into(),
+                evidence: "cargo test assign_task --lib passed".into(),
+            }],
         };
 
         let snapshot = task.to_snapshot();
@@ -510,6 +524,8 @@ mod task_snapshot_tests {
                 .allowed_actions,
             vec!["read docs"]
         );
+        assert_eq!(snapshot.done_criteria, vec!["focused test passes"]);
+        assert_eq!(snapshot.done_evidence[0].criterion, "focused test passes");
 
         let restored = TeamTask::from_snapshot(snapshot);
         assert_eq!(restored.target_paths, vec!["src/foo.rs"]);
@@ -523,6 +539,11 @@ mod task_snapshot_tests {
                 .note
                 .as_deref(),
             Some("lightweight investigation only")
+        );
+        assert_eq!(restored.done_criteria, vec!["focused test passes"]);
+        assert_eq!(
+            restored.done_evidence[0].evidence,
+            "cargo test assign_task --lib passed"
         );
     }
 }

@@ -2,6 +2,7 @@
 //!
 //! Issue #373 Phase 2 で `protocol.rs` から切り出し。
 
+use crate::commands::team_state::TaskDoneEvidenceSnapshot;
 use crate::team_hub::{CallContext, TeamHub};
 use chrono::Utc;
 use serde_json::{json, Value};
@@ -19,6 +20,72 @@ fn optional_bool(args: &Value, snake: &str, camel: &str) -> Option<bool> {
     args.get(snake)
         .or_else(|| args.get(camel))
         .and_then(|v| v.as_bool())
+}
+
+fn normalize_criterion(s: &str) -> String {
+    s.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
+}
+
+fn is_done_status(status: &str) -> bool {
+    matches!(
+        status.trim().to_ascii_lowercase().as_str(),
+        "done" | "completed" | "complete"
+    )
+}
+
+fn done_evidence_invalid(message: impl Into<String>) -> String {
+    json!({
+        "code": "task_done_evidence_invalid",
+        "message": message.into(),
+    })
+    .to_string()
+}
+
+fn done_evidence_missing(missing: Vec<String>) -> String {
+    json!({
+        "code": "task_done_evidence_missing",
+        "message": "done_evidence must cover every done_criteria item before marking the task done",
+        "missingCriteria": missing,
+    })
+    .to_string()
+}
+
+fn parse_done_evidence(args: &Value) -> Result<Vec<TaskDoneEvidenceSnapshot>, String> {
+    let Some(raw) = args
+        .get("done_evidence")
+        .or_else(|| args.get("doneEvidence"))
+    else {
+        return Ok(Vec::new());
+    };
+    let arr = raw
+        .as_array()
+        .ok_or_else(|| done_evidence_invalid("done_evidence must be an array"))?;
+    let mut out = Vec::new();
+    for item in arr {
+        let obj = item.as_object().ok_or_else(|| {
+            done_evidence_invalid("done_evidence entries must be objects with criterion/evidence")
+        })?;
+        let criterion = obj
+            .get("criterion")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| done_evidence_invalid("done_evidence.criterion is required"))?;
+        let evidence = obj
+            .get("evidence")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .ok_or_else(|| done_evidence_invalid("done_evidence.evidence is required"))?;
+        out.push(TaskDoneEvidenceSnapshot {
+            criterion: criterion.to_string(),
+            evidence: evidence.to_string(),
+        });
+    }
+    Ok(out)
 }
 
 /// Issue #516: `report_payload` をネスト JSON / フラット object どちらでも受けてパースする。
@@ -93,6 +160,7 @@ pub async fn team_update_task(
 ) -> Result<Value, String> {
     let task_id = args.get("task_id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
     let status = args.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    let done_evidence = parse_done_evidence(args)?;
     let summary = optional_string(args, "summary", "summary");
     let blocked_reason = optional_string(args, "blocked_reason", "blockedReason");
     let report_payload = optional_report_payload(args);
@@ -127,8 +195,28 @@ pub async fn team_update_task(
             .iter_mut()
             .find(|t| t.id == task_id)
             .ok_or_else(|| format!("Task #{task_id} not found"))?;
+        if is_done_status(status) && !task.done_criteria.is_empty() {
+            let missing = task
+                .done_criteria
+                .iter()
+                .filter(|criterion| {
+                    let criterion_key = normalize_criterion(criterion);
+                    !done_evidence.iter().any(|evidence| {
+                        normalize_criterion(&evidence.criterion) == criterion_key
+                            && !evidence.evidence.trim().is_empty()
+                    })
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            if !missing.is_empty() {
+                return Err(done_evidence_missing(missing));
+            }
+        }
         task.status = status.to_string();
         task.updated_at = Some(now_iso.clone());
+        if !done_evidence.is_empty() {
+            task.done_evidence = done_evidence.clone();
+        }
         if summary.is_some() {
             task.summary = summary.clone();
         }
@@ -239,6 +327,8 @@ mod tests {
                 target_paths: Vec::new(),
                 lock_conflicts: Vec::new(),
                 pre_approval: None,
+                done_criteria: Vec::new(),
+                done_evidence: Vec::new(),
             });
         }
 
@@ -288,6 +378,8 @@ mod tests {
                 target_paths: Vec::new(),
                 lock_conflicts: Vec::new(),
                 pre_approval: None,
+                done_criteria: Vec::new(),
+                done_evidence: Vec::new(),
             });
         }
 
@@ -356,6 +448,8 @@ mod tests {
                 target_paths: Vec::new(),
                 lock_conflicts: Vec::new(),
                 pre_approval: None,
+                done_criteria: Vec::new(),
+                done_evidence: Vec::new(),
             });
         }
 
@@ -456,6 +550,8 @@ mod tests {
                 target_paths: Vec::new(),
                 lock_conflicts: Vec::new(),
                 pre_approval: None,
+                done_criteria: Vec::new(),
+                done_evidence: Vec::new(),
             });
         }
         let ctx = CallContext {
@@ -479,5 +575,132 @@ mod tests {
         let team = state.teams.get(&team_id).unwrap();
         let report = team.worker_reports.back().unwrap();
         assert!(report.payload.is_none(), "empty payload should not persist");
+    }
+
+    #[tokio::test]
+    async fn update_task_rejects_done_without_required_evidence() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let team_id = "team-527-missing".to_string();
+        {
+            let mut state = hub.state.lock().await;
+            let team = state
+                .teams
+                .entry(team_id.clone())
+                .or_insert_with(TeamInfo::default);
+            team.tasks.push_back(TeamTask {
+                id: 21,
+                assigned_to: "worker".into(),
+                description: "quality gate".into(),
+                status: "pending".into(),
+                created_by: "leader".into(),
+                created_at: "2026-05-08T10:00:00Z".into(),
+                updated_at: None,
+                summary: None,
+                blocked_reason: None,
+                next_action: None,
+                artifact_path: None,
+                blocked_by_human_gate: false,
+                required_human_decision: None,
+                target_paths: Vec::new(),
+                lock_conflicts: Vec::new(),
+                pre_approval: None,
+                done_criteria: vec!["tests pass".into(), "security reviewed".into()],
+                done_evidence: Vec::new(),
+            });
+        }
+        let ctx = CallContext {
+            team_id: team_id.clone(),
+            role: "worker".into(),
+            agent_id: "vc-w-527".into(),
+        };
+
+        let err = team_update_task(
+            &hub,
+            &ctx,
+            &json!({
+                "task_id": 21,
+                "status": "done",
+                "done_evidence": [
+                    { "criterion": "tests pass", "evidence": "cargo test passed" }
+                ]
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(err.contains("task_done_evidence_missing"));
+        assert!(err.contains("security reviewed"));
+        let state = hub.state.lock().await;
+        let task = state
+            .teams
+            .get(&team_id)
+            .unwrap()
+            .tasks
+            .iter()
+            .find(|task| task.id == 21)
+            .unwrap();
+        assert_eq!(task.status, "pending");
+        assert!(task.done_evidence.is_empty());
+    }
+
+    #[tokio::test]
+    async fn update_task_accepts_done_when_all_evidence_is_present() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let team_id = "team-527-ok".to_string();
+        {
+            let mut state = hub.state.lock().await;
+            let team = state
+                .teams
+                .entry(team_id.clone())
+                .or_insert_with(TeamInfo::default);
+            team.tasks.push_back(TeamTask {
+                id: 22,
+                assigned_to: "worker".into(),
+                description: "quality gate".into(),
+                status: "pending".into(),
+                created_by: "leader".into(),
+                created_at: "2026-05-08T10:00:00Z".into(),
+                updated_at: None,
+                summary: None,
+                blocked_reason: None,
+                next_action: None,
+                artifact_path: None,
+                blocked_by_human_gate: false,
+                required_human_decision: None,
+                target_paths: Vec::new(),
+                lock_conflicts: Vec::new(),
+                pre_approval: None,
+                done_criteria: vec!["tests pass".into(), "security reviewed".into()],
+                done_evidence: Vec::new(),
+            });
+        }
+        let ctx = CallContext {
+            team_id: team_id.clone(),
+            role: "worker".into(),
+            agent_id: "vc-w-527-ok".into(),
+        };
+
+        team_update_task(
+            &hub,
+            &ctx,
+            &json!({
+                "task_id": 22,
+                "status": "done",
+                "summary": "quality gate cleared",
+                "done_evidence": [
+                    { "criterion": "tests pass", "evidence": "cargo test --lib passed" },
+                    { "criterion": "security reviewed", "evidence": "no secret or injection path changed" }
+                ]
+            }),
+        )
+        .await
+        .expect("done evidence should satisfy criteria");
+
+        let state = hub.state.lock().await;
+        let team = state.teams.get(&team_id).unwrap();
+        let task = team.tasks.iter().find(|task| task.id == 22).unwrap();
+        assert_eq!(task.status, "done");
+        assert_eq!(task.done_evidence.len(), 2);
+        assert_eq!(team.worker_reports.len(), 1);
     }
 }

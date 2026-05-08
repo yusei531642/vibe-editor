@@ -1411,7 +1411,7 @@ Plan: `tasks/release-v1.4.12.md`
 
 - [x] #525 の planned コメント不一致について、実装対象を確定する。
 - [x] bug batch #525 を `fix/issue-525-file-ownership-guardrails` で開始し、単体実装する。
-- [ ] enhancement batch は #510 -> #515 -> #523 -> #527 の順に進める。UI/health から入り、message kind、wait policy、DoD gate の順で protocol 変更を積む。
+- [x] enhancement batch は #510 -> #515 -> #523 -> #527 の順に進める。UI/health から入り、message kind、wait policy、DoD gate の順で protocol 変更を積む。
 - [x] security batch #520 は `team_send` の構造化 body と worker prompt 注入ルールの計画を `tasks/issue-520/plan.md` に記録し、`security/issue-520-structured-team-send` で開始する。
 - [x] security batch #520 は `team_send` の構造化 body と worker prompt 注入ルールを実装する。
 
@@ -1470,14 +1470,46 @@ Plan: `tasks/release-v1.4.12.md`
 - [x] #515 / #523 / #527 を `planned` から `implementing` へ移す。
 - [x] #515: `team_send` に `kind` を追加し、`request` は Leader に自動 CC する。
 - [x] #523: worker 単位の `wait_policy` と task の `pre_approval` を追加する。
-- [ ] #527: task の Definition of Done と done evidence gate を追加する。
-- [ ] 1 Issue = 1 commit の形で差分を分ける。
-- [ ] Rust / TypeScript / skill 文言 / schema / UI 型を同期する。
-- [ ] typecheck、Rust test、関連 Vitest、build を通してから PR を準備する。
+- [x] #527: task の Definition of Done と done evidence gate を追加する。
+- [x] 1 Issue = 1 commit の形で差分を分ける。
+- [x] Rust / TypeScript / skill 文言 / schema / UI 型を同期する。
+- [x] typecheck、Rust test、関連 Vitest、build を通してから PR を準備する。
 
 ### Next Steps
 
 - [x] 既存の `team_send` / `team_assign_task` / `team_update_task` / `team_recruit` の構造体とテストを読む。
 - [x] #515 の配送仕様を最小差分で実装する。
 - [x] #523 の policy / pre_approval を後方互換を保って追加する。
-- [ ] #527 の DoD gate は新規タスクに強制し、既存 task 互換を壊さない。
+- [x] #527 の DoD gate は新規タスクに強制し、既存 task 互換を壊さない。
+
+### 進捗 (2026-05-08 / Codex)
+
+- [x] #510 は `ac48ee4` / PR #544 で `main` merge 済みと確認。今回ブランチでは重複実装しない。
+- [x] #515: `team_send.kind` (`advisory` / `request` / `report`) を追加し、`request` は active Leader に自動 CC する。
+- [x] #515: peer advisory を Leader summary feed に軽量記録し、`team_read` で kind を返す。
+- [x] #523: `team_recruit.wait_policy` (`strict` / `standard` / `proactive`) を追加し、renderer recruit 注入に worker autonomy ルールを渡す。
+- [x] #523: `team_assign_task.pre_approval` を task snapshot / shared TS / notification / prompt に同期する。
+- [x] #527: `team_assign_task.done_criteria` を必須化し、欠落時は `assign_done_criteria_required` を返す。
+- [x] #527: `team_update_task(..., "done")` 時に全 criteria 対応の `done_evidence` を要求し、不足時は `task_done_evidence_missing` で status を変えない。
+- [x] #527: Skill version を `1.6.3` に更新し、同梱 Skill / prompt / JSON Schema / shared TS を同期する。
+
+### 検証結果
+
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test -- src/renderer/src/lib/__tests__/team-prompts-liveness.test.ts`: PASS (19 tests)
+- [x] `npm run test`: PASS (45 files / 288 tests)
+- [x] `npm run build:vite`: PASS
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml team_hub::protocol::tools::send --lib`: PASS
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml team_hub::protocol::tools::assign_task --lib`: PASS (9 tests)
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml team_hub::protocol::tools::update_task --lib`: PASS (6 tests)
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml team_hub::state::task_snapshot_tests --lib`: PASS
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml --lib`: PASS (283 tests / 既存 warning: `unused variable: home`)
+- [x] `git diff --check`: PASS
+
+### Next Tasks
+
+- [ ] #527 の最終テスト修正をコミットへ amend する。
+- [ ] ブランチを push し、PR 本文に `Closes #515` / `Closes #523` / `Closes #527` と検証結果を記載する。
+- [ ] #510 は既存 PR #544 merge 済みとして Issue コメントとラベル整理を行う。
+- [ ] #515 / #523 / #527 は PR URL と検証結果を Issue コメントへ残し、`implementing` から `implemented` へ移す。
+- [ ] CodeRabbit / CI / 人間レビューを待ち、自動マージは行わない。

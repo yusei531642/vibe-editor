@@ -32,6 +32,46 @@ fn parse_target_paths(args: &Value) -> Vec<String> {
     out
 }
 
+fn assign_invalid_done_criteria(message: impl Into<String>) -> String {
+    AssignError {
+        code: "assign_done_criteria_required".into(),
+        message: message.into(),
+        phase: None,
+        elapsed_ms: None,
+    }
+    .into_err_string()
+}
+
+fn parse_done_criteria(args: &Value) -> Result<Vec<String>, String> {
+    let arr = args
+        .get("done_criteria")
+        .or_else(|| args.get("doneCriteria"))
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| {
+            assign_invalid_done_criteria(
+                "done_criteria must be a non-empty string array for new tasks",
+            )
+        })?;
+    let mut out = Vec::new();
+    for criterion in arr {
+        let Some(raw) = criterion.as_str() else {
+            return Err(assign_invalid_done_criteria(
+                "done_criteria must contain only strings",
+            ));
+        };
+        let trimmed = raw.trim();
+        if !trimmed.is_empty() && !out.iter().any(|v| v == trimmed) {
+            out.push(trimmed.to_string());
+        }
+    }
+    if out.is_empty() {
+        return Err(assign_invalid_done_criteria(
+            "done_criteria must contain at least one non-empty criterion",
+        ));
+    }
+    Ok(out)
+}
+
 fn optional_text_field(
     obj: &serde_json::Map<String, Value>,
     snake: &str,
@@ -166,6 +206,7 @@ pub async fn team_assign_task(
     // Issue #526: `target_paths: string[]` (任意) — このタスクで触る予定のファイル / dir 宣言。
     // Hub は assign_task 時点で同 path を別 agent が握っていないか peek し、
     // `lockConflicts` を response に乗せる (advisory: 拒否はしない、Leader が判断)。
+    let done_criteria = parse_done_criteria(args)?;
     let target_paths = parse_target_paths(args);
     let pre_approval = parse_pre_approval(args)?;
     let target_paths_missing = target_paths.is_empty();
@@ -348,6 +389,8 @@ pub async fn team_assign_task(
             target_paths: target_paths.clone(),
             lock_conflicts: lock_conflict_snapshots.clone(),
             pre_approval: pre_approval.clone(),
+            done_criteria: done_criteria.clone(),
+            done_evidence: Vec::new(),
         });
         // Issue #107 / #216: tasks も件数上限で古い順に O(1) で破棄
         while team.tasks.len() > MAX_TASKS_PER_TEAM {
@@ -458,6 +501,7 @@ pub async fn team_assign_task(
         notify_description,
         &target_paths,
         pre_approval.as_ref(),
+        &done_criteria,
     );
     let notify_args = json!({ "to": assignee, "message": notify_message });
     let hub_clone = hub.clone();
@@ -497,6 +541,7 @@ pub async fn team_assign_task(
         "fileLockWarningMessage": file_lock_warning_message,
         "lockConflicts": lock_conflict_snapshots,
         "preApproval": pre_approval,
+        "doneCriteria": done_criteria,
     }))
 }
 
@@ -513,6 +558,7 @@ pub(super) fn build_task_notification(
     description: &str,
     target_paths: &[String],
     pre_approval: Option<&TaskPreApprovalSnapshot>,
+    done_criteria: &[String],
 ) -> String {
     let file_lock_section = if target_paths.is_empty() {
         String::new()
@@ -556,8 +602,30 @@ pub(super) fn build_task_notification(
             )
         })
         .unwrap_or_default();
+    let done_criteria_list = done_criteria
+        .iter()
+        .map(|criterion| format!("         - {criterion}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let done_evidence_example = done_criteria
+        .iter()
+        .map(|criterion| {
+            json!({
+                "criterion": criterion,
+                "evidence": "<test/log/review/artifact proving this criterion>"
+            })
+        })
+        .collect::<Vec<_>>();
+    let done_evidence_json =
+        serde_json::to_string(&done_evidence_example).unwrap_or_else(|_| "[]".to_string());
+    let done_section = format!(
+        "\n\n\
+         [Definition of Done — required before status done]\n\
+         You cannot mark this task done until every criterion has concrete evidence:\n{done_criteria_list}\n\
+         When complete, call `team_update_task({{\"task_id\":{task_id},\"status\":\"done\",\"done_evidence\":{done_evidence_json}}})`."
+    );
     format!(
-        "[Task #{task_id}] {description}{file_lock_section}{pre_approval_section}\n\n\
+        "[Task #{task_id}] {description}{file_lock_section}{pre_approval_section}{done_section}\n\n\
          [Standard response protocol — follow even if not repeated in the task body]\n\
          1. Reply immediately with `team_send(\"leader\", \"ACK: Task #{task_id} received, starting...\")`.\n\
          2. Call `team_update_task({task_id}, \"in_progress\")`.\n\
@@ -570,14 +638,17 @@ pub(super) fn build_task_notification(
 
 #[cfg(test)]
 mod tests {
-    use super::{build_task_notification, parse_pre_approval, parse_target_paths};
+    use super::{
+        build_task_notification, parse_done_criteria, parse_pre_approval, parse_target_paths,
+    };
     use crate::commands::team_state::TaskPreApprovalSnapshot;
     use serde_json::json;
 
     /// Issue #409: 通知 payload に ACK / in_progress / status / 完了プロトコルが含まれること。
     #[test]
     fn notification_embeds_standard_response_protocol() {
-        let msg = build_task_notification(42u32, "リポジトリ clone & 調査", &[], None);
+        let criteria = vec!["focused test passes".to_string()];
+        let msg = build_task_notification(42u32, "リポジトリ clone & 調査", &[], None, &criteria);
         // 元の description が落ちていない
         assert!(msg.starts_with("[Task #42] リポジトリ clone & 調査"));
         // プロトコル節 4 項目が含まれる
@@ -597,7 +668,9 @@ mod tests {
             "src/renderer/src/lib/role-profiles-builtin.ts".to_string(),
             "src-tauri/src/team_hub/protocol/tools/assign_task.rs".to_string(),
         ];
-        let msg = build_task_notification(525u32, "file ownership を補強する", &paths, None);
+        let criteria = vec!["file lock warning is visible".to_string()];
+        let msg =
+            build_task_notification(525u32, "file ownership を補強する", &paths, None, &criteria);
         assert!(msg.contains("File ownership protocol"));
         assert!(msg.contains("team_lock_files"));
         assert!(msg.contains("team_unlock_files"));
@@ -620,6 +693,25 @@ mod tests {
             ]
         }));
         assert_eq!(paths, vec!["src/foo.rs", "src/bar.rs"]);
+    }
+
+    #[test]
+    fn parse_done_criteria_accepts_camel_and_dedups() {
+        let criteria = parse_done_criteria(&json!({
+            "doneCriteria": ["test passes", "test passes", "review done"]
+        }))
+        .unwrap();
+
+        assert_eq!(criteria, vec!["test passes", "review done"]);
+    }
+
+    #[test]
+    fn parse_done_criteria_rejects_missing_or_empty() {
+        let missing = parse_done_criteria(&json!({})).unwrap_err();
+        let empty = parse_done_criteria(&json!({ "done_criteria": [" "] })).unwrap_err();
+
+        assert!(missing.contains("assign_done_criteria_required"));
+        assert!(empty.contains("at least one non-empty criterion"));
     }
 
     #[test]
@@ -657,12 +749,28 @@ mod tests {
             allowed_actions: vec!["read docs".into(), "run focused test".into()],
             note: Some("no file edits".into()),
         };
-        let msg = build_task_notification(523u32, "軽量調査", &[], Some(&approval));
+        let criteria = vec!["investigation summary is reported".to_string()];
+        let msg = build_task_notification(523u32, "軽量調査", &[], Some(&approval), &criteria);
 
         assert!(msg.contains("Pre-approval"));
         assert!(msg.contains("read docs"));
         assert!(msg.contains("run focused test"));
         assert!(msg.contains("no file edits"));
         assert!(msg.contains("\"kind\":\"request\""));
+    }
+
+    #[test]
+    fn notification_embeds_done_criteria_and_evidence_example() {
+        let criteria = vec![
+            "tests pass".to_string(),
+            "security risk reviewed".to_string(),
+        ];
+        let msg = build_task_notification(527u32, "品質ゲート", &[], None, &criteria);
+
+        assert!(msg.contains("Definition of Done"));
+        assert!(msg.contains("tests pass"));
+        assert!(msg.contains("security risk reviewed"));
+        assert!(msg.contains("\"done_evidence\""));
+        assert!(msg.contains("team_update_task"));
     }
 }

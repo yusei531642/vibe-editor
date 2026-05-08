@@ -401,6 +401,11 @@ export interface TaskPreApproval {
   note?: string | null;
 }
 
+export interface TaskDoneEvidence {
+  criterion: string;
+  evidence: string;
+}
+
 export interface TeamRecruitArgs {
   roleId?: string;
   role_id?: string;
@@ -419,6 +424,8 @@ export interface TeamRecruitArgs {
 export interface TeamAssignTaskArgs {
   assignee: string;
   description: string;
+  doneCriteria?: string[];
+  done_criteria?: string[];
   targetPaths?: string[];
   target_paths?: string[];
   preApproval?: TaskPreApproval;
@@ -687,6 +694,8 @@ export interface TeamTaskSnapshot {
   targetPaths?: string[];
   lockConflicts?: FileLockConflictSnapshot[];
   preApproval?: TaskPreApproval | null;
+  doneCriteria?: string[];
+  doneEvidence?: TaskDoneEvidence[];
 }
 
 export interface FileLockConflictSnapshot {
@@ -759,6 +768,8 @@ export interface UpdateTaskArgs {
   blockedByHumanGate?: boolean;
   requiredHumanDecision?: string;
   reportKind?: string;
+  doneEvidence?: TaskDoneEvidence[];
+  done_evidence?: TaskDoneEvidence[];
   /** Issue #516: 構造化された worker report */
   reportPayload?: WorkerReportPayload;
 }
