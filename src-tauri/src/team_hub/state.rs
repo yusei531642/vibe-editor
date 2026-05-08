@@ -879,9 +879,13 @@ impl TeamHub {
     /// (= 起動時にのみ調整する想定)。
     ///
     /// permit 取得待ちが長引いて caller (MCP client) が timeout するのを避けるため、
-    /// 既存 `RECRUIT_TIMEOUT` (30s) と同水準の上限を取得側にも入れている。timeout で
-    /// 戻す `Err(...)` メッセージには `"recruit_permit_timeout"` の語を含めて、呼び出し側で
-    /// 構造化エラーコードに変換できるようにする。
+    /// 既存 `RECRUIT_TIMEOUT` (30s) と同水準の上限を取得側にも入れている。
+    ///
+    /// 戻り値の `Err(String)` は **人間可読メッセージのみ** を含む (= `"recruit_permit_timeout"`
+    /// 等の error code prefix は付けない)。caller 側で `RecruitError::new("recruit_permit_timeout",
+    /// msg)` 等でラップして flat JSON `{ "code": ..., "message": ..., "phase": ... }` に
+    /// シリアライズする責務を持たせる。これにより renderer が `code` で機械的に分岐する際に
+    /// `code` 文字列が `message` に重複混入するのを避ける (PR #583 review より)。
     pub async fn acquire_recruit_permit(
         &self,
         team_id: &str,
@@ -899,11 +903,11 @@ impl TeamHub {
         match tokio::time::timeout(timeout, semaphore.acquire_owned()).await {
             Ok(Ok(permit)) => Ok(permit),
             Ok(Err(_closed)) => Err(format!(
-                "recruit_permit_closed: team_id={team_id} (semaphore was closed)"
+                "recruit semaphore for team_id={team_id} was closed"
             )),
             Err(_) => Err(format!(
-                "recruit_permit_timeout: team_id={team_id} could not acquire a recruit permit \
-                 within {}s (concurrency saturated)",
+                "could not acquire a recruit permit for team_id={team_id} within {}s \
+                 (concurrency saturated)",
                 timeout.as_secs()
             )),
         }
