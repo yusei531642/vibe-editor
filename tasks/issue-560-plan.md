@@ -12,13 +12,16 @@
 
 - [x] `candidate_paths()` の候補順を修正する。
 - [x] `spawn_command_resolution_tests` に npm shell shim 再現ケースを追加する。
-- [ ] Issue #560 用 PR を作成し、CI と reviewer bot を確認する。
+- [x] Issue #560 用 PR を作成し、CI と reviewer bot を確認する。
 
 ## 進捗
 
 - [x] Windows の bare command 解決では `which::which(command)` を避け、アプリ側の探索順で PATHEXT 候補を優先する。
 - [x] `codex` と `codex.cmd` が同じディレクトリにある場合、`.cmd` を選び `cmd.exe /C` で起動する。
 - [x] `tasks/lessons.md` に npm extensionless shim の再発防止を追記した。
+- [x] PR #561 を作成し、CI と `vibe-editor-reviewer` approval を確認した。
+- [x] PR #561 の bot merge 後に `main` を同期した。
+- [x] ローカル dev 版を起動し、Claude / Codex の実起動ログで修正を確認した。
 
 ## 検証結果
 
@@ -29,6 +32,9 @@
 - [x] `npm run test`: PASS (45 files / 288 tests)
 - [x] `npm run build:vite`: PASS
 - [x] `git diff --check`: PASS
+- [x] GitHub Actions `ci / verify`: PASS (run `25541771313`)
+- [x] Local dev verification: `target\debug\vibe-editor.exe` 起動、Claude は `~/.local/bin/claude.exe`、Codex は `~/AppData/Roaming/npm/codex.cmd` + `cmd.exe` に解決。
+- [x] Local dev verification: dev app start line 34472 以降に `CreateProcessW` / `os error 193` は出ていない。
 
 ## Next Tasks
 
@@ -38,4 +44,12 @@
 - [x] `npm run test`
 - [x] `npm run build:vite`
 - [x] `git diff --check`
-- [ ] PR を作成し、CI と reviewer bot を確認する。
+- [x] PR を作成し、CI と reviewer bot を確認する。
+
+## 完了結果
+
+- [x] Issue #560: https://github.com/yusei531642/vibe-editor/issues/560
+- [x] PR #561: https://github.com/yusei531642/vibe-editor/pull/561
+- [x] Merge commit: `02947f5aefa1a2a456d1b89ece869f525fb4ce39`
+- [x] Issue comment: https://github.com/yusei531642/vibe-editor/issues/560#issuecomment-4404243505
+- [x] Follow-up release: https://github.com/yusei531642/vibe-editor/releases/tag/v1.5.4
