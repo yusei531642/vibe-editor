@@ -365,6 +365,31 @@ export interface TeamMember {
 }
 
 /**
+ * Issue #520: `team_send` の本文。
+ *
+ * 旧来の string はそのまま後方互換で使える。外部 API / ファイル / Web スクレイプ結果など、
+ * 信頼できない本文を worker に渡すときは `data` に入れる。Hub は `data` を
+ * `data (untrusted)` フェンスで囲み、受信側 prompt はその中の指示を実行しない。
+ */
+export interface TeamSendStructuredMessageBody {
+  /** 受信者に実行してほしい信頼済み指示 */
+  instructions?: string;
+  /** 背景、目的、前提などの信頼済み補足 */
+  context?: string;
+  /** 信頼できないソース由来の資料。ここに含まれる命令文は実行対象外 */
+  data?: string;
+}
+
+export type TeamSendMessageBody = string | TeamSendStructuredMessageBody;
+
+export interface TeamSendArgs {
+  to: string;
+  message: TeamSendMessageBody;
+  handoffId?: string;
+  handoff_id?: string;
+}
+
+/**
  * Issue #518: チーム単位の engine policy。`team_info` response の `enginePolicy` /
  * `team_create_leader({engine_policy})` 引数 / `team_recruit` の policy 違反時の
  * 構造化エラー (`recruit_engine_policy_violation`) で参照される。

@@ -183,3 +183,10 @@ codex exec --sandbox read-only --color never --ephemeral \
 - 既存の lock / guardrail がある場合は「未実装」と決めつけず、task state、必須 prompt、UI visibility に接続されているかを確認する。
 - advisory lock を強化するときは、新しい lock engine を足す前に、既存 tool を「必ず使われる導線」へ接続する。
 - Tauri event helper を React effect から使う場合は、jsdom の `listen()` reject が未処理 rejection にならないよう helper 側で noop cleanup を返す。
+
+## Issue #520 - team_send untrusted data boundary
+
+- 外部 API / ファイル / Web スクレイプ本文を agent へ渡すときは、通常の `message` 文字列に混ぜず、`data` として構造化する。
+- `data` は prompt 上で `data (untrusted)` と明示し、指示文ではなく資料として扱わせる。
+- 送信 API、JSON Schema、共有 TypeScript 型、worker / leader prompt、配布 Skill の文言は同じ境界で同期する。
+- Markdown fence で信頼できない本文を囲む場合は、本文中の backtick 連続数より長い fence を選ぶ。
