@@ -195,6 +195,7 @@ mod tests {
             from: "leader".into(),
             from_agent_id: "leader-1".into(),
             to: "worker".into(),
+            kind: "advisory".into(),
             resolved_recipient_ids: vec!["worker-1".into()],
             message: "please continue".into(),
             timestamp: "2026-05-04T10:00:00Z".into(),

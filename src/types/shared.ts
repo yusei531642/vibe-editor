@@ -381,10 +381,16 @@ export interface TeamSendStructuredMessageBody {
 }
 
 export type TeamSendMessageBody = string | TeamSendStructuredMessageBody;
+export type TeamMessageKind = 'advisory' | 'request' | 'report';
 
 export interface TeamSendArgs {
   to: string;
   message: TeamSendMessageBody;
+  /**
+   * Issue #515: worker 間メッセージの意味。
+   * `request` は Hub 側で active Leader にも自動 CC される。
+   */
+  kind?: TeamMessageKind;
   handoffId?: string;
   handoff_id?: string;
 }

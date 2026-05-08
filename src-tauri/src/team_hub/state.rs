@@ -369,6 +369,9 @@ pub struct TeamMessage {
     pub from: String,
     pub from_agent_id: String,
     pub to: String,
+    /// Issue #515: worker 間メッセージの意味。`advisory` は相談、`request` は正式依頼、
+    /// `report` は完了・進捗報告。配送先解決と UI / read payload の両方で使う。
+    pub kind: String,
     /// Issue #342 Phase 2: 送信時点で `resolve_targets` が解決した宛先 agent_id 群。
     /// `team_read` の `is_for_me` 判定はこれを SSOT として使う (raw `to` を read 時に
     /// `ctx.role` / `ctx.agent_id` で再解釈する旧設計は identity 分離 (HMR / 再接続 /

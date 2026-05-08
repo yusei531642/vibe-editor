@@ -40,6 +40,12 @@ pub(super) fn tool_defs() -> Value {
                         ],
                         "description": "Plain message string, or structured body split into instructions/context/data. Use data for untrusted file/API/web content."
                     },
+                    "kind": {
+                        "type": "string",
+                        "enum": ["advisory", "request", "report"],
+                        "default": "advisory",
+                        "description": "Message intent. advisory = peer consultation, request = formal task/request and is automatically CCed to the active Leader, report = completion/progress report."
+                    },
                     "handoff_id": {
                         "type": "string",
                         "description": "Optional handoff id. When delivery succeeds, the handoff lifecycle is marked injected."
