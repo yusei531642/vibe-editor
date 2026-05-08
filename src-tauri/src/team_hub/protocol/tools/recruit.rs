@@ -4,7 +4,7 @@
 
 use crate::team_hub::{CallContext, DynamicRole, TeamHub};
 use serde_json::{json, Value};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::Emitter;
 use uuid::Uuid;
 
@@ -18,6 +18,22 @@ use super::error::RecruitError;
 use crate::team_hub::role_lint::{compute_role_overlap, RoleSnapshot};
 
 const DEFAULT_WAIT_POLICY: &str = "strict";
+
+/// Issue #574: `RECRUIT_ACK_TIMEOUT` の実行時値を env override 込みで返す。
+///
+/// `VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS` を u64 秒として読み出し、`>= 1` の値が
+/// パースできればその Duration を返す。未設定 / パース失敗 / 0 のときは
+/// `RECRUIT_ACK_TIMEOUT` (= 15s) を返す。
+///
+/// `team_recruit` / `team_create_leader` の双方から参照される共通入口。
+pub(super) fn recruit_ack_timeout() -> Duration {
+    std::env::var("VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|&secs| secs > 0)
+        .map(Duration::from_secs)
+        .unwrap_or(RECRUIT_ACK_TIMEOUT)
+}
 
 fn parse_wait_policy(args: &Value) -> Result<String, String> {
     let raw = args
@@ -329,13 +345,21 @@ pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Res
     let disable_ack = std::env::var("VIBE_TEAM_DISABLE_RECRUIT_ACK").as_deref() == Ok("1");
 
     if !disable_ack {
-        // Issue #342 Phase 1: ack 短期待機 (5s)。renderer が `team:recruit-request` を受領して
+        // Issue #342 Phase 1: ack 短期待機。renderer が `team:recruit-request` を受領して
         // addCard / spawn を開始した時点で `app_recruit_ack(ok=true)` が来る。
         // ack 失敗 / timeout なら handshake を待たずに即座に構造化エラーを返す。
-        match tokio::time::timeout(RECRUIT_ACK_TIMEOUT, ack_rx).await {
+        // Issue #574: timeout 値は `recruit_ack_timeout()` (env override 込み、default 15s)。
+        let ack_timeout = recruit_ack_timeout();
+        match tokio::time::timeout(ack_timeout, ack_rx).await {
             Ok(Ok(ack)) if ack.ok => {
                 // ack 受領 OK。続けて handshake 待機へ。
                 // ※ ack=true は受領通知のみ。MCP 成功判定は依然 handshake 経由のみ。
+                let elapsed_ms = started.elapsed().as_millis() as u64;
+                tracing::info!(
+                    "[teamhub] recruit_ack received agent_id={new_agent_id} \
+                     team_id={team_id} elapsed_ms={elapsed_ms}",
+                    team_id = ctx.team_id,
+                );
             }
             Ok(Ok(ack)) => {
                 // renderer から ack(ok=false) が来た = 起動失敗を即時通知された
@@ -379,7 +403,13 @@ pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Res
                 .into_err_string());
             }
             Err(_) => {
-                // ack timeout (5s)。renderer が `team:recruit-request` を受け取れていない可能性。
+                // ack timeout。renderer が `team:recruit-request` を受け取れていない可能性。
+                let elapsed_ms = started.elapsed().as_millis() as u64;
+                tracing::info!(
+                    "[teamhub] recruit_ack timed_out agent_id={new_agent_id} \
+                     team_id={team_id} elapsed_ms={elapsed_ms}",
+                    team_id = ctx.team_id,
+                );
                 hub.cancel_pending_recruit(&new_agent_id).await;
                 if let Some(app) = &app {
                     let _ = app.emit(
@@ -391,11 +421,11 @@ pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Res
                     "recruit_ack_timeout",
                     format!(
                         "renderer did not ack recruit-request within {}s",
-                        RECRUIT_ACK_TIMEOUT.as_secs()
+                        ack_timeout.as_secs()
                     ),
                 )
                 .with_phase("ack")
-                .with_elapsed_ms(started.elapsed().as_millis() as u64)
+                .with_elapsed_ms(elapsed_ms)
                 .into_err_string());
             }
         }

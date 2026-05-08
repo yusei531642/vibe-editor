@@ -9,9 +9,14 @@
 use std::time::Duration;
 
 pub(crate) const RECRUIT_TIMEOUT: Duration = Duration::from_secs(30);
-/// Issue #342 Phase 1: renderer 側 `app_recruit_ack` invoke 受領を待つ短期タイムアウト。
-/// 「addCard / spawn 開始の受領通知」だけを待つので 5s で十分 (handshake 完了までは待たない)。
-pub(crate) const RECRUIT_ACK_TIMEOUT: Duration = Duration::from_secs(5);
+/// Issue #342 Phase 1: renderer 側 `app_recruit_ack` invoke 受領を待つ短期タイムアウトの
+/// デフォルト値。「addCard / spawn 開始の受領通知」を待つ (handshake 完了までは待たない)。
+///
+/// Issue #574: Windows + WebView 環境で同時 6 件 recruit 等のとき 5s では addCard 完了前に
+/// cancel が走る事故が報告されたため 5s → 15s に拡大。実行時値は環境変数
+/// `VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS` (有効範囲は 1 以上の u64 秒) で上書き可能。
+/// 参照は `protocol/tools/recruit.rs` の `recruit_ack_timeout()` ヘルパ経由。
+pub(crate) const RECRUIT_ACK_TIMEOUT: Duration = Duration::from_secs(15);
 /// 動的ロール instructions の最大長。Leader が暴走して巨大プロンプトを投げてくるのを抑える。
 pub(crate) const MAX_DYNAMIC_INSTRUCTIONS_LEN: usize = 16 * 1024; // 16 KiB
 /// 動的ロール label / description の最大長
