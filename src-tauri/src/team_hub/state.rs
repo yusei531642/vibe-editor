@@ -18,7 +18,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use tokio::sync::{oneshot, Mutex, Semaphore};
+use tokio::sync::{oneshot, Mutex, OwnedSemaphorePermit, Semaphore};
 pub(crate) struct HubState {
     /// チーム別の会話履歴・タスク
     pub(crate) teams: HashMap<String, TeamInfo>,
@@ -56,6 +56,14 @@ pub(crate) struct HubState {
     /// TTL は設けない (本 issue では out-of-scope)。`team_dismiss` 時には対象 agent_id の
     /// 全 lock を `release_all_for_agent` で一括解放する想定。
     pub(crate) file_locks: HashMap<(String, String), crate::team_hub::file_locks::FileLock>,
+    /// Issue #576: team_id ごとの「同時 recruit / create_leader 件数」を直列化する semaphore。
+    /// `team_recruit` / `team_create_leader` の冒頭で `acquire_recruit_permit` を呼んで permit を
+    /// 取得し、permit 保持のまま emit → ack 受領 (or timeout) → `cancel_pending_recruit` までを
+    /// 1 クリティカルセクションに包む。permit は team_id 単位で独立 (異なる team_id は別 Semaphore)
+    /// なので、cross-team では並列に進行する。Hub 再起動で全 clear (in-memory only)。
+    /// permit 数は `VIBE_TEAM_RECRUIT_CONCURRENCY` 環境変数で `1..=RECRUIT_MAX_CONCURRENCY` の
+    /// 範囲に tunable (既定 `RECRUIT_DEFAULT_CONCURRENCY`)。team 単位で lazy 初期化される。
+    pub(crate) recruit_semaphores: HashMap<String, Arc<Semaphore>>,
 }
 
 /// Issue #342 Phase 3 (3.1): `team_diagnostics` で返す診断 timestamp / counter。
@@ -573,6 +581,7 @@ impl TeamHub {
                 dynamic_roles: HashMap::new(),
                 member_diagnostics: HashMap::new(),
                 file_locks: HashMap::new(),
+                recruit_semaphores: HashMap::new(),
             })),
             app_handle: Arc::new(Mutex::new(None)),
         }
@@ -854,6 +863,59 @@ impl TeamHub {
     pub async fn cancel_pending_recruit(&self, agent_id: &str) {
         let mut s = self.state.lock().await;
         s.pending_recruits.remove(agent_id);
+    }
+
+    /// Issue #576: team 単位の同時 recruit permit を取得する。
+    ///
+    /// `team_id` 単位で初回呼び出し時に lazy 初期化される `tokio::sync::Semaphore` から
+    /// `acquire_owned()` で permit を要求する。permit は `OwnedSemaphorePermit` の Drop で
+    /// 自動解放されるため、`team_recruit` / `team_create_leader` 側では
+    /// `let _permit = hub.acquire_recruit_permit(...).await?;` で関数末尾まで束ねれば、
+    /// 正常終了 / `?` での早期 return / panic / future cancel いずれでも自動で解放される。
+    ///
+    /// permit 数は `VIBE_TEAM_RECRUIT_CONCURRENCY` 環境変数で `1..=RECRUIT_MAX_CONCURRENCY`
+    /// の範囲に上書きできる (範囲外 / parse 失敗時は `RECRUIT_DEFAULT_CONCURRENCY`)。
+    /// 値は `team_id` ごとの初回 acquire 時に確定し、その後の env 変更では再評価しない
+    /// (= 起動時にのみ調整する想定)。
+    ///
+    /// permit 取得待ちが長引いて caller (MCP client) が timeout するのを避けるため、
+    /// 既存 `RECRUIT_TIMEOUT` (30s) と同水準の上限を取得側にも入れている。timeout で
+    /// 戻す `Err(...)` メッセージには `"recruit_permit_timeout"` の語を含めて、呼び出し側で
+    /// 構造化エラーコードに変換できるようにする。
+    pub async fn acquire_recruit_permit(
+        &self,
+        team_id: &str,
+    ) -> Result<OwnedSemaphorePermit, String> {
+        // semaphore の lookup / 挿入だけ HubState lock 内で済ませ、その後の `acquire_owned`
+        // はロック外で行う (acquire 側で他の HubState 操作と競合しないように)。
+        let semaphore = {
+            let mut s = self.state.lock().await;
+            s.recruit_semaphores
+                .entry(team_id.to_string())
+                .or_insert_with(|| Arc::new(Semaphore::new(recruit_concurrency_from_env())))
+                .clone()
+        };
+        let timeout = crate::team_hub::protocol::consts::RECRUIT_TIMEOUT;
+        match tokio::time::timeout(timeout, semaphore.acquire_owned()).await {
+            Ok(Ok(permit)) => Ok(permit),
+            Ok(Err(_closed)) => Err(format!(
+                "recruit_permit_closed: team_id={team_id} (semaphore was closed)"
+            )),
+            Err(_) => Err(format!(
+                "recruit_permit_timeout: team_id={team_id} could not acquire a recruit permit \
+                 within {}s (concurrency saturated)",
+                timeout.as_secs()
+            )),
+        }
+    }
+
+    /// テスト専用: 指定 `team_id` の recruit semaphore を任意の permit 数で初期化 (or 置換)。
+    /// `acquire_recruit_permit` の lazy init をスキップして permit 数を直接指定したいときに使う。
+    #[cfg(test)]
+    pub(crate) async fn set_recruit_concurrency_for_test(&self, team_id: &str, permits: usize) {
+        let mut s = self.state.lock().await;
+        s.recruit_semaphores
+            .insert(team_id.to_string(), Arc::new(Semaphore::new(permits)));
     }
 
     /// Issue #342 Phase 3 (3.3): `team_diagnostics` で見える member_diagnostics エントリを返す。
@@ -1292,6 +1354,23 @@ impl TeamHub {
     }
 }
 
+/// Issue #576: `VIBE_TEAM_RECRUIT_CONCURRENCY` 環境変数を読んで permit 数を決める。
+/// `1..=RECRUIT_MAX_CONCURRENCY` の範囲外、parse 失敗、未設定はいずれも
+/// `RECRUIT_DEFAULT_CONCURRENCY` にフォールバック。
+///
+/// `acquire_recruit_permit` の lazy 初期化時に 1 度だけ呼ばれる想定なので、env を読む
+/// オーバーヘッドは無視できる。
+fn recruit_concurrency_from_env() -> usize {
+    use crate::team_hub::protocol::consts::{
+        RECRUIT_DEFAULT_CONCURRENCY, RECRUIT_MAX_CONCURRENCY,
+    };
+    std::env::var("VIBE_TEAM_RECRUIT_CONCURRENCY")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .filter(|&n| (1..=RECRUIT_MAX_CONCURRENCY).contains(&n))
+        .unwrap_or(RECRUIT_DEFAULT_CONCURRENCY)
+}
+
 /// Issue #513: `~/.vibe-editor/role-profiles.json#dynamic[]` から **指定 team_id に紐付く
 /// entry だけ** を抽出して返す内部 helper。`register_team` の前段で呼び、Hub state.lock を
 /// 取らずに async I/O を済ませてから replay する設計。
@@ -1342,4 +1421,137 @@ async fn load_persisted_dynamic_for_team(
         }
     }
     out
+}
+
+/// Issue #576: `acquire_recruit_permit` / `recruit_semaphores` の単体テスト。
+///
+/// `team_recruit` 全体は renderer (app_handle) 依存なのでここでは結合せず、permit ヘルパ
+/// 単独の挙動 — (a) permit=1 で並列 acquire が直列化される、(b) panic / cancel で permit
+/// が解放される、(c) 異なる team_id は独立に並列実行できる — を確認する。
+#[cfg(test)]
+mod recruit_semaphore_tests {
+    use super::TeamHub;
+    use crate::pty::SessionRegistry;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::time::{sleep, timeout};
+
+    fn make_hub() -> TeamHub {
+        TeamHub::new(Arc::new(SessionRegistry::new()))
+    }
+
+    /// permit=1 のとき、2 件目の acquire は 1 件目の permit が drop されるまで待つ
+    /// (= 同一 team_id の同時 recruit が直列化される)。
+    #[tokio::test]
+    async fn permit_one_serializes_two_concurrent_acquires() {
+        let hub = make_hub();
+        hub.set_recruit_concurrency_for_test("team-a", 1).await;
+
+        let permit_a = hub
+            .acquire_recruit_permit("team-a")
+            .await
+            .expect("first acquire should succeed");
+
+        let hub_for_task = hub.clone();
+        let handle = tokio::spawn(async move {
+            hub_for_task.acquire_recruit_permit("team-a").await
+        });
+
+        // permit_a を握ったまま十分に待つ。直列化されているなら handle は完了しない。
+        sleep(Duration::from_millis(150)).await;
+        assert!(
+            !handle.is_finished(),
+            "second acquire must remain pending while first permit is held"
+        );
+
+        drop(permit_a);
+
+        let permit_b = timeout(Duration::from_secs(2), handle)
+            .await
+            .expect("second acquire should complete shortly after first permit drop")
+            .expect("spawned task must not panic")
+            .expect("second acquire should succeed");
+        drop(permit_b);
+    }
+
+    /// permit を保持した task が panic で死んでも、`OwnedSemaphorePermit` の Drop で
+    /// 解放されるので後続の acquire は即座に成功する。
+    #[tokio::test]
+    async fn permit_released_when_holder_panics() {
+        let hub = make_hub();
+        hub.set_recruit_concurrency_for_test("team-b", 1).await;
+
+        let hub_for_task = hub.clone();
+        let handle = tokio::spawn(async move {
+            let _permit = hub_for_task
+                .acquire_recruit_permit("team-b")
+                .await
+                .expect("inner acquire should succeed");
+            panic!("intentional panic to verify permit drop releases the semaphore");
+        });
+
+        let join_result = handle.await;
+        assert!(
+            join_result.is_err() && join_result.err().is_some_and(|e| e.is_panic()),
+            "spawned task should have panicked"
+        );
+
+        let permit = timeout(Duration::from_secs(1), hub.acquire_recruit_permit("team-b"))
+            .await
+            .expect("acquire should not time out after holder panic")
+            .expect("acquire should succeed once panicked permit is dropped");
+        drop(permit);
+    }
+
+    /// permit を保持した task の Future を `abort()` (= cancel) しても、Drop で permit が
+    /// 解放されるので後続の acquire は即座に成功する。
+    #[tokio::test]
+    async fn permit_released_when_holder_future_cancelled() {
+        let hub = make_hub();
+        hub.set_recruit_concurrency_for_test("team-c", 1).await;
+
+        let hub_for_task = hub.clone();
+        let handle = tokio::spawn(async move {
+            let _permit = hub_for_task
+                .acquire_recruit_permit("team-c")
+                .await
+                .expect("inner acquire should succeed");
+            // permit を握ったまま長時間 sleep — abort() で future ごと drop される想定。
+            sleep(Duration::from_secs(60)).await;
+        });
+
+        // permit が確実に握られるまで少しだけ待つ。
+        sleep(Duration::from_millis(50)).await;
+        handle.abort();
+        let _ = handle.await;
+
+        let permit = timeout(Duration::from_secs(1), hub.acquire_recruit_permit("team-c"))
+            .await
+            .expect("acquire should not time out after holder cancel")
+            .expect("acquire should succeed once cancelled permit is dropped");
+        drop(permit);
+    }
+
+    /// 異なる team_id は別々の Semaphore を持つので、permit=1 でも cross-team では
+    /// 並列に acquire できる (= 無関係の team が待たされない)。
+    #[tokio::test]
+    async fn different_team_ids_are_independent() {
+        let hub = make_hub();
+        hub.set_recruit_concurrency_for_test("team-x", 1).await;
+        hub.set_recruit_concurrency_for_test("team-y", 1).await;
+
+        let permit_x = hub
+            .acquire_recruit_permit("team-x")
+            .await
+            .expect("team-x acquire should succeed");
+
+        // team-x の permit を握ったままでも、team-y は即座に取れる。
+        let permit_y = timeout(Duration::from_secs(1), hub.acquire_recruit_permit("team-y"))
+            .await
+            .expect("team-y acquire should not be blocked by team-x")
+            .expect("team-y acquire should succeed");
+
+        drop(permit_y);
+        drop(permit_x);
+    }
 }

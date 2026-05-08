@@ -9,6 +9,19 @@
 use std::time::Duration;
 
 pub(crate) const RECRUIT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Issue #576: 1 チームあたり「同時に renderer に投げる recruit 件数」の既定上限。
+/// `team_recruit` / `team_create_leader` の冒頭で `team_id` 単位 semaphore の permit を
+/// 取得し、permit 保持のまま emit → ack 受領 (or timeout) → cancel までを 1 クリティカル
+/// セクションに包むことで、HR が 6 体一気に採用しても renderer の event queue が詰まり
+/// `recruit_ack_timeout` で全滅する事故を構造的に防ぐ。
+///
+/// 実行時値は環境変数 `VIBE_TEAM_RECRUIT_CONCURRENCY` で `1..=RECRUIT_MAX_CONCURRENCY`
+/// の範囲に上書き可能 (範囲外 / parse 失敗時は本既定値にフォールバック)。
+pub(crate) const RECRUIT_DEFAULT_CONCURRENCY: usize = 2;
+/// Issue #576: `VIBE_TEAM_RECRUIT_CONCURRENCY` で受け付ける permit 数の上限。
+/// 上限 8 は Phase 1 ログ (`[teamhub] recruit_ack received elapsed_ms=...`) で観測される
+/// 「同時 recruit 6 体」が WebView 側で破綻しない範囲を多少上回る程度に絞った安全弁。
+pub(crate) const RECRUIT_MAX_CONCURRENCY: usize = 8;
 /// Issue #342 Phase 1: renderer 側 `app_recruit_ack` invoke 受領を待つ短期タイムアウトの
 /// デフォルト値。「addCard / spawn 開始の受領通知」を待つ (handshake 完了までは待たない)。
 ///
