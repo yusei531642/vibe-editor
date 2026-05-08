@@ -1671,3 +1671,39 @@ Plan: `tasks/release-v1.5.3.md`
 - [x] PR #558: https://github.com/yusei531642/vibe-editor/pull/558
 - [x] Release: https://github.com/yusei531642/vibe-editor/releases/tag/v1.5.3
 - [x] Assets: Windows `.exe`、macOS `.dmg` / `.app.tar.gz`、Linux `.AppImage` / `.deb` / `.rpm`、SBOM、signatures、`latest.json`
+
+## Issue #560 Windows npm shim resolver hotfix (2026-05-08 / Codex)
+
+Plan: `tasks/issue-560-plan.md`
+
+### 計画
+
+- [x] v1.5.3 の実ログで `os error 193` を確認する。
+- [x] resolver が `~/AppData/Roaming/npm/codex` / `claude` の拡張子なし shell shim を選んでいることを確認する。
+- [x] 同じディレクトリに `.cmd` shim が存在することを確認する。
+- [x] Windows resolver の候補順を PATHEXT 優先へ変える。
+- [x] npm shell shim 再現テストを追加する。
+- [x] targeted Rust test と主要品質ゲートを通す。
+- [ ] PR を作成し、CI / reviewer bot を確認する。
+
+### Next Steps
+
+- [x] `src-tauri/src/pty/session.rs` を最小修正する。
+- [x] `tasks/lessons.md` に再発防止を追記する。
+- [ ] Issue #560 に検証結果をコメントする。
+
+### 進捗
+
+- [x] `candidate_paths()` を PATHEXT 候補優先、拡張子なし候補を最後に変更。
+- [x] Windows bare command では `which::which(command)` を使わず、アプリ側の探索順で解決するよう変更。
+- [x] `prefers_cmd_over_extensionless_npm_shell_shim` を追加。
+
+### 検証結果
+
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml spawn_command_resolution_tests --lib`: PASS (4 tests)
+- [x] `cargo check --manifest-path src-tauri\Cargo.toml`: PASS（既存 warning: `LockResult::has_conflicts` / `TemplateReport::{warnings,warn_message}`）
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml --lib`: PASS (294 tests / 既存 warning: `unused variable: home`)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (45 files / 288 tests、jsdom の Tauri `listen()` cleanup warning は既存)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS

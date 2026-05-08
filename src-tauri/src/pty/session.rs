@@ -472,10 +472,11 @@ fn candidate_paths(base: &Path, pathext: &[String]) -> Vec<PathBuf> {
     if base.extension().is_some() {
         return vec![base.to_path_buf()];
     }
-    let mut out = vec![base.to_path_buf()];
+    let mut out = Vec::with_capacity(pathext.len() + 1);
     for ext in pathext {
         out.push(PathBuf::from(format!("{}{}", base.to_string_lossy(), ext)));
     }
+    out.push(base.to_path_buf());
     out
 }
 
@@ -502,8 +503,6 @@ fn resolve_windows_command_path(
         if let Ok(found) = which::which(command) {
             return Ok(found);
         }
-    } else if let Ok(found) = which::which(command) {
-        return Ok(found);
     }
 
     for dir in search_dirs {
@@ -628,6 +627,41 @@ mod spawn_command_resolution_tests {
 
         assert_eq!(PathBuf::from(&prepared.program), cli);
         assert_eq!(prepared.args, vec!["--help"]);
+    }
+
+    #[test]
+    fn prefers_cmd_over_extensionless_npm_shell_shim() {
+        let tmp = tempfile::tempdir().unwrap();
+        let shell_shim = tmp.path().join("codex");
+        let cmd_shim = tmp.path().join("codex.cmd");
+        std::fs::write(
+            &shell_shim,
+            "#!/bin/sh\nexec node \"$basedir/node_modules/.bin/codex\"\n",
+        )
+        .unwrap();
+        std::fs::write(&cmd_shim, "@echo off\r\n").unwrap();
+        let mut env = HashMap::new();
+        env.insert(
+            "PATH".to_string(),
+            tmp.path().to_string_lossy().into_owned(),
+        );
+        env.insert("PATHEXT".to_string(), ".COM;.EXE;.BAT;.CMD".to_string());
+
+        let prepared =
+            resolve_windows_spawn_command("codex", vec!["--version".to_string()], &env).unwrap();
+
+        assert_eq!(PathBuf::from(&prepared.resolved_command), cmd_shim);
+        assert_eq!(
+            Path::new(&prepared.program)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .map(str::to_ascii_lowercase)
+                .as_deref(),
+            Some("cmd.exe")
+        );
+        assert_eq!(prepared.args[0], "/C");
+        assert_eq!(PathBuf::from(&prepared.args[1]), cmd_shim);
+        assert_eq!(prepared.args[2], "--version");
     }
 
     #[test]
