@@ -66,6 +66,21 @@ fn parse_wait_policy(args: &Value) -> Result<String, String> {
 ///   - agent_label_hint: 任意。canvas カードのタイトル上書き。
 pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
     check_permission(&ctx.role, Permission::Recruit).map_err(|e| e.into_message("recruit"))?;
+
+    // Issue #576: 同チーム内の同時 recruit を team_id 単位 semaphore で順番待ち化する。
+    // permit 保持のまま emit → ack 受領 (or timeout) → cancel_pending_recruit までを
+    // 1 クリティカルセクションに包むため、関数末尾まで `_permit` で束ねて Drop で自動解放。
+    // 取得待ちが長引いて caller (MCP client) が timeout するのを避けるため、permit 取得側にも
+    // `RECRUIT_TIMEOUT` (30s) と同水準の上限が掛かっている。
+    let _permit = match hub.acquire_recruit_permit(&ctx.team_id).await {
+        Ok(p) => p,
+        Err(msg) => {
+            return Err(RecruitError::new("recruit_permit_timeout", msg)
+                .with_phase("permit")
+                .into_err_string());
+        }
+    };
+
     // role_id を主引数とする。後方互換のため `role_profile_id` も受け付ける。
     let role_profile_id = args
         .get("role_id")

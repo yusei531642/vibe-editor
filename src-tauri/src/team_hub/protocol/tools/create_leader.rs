@@ -42,6 +42,21 @@ pub async fn team_create_leader(
         );
     }
 
+    // Issue #576: 同チーム内の同時 recruit / create_leader を team_id 単位 semaphore で
+    // 順番待ち化する (`team_recruit` と同じ semaphore を共有 → 引き継ぎ用 leader spawn 中に
+    // HR が並列 recruit を投げても renderer の event queue が詰まらない)。
+    // 関数末尾まで `_permit` で束ねて Drop で自動解放させる。
+    let _permit = match hub.acquire_recruit_permit(&ctx.team_id).await {
+        Ok(p) => p,
+        Err(msg) => {
+            return Err(
+                RecruitError::new("create_leader_permit_timeout", msg)
+                    .with_phase("permit")
+                    .into_err_string(),
+            );
+        }
+    };
+
     let role_profile_id = "leader".to_string();
 
     let engine = args
