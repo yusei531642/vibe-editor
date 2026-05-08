@@ -24,6 +24,67 @@ pub fn command_basename(command: &str) -> String {
         .to_string()
 }
 
+fn split_command_line(input: &str) -> Vec<String> {
+    let mut parts = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut chars = input.trim().chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        match ch {
+            '"' | '\'' => {
+                if quote == Some(ch) {
+                    quote = None;
+                } else if quote.is_none() {
+                    quote = Some(ch);
+                } else {
+                    current.push(ch);
+                }
+            }
+            '\\' => {
+                let next = chars.peek().copied();
+                if quote.is_some() && next == quote {
+                    current.push(chars.next().unwrap_or(ch));
+                } else if quote.is_none() && matches!(next, Some('"') | Some('\'')) {
+                    current.push(chars.next().unwrap_or(ch));
+                } else {
+                    current.push(ch);
+                }
+            }
+            c if c.is_whitespace() && quote.is_none() => {
+                if !current.is_empty() {
+                    parts.push(std::mem::take(&mut current));
+                }
+            }
+            c => current.push(c),
+        }
+    }
+
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    parts
+}
+
+pub fn normalize_terminal_command(
+    command: Option<String>,
+    args: Option<Vec<String>>,
+) -> (String, Vec<String>) {
+    let mut existing_args = args.unwrap_or_default();
+    let raw = command
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("claude");
+    let mut parts = split_command_line(raw);
+    if parts.is_empty() {
+        return ("claude".to_string(), existing_args);
+    }
+    let cmd = parts.remove(0);
+    parts.append(&mut existing_args);
+    (cmd, parts)
+}
+
 pub fn configured_terminal_commands() -> HashSet<String> {
     let mut out = HashSet::new();
     let path = crate::util::config_paths::settings_path();
@@ -36,6 +97,9 @@ pub fn configured_terminal_commands() -> HashSet<String> {
     let mut push = |raw: Option<&str>| {
         if let Some(cmd) = raw.map(str::trim).filter(|s| !s.is_empty()) {
             out.insert(cmd.to_ascii_lowercase());
+            if let Some(program) = split_command_line(cmd).first() {
+                out.insert(program.to_ascii_lowercase());
+            }
         }
     };
     push(value.get("claudeCommand").and_then(|v| v.as_str()));
@@ -213,5 +277,93 @@ mod codex_command_tests {
         assert!(!is_codex_command("claude"));
         assert!(!is_codex_command("bash"));
         assert!(!is_codex_command(""));
+    }
+}
+
+#[cfg(test)]
+mod command_normalization_tests {
+    use super::{normalize_terminal_command, reject_immediate_exec_args, split_command_line};
+
+    #[test]
+    fn splits_inline_codex_flags_from_command_field() {
+        let (command, args) = normalize_terminal_command(
+            Some("codex --dangerously-bypass-approvals-and-sandbox".to_string()),
+            None,
+        );
+
+        assert_eq!(command, "codex");
+        assert_eq!(args, vec!["--dangerously-bypass-approvals-and-sandbox"]);
+    }
+
+    #[test]
+    fn inline_args_are_prepended_before_existing_args() {
+        let (command, args) = normalize_terminal_command(
+            Some("codex --dangerously-bypass-approvals-and-sandbox".to_string()),
+            Some(vec![
+                "-c".to_string(),
+                "disable_paste_burst=true".to_string(),
+                "--config".to_string(),
+                r"model_instructions_file=C:\Users\zooyo\.vibe-editor\codex-instructions\instr.md"
+                    .to_string(),
+            ]),
+        );
+
+        assert_eq!(command, "codex");
+        assert_eq!(
+            args,
+            vec![
+                "--dangerously-bypass-approvals-and-sandbox",
+                "-c",
+                "disable_paste_burst=true",
+                "--config",
+                r"model_instructions_file=C:\Users\zooyo\.vibe-editor\codex-instructions\instr.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn strips_quotes_around_windows_executable_path() {
+        let (command, args) = normalize_terminal_command(
+            Some(r#""C:\Program Files\Codex\codex.exe" --foo "bar baz""#.to_string()),
+            None,
+        );
+
+        assert_eq!(command, r"C:\Program Files\Codex\codex.exe");
+        assert_eq!(args, vec!["--foo", "bar baz"]);
+    }
+
+    #[test]
+    fn defaults_to_claude_when_command_is_blank() {
+        let (command, args) =
+            normalize_terminal_command(Some("   ".to_string()), Some(vec!["--resume".into()]));
+
+        assert_eq!(command, "claude");
+        assert_eq!(args, vec!["--resume"]);
+    }
+
+    #[test]
+    fn split_preserves_windows_backslashes() {
+        assert_eq!(
+            split_command_line(
+                r#"codex --config model_instructions_file=C:\Users\zooyo\.vibe-editor\instr.md"#
+            ),
+            vec![
+                "codex",
+                "--config",
+                r"model_instructions_file=C:\Users\zooyo\.vibe-editor\instr.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn immediate_exec_rejection_runs_after_normalization() {
+        let (command, args) =
+            normalize_terminal_command(Some("cmd /c echo unsafe".to_string()), None);
+
+        assert_eq!(command, "cmd");
+        assert_eq!(
+            reject_immediate_exec_args(&command, &args),
+            Some("cmd immediate-exec flags (/c /k) are blocked")
+        );
     }
 }

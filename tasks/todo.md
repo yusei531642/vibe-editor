@@ -1522,3 +1522,30 @@ Plan: `tasks/release-v1.4.12.md`
 - [x] #523: https://github.com/yusei531642/vibe-editor/issues/523#issuecomment-4402921223
 - [x] #527: https://github.com/yusei531642/vibe-editor/issues/527#issuecomment-4402921222
 - [x] #515 / #523 / #527: `implementing` -> `implemented`。Issue close は PR #549 merge 後。
+
+## Hotfix - Issue #550 Codex command args normalization (2026-05-08 / Codex)
+
+### 計画
+
+- [x] Windows 起動エラーを Issue #550 として作成する。
+- [x] `fix/issue-550-codex-command-args` ブランチを作成する。
+- [x] Rust 側で `command` 欄に混ざった flags を起動前に `args` へ分離する。
+- [x] `cmd /c` などの即時実行拒否が、分離後の args にも効くことをテストする。
+- [x] Rust test / cargo check / diff check を通す。
+- [ ] PR を作成し、Bot merge 後に `v1.5.2` をリリースする。
+
+### Next Steps
+
+- [x] `src-tauri/src/commands/terminal/command_validation.rs` に command 正規化 helper と unit test を追加する。
+- [x] `terminal_create` の入口で正規化 helper を使う。
+- [x] 検証結果を Issue / PR / 本ファイルへ記録する。
+
+### 検証結果
+
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml command_normalization_tests --lib`: PASS (6 tests)
+- [x] `cargo check --manifest-path src-tauri\Cargo.toml`: PASS (既存 warning: `LockResult::has_conflicts` / `TemplateReport::{warnings,warn_message}`)
+- [x] `npm run typecheck`: PASS
+- [x] `git diff --check`: PASS
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml --lib`: PASS (289 tests / 既存 warning: `unused variable: home`)
+- [x] `npm run test`: PASS (45 files / 288 tests、jsdom の Tauri `listen()` cleanup warning は既存)
+- [x] `npm run build:vite`: PASS
