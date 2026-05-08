@@ -1815,16 +1815,16 @@ Plan: `tasks/release-v1.5.5.md`
 - [x] `chore/release-v1.5.5` ブランチを作成する。
 - [x] npm / Rust / Tauri の version を `1.5.5` に更新する。
 - [x] 品質ゲートを通す。
-- [ ] release PR を作成し、CI / reviewer bot を確認する。
-- [ ] PR merge 後に `v1.5.5` tag を pushする。
-- [ ] release workflow を監視し、draft release の assets と `latest.json` を確認する。
-- [ ] draft release を publish する。
+- [x] release PR を作成し、CI / reviewer bot を確認する。
+- [x] PR merge 後に `v1.5.5` tag を pushする。
+- [x] release workflow を監視し、draft release の assets と `latest.json` を確認する。
+- [x] draft release を publish する。
 
 ### Next Steps
 
 - [x] `package.json` / `package-lock.json` / `src-tauri/Cargo.toml` / `src-tauri/Cargo.lock` / `src-tauri/tauri.conf.json` を `1.5.5` に更新する。
 - [x] `npm run typecheck`、`npm run build:vite`、`cargo check` を実行する。
-- [ ] release PR を作成し、CI と reviewer bot を確認する。
+- [x] release PR を作成し、CI と reviewer bot を確認する。
 
 ### 検証結果
 
@@ -1832,3 +1832,13 @@ Plan: `tasks/release-v1.5.5.md`
 - [x] `npm run build:vite`: PASS
 - [x] `C:\Users\zooyo\.cargo\bin\cargo.exe check --manifest-path src-tauri\Cargo.toml`: PASS（既存 warning: `LockResult::has_conflicts` / `TemplateReport::{warnings,warn_message}`）
 - [x] `git diff --check`: PASS
+- [x] GitHub Actions `ci / verify`: PASS (run `25545970791`)
+- [x] Release workflow: PASS (run `25546233461`)
+- [x] `latest.json`: `version` が `1.5.5`、platforms が `darwin-aarch64` / `linux-x86_64` / `windows-x86_64`
+
+### 完了結果
+
+- [x] PR #566: https://github.com/yusei531642/vibe-editor/pull/566
+- [x] Release: https://github.com/yusei531642/vibe-editor/releases/tag/v1.5.5
+- [x] Assets: Windows `.exe`、macOS `.dmg` / `.app.tar.gz`、Linux `.AppImage` / `.deb` / `.rpm`、SBOM、signatures、`latest.json`
+- [x] Published at: 2026-05-08T08:55:50Z
