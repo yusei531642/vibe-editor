@@ -1085,6 +1085,24 @@ export interface TeamDiagnosticsMemberRow {
   stalenessThresholdMs: number;
 }
 
+// ---------- Canvas Visibility Observation (Issue #578) ----------
+
+/**
+ * Issue #578: Canvas が非表示中 (`document.visibilityState === 'hidden'` または
+ * Tauri Window がフォーカス外) に `team:recruit-request` が走った観測を Hub 側へ
+ * 通知するための IPC 引数。`hiddenForMs >= 5000` の場合のみ renderer から呼ばれる。
+ *
+ * Rust 側は `tracing::info!` でサーバログに 1 行残すだけの軽量 endpoint。
+ * Leader / 開発者がログ集計で「非アクティブ中採用の頻度」を見るための観測点。
+ */
+export interface RecruitObservedWhileHiddenArgs {
+  teamId: string;
+  /** 採用された新規 agent_id (recruit-request payload の newAgentId)。 */
+  agentId: string;
+  /** Canvas が hidden だった経過時間 (ms)。 */
+  hiddenForMs: number;
+}
+
 // ---------- Window Effects (Issue #260) ----------
 
 /**

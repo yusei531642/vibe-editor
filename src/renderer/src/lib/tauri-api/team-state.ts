@@ -9,10 +9,20 @@
 // wrapper は read のみ用意する (write は agent が `team_assign_task` 等を MCP で叩く)。
 
 import { invoke } from '@tauri-apps/api/core';
-import type { TeamOrchestrationState } from '../../../../types/shared';
+import type {
+  RecruitObservedWhileHiddenArgs,
+  TeamOrchestrationState
+} from '../../../../types/shared';
 
 export const teamState = {
   /** 永続化されたチームの orchestration state を読み出す。未保存なら null。 */
   read: (projectRoot: string, teamId: string): Promise<TeamOrchestrationState | null> =>
-    invoke('team_state_read', { projectRoot, teamId })
+    invoke('team_state_read', { projectRoot, teamId }),
+
+  /**
+   * Issue #578: Canvas (Tauri webview) が非表示の間に `team:recruit-request` が走った
+   * 観測点を Hub 側ログに残す。renderer 側で hidden 経過時間 >= 5000ms を満たす場合のみ呼ぶ。
+   */
+  recruitObservedWhileHidden: (args: RecruitObservedWhileHiddenArgs): Promise<void> =>
+    invoke('recruit_observed_while_hidden', { args })
 };

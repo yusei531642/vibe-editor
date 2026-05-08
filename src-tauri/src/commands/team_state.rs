@@ -390,6 +390,32 @@ pub async fn team_state_read(
     load_orchestration_state(&project_root, &team_id).await
 }
 
+/// Issue #578: Canvas (= Tauri webview) が非表示の間に `team:recruit-request` が走った
+/// 観測点を tracing ログに 1 行残すだけの軽量 endpoint。renderer 側 `useRecruitListener`
+/// が hidden 経過時間 >= 5000ms (env `VIBE_TEAM_RECRUIT_HIDDEN_THRESHOLD_MS` で調整可能)
+/// の条件を満たした recruit に対してのみ呼ぶ。短時間 hidden で info ログを汚染しない設計。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecruitObservedWhileHiddenArgs {
+    pub team_id: String,
+    pub agent_id: String,
+    pub hidden_for_ms: u64,
+}
+
+#[tauri::command]
+pub async fn recruit_observed_while_hidden(
+    args: RecruitObservedWhileHiddenArgs,
+) -> Result<(), String> {
+    tracing::info!(
+        target: "teamhub",
+        team_id = %args.team_id,
+        agent_id = %args.agent_id,
+        hidden_for_ms = args.hidden_for_ms,
+        "[teamhub] recruit observed while canvas hidden"
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

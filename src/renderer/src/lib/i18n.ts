@@ -486,6 +486,9 @@ const ja: Dict = {
   'toast.terminalNotReady': 'ターミナルが起動していません',
   'toast.settings.saveFailed': '設定の保存に失敗しました: {error}',
   'toast.settings.projectRootFailed': 'プロジェクトルートの反映に失敗しました: {error}',
+  // Issue #578: Canvas 非表示中に recruit が走った件数を可視化時に警告する
+  'toast.recruitWhileHidden':
+    'Canvas を非表示の間にメンバー採用が {count} 件走りました。失敗していたら再実行してください',
 
   // ---------- Terminal (pasteエラー等) ----------
   'terminal.pasteImageFailed': '画像保存失敗',
@@ -1126,6 +1129,9 @@ const en: Dict = {
   'toast.terminalNotReady': 'Terminal is not ready',
   'toast.settings.saveFailed': 'Failed to save settings: {error}',
   'toast.settings.projectRootFailed': 'Failed to apply project root: {error}',
+  // Issue #578: Warn when recruits ran while canvas was hidden
+  'toast.recruitWhileHidden':
+    '{count} recruit(s) ran while Canvas was hidden. Re-run any that may have failed',
 
   // ---------- Status ----------
   // ---------- Terminal (paste errors) ----------
