@@ -1508,8 +1508,17 @@ Plan: `tasks/release-v1.4.12.md`
 
 ### Next Tasks
 
-- [ ] #527 の最終テスト修正をコミットへ amend する。
-- [ ] ブランチを push し、PR 本文に `Closes #515` / `Closes #523` / `Closes #527` と検証結果を記載する。
-- [ ] #510 は既存 PR #544 merge 済みとして Issue コメントとラベル整理を行う。
-- [ ] #515 / #523 / #527 は PR URL と検証結果を Issue コメントへ残し、`implementing` から `implemented` へ移す。
+- [x] #527 の最終テスト修正をコミットへ amend する。
+- [x] ブランチを push し、PR 本文に `Closes #515` / `Closes #523` / `Closes #527` と検証結果を記載する: https://github.com/yusei531642/vibe-editor/pull/549
+- [x] #510 は既存 PR #544 merge 済みとして Issue コメントとラベル整理を行う。
+- [x] #515 / #523 / #527 は PR URL と検証結果を Issue コメントへ残し、`implementing` から `implemented` へ移す。
 - [ ] CodeRabbit / CI / 人間レビューを待ち、自動マージは行わない。
+
+### 投稿結果
+
+- [x] PR: https://github.com/yusei531642/vibe-editor/pull/549
+- [x] #510: PR #544 merge 済みをコメントし、`planned` -> `implemented`、Issue close。
+- [x] #515: https://github.com/yusei531642/vibe-editor/issues/515#issuecomment-4402921256
+- [x] #523: https://github.com/yusei531642/vibe-editor/issues/523#issuecomment-4402921223
+- [x] #527: https://github.com/yusei531642/vibe-editor/issues/527#issuecomment-4402921222
+- [x] #515 / #523 / #527: `implementing` -> `implemented`。Issue close は PR #549 merge 後。
