@@ -18,7 +18,7 @@
  * 不変式 #3 (Issue #285): 新規 spawn は client-generated id + `subscribeEventReady` で
  *   pre-subscribe してから create を呼ぶ。post-subscribe race を構造的に消す。
  */
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
@@ -73,6 +73,11 @@ export interface UseXtermBindOptions {
   fallbackCwd?: string;
   command: string;
   /**
+   * false の間は PTY spawn を延期する。Canvas を IDE モードで非表示保持するとき、
+   * mount 済みの TerminalView が裏で端末を起動しないようにするためのゲート。
+   */
+  spawnEnabled?: boolean;
+  /**
    * Issue #271: HMR remount 時に同じ PTY へ再 bind するための論理キー。
    * 親が `term:${tab.id}` / `canvas-term:${node.id}` 等の安定した文字列を
    * 渡すと、Vite HMR で本フックが unmount → remount しても terminal.kill を
@@ -111,6 +116,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
     cwd,
     fallbackCwd,
     command,
+    spawnEnabled = true,
     sessionKey,
     termRef,
     fitRef,
@@ -142,8 +148,25 @@ export function useXtermBind(options: UseXtermBindOptions): void {
   containerRefRef.current = containerRef;
   const lastScheduledRefRef = useRef(lastScheduledRef);
   lastScheduledRefRef.current = lastScheduledRef;
+  const spawnEnabledRef = useRef(spawnEnabled);
+  spawnEnabledRef.current = spawnEnabled;
+  const spawnDeferredRef = useRef(false);
+  const [deferredSpawnToken, setDeferredSpawnToken] = useState(0);
 
   useEffect(() => {
+    if (!spawnEnabled || !spawnDeferredRef.current) return;
+    spawnDeferredRef.current = false;
+    setDeferredSpawnToken((token) => token + 1);
+  }, [spawnEnabled]);
+
+  useEffect(() => {
+    if (!spawnEnabledRef.current) {
+      spawnDeferredRef.current = true;
+      disposedRef.current = true;
+      return;
+    }
+    spawnDeferredRef.current = false;
+
     const term = termRef.current;
     const fit = fitRef.current;
     if (!term) return;
@@ -371,6 +394,10 @@ export function useXtermBind(options: UseXtermBindOptions): void {
       try {
         await loadInitialMetrics();
         if (localDisposed || disposedRef.current) return;
+        if (!spawnEnabledRef.current && !ptyIdRef.current) {
+          spawnDeferredRef.current = true;
+          return;
+        }
 
         callbacksRef.current.onStatus?.(`${command} を起動中…`);
         // 不変式 #2: 初回 spawn 時点のスナップショットを使う (以後の prop 変化は無視)
@@ -432,6 +459,11 @@ export function useXtermBind(options: UseXtermBindOptions): void {
             newSpawnSessionIdCb
           );
           if (!ok) return;
+        }
+        if (!spawnEnabledRef.current && !ptyIdRef.current) {
+          unsubscribePtyListeners();
+          spawnDeferredRef.current = true;
+          return;
         }
 
         const res = await window.api.terminal.create({
@@ -711,8 +743,8 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         }
       }
     };
-    // 不変式 #1: deps は [cwd, command] のみ。
+    // 不変式 #1: deps は [cwd, command, deferredSpawnToken] のみ。
     // 他の props/callbacks/refs は意図的に依存配列から除外する。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cwd, command]);
+  }, [cwd, command, deferredSpawnToken]);
 }

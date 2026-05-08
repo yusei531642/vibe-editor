@@ -16,6 +16,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import { TerminalView, type TerminalViewHandle } from '../../../TerminalView';
 import { useSettings } from '../../../../lib/settings-context';
 import { useCanvasStore } from '../../../../stores/canvas';
+import { useUiStore } from '../../../../stores/ui';
 import { useCanvasTerminalFit } from '../../../../lib/use-canvas-terminal-fit';
 import { useXtermScrollToBottomOnResize } from '../../../../lib/use-xterm-scroll-on-resize';
 import { useRecruitSpawnAck } from '../../../../lib/use-terminal-spawn';
@@ -85,6 +86,7 @@ export function TerminalOverlay({
   const { settings } = useSettings();
   const setCardTitle = useCanvasStore((s) => s.setCardTitle);
   const setCardPayload = useCanvasStore((s) => s.setCardPayload);
+  const isCanvasActive = useUiStore((s) => s.viewMode === 'canvas');
   // Issue #261: NodeResizer でカードを縮めたあと再度広げたとき、内部 `.xterm-viewport`
   // の scrollTop が中途半端な位置で残って「末尾が見えない」状態になることがある。
   // `.canvas-agent-card__term` 自体のサイズ変化を ResizeObserver で監視し、
@@ -201,7 +203,9 @@ export function TerminalOverlay({
         // 潰れないようガード (`?? args` だと `[]` でも truthy 扱いで args が無視される)。
         args={payload.args && payload.args.length > 0 ? payload.args : args}
         codexInstructions={codexInstructions}
-        visible={true}
+        // Issue #564: IDE 初期表示では Canvas 側 AgentNode を非表示保持するだけなので、
+        // 裏で Leader/Codex の PTY を起動しない。
+        visible={isCanvasActive}
         teamId={payload.teamId}
         agentId={payload.agentId}
         role={roleProfileId}
