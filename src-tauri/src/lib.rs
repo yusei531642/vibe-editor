@@ -130,6 +130,8 @@ pub fn run() {
             commands::team_history::team_history_save_batch,
             commands::team_history::team_history_delete,
             commands::team_state::team_state_read,
+            // ---- recruit observability (Issue #578) ----
+            commands::team_state::recruit_observed_while_hidden,
             // ---- team diagnostics read (Issue #510) ----
             commands::team_diagnostics::team_diagnostics_read,
             // ---- team inject retry (Issue #511) ----

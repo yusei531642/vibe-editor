@@ -6,8 +6,14 @@
  * の 3 イベントを受け、canvas store にカードを追加 / 削除する。
  *
  * App.tsx で 1 度だけ mount される想定。
+ *
+ * Issue #578: Canvas が非表示中 (`document.visibilityState === 'hidden'` または
+ * Tauri Window がフォーカス外) に `team:recruit-request` を受けた場合は、件数を
+ * ローカル ref に積み、可視化遷移時に Toast Context で 1 回まとめて警告する。
+ * hidden 経過時間が 5000ms 以上 (env `VIBE_TEAM_RECRUIT_HIDDEN_THRESHOLD_MS` で調整可能)
+ * の場合のみ Hub に観測 IPC `recruit_observed_while_hidden` を投げる。
  */
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { useCanvasStore } from '../stores/canvas';
 import type { Node } from '@xyflow/react';
@@ -16,6 +22,30 @@ import { useRoleProfiles } from './role-profiles-context';
 import { ackRecruit } from './recruit-ack';
 import { findRecruitPosition } from './canvas-recruit-position';
 import type { WaitPolicy } from '../../../types/shared';
+import { useToast } from './toast-context';
+import { useT } from './i18n';
+import {
+  getHiddenSinceMs,
+  isCanvasVisibleNow,
+  subscribeOnVisible
+} from './use-canvas-visibility';
+import { api } from './tauri-api';
+
+const DEFAULT_HIDDEN_THRESHOLD_MS = 5000;
+
+function resolveHiddenThresholdMs(): number {
+  // Vite は VITE_ プレフィックス付き env のみ renderer に注入する。
+  // 実運用では `VIBE_TEAM_RECRUIT_HIDDEN_THRESHOLD_MS=10000 npm run dev` で起動するか、
+  // Vite の define で `VITE_VIBE_TEAM_RECRUIT_HIDDEN_THRESHOLD_MS` として供給する。
+  const raw = (import.meta as unknown as {
+    env?: Record<string, string | undefined>;
+  }).env?.VITE_VIBE_TEAM_RECRUIT_HIDDEN_THRESHOLD_MS;
+  if (raw) {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return DEFAULT_HIDDEN_THRESHOLD_MS;
+}
 
 interface RecruitRequestPayload {
   teamId: string;
@@ -85,6 +115,35 @@ function mergeCustomInstructions(
 export function useRecruitListener(): void {
   // 動的ロールを RoleProfilesContext に投入するためのフック関数
   const { registerDynamicRole } = useRoleProfiles();
+  const { showToast } = useToast();
+  const t = useT();
+
+  // Issue #578: hidden 中に積んだ recruit を可視化遷移で flush するため、
+  // showToast / t は ref 経由で listen() callback から最新参照する。listen 登録は
+  // mount 時 1 回だけで再登録しない (recruit handler の他処理と整合)。
+  const showToastRef = useRef(showToast);
+  showToastRef.current = showToast;
+  const tRef = useRef(t);
+  tRef.current = t;
+
+  // hidden 中に観測した recruit の件数 + 最古の hidden 起点。可視化時に flush。
+  const pendingHiddenRef = useRef<{ count: number; firstObservedAt: number | null }>({
+    count: 0,
+    firstObservedAt: null
+  });
+
+  useEffect(() => {
+    return subscribeOnVisible(() => {
+      const pending = pendingHiddenRef.current;
+      if (pending.count === 0) return;
+      const count = pending.count;
+      pendingHiddenRef.current = { count: 0, firstObservedAt: null };
+      showToastRef.current(tRef.current('toast.recruitWhileHidden', { count }), {
+        tone: 'warning',
+        duration: 8000
+      });
+    });
+  }, []);
 
   useEffect(() => {
     const unlistens: UnlistenFn[] = [];
@@ -93,6 +152,27 @@ export function useRecruitListener(): void {
     void listen<RecruitRequestPayload>('team:recruit-request', (e) => {
       if (cancelled) return;
       const p = e.payload;
+      // Issue #578: Canvas が非表示中の recruit は件数を積み、可視化時にまとめて警告する。
+      // hidden 経過時間が threshold 以上なら Hub にも観測 IPC を投げる (短時間 hidden で
+      // info ログを汚染しない)。可視カード追加処理 (下の async ブロック) はそのまま続行する。
+      if (!isCanvasVisibleNow()) {
+        const pending = pendingHiddenRef.current;
+        pending.count += 1;
+        if (pending.firstObservedAt === null) pending.firstObservedAt = Date.now();
+        const hiddenSince = getHiddenSinceMs();
+        const hiddenForMs = hiddenSince === null ? 0 : Date.now() - hiddenSince;
+        if (hiddenForMs >= resolveHiddenThresholdMs()) {
+          void api.teamState
+            .recruitObservedWhileHidden({
+              teamId: p.teamId,
+              agentId: p.newAgentId,
+              hiddenForMs
+            })
+            .catch((err) => {
+              console.warn('[recruit] recruit_observed_while_hidden IPC failed', err);
+            });
+        }
+      }
       void (async () => {
         // Issue #342 Phase 1: requester 探索は 2 段階で行う。
         //   1. agentId 完全一致で 1 回走査 (旧挙動)。

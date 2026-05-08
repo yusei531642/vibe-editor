@@ -39,6 +39,7 @@ import { OnboardingWizard } from './components/OnboardingWizard';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
 import { MenuBar, MenuItem, MenuDivider, MenuSection } from './components/shell/MenuBar';
 import { useRecruitListener } from './lib/use-recruit-listener';
+import { useCanvasVisibility } from './lib/use-canvas-visibility';
 import { useWindowFrameInsets } from './lib/use-window-frame-insets';
 import { ClaudeNotFound } from './components/ClaudeNotFound';
 import { getStatusMascotState } from './lib/status-mascot';
@@ -618,6 +619,9 @@ export function App(): JSX.Element {
     }
   }, [hasGitRepo, sidebarView]);
   const activityFeed = useActivityFeed();
+  // Issue #578: Canvas (Tauri webview) の可視状態を観測する singleton listener を mount。
+  // useRecruitListener が hidden 中の recruit を集計するために使う。
+  useCanvasVisibility();
   // Phase 6: vibe-canvas:recruit/dismiss イベントを listen して canvas store に反映
   useRecruitListener();
   const activityOpen = useUiStore((s) => s.activityOpen);
