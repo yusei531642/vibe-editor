@@ -894,8 +894,13 @@ impl TeamHub {
     ) -> Result<(), AckError> {
         let mut s = self.state.lock().await;
         let Some(pending) = s.pending_recruits.get_mut(agent_id) else {
-            tracing::warn!(
-                "[teamhub] recruit_ack ignored: no pending recruit for agent={agent_id}"
+            // Issue #574: ack_timeout 後の遅着 ack は設計上の正常現象 (cancel_pending_recruit が
+            // pending を完全削除した後で renderer が ack invoke を届けるパス) なので、
+            // warn → info に降格してアラート noise を減らす。agent_id / team_id / reason は
+            // 構造化キーで出して grep / 集計しやすくする。
+            tracing::info!(
+                "[teamhub] recruit_ack ignored agent_id={agent_id} team_id={expected_team_id} \
+                 reason=no_pending_recruit"
             );
             return Err(AckError::NotFound);
         };

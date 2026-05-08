@@ -14,9 +14,10 @@ use std::time::Instant;
 use tauri::Emitter;
 use uuid::Uuid;
 
-use super::super::consts::{RECRUIT_ACK_TIMEOUT, RECRUIT_TIMEOUT};
+use super::super::consts::RECRUIT_TIMEOUT;
 use super::super::permissions::{check_permission, Permission};
 use super::error::RecruitError;
+use super::recruit::recruit_ack_timeout;
 
 /// `team_create_leader` — 引き継ぎ用に同 teamId へ追加の leader カードを spawn する。
 ///
@@ -140,8 +141,17 @@ pub async fn team_create_leader(
     }
 
     // ack 待機 (renderer が `team:recruit-request` を受領 → addCard 開始)
-    match tokio::time::timeout(RECRUIT_ACK_TIMEOUT, ack_rx).await {
-        Ok(Ok(ack)) if ack.ok => {}
+    // Issue #574: timeout 値は `recruit_ack_timeout()` (env override 込み、default 15s)。
+    let ack_timeout = recruit_ack_timeout();
+    match tokio::time::timeout(ack_timeout, ack_rx).await {
+        Ok(Ok(ack)) if ack.ok => {
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            tracing::info!(
+                "[teamhub] recruit_ack received agent_id={new_agent_id} \
+                 team_id={team_id} elapsed_ms={elapsed_ms}",
+                team_id = ctx.team_id,
+            );
+        }
         Ok(Ok(ack)) => {
             hub.cancel_pending_recruit(&new_agent_id).await;
             let phase_str = ack
@@ -185,6 +195,12 @@ pub async fn team_create_leader(
             .into_err_string());
         }
         Err(_) => {
+            let elapsed_ms = started.elapsed().as_millis() as u64;
+            tracing::info!(
+                "[teamhub] recruit_ack timed_out agent_id={new_agent_id} \
+                 team_id={team_id} elapsed_ms={elapsed_ms}",
+                team_id = ctx.team_id,
+            );
             hub.cancel_pending_recruit(&new_agent_id).await;
             if let Some(app) = &app {
                 let _ = app.emit(
@@ -196,10 +212,10 @@ pub async fn team_create_leader(
                 code: "create_leader_ack_timeout".into(),
                 message: format!(
                     "renderer did not ack recruit-request within {}s",
-                    RECRUIT_ACK_TIMEOUT.as_secs()
+                    ack_timeout.as_secs()
                 ),
                 phase: Some("ack".into()),
-                elapsed_ms: Some(started.elapsed().as_millis() as u64),
+                elapsed_ms: Some(elapsed_ms),
             }
             .into_err_string());
         }
