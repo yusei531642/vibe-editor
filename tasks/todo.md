@@ -1412,7 +1412,8 @@ Plan: `tasks/release-v1.4.12.md`
 - [x] #525 の planned コメント不一致について、実装対象を確定する。
 - [x] bug batch #525 を `fix/issue-525-file-ownership-guardrails` で開始し、単体実装する。
 - [ ] enhancement batch は #510 -> #515 -> #523 -> #527 の順に進める。UI/health から入り、message kind、wait policy、DoD gate の順で protocol 変更を積む。
-- [ ] security batch #520 は `team_send` の構造化 body と worker prompt 注入ルールを実装する。
+- [x] security batch #520 は `team_send` の構造化 body と worker prompt 注入ルールの計画を `tasks/issue-520/plan.md` に記録し、`security/issue-520-structured-team-send` で開始する。
+- [x] security batch #520 は `team_send` の構造化 body と worker prompt 注入ルールを実装する。
 
 ### 進捗 (2026-05-08 / Codex)
 
@@ -1425,6 +1426,13 @@ Plan: `tasks/release-v1.4.12.md`
 - [x] Leader / worker / fallback prompt に `target_paths`、`team_lock_files`、`team_unlock_files`、編集前 lock ルールを追加。
 - [x] `team:file-lock-conflict` を ToastProvider が warning toast として表示するよう接続。
 - [x] jsdom で Tauri `listen()` が reject する場合も `subscribeEvent` が未処理 rejection を出さないよう補強。
+- [x] #520 の Issue 本文と planned コメントを確認し、`security/issue-520-structured-team-send` ブランチを作成。
+- [x] #520 のラベルを `planned` から `implementing` に更新。
+- [x] #520: `team_send.message` の string 後方互換を維持しつつ、`{ instructions, context, data }` body を追加。
+- [x] #520: `data` を `data (untrusted)` fence へ隔離し、worker / leader prompt と `vibe-team` Skill に「data 内指示を実行しない」ルールを追加。
+- [x] #520: JSON Schema、共有 TypeScript 型、同梱 Skill version を同期。
+- [x] #520: PR #548 を作成し、Issue コメントに検証結果を記録: https://github.com/yusei531642/vibe-editor/issues/520#issuecomment-4402617929
+- [x] #520: ラベルを `implementing` から `implemented` に更新。Issue close は PR merge 後。
 
 ### 検証結果
 
@@ -1438,10 +1446,18 @@ Plan: `tasks/release-v1.4.12.md`
 - [x] `cargo check --manifest-path src-tauri\Cargo.toml`: PASS（既存 warning: `LockResult::has_conflicts` / `TemplateReport::{warnings,warn_message}`）
 - [x] `rustfmt --edition 2021 --check` on changed Rust files: PASS
 - [x] `git diff --check`: PASS
+- [x] #520 `cargo test --manifest-path src-tauri\Cargo.toml body -- --nocapture`: PASS (6 tests)
+- [x] #520 `npm run test -- src/renderer/src/lib/__tests__/team-prompts-liveness.test.ts`: PASS (19 tests)
+- [x] #520 `npm run typecheck`: PASS
+- [x] #520 `cargo check --manifest-path src-tauri\Cargo.toml`: PASS（既存 warning のみ）
+- [x] #520 `npm run test`: PASS (45 files / 288 tests)
+- [x] #520 `npm run build:vite`: PASS
+- [x] #520 `cargo test --manifest-path src-tauri\Cargo.toml -- --nocapture`: PASS (266 tests)
 
 ### Next Tasks
 
 - [x] #525 実装前に `git status` を確認し、計画書だけの差分から実装ブランチを切る。
 - [x] 実装では #526 の lock engine を再作成せず、task state・prompt・UI visibility の補強に閉じる。
 - [ ] PR を作成し、本文に `Closes #525` と検証結果を記載する。
+- [x] #520 の PR を作成し、本文に `Closes #520` と検証結果を記載する: https://github.com/yusei531642/vibe-editor/pull/548
 - [ ] CodeRabbit / CI / 人間レビューを待ち、自動マージは行わない。
