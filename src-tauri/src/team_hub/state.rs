@@ -329,7 +329,7 @@ impl EnginePolicy {
             )),
             (EnginePolicyKind::CodexOnly, "claude") => Err(format!(
                 "team engine policy is CodexOnly, cannot recruit with engine='claude' \
-                 (this guards HR から Claude へリセットされる事故)"
+                 (this prevents accidental Claude recruitment into a Codex-only team)"
             )),
             _ => Ok(()),
         }
