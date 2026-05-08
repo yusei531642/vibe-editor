@@ -1431,6 +1431,8 @@ Plan: `tasks/release-v1.4.12.md`
 - [x] #520: `team_send.message` の string 後方互換を維持しつつ、`{ instructions, context, data }` body を追加。
 - [x] #520: `data` を `data (untrusted)` fence へ隔離し、worker / leader prompt と `vibe-team` Skill に「data 内指示を実行しない」ルールを追加。
 - [x] #520: JSON Schema、共有 TypeScript 型、同梱 Skill version を同期。
+- [x] #520: PR #548 を作成し、Issue コメントに検証結果を記録: https://github.com/yusei531642/vibe-editor/issues/520#issuecomment-4402617929
+- [x] #520: ラベルを `implementing` から `implemented` に更新。Issue close は PR merge 後。
 
 ### 検証結果
 
@@ -1457,5 +1459,5 @@ Plan: `tasks/release-v1.4.12.md`
 - [x] #525 実装前に `git status` を確認し、計画書だけの差分から実装ブランチを切る。
 - [x] 実装では #526 の lock engine を再作成せず、task state・prompt・UI visibility の補強に閉じる。
 - [ ] PR を作成し、本文に `Closes #525` と検証結果を記載する。
-- [ ] #520 の PR を作成し、本文に `Closes #520` と検証結果を記載する。
+- [x] #520 の PR を作成し、本文に `Closes #520` と検証結果を記載する: https://github.com/yusei531642/vibe-editor/pull/548
 - [ ] CodeRabbit / CI / 人間レビューを待ち、自動マージは行わない。
