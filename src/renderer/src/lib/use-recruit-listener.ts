@@ -4,7 +4,7 @@
  *   - team:dismiss-request   (誰かが team_dismiss を呼んだ)
  *   - team:recruit-cancelled (timeout 等で取消)
  *   - team:recruit-rescued   (timeout 後 grace 中の ack 救済)
- * のイベントを受け、canvas store にカードを追加 / 削除 / 維持通知する。
+ * のイベントを受け、canvas store にカードを追加 / 削除 / 維持を通知する。
  *
  * App.tsx で 1 度だけ mount される想定。
  *
