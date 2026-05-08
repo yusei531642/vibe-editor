@@ -1643,10 +1643,10 @@ Plan: `tasks/release-v1.5.3.md`
 - [x] npm / Rust / Tauri の version を `1.5.3` に更新する。
 - [x] `Cargo.lock` を同期する。
 - [x] 品質ゲートを通す。
-- [ ] release PR を作成し、CI / reviewer bot を確認する。
-- [ ] PR merge 後に `v1.5.3` tag を push する。
-- [ ] release workflow を監視し、draft release の assets と `latest.json` を確認する。
-- [ ] draft release を publish する。
+- [x] release PR を作成し、CI / reviewer bot を確認する。
+- [x] PR merge 後に `v1.5.3` tag を push する。
+- [x] release workflow を監視し、draft release の assets と `latest.json` を確認する。
+- [x] draft release を publish する。
 
 ### Next Steps
 
@@ -1662,3 +1662,12 @@ Plan: `tasks/release-v1.5.3.md`
 - [x] `npm run test`: PASS (45 files / 288 tests)
 - [x] `npm run build:vite`: PASS
 - [x] `git diff --check`: PASS
+- [x] GitHub Actions `ci / verify`: PASS (run `25540482890`)
+- [x] Release workflow: PASS (run `25540716934`)
+- [x] `latest.json`: `version` が `1.5.3`、platforms が `darwin-aarch64` / `linux-x86_64` / `windows-x86_64`
+
+### 完了結果
+
+- [x] PR #558: https://github.com/yusei531642/vibe-editor/pull/558
+- [x] Release: https://github.com/yusei531642/vibe-editor/releases/tag/v1.5.3
+- [x] Assets: Windows `.exe`、macOS `.dmg` / `.app.tar.gz`、Linux `.AppImage` / `.deb` / `.rpm`、SBOM、signatures、`latest.json`
