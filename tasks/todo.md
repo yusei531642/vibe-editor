@@ -1580,3 +1580,53 @@ Plan: `tasks/release-v1.4.12.md`
 
 - [x] PR #554: https://github.com/yusei531642/vibe-editor/pull/554
 - [x] Issue #553: Bot merge 後に close、`implemented` ラベルへ更新
+
+## Issue Autopilot Batch - Issue #556 CLI resolver hotfix (2026-05-08 / Codex)
+
+計画: `tasks/issue-556/plan.md`
+
+### 計画
+
+- [x] `planned` 付き open Issue を確認し、今回の対象を #556 の単独バッチに限定する。
+- [x] Issue #556 の本文、実装計画コメント、追加調査メモ、Claude Code セカンドオピニオンを確認する。
+- [x] `AGENTS.md` / `CLAUDE.md` / `vibe-editor` skill / `tasks/lessons.md` を確認する。
+- [x] `terminal_create` 入口の command 正規化と `spawn_session` 直前の Windows CLI 解決を確認する。
+- [x] ユーザー確認後、`fix/issue-556-cli-resolver` ブランチを作成する。
+- [x] Issue #556 のラベルを `planned` から `implementing` へ移す。
+- [x] spawn 境界で command / args を再正規化し、allowlist と immediate-exec 拒否を再実行する。
+- [x] Windows CLI resolver を追加し、`.cmd` / `.bat` は `cmd.exe /C` で起動する。
+- [x] resolver と spawn 境界の Rust 回帰テストを追加する。
+- [x] Rust targeted test、`cargo check`、全 Rust lib test、`npm run typecheck`、`npm run test`、`npm run build:vite`、`git diff --check` を通す。
+- [x] PR を作成し、Issue コメントへ検証結果を記録する: https://github.com/yusei531642/vibe-editor/pull/557
+
+### Next Steps
+
+- [x] 実装開始の承認を受ける。
+- [x] `fix/issue-556-cli-resolver` を切る。
+- [x] `tasks/batch-pipeline-state.json` を #556 単独バッチとして初期化する。
+- [x] #556 の Phase A を完了し、PR 作成後に CodeRabbit / CI を確認する。
+
+### 進捗
+
+- [x] `src-tauri/src/commands/terminal.rs` の `command_validation` を spawn 側から再利用できるよう `pub(crate)` 化。
+- [x] `src-tauri/src/pty/session.rs` に spawn 境界の `prepare_spawn_command()` を追加。
+- [x] Windows resolver で `PATH`、`PATHEXT`、`%APPDATA%\npm`、`%USERPROFILE%\.local\bin`、`%LOCALAPPDATA%\Microsoft\WindowsApps`、`%LOCALAPPDATA%\OpenAI\Codex\bin` を探索。
+- [x] `.cmd` / `.bat` 解決時は `cmd.exe /C <resolved script> ...args` に変換。
+- [x] INFO ログに requested / resolved / launcher / args.len / path_entries / pathext_present を出し、args 本文は出さない。
+
+### 検証結果
+
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml command_normalization_tests --lib`: PASS (7 tests)
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml spawn_command_resolution_tests --lib`: PASS (3 tests)
+- [x] `cargo check --manifest-path src-tauri\Cargo.toml`: PASS（既存 warning: `LockResult::has_conflicts` / `TemplateReport::{warnings,warn_message}`）
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml --lib`: PASS (293 tests / 既存 warning: `unused variable: home`)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (45 files / 288 tests、jsdom の Tauri `listen()` cleanup warning は既存)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
+
+### 投稿結果
+
+- [x] PR: https://github.com/yusei531642/vibe-editor/pull/557
+- [x] Issue comment: https://github.com/yusei531642/vibe-editor/issues/556#issuecomment-4403888408
+- [x] Issue #556: `implementing` -> `implemented`。Issue close は PR merge 後。

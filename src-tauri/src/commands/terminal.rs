@@ -4,7 +4,7 @@
 // terminal:data:{id} / terminal:exit:{id} イベントを emit する。
 
 mod codex_instructions;
-mod command_validation;
+pub(crate) mod command_validation;
 mod paste_image;
 
 use crate::pty::{spawn_session, SpawnOptions, UserWriteOutcome};
