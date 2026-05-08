@@ -60,13 +60,16 @@ function pointOrNull(position: Partial<CanvasPoint> | undefined): CanvasPoint | 
   return x === null || y === null ? null : { x, y };
 }
 
-function nodeRect(
+/**
+ * 任意の Canvas ノードから「実際に描画されている幅/高さ」を取り出す。
+ * 優先順位は `style.width` → `measured.width` → `node.width` → fallback。
+ * NodeResizer で拡大されたカードを基準に配置計算したい用途で使う (Issue #569)。
+ */
+export function getNodeSize(
   node: CanvasPlacementNode,
   fallbackWidth: number,
   fallbackHeight: number
-): Rect | null {
-  const position = pointOrNull(node.position);
-  if (!position) return null;
+): { width: number; height: number } {
   const width = positiveDimension(
     node.style?.width ?? node.measured?.width ?? node.width,
     fallbackWidth
@@ -75,6 +78,17 @@ function nodeRect(
     node.style?.height ?? node.measured?.height ?? node.height,
     fallbackHeight
   );
+  return { width, height };
+}
+
+function nodeRect(
+  node: CanvasPlacementNode,
+  fallbackWidth: number,
+  fallbackHeight: number
+): Rect | null {
+  const position = pointOrNull(node.position);
+  if (!position) return null;
+  const { width, height } = getNodeSize(node, fallbackWidth, fallbackHeight);
   return {
     left: position.x,
     top: position.y,

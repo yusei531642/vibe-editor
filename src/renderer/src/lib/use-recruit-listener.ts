@@ -9,11 +9,12 @@
  */
 import { useEffect } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { useCanvasStore, NODE_W, NODE_H } from '../stores/canvas';
+import { useCanvasStore } from '../stores/canvas';
 import type { Node } from '@xyflow/react';
 import type { CardData } from '../stores/canvas';
 import { useRoleProfiles } from './role-profiles-context';
 import { ackRecruit } from './recruit-ack';
+import { findRecruitPosition } from './canvas-recruit-position';
 import type { WaitPolicy } from '../../../types/shared';
 
 interface RecruitRequestPayload {
@@ -45,36 +46,6 @@ interface RecruitCancelledPayload {
   newAgentId: string;
   reason: string;
 }
-
-// NODE_W / NODE_H は stores/canvas.ts の共有定数を import (Issue #253 で 640x400 に拡張)
-
-/**
- * Issue #259: 同心円配置の半径を「メンバー数 + 画面サイズ」両方に応じた可変値にする。
- *  - 0-3 名: NODE_W + 60 (狭めに、1080p でも fitView せず収まる)
- *  - 4-5 名: NODE_W + 80 (PR #257 と同じ既存挙動を維持)
- *  - 6+ 名: 同心円ではなくグリッド配置に切替えるため radius は使われない
- *  - clamp: 画面サイズの 45% を上限として極端な小画面で半径が画面外を超えないようにする
- *           (NODE_W 未満には絶対しない)
- */
-function computeRecruitRadius(memberCount: number): number {
-  const base = memberCount <= 3 ? NODE_W + 60 : NODE_W + 80;
-  const screenSize = Math.max(
-    typeof window !== 'undefined' ? window.innerWidth : 1920,
-    typeof window !== 'undefined' ? window.innerHeight : 1080
-  );
-  const cap = Math.max(NODE_W, screenSize * 0.45);
-  return Math.min(base, cap);
-}
-
-/**
- * Issue #259: 6 名以上 (Leader 含む newMemberCount >= 6) は同心円配置を諦め、
- * requester の右側 2 列グリッドに展開する。論理幅が小画面 viewport を超えても
- * Canvas 側 fitView の zoom 下限ガードと組み合わせて UX を保つ。
- */
-const GRID_PLACEMENT_THRESHOLD = 6;
-const GRID_COLS = 2;
-const GRID_COL_GAP = 32;
-const GRID_ROW_GAP = 32;
 
 function waitPolicyInstructions(policy: WaitPolicy | undefined): string {
   const resolved = policy ?? 'strict';
@@ -109,64 +80,6 @@ function mergeCustomInstructions(
   waitPolicy: WaitPolicy | undefined
 ): string {
   return [raw?.trim(), waitPolicyInstructions(waitPolicy)].filter(Boolean).join('\n\n');
-}
-
-/** requester の周囲で空いている角度を見つけて配置位置を返す。
- *  既存メンバーの方角をスキャンし、最も空いている角度をピック。 */
-function findRecruitPosition(
-  requester: Node<CardData>,
-  team: Node<CardData>[]
-): { x: number; y: number } {
-  const others = team.filter((n) => n.id !== requester.id);
-  const newMemberCount = others.length + 1;
-
-  // Issue #259: 6 名以上は requester の右側 2 列グリッドに展開
-  if (newMemberCount >= GRID_PLACEMENT_THRESHOLD) {
-    const newIdx = others.length; // 0-based new index = 既存 others 数
-    const col = newIdx % GRID_COLS;
-    const row = Math.floor(newIdx / GRID_COLS);
-    return {
-      x: requester.position.x + (NODE_W + GRID_COL_GAP) * (col + 1),
-      y: requester.position.y + (NODE_H + GRID_ROW_GAP) * row
-    };
-  }
-
-  // 通常: 同心円配置 (可変半径)
-  const radius = computeRecruitRadius(newMemberCount);
-  const cx = requester.position.x + NODE_W / 2;
-  const cy = requester.position.y + NODE_H / 2;
-  if (others.length === 0) {
-    return { x: requester.position.x + radius, y: requester.position.y };
-  }
-  // 既存メンバーの角度を集計
-  const usedAngles = others.map((n) => {
-    const ox = n.position.x + NODE_W / 2;
-    const oy = n.position.y + NODE_H / 2;
-    return Math.atan2(oy - cy, ox - cx);
-  });
-  // 12 等分のスロットを試して、最も近い既存メンバーから角度的に最も離れた slot を選ぶ
-  const SLOTS = 12;
-  let bestAngle = 0;
-  let bestDist = -1;
-  for (let i = 0; i < SLOTS; i++) {
-    const a = (i / SLOTS) * Math.PI * 2 - Math.PI / 2; // 上から時計回り
-    const minDistToUsed = usedAngles.reduce((min, u) => {
-      const d = Math.min(
-        Math.abs(a - u),
-        Math.abs(a - u + Math.PI * 2),
-        Math.abs(a - u - Math.PI * 2)
-      );
-      return Math.min(min, d);
-    }, Number.POSITIVE_INFINITY);
-    if (minDistToUsed > bestDist) {
-      bestDist = minDistToUsed;
-      bestAngle = a;
-    }
-  }
-  return {
-    x: cx + Math.cos(bestAngle) * radius - NODE_W / 2,
-    y: cy + Math.sin(bestAngle) * radius - NODE_H / 2
-  };
 }
 
 export function useRecruitListener(): void {
