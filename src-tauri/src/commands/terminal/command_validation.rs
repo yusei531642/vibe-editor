@@ -322,6 +322,28 @@ mod command_normalization_tests {
     }
 
     #[test]
+    fn splits_claude_inline_command_args_with_system_prompt() {
+        let prompt = "あなたはチーム「Leader」のLeader。\n最初の指示が来るまで待機する。";
+        let (command, args) = normalize_terminal_command(
+            Some(format!(
+                r#"claude --dangerously-skip-permissions --chrome --append-system-prompt "{prompt}""#
+            )),
+            None,
+        );
+
+        assert_eq!(command, "claude");
+        assert_eq!(
+            args,
+            vec![
+                "--dangerously-skip-permissions",
+                "--chrome",
+                "--append-system-prompt",
+                prompt,
+            ]
+        );
+    }
+
+    #[test]
     fn strips_quotes_around_windows_executable_path() {
         let (command, args) = normalize_terminal_command(
             Some(r#""C:\Program Files\Codex\codex.exe" --foo "bar baz""#.to_string()),
