@@ -97,11 +97,8 @@ pub async fn team_update_task(
     let blocked_reason = optional_string(args, "blocked_reason", "blockedReason");
     let report_payload = optional_report_payload(args);
     // Issue #516: top-level next_action が無いとき report_payload.next_action を昇格させる。
-    let next_action = optional_string(args, "next_action", "nextAction").or_else(|| {
-        report_payload
-            .as_ref()
-            .and_then(|p| p.next_action.clone())
-    });
+    let next_action = optional_string(args, "next_action", "nextAction")
+        .or_else(|| report_payload.as_ref().and_then(|p| p.next_action.clone()));
     // Issue #516: top-level artifact_path が無いとき report_payload.artifacts[0] を昇格させる。
     let artifact_path = optional_string(args, "artifact_path", "artifactPath").or_else(|| {
         report_payload
@@ -239,6 +236,8 @@ mod tests {
                 artifact_path: None,
                 blocked_by_human_gate: false,
                 required_human_decision: None,
+                target_paths: Vec::new(),
+                lock_conflicts: Vec::new(),
             });
         }
 
@@ -285,6 +284,8 @@ mod tests {
                 artifact_path: None,
                 blocked_by_human_gate: false,
                 required_human_decision: None,
+                target_paths: Vec::new(),
+                lock_conflicts: Vec::new(),
             });
         }
 
@@ -350,6 +351,8 @@ mod tests {
                 artifact_path: None,
                 blocked_by_human_gate: false,
                 required_human_decision: None,
+                target_paths: Vec::new(),
+                lock_conflicts: Vec::new(),
             });
         }
 
@@ -447,6 +450,8 @@ mod tests {
                 artifact_path: None,
                 blocked_by_human_gate: false,
                 required_human_decision: None,
+                target_paths: Vec::new(),
+                lock_conflicts: Vec::new(),
             });
         }
         let ctx = CallContext {

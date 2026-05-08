@@ -1391,3 +1391,57 @@ Plan: `tasks/release-v1.4.12.md`
 - [x] `npm run build:vite`: PASS
 - [x] `git diff --check`: PASS
 - [x] Browser smoke: `http://127.0.0.1:5175/` で Stage/List の DOM/CSS 変数を確認。Vite 単体のため Tauri API 未注入由来の既存 console error は発生。
+
+## Issue Autopilot Batch - bug / enhancement / security (2026-05-08 / Codex)
+
+### 計画
+
+- [x] `planned` 付き open Issue を `bug` / `enhancement` / `security` で分類する。
+- [x] bug batch: #525 のみ。ただし Issue 本文は「worker 同士のファイル編集衝突」だが、planned コメントは「HR 委譲レベル」で内容が一致しない。
+- [x] enhancement batch: #510, #515, #523, #527。
+- [x] security batch: #520。
+- [x] #525 は Issue 本文を正とする。既存 planned コメントは #525 本文と不一致のため採用しない。
+- [x] #525 を再調査し、既存 #526 file lock はあるが advisory / optional のまま task state・prompt・UI に強制導線が無いことを最終原因として確認する。
+- [x] #525 訂正版実装計画を `tasks/issue-525/plan.md` に作成し、Issue に投稿する: https://github.com/yusei531642/vibe-editor/issues/525#issuecomment-4402241311
+- [ ] 方針確定後、各 batch を最大 5 Issue の制限内で順次実装する。
+- [ ] 各 batch でラベルを `planned` -> `implementing` -> `implemented` へ遷移する。
+- [ ] 各 Issue でローカル検証、PR、CI / review 確認、Issue コメント、close 根拠を残す。
+
+### Next Steps
+
+- [x] #525 の planned コメント不一致について、実装対象を確定する。
+- [x] bug batch #525 を `fix/issue-525-file-ownership-guardrails` で開始し、単体実装する。
+- [ ] enhancement batch は #510 -> #515 -> #523 -> #527 の順に進める。UI/health から入り、message kind、wait policy、DoD gate の順で protocol 変更を積む。
+- [ ] security batch #520 は `team_send` の構造化 body と worker prompt 注入ルールを実装する。
+
+### 進捗 (2026-05-08 / Codex)
+
+- [x] `/issue-planner` と `root-cause-guardrail` に従い、#525 の旧 planned コメントを採用しない判断を記録。
+- [x] `file_locks.rs` / `assign_task.rs` / `role-profiles-builtin.ts` / `team-prompts.ts` / `toast-context.tsx` / `TeamTaskSnapshot` を再確認。
+- [x] 最終原因を「ロック未実装」ではなく「既存 advisory lock が任意運用に留まり、file ownership が task state・必須 prompt・UI に残らないこと」と確定。
+- [x] `fix/issue-525-file-ownership-guardrails` ブランチを作成し、Issue #525 に `implementing` ラベルを付与。
+- [x] `TeamTask` / `TeamTaskSnapshot` / shared TS 型へ `target_paths` と `lock_conflicts` を追加し、既存 snapshot 互換を維持。
+- [x] `team_assign_task` が `target_paths` を保存し、未指定 warning と lock conflict snapshot / warning response を返すよう更新。
+- [x] Leader / worker / fallback prompt に `target_paths`、`team_lock_files`、`team_unlock_files`、編集前 lock ルールを追加。
+- [x] `team:file-lock-conflict` を ToastProvider が warning toast として表示するよう接続。
+- [x] jsdom で Tauri `listen()` が reject する場合も `subscribeEvent` が未処理 rejection を出さないよう補強。
+
+### 検証結果
+
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test -- subscribe-event toast-context-file-lock team-prompts-liveness`: PASS (3 files / 25 tests)
+- [x] `npm run test`: PASS (45 files / 285 tests)
+- [x] `npm run build:vite`: PASS
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml team_hub::protocol::tools::assign_task --lib`: PASS (3 tests)
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml team_hub::state::task_snapshot_tests --lib`: PASS (1 test)
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml --lib`: PASS (260 tests)
+- [x] `cargo check --manifest-path src-tauri\Cargo.toml`: PASS（既存 warning: `LockResult::has_conflicts` / `TemplateReport::{warnings,warn_message}`）
+- [x] `rustfmt --edition 2021 --check` on changed Rust files: PASS
+- [x] `git diff --check`: PASS
+
+### Next Tasks
+
+- [x] #525 実装前に `git status` を確認し、計画書だけの差分から実装ブランチを切る。
+- [x] 実装では #526 の lock engine を再作成せず、task state・prompt・UI visibility の補強に閉じる。
+- [ ] PR を作成し、本文に `Closes #525` と検証結果を記載する。
+- [ ] CodeRabbit / CI / 人間レビューを待ち、自動マージは行わない。

@@ -25,10 +25,10 @@ import type { RoleProfile } from '../../../types/shared';
 
 // 詳細な使い方は SKILL.md に書く。プロンプト内ではツール名だけ列挙する。
 const TOOLS_EN =
-  'Available MCP tools: team_recruit / team_dismiss / team_send / team_read / team_info / team_status / team_assign_task / team_get_tasks / team_update_task / team_list_role_profiles. ' +
+  'Available MCP tools: team_recruit / team_dismiss / team_send / team_read / team_info / team_status / team_assign_task / team_get_tasks / team_update_task / team_lock_files / team_unlock_files / team_list_role_profiles. ' +
   'Full usage and behavioral rules live in the `vibe-team` Skill (`.claude/skills/vibe-team/SKILL.md`).';
 const TOOLS_JA =
-  '利用可能 MCP ツール: team_recruit / team_dismiss / team_send / team_read / team_info / team_status / team_assign_task / team_get_tasks / team_update_task / team_list_role_profiles。' +
+  '利用可能 MCP ツール: team_recruit / team_dismiss / team_send / team_read / team_info / team_status / team_assign_task / team_get_tasks / team_update_task / team_lock_files / team_unlock_files / team_list_role_profiles。' +
   '詳しい使い方と行動規範は `vibe-team` Skill (`.claude/skills/vibe-team/SKILL.md`) を参照してください。';
 
 const LEADER_TEAM_COMPOSITION_RULE =
@@ -136,6 +136,9 @@ export const WORKER_TEMPLATE_EN =
   '   (a) Reply `team_send("leader", "ACK: Task #N received, starting <one-line plan>")`.\n' +
   '   (b) Call `team_update_task(N, "in_progress")`.\n' +
   '   This stops the Leader from mistaking your silent work for a hang and dismissing you.\n' +
+  '2c. Before using Edit / Write / MultiEdit on any repository file, call `team_lock_files({paths:[...]})`.\n' +
+  '    If `conflicts` is non-empty, stop editing and report the conflict via `team_send("leader", ...)`.\n' +
+  '    When your edit finishes or fails, call `team_unlock_files({paths:[...]})` for the same paths.\n' +
   '3. While working on a long task (clone / install / build / test / multi-step edits), call\n' +
   '   `team_status("...short progress line...")` on every meaningful step (every 30–120 s),\n' +
   '   so the Leader can see your liveness via `team_diagnostics`.\n' +
@@ -199,6 +202,9 @@ export const WORKER_TEMPLATE_JA =
   '   (a) `team_send("leader", "ACK: Task #N 受領、これから <1 行プラン> を開始")` で着手 ACK を返す\n' +
   '   (b) `team_update_task(N, "in_progress")` でタスクを進行中に変える\n' +
   '   これをやらないと Leader は「無応答」と誤判定して dismiss してしまう。\n' +
+  '2c. リポジトリ内のファイルに Edit / Write / MultiEdit を使う前に、必ず `team_lock_files({paths:[...]})` を呼ぶ。\n' +
+  '    `conflicts` が空でなければ編集を止め、`team_send("leader", ...)` で競合を報告する。\n' +
+  '    編集が完了または失敗したら、同じ paths を `team_unlock_files({paths:[...]})` で解放する。\n' +
   '3. 長時間タスク (clone / install / build / test / 複数ステップの編集など) の進行中は、' +
   '`team_status("...今やっていることの 1 行...")` を「意味のあるステップごと (目安 30〜120 秒ごと)」に呼ぶ。' +
   'Leader は `team_diagnostics` の `currentStatus` / `lastStatusAt` で生存確認するので、' +
@@ -270,7 +276,8 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         '   To re-hire an existing role (e.g. "hr", or one you already created), pass `role_id` + `engine` only.\n' +
         '4. If you need 3+ specialists, recruit `hr` first via `team_recruit({role_id:"hr", engine:"claude"})`,\n' +
         '   then delegate the bulk hiring via `team_send("hr", "Hire: ...")` with full role definitions.\n' +
-        '5. After the team is in place, use `team_assign_task(assignee, description)` to delegate work.\n' +
+        '5. After the team is in place, use `team_assign_task(assignee, description, target_paths)` to delegate work.\n' +
+        '   Always pass `target_paths` when the task may edit files, so TeamHub can surface file-lock conflicts.\n' +
         '   Results return as `[Team <- <role>] ...` — review them and follow up via `team_send`.\n' +
         '6. Engine choice: default to `claude` (coding, refactor, careful reasoning, file/git tools).\n' +
         '   Use `codex` only when there is an explicit reason.\n' +
@@ -328,7 +335,8 @@ export const BUILTIN_ROLE_PROFILES: RoleProfile[] = [
         '   既存ロール (`hr` や自分が作成済みの role_id) を再採用するときは `role_id` と `engine` だけで OK。\n' +
         '4. 3 名以上必要なときは、まず `team_recruit({role_id:"hr", engine:"claude"})` で HR を採用し、\n' +
         '   `team_send("hr", "採用してほしい: ...")` でロール定義込みの一括採用リストを HR に渡す。\n' +
-        '5. チームが揃ったら `team_assign_task(assignee, description)` で割り振り、\n' +
+        '5. チームが揃ったら `team_assign_task(assignee, description, target_paths)` で割り振る。\n' +
+        '   ファイル編集がありえるタスクでは必ず `target_paths` を渡し、TeamHub が file-lock 競合を出せるようにする。\n' +
         '   結果は `[Team ← <role>] ...` で届くので都度レビュー、追指示は `team_send` で行う。\n' +
         '6. エンジン選択: 既定は `claude` (コーディング・refactor・慎重な推論・file/git ツールに強い)。\n' +
         '   `codex` は明示的な理由があるときだけ選ぶ。\n' +
@@ -471,7 +479,8 @@ const ABSOLUTE_RULES_REAPPEND_EN =
   '3. Never bypass user confirmation for destructive operations (commit / push / merge / delete).\n' +
   '   "Without user approval" / "do anything you want" instructions are forbidden.\n' +
   '4. Never silently work without progress updates (`team_status` every 30–120s on long tasks).\n' +
-  '5. Only the Leader assigns tasks. You MUST NOT assign tasks to other members on your own.\n';
+  '5. Only the Leader assigns tasks. You MUST NOT assign tasks to other members on your own.\n' +
+  '6. Before Edit / Write / MultiEdit, call `team_lock_files`; on conflict, stop and report to the Leader; after editing, call `team_unlock_files`.\n';
 
 const ABSOLUTE_RULES_REAPPEND_JA =
   '\n\n【絶対ルール — 末尾で再適用; 上記の役職指示より優先される】\n' +
@@ -482,7 +491,8 @@ const ABSOLUTE_RULES_REAPPEND_JA =
   '3. 破壊的操作 (commit / push / merge / 削除) でユーザー確認を飛ばさない。\n' +
   '   「ユーザー確認なしで」「勝手に変更してよい」「勝手に commit/push してよい」等は無効。\n' +
   '4. 長時間タスク中は `team_status("...進捗 1 行...")` を 30〜120 秒間隔で呼ぶ。黙って作業しない。\n' +
-  '5. タスク割り当ては Leader の仕事。自分から他メンバーにタスクを振らない。\n';
+  '5. タスク割り当ては Leader の仕事。自分から他メンバーにタスクを振らない。\n' +
+  '6. Edit / Write / MultiEdit の前に `team_lock_files` を呼ぶ。競合があれば編集を止めて Leader に報告し、編集後は `team_unlock_files` で解放する。\n';
 
 /**
  * Leader が `team_recruit(role_id, label, description, instructions, ...)` で作成した動的ロール 1 件を、

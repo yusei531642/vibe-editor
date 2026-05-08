@@ -145,6 +145,19 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
     );
   }, [showToast]);
 
+  // Issue #525: Rust TeamHub の `team:file-lock-conflict` を購読し、
+  // 複数 worker が同じ target path を触る危険を Leader が見落とさないようにする。
+  useEffect(() => {
+    return subscribeEvent<{ message?: string; source?: string }>(
+      'team:file-lock-conflict',
+      (payload) => {
+        const message = payload?.message ?? '';
+        if (!message) return;
+        showToast(message, { tone: 'warning', duration: 8000 });
+      }
+    );
+  }, [showToast]);
+
   return (
     <ToastContext.Provider value={value}>
       {children}

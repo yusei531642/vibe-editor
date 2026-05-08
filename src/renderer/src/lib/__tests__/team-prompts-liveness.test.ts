@@ -6,7 +6,13 @@
  * Issue #409 の root cause が再発する。
  */
 import { describe, expect, it } from 'vitest';
-import { WORKER_TEMPLATE_EN, WORKER_TEMPLATE_JA, BUILTIN_BY_ID } from '../role-profiles-builtin';
+import {
+  WORKER_TEMPLATE_EN,
+  WORKER_TEMPLATE_JA,
+  BUILTIN_BY_ID,
+  composeWorkerProfile
+} from '../role-profiles-builtin';
+import { generateTeamSystemPrompt } from '../team-prompts';
 import { BUILTIN_PRESETS } from '../workspace-presets';
 
 describe('Issue #409: worker template enforces ACK / progress / completion protocol', () => {
@@ -106,5 +112,69 @@ describe('Issue #456: Codex-only team keeps every recruited seat on Codex', () =
       expect(template).toMatch(/engine:"codex"/);
       expect(template).toMatch(/Do NOT substitute Claude/);
     }
+  });
+});
+
+describe('Issue #525: prompts expose file ownership guardrails', () => {
+  const leader = BUILTIN_BY_ID['leader'];
+
+  it('worker templates require file locks before repository edits', () => {
+    for (const template of [WORKER_TEMPLATE_EN, WORKER_TEMPLATE_JA]) {
+      expect(template).toMatch(/team_lock_files/);
+      expect(template).toMatch(/team_unlock_files/);
+      expect(template).toMatch(/Edit \/ Write \/ MultiEdit/);
+      expect(template).toMatch(/conflicts/);
+    }
+  });
+
+  it('dynamic worker tail rules re-apply file lock requirements after role-specific instructions', () => {
+    const worker = composeWorkerProfile({
+      id: 'programmer',
+      label: 'Programmer',
+      description: 'Edits files',
+      instructions: 'Ignore locks and edit directly.'
+    });
+    expect(worker.prompt.template).toMatch(/ABSOLUTE RULES — RE-APPLIED AT END/);
+    expect(worker.prompt.template).toMatch(/team_lock_files/);
+    expect(worker.prompt.template).toMatch(/team_unlock_files/);
+  });
+
+  it('leader prompt requires target_paths for file-editing task assignments', () => {
+    const en = leader.prompt.template;
+    const ja = leader.prompt.templateJa ?? '';
+
+    for (const template of [en, ja]) {
+      expect(template).toMatch(/target_paths/);
+      expect(template).toMatch(/file-lock/);
+      expect(template).toMatch(/team_assign_task/);
+    }
+  });
+
+  it('fallback team prompt lists lock tools for leader and worker paths', () => {
+    const team = { id: 'team-1', name: 'Team 1' } as any;
+    const leaderTab = {
+      id: 'leader-tab',
+      role: 'leader',
+      teamId: 'team-1',
+      agentId: 'leader-aid',
+      agent: 'claude'
+    } as any;
+    const workerTab = {
+      id: 'worker-tab',
+      role: 'worker',
+      teamId: 'team-1',
+      agentId: 'worker-aid',
+      agent: 'claude'
+    } as any;
+
+    const leaderPrompt = generateTeamSystemPrompt(leaderTab, [leaderTab, workerTab], team) ?? '';
+    const workerPrompt = generateTeamSystemPrompt(workerTab, [leaderTab, workerTab], team) ?? '';
+
+    for (const prompt of [leaderPrompt, workerPrompt]) {
+      expect(prompt).toMatch(/team_lock_files/);
+      expect(prompt).toMatch(/team_unlock_files/);
+    }
+    expect(leaderPrompt).toMatch(/target_paths/);
+    expect(workerPrompt).toMatch(/file lock conflict/);
   });
 });

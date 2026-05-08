@@ -2,6 +2,8 @@
 //!
 //! Issue #373 Phase 2 で `protocol.rs` から切り出し。
 
+use crate::commands::team_state::FileLockConflictSnapshot;
+use crate::team_hub::file_locks::{normalize_path, LockConflict};
 use crate::team_hub::{CallContext, TeamHub, TeamTask};
 use chrono::Utc;
 use serde_json::{json, Value};
@@ -13,6 +15,61 @@ use super::super::permissions::{check_permission, Permission};
 use super::error::AssignError;
 use super::send::team_send;
 use crate::team_hub::role_lint::{compute_task_overlap, MemberSnapshot};
+
+fn parse_target_paths(args: &Value) -> Vec<String> {
+    let mut out = Vec::new();
+    if let Some(arr) = args.get("target_paths").and_then(|v| v.as_array()) {
+        for v in arr {
+            let Some(raw) = v.as_str() else {
+                continue;
+            };
+            let normalized = normalize_path(raw);
+            if !normalized.is_empty() && !out.contains(&normalized) {
+                out.push(normalized);
+            }
+        }
+    }
+    out
+}
+
+fn to_lock_conflict_snapshots(conflicts: &[LockConflict]) -> Vec<FileLockConflictSnapshot> {
+    conflicts
+        .iter()
+        .map(|c| FileLockConflictSnapshot {
+            path: c.path.clone(),
+            holder_agent_id: c.holder_agent_id.clone(),
+            holder_role: c.holder_role.clone(),
+            acquired_at: c.acquired_at.clone(),
+        })
+        .collect()
+}
+
+fn file_lock_warning_message(
+    target_paths_missing: bool,
+    lock_conflicts: &[FileLockConflictSnapshot],
+) -> Option<String> {
+    if target_paths_missing {
+        return Some(
+            "team_assign_task was called without target_paths; file ownership is not tracked and \
+             file-lock conflict detection was skipped"
+                .to_string(),
+        );
+    }
+    if lock_conflicts.is_empty() {
+        return None;
+    }
+    let summary = lock_conflicts
+        .iter()
+        .map(|c| {
+            format!(
+                "{} held by {} ({})",
+                c.path, c.holder_agent_id, c.holder_role
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("; ");
+    Some(format!("file lock conflicts detected: {summary}"))
+}
 
 pub async fn team_assign_task(
     hub: &TeamHub,
@@ -44,16 +101,8 @@ pub async fn team_assign_task(
     // Issue #526: `target_paths: string[]` (任意) — このタスクで触る予定のファイル / dir 宣言。
     // Hub は assign_task 時点で同 path を別 agent が握っていないか peek し、
     // `lockConflicts` を response に乗せる (advisory: 拒否はしない、Leader が判断)。
-    let target_paths: Vec<String> = args
-        .get("target_paths")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|v| v.as_str())
-                .map(|s| s.to_string())
-                .collect()
-        })
-        .unwrap_or_default();
+    let target_paths = parse_target_paths(args);
+    let target_paths_missing = target_paths.is_empty();
     // 旧実装は assignee を一切検証せずに task を作成していた。
     // Claude (LLM) が "Programmer" / "プログラマー" / 存在しない role 名を渡すと、
     // task は作成されるが team_send 通知はゼロ宛先で no-op になり、
@@ -94,6 +143,26 @@ pub async fn team_assign_task(
         }
         .into_err_string());
     }
+    // Issue #525: #526 の advisory lock を task state へ接続する。
+    // target_paths がある時点で既存 lock と peek し、response だけでなく TeamTaskSnapshot にも
+    // 残す。assign 自体は引き続き advisory として成功させ、Leader が調整できる情報を返す。
+    let lock_conflicts = if !target_paths.is_empty() {
+        // assignee 自身が握る path は当然衝突ではないので filter で除外。
+        let assignee_aid_filter = if resolved.len() == 1 {
+            Some(resolved[0].0.as_str())
+        } else {
+            // 複数名宛て (同 role 複数 / "all") の場合は誰の lock かを単純に決められないので
+            // フィルタ無し (= 全 holder を返す。Leader が boundaryWarnings 同様に解釈)。
+            None
+        };
+        hub.peek_file_locks(&ctx.team_id, assignee_aid_filter, &target_paths)
+            .await
+    } else {
+        Vec::new()
+    };
+    let lock_conflict_snapshots = to_lock_conflict_snapshots(&lock_conflicts);
+    let file_lock_warning_message =
+        file_lock_warning_message(target_paths_missing, &lock_conflict_snapshots);
     // Issue #512: description が SOFT_PAYLOAD_LIMIT 相当 (= protocol hint reserve 引いた値) を
     // 超過したら、Hub 側で auto-spool 化する。worker への inject 通知本文 (`team_send` 経由) は
     // 「summary + attached: <path>」の短文に置換し、TeamTask.description には **元 description**
@@ -115,7 +184,10 @@ pub async fn team_assign_task(
                 .get(&ctx.team_id)
                 .and_then(|t| t.project_root.clone())
         };
-        let project_root = match project_root.as_deref().map(str::trim).filter(|p| !p.is_empty())
+        let project_root = match project_root
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
         {
             Some(p) => p.to_string(),
             None => {
@@ -139,8 +211,7 @@ pub async fn team_assign_task(
                 .into_err_string());
             }
         };
-        match crate::team_hub::spool::spool_long_payload(&project_root, description, "assign")
-            .await
+        match crate::team_hub::spool::spool_long_payload(&project_root, description, "assign").await
         {
             Ok(result) => {
                 tracing::info!(
@@ -208,6 +279,8 @@ pub async fn team_assign_task(
             artifact_path: None,
             blocked_by_human_gate: false,
             required_human_decision: None,
+            target_paths: target_paths.clone(),
+            lock_conflicts: lock_conflict_snapshots.clone(),
         });
         // Issue #107 / #216: tasks も件数上限で古い順に O(1) で破棄
         while team.tasks.len() > MAX_TASKS_PER_TEAM {
@@ -276,30 +349,17 @@ pub async fn team_assign_task(
     let boundary_warning_message =
         boundary_report.warn_message("task boundary warnings (continuing assign)");
 
-    // Issue #526: target_paths 宣言があれば、現在 hub に登録されている file lock と照合し、
-    // 既に他 agent が握っている path があれば `lockConflicts` として response に同梱する。
-    // `team:role-lint-warning` と並列に `team:file-lock-conflict` event も emit して
-    // Canvas UI の toast 経路に乗せる (advisory: 拒否はしない)。
-    let lock_conflicts = if !target_paths.is_empty() {
-        // assignee 自身が握る path は当然衝突ではないので filter で除外。
-        let assignee_aid_filter = if resolved.len() == 1 {
-            Some(resolved[0].0.as_str())
-        } else {
-            // 複数名宛て (同 role 複数 / "all") の場合は誰の lock かを単純に決められないので
-            // フィルタ無し (= 全 holder を返す。Leader が boundaryWarnings 同様に解釈)。
-            None
-        };
-        hub.peek_file_locks(&ctx.team_id, assignee_aid_filter, &target_paths)
-            .await
-    } else {
-        Vec::new()
-    };
-    if !lock_conflicts.is_empty() {
+    if !lock_conflict_snapshots.is_empty() {
         let app = hub.app_handle.lock().await.clone();
         if let Some(app) = &app {
-            let summary = lock_conflicts
+            let summary = lock_conflict_snapshots
                 .iter()
-                .map(|c| format!("{} held by {} ({})", c.path, c.holder_agent_id, c.holder_role))
+                .map(|c| {
+                    format!(
+                        "{} held by {} ({})",
+                        c.path, c.holder_agent_id, c.holder_role
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("; ");
             let payload = json!({
@@ -308,7 +368,7 @@ pub async fn team_assign_task(
                 "taskId": task_id,
                 "assignee": assignee,
                 "message": format!("タスク #{} の file lock 競合: {}", task_id, summary),
-                "conflicts": lock_conflicts,
+                "conflicts": lock_conflict_snapshots.clone(),
             });
             if let Err(e) = app.emit("team:file-lock-conflict", payload) {
                 tracing::warn!("emit team:file-lock-conflict failed: {e}");
@@ -326,7 +386,7 @@ pub async fn team_assign_task(
     //   3) 長時間タスクでは team_status で進捗を残す
     //   4) 完了時に team_send + team_update_task("done" or "blocked") を呼ぶ
     // ことで、Leader が `team_read` 0 件だけで「無応答」と誤判定するのを防ぐ。
-    let notify_message = build_task_notification(task_id, notify_description);
+    let notify_message = build_task_notification(task_id, notify_description, &target_paths);
     let notify_args = json!({ "to": assignee, "message": notify_message });
     let hub_clone = hub.clone();
     let ctx_clone = ctx.clone();
@@ -360,7 +420,10 @@ pub async fn team_assign_task(
         "assignedAt": assigned_at,
         "boundaryWarnings": boundary_warning_strs,
         "boundaryWarningMessage": boundary_warning_message,
-        "lockConflicts": lock_conflicts,
+        "targetPaths": target_paths,
+        "targetPathsMissing": target_paths_missing,
+        "fileLockWarningMessage": file_lock_warning_message,
+        "lockConflicts": lock_conflict_snapshots,
     }))
 }
 
@@ -372,9 +435,33 @@ pub async fn team_assign_task(
 ///   4) 完了時に team_send + team_update_task("done"/"blocked") を呼ぶ
 ///
 /// ことで、Leader が `team_read` 0 件だけで「無応答」と誤判定するのを防ぐ。
-pub(super) fn build_task_notification(task_id: u32, description: &str) -> String {
+pub(super) fn build_task_notification(
+    task_id: u32,
+    description: &str,
+    target_paths: &[String],
+) -> String {
+    let file_lock_section = if target_paths.is_empty() {
+        String::new()
+    } else {
+        let target_paths_json =
+            serde_json::to_string(target_paths).unwrap_or_else(|_| "[]".to_string());
+        let target_paths_list = target_paths
+            .iter()
+            .map(|path| format!("         - {path}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        format!(
+            "\n\n\
+             [File ownership protocol — follow before editing]\n\
+             Target paths declared by the Leader:\n{target_paths_list}\n\
+             Before using Edit / Write / MultiEdit on these paths, call \
+             `team_lock_files({{\"paths\":{target_paths_json}}})`. If `conflicts` is non-empty, \
+             stop editing and report the conflict with `team_send(\"leader\", \"file lock conflict: ...\")`. \
+             After finishing or failing, call `team_unlock_files({{\"paths\":{target_paths_json}}})`."
+        )
+    };
     format!(
-        "[Task #{task_id}] {description}\n\n\
+        "[Task #{task_id}] {description}{file_lock_section}\n\n\
          [Standard response protocol — follow even if not repeated in the task body]\n\
          1. Reply immediately with `team_send(\"leader\", \"ACK: Task #{task_id} received, starting...\")`.\n\
          2. Call `team_update_task({task_id}, \"in_progress\")`.\n\
@@ -387,12 +474,13 @@ pub(super) fn build_task_notification(task_id: u32, description: &str) -> String
 
 #[cfg(test)]
 mod tests {
-    use super::build_task_notification;
+    use super::{build_task_notification, parse_target_paths};
+    use serde_json::json;
 
     /// Issue #409: 通知 payload に ACK / in_progress / status / 完了プロトコルが含まれること。
     #[test]
     fn notification_embeds_standard_response_protocol() {
-        let msg = build_task_notification(42u32, "リポジトリ clone & 調査");
+        let msg = build_task_notification(42u32, "リポジトリ clone & 調査", &[]);
         // 元の description が落ちていない
         assert!(msg.starts_with("[Task #42] リポジトリ clone & 調査"));
         // プロトコル節 4 項目が含まれる
@@ -402,5 +490,38 @@ mod tests {
         assert!(msg.contains("team_status("));
         assert!(msg.contains("team_update_task(42, \"done\")"));
         assert!(msg.contains("\"blocked\""));
+    }
+
+    /// Issue #525: target_paths がある task 通知には、worker が編集前に file lock を取る
+    /// ための具体的な path と tool 呼び出しが含まれること。
+    #[test]
+    fn notification_embeds_file_lock_protocol_when_target_paths_are_declared() {
+        let paths = vec![
+            "src/renderer/src/lib/role-profiles-builtin.ts".to_string(),
+            "src-tauri/src/team_hub/protocol/tools/assign_task.rs".to_string(),
+        ];
+        let msg = build_task_notification(525u32, "file ownership を補強する", &paths);
+        assert!(msg.contains("File ownership protocol"));
+        assert!(msg.contains("team_lock_files"));
+        assert!(msg.contains("team_unlock_files"));
+        assert!(msg.contains("file lock conflict"));
+        assert!(msg.contains("src/renderer/src/lib/role-profiles-builtin.ts"));
+        assert!(msg.contains("src-tauri/src/team_hub/protocol/tools/assign_task.rs"));
+    }
+
+    /// Issue #525: Leader が渡した target_paths は Hub の path 正規化と同じ規則で
+    /// 保存用に整える。空 path / 重複 / Windows separator が残ると ownership 表示が揺れる。
+    #[test]
+    fn parse_target_paths_normalizes_dedups_and_skips_empty_paths() {
+        let paths = parse_target_paths(&json!({
+            "target_paths": [
+                "src\\foo.rs",
+                "./src/foo.rs",
+                "",
+                "src//bar.rs/",
+                42
+            ]
+        }));
+        assert_eq!(paths, vec!["src/foo.rs", "src/bar.rs"]);
     }
 }

@@ -34,12 +34,27 @@ export async function subscribeEventReady<T>(
   cb: (payload: T) => void
 ): Promise<() => void> {
   let disposed = false;
-  const unlisten = await listen<T>(event, (e) => {
-    if (!disposed) cb(e.payload);
-  });
+  let unlisten: (() => void) | null = null;
+  try {
+    unlisten = await listen<T>(event, (e) => {
+      if (!disposed) cb(e.payload);
+    });
+  } catch (error) {
+    // Vitest/jsdom など Tauri runtime がない環境では listen() が reject する。
+    // helper 側で noop cleanup を返し、fire-and-forget caller の unhandled rejection を防ぐ。
+    if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+      console.warn('[subscribe-event] failed to subscribe Tauri event', {
+        event,
+        error,
+      });
+    }
+    return () => {
+      disposed = true;
+    };
+  }
   return () => {
     disposed = true;
-    unlisten();
+    unlisten?.();
   };
 }
 
