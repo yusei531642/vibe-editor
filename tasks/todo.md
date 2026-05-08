@@ -1630,3 +1630,35 @@ Plan: `tasks/release-v1.4.12.md`
 - [x] PR: https://github.com/yusei531642/vibe-editor/pull/557
 - [x] Issue comment: https://github.com/yusei531642/vibe-editor/issues/556#issuecomment-4403888408
 - [x] Issue #556: `implementing` -> `implemented`。Issue close は PR merge 後。
+
+## Release v1.5.3 (2026-05-08 / Codex)
+
+Plan: `tasks/release-v1.5.3.md`
+
+### 計画
+
+- [x] 最新公開リリースが `v1.5.2` であることを確認する。
+- [x] `main` が PR #557 merge commit `0292dbd` まで同期済みであることを確認する。
+- [x] `chore/release-v1.5.3` ブランチを作成する。
+- [x] npm / Rust / Tauri の version を `1.5.3` に更新する。
+- [x] `Cargo.lock` を同期する。
+- [x] 品質ゲートを通す。
+- [ ] release PR を作成し、CI / reviewer bot を確認する。
+- [ ] PR merge 後に `v1.5.3` tag を push する。
+- [ ] release workflow を監視し、draft release の assets と `latest.json` を確認する。
+- [ ] draft release を publish する。
+
+### Next Steps
+
+- [x] `package.json` / `package-lock.json` / `src-tauri/Cargo.toml` / `src-tauri/tauri.conf.json` を `1.5.3` に更新する。
+- [x] `cargo check --manifest-path src-tauri\Cargo.toml` で `Cargo.lock` を同期する。
+- [x] `npm run typecheck`、`npm run test`、`npm run build:vite`、`git diff --check` を実行する。
+
+### 検証結果
+
+- [x] `cargo check --manifest-path src-tauri\Cargo.toml`: PASS
+- [x] `cargo test --manifest-path src-tauri\Cargo.toml --lib`: PASS (293 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (45 files / 288 tests)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
