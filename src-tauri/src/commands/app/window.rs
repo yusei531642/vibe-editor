@@ -1,4 +1,4 @@
-use crate::commands::app::ClaudeCheckResult;
+use crate::{commands::app::ClaudeCheckResult, pty::session::resolve_terminal_command_path_for_check};
 use serde::Serialize;
 
 #[derive(Serialize)]
@@ -40,7 +40,7 @@ pub async fn app_check_claude(command: String) -> ClaudeCheckResult {
             error: Some("invalid command name (only PATH lookup of bare names is allowed)".into()),
         };
     }
-    match which::which(cmd) {
+    match resolve_terminal_command_path_for_check(cmd) {
         Ok(path) => ClaudeCheckResult {
             ok: true,
             path: Some(path.to_string_lossy().into_owned()),

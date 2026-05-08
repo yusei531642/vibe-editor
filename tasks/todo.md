@@ -1842,3 +1842,28 @@ Plan: `tasks/release-v1.5.5.md`
 - [x] Release: https://github.com/yusei531642/vibe-editor/releases/tag/v1.5.5
 - [x] Assets: Windows `.exe`、macOS `.dmg` / `.app.tar.gz`、Linux `.AppImage` / `.deb` / `.rpm`、SBOM、signatures、`latest.json`
 - [x] Published at: 2026-05-08T08:55:50Z
+
+## Issue #568 IDE CLI readiness still reports missing CLI (2026-05-08 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/568
+Plan: `tasks/issue-568-plan.md`
+
+### 計画
+
+- [x] Issue #568 を作成する。
+- [x] readiness check と terminal spawn の resolver 差分を確認する。
+- [x] 原因確定後に最小修正する。
+- [x] 回帰テストを追加する。
+- [ ] `npm run dev` 相当で同じ症状が消えたことを確認する。
+
+### 進捗
+
+- [x] ユーザー報告を Issue 化。
+- [x] RCA Confirmed: `app_check_claude` が `which::which` 直呼びで spawn と別 resolver。Renderer 側は Claude readiness が Codex 描画も巻き込んでいた。
+- [x] 最小修正適用: readiness を Windows 共通 resolver に統一 + `windows_search_dirs` の PATH を `env_value` 統一 + render gate 関数化。
+
+### 検証結果
+
+- `cargo test --lib`: 295/295 PASS
+- `npx vitest run`: 299/299 PASS (48 files)
+- `npm run typecheck`: 0 error

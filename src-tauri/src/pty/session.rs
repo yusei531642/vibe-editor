@@ -318,6 +318,28 @@ fn env_value(env: &HashMap<String, String>, key: &str) -> Option<String> {
         .filter(|v| !v.trim().is_empty())
 }
 
+pub(crate) fn resolve_terminal_command_path_for_check(command: &str) -> Result<PathBuf> {
+    resolve_terminal_command_path_for_check_with_env(command, &HashMap::new())
+}
+
+fn resolve_terminal_command_path_for_check_with_env(
+    command: &str,
+    env: &HashMap<String, String>,
+) -> Result<PathBuf> {
+    #[cfg(windows)]
+    {
+        let pathext_raw = env_value(env, "PATHEXT");
+        let pathext = windows_pathext(pathext_raw.as_deref());
+        let search_dirs = windows_search_dirs(env);
+        resolve_windows_command_path(command, &search_dirs, &pathext)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = env;
+        which::which(command).map_err(Into::into)
+    }
+}
+
 #[cfg(not(windows))]
 fn count_path_entries(path: Option<&str>) -> usize {
     path.map(std::env::split_paths)
@@ -431,12 +453,7 @@ fn windows_search_dirs(env: &HashMap<String, String>) -> Vec<PathBuf> {
         }
     };
 
-    if let Some(path) = env.iter().find(|(k, _)| k.eq_ignore_ascii_case("PATH")) {
-        for dir in std::env::split_paths(path.1) {
-            push_dir(dir);
-        }
-    }
-    if let Ok(path) = std::env::var("PATH") {
+    if let Some(path) = env_value(env, "PATH") {
         for dir in std::env::split_paths(&path) {
             push_dir(dir);
         }
@@ -697,6 +714,42 @@ mod spawn_command_resolution_tests {
         opts.args.clear();
         let err = prepare_spawn_command(&opts).unwrap_err().to_string();
         assert!(err.contains("cmd immediate-exec flags"));
+    }
+
+    #[test]
+    fn readiness_check_uses_same_windows_fallback_dirs_as_spawn() {
+        let home = tempfile::tempdir().unwrap();
+        let claude_dir = home.path().join(".local").join("bin");
+        std::fs::create_dir_all(&claude_dir).unwrap();
+        let claude = claude_dir.join("claude.exe");
+        std::fs::write(&claude, "").unwrap();
+
+        let appdata = home.path().join("AppData").join("Roaming");
+        let npm_dir = appdata.join("npm");
+        std::fs::create_dir_all(&npm_dir).unwrap();
+        let codex = npm_dir.join("codex.cmd");
+        std::fs::write(&codex, "@echo off\r\n").unwrap();
+
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), home.path().join("empty").to_string_lossy().into_owned());
+        env.insert(
+            "USERPROFILE".to_string(),
+            home.path().to_string_lossy().into_owned(),
+        );
+        env.insert("APPDATA".to_string(), appdata.to_string_lossy().into_owned());
+        env.insert(
+            "LOCALAPPDATA".to_string(),
+            home.path().join("LocalAppData").to_string_lossy().into_owned(),
+        );
+
+        assert_eq!(
+            resolve_terminal_command_path_for_check_with_env("claude", &env).unwrap(),
+            claude
+        );
+        assert_eq!(
+            resolve_terminal_command_path_for_check_with_env("codex", &env).unwrap(),
+            codex
+        );
     }
 }
 

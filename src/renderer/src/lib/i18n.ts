@@ -204,7 +204,7 @@ const ja: Dict = {
   'canvasMenu.addClaudeHere': 'ここに Claude を追加',
 
   // ---------- Claude Code panel ----------
-  'claudePanel.title': 'Claude Code',
+  'claudePanel.title': 'IDEモード',
   'claudePanel.starting': '起動待ち',
   'claudePanel.running': '実行中',
   'claudePanel.exited': '終了',
@@ -841,7 +841,7 @@ const en: Dict = {
   'canvasMenu.addClaudeHere': 'Add Claude here',
 
   // ---------- Claude Code panel ----------
-  'claudePanel.title': 'Claude Code',
+  'claudePanel.title': 'IDE Mode',
   'claudePanel.starting': 'Waiting',
   'claudePanel.running': 'Running',
   'claudePanel.exited': 'Exited',

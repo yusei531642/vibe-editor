@@ -66,6 +66,10 @@ import { useAppShortcuts } from './lib/hooks/use-app-shortcuts';
 import { useClaudeCheck } from './lib/hooks/use-claude-check';
 import type { Command } from './lib/commands';
 import { buildAppCommands } from './lib/app-commands';
+import {
+  canRenderTerminalForAgent,
+  shouldShowGlobalClaudeCheck
+} from './lib/terminal-render-gate';
 
 // DiffTab / EditorTab の型定義は use-file-tabs.ts に移管済み (Issue #373 Phase 1-2)。
 
@@ -872,7 +876,7 @@ export function App(): JSX.Element {
         <div
           className="resize-handle"
           onMouseDown={onClaudePanelResizeStart}
-          title="ドラッグで Claude Code パネルの幅を調整"
+          title="ドラッグで IDE モードパネルの幅を調整"
           role="separator"
           aria-orientation="vertical"
         />
@@ -979,20 +983,21 @@ export function App(): JSX.Element {
           data-panes={terminalTabs.length}
           data-panes-many={terminalTabs.length > 16 ? 'true' : undefined}
         >
-          {claudeCheck.state === 'checking' && (
+          {shouldShowGlobalClaudeCheck(terminalTabs.length, claudeCheck.state) &&
+            claudeCheck.state === 'checking' && (
             <div className="claude-not-found__body" style={{ padding: 40, textAlign: 'center' }}>
               {t('claudePanel.checking')}
             </div>
           )}
-          {claudeCheck.state === 'missing' && (
+          {shouldShowGlobalClaudeCheck(terminalTabs.length, claudeCheck.state) &&
+            claudeCheck.state === 'missing' && (
             <ClaudeNotFound
               error={claudeCheck.error}
               onRetry={() => void runClaudeCheck()}
               onOpenSettings={() => setSettingsOpen(true)}
             />
           )}
-          {claudeCheck.state === 'ok' &&
-            projectRoot &&
+          {projectRoot &&
             terminalTabs.map((tab) => (
               <div
                 key={`pane-${tab.id}`}
@@ -1079,46 +1084,58 @@ export function App(): JSX.Element {
                     </button>
                   </div>
                 )}
-                <TerminalView
-                  key={`term-${tab.id}-v${tab.version}`}
-                  // Issue #271: HMR remount 時に同じ PTY へ再 bind するための論理キー。
-                  // tab.id + version で識別。restart は version を上げて key を変えるので
-                  // 同時に sessionKey も変わり、HMR cache は cache miss → 新規 spawn に
-                  // なる。HMR remount は version 不変のままなので、cache hit して既存
-                  // PTY に attach する。
-                  sessionKey={`term:${tab.id}:v${tab.version}`}
-                  ref={(el) => {
-                    if (el) terminalRefs.current.set(tab.id, el);
-                    else terminalRefs.current.delete(tab.id);
-                  }}
-                  cwd={settings.claudeCwd || projectRoot}
-                  fallbackCwd={projectRoot}
-                  command={
-                    tab.agent === 'codex'
-                      ? settings.codexCommand || 'codex'
-                      : settings.claudeCommand || 'claude'
-                  }
-                  args={getTerminalArgs(tab)}
-                  env={getTerminalEnv(tab)}
-                  codexInstructions={getCodexInstructions(tab)}
-                  teamId={tab.teamId ?? undefined}
-                  visible={true}
-                  initialMessage={getRolePrompt(tab)}
-                  agentId={tab.agentId}
-                  role={tab.role ?? undefined}
-                  onStatus={(s) =>
-                    setTerminalTabs((prev) =>
-                      prev.map((t) => (t.id === tab.id ? { ...t, status: s } : t))
-                    )
-                  }
-                  onActivity={() => markTerminalActivity(tab.id)}
-                  onExit={() =>
-                    setTerminalTabs((prev) =>
-                      prev.map((t) => (t.id === tab.id ? { ...t, exited: true } : t))
-                    )
-                  }
-                  onSessionId={(sid) => handleTerminalSessionId(tab, sid)}
-                />
+                {canRenderTerminalForAgent(tab.agent, claudeCheck.state) ? (
+                  <TerminalView
+                    key={`term-${tab.id}-v${tab.version}`}
+                    // Issue #271: HMR remount 時に同じ PTY へ再 bind するための論理キー。
+                    // tab.id + version で識別。restart は version を上げて key を変えるので
+                    // 同時に sessionKey も変わり、HMR cache は cache miss → 新規 spawn に
+                    // なる。HMR remount は version 不変のままなので、cache hit して既存
+                    // PTY に attach する。
+                    sessionKey={`term:${tab.id}:v${tab.version}`}
+                    ref={(el) => {
+                      if (el) terminalRefs.current.set(tab.id, el);
+                      else terminalRefs.current.delete(tab.id);
+                    }}
+                    cwd={settings.claudeCwd || projectRoot}
+                    fallbackCwd={projectRoot}
+                    command={
+                      tab.agent === 'codex'
+                        ? settings.codexCommand || 'codex'
+                        : settings.claudeCommand || 'claude'
+                    }
+                    args={getTerminalArgs(tab)}
+                    env={getTerminalEnv(tab)}
+                    codexInstructions={getCodexInstructions(tab)}
+                    teamId={tab.teamId ?? undefined}
+                    visible={true}
+                    initialMessage={getRolePrompt(tab)}
+                    agentId={tab.agentId}
+                    role={tab.role ?? undefined}
+                    onStatus={(s) =>
+                      setTerminalTabs((prev) =>
+                        prev.map((t) => (t.id === tab.id ? { ...t, status: s } : t))
+                      )
+                    }
+                    onActivity={() => markTerminalActivity(tab.id)}
+                    onExit={() =>
+                      setTerminalTabs((prev) =>
+                        prev.map((t) => (t.id === tab.id ? { ...t, exited: true } : t))
+                      )
+                    }
+                    onSessionId={(sid) => handleTerminalSessionId(tab, sid)}
+                  />
+                ) : claudeCheck.state === 'checking' ? (
+                  <div className="claude-not-found__body" style={{ padding: 40, textAlign: 'center' }}>
+                    {t('claudePanel.checking')}
+                  </div>
+                ) : (
+                  <ClaudeNotFound
+                    error={claudeCheck.error}
+                    onRetry={() => void runClaudeCheck()}
+                    onOpenSettings={() => setSettingsOpen(true)}
+                  />
+                )}
                 {tab.exited && (
                   <div className="terminal-pane__exit-banner" onClick={(e) => e.stopPropagation()}>
                     <span className="terminal-pane__exit-banner-text">
