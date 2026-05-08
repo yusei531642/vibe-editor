@@ -251,20 +251,17 @@ pub async fn team_report(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Resu
             while team.team_reports.len() > MAX_TEAM_REPORTS {
                 let _ = team.team_reports.pop_front();
             }
-            // 既存 task と紐付くなら summary / status / next_action / artifact_path を更新する。
+            // 既存 task と紐付いても、status / next_action / artifact_path は上書きしない。
+            // 状態遷移は done_criteria / done_evidence を検証する `team_update_task` 経路に限定し、
+            // `team_report` は構造化レポートを `team_reports[]` に積むだけにする
+            // (PR #575 review: 任意 worker が証拠ゼロで他者 task を done にできる認可欠落の修正)。
+            // 軽量な summary / updated_at のヒント反映だけは、caller が task の assignee
+            // (role 一致 or 同一 agent_id) のときに限り許可する。
             if let Some(num) = task_id_num {
                 if let Some(task) = team.tasks.iter_mut().find(|t| t.id == num) {
-                    task.summary = Some(summary.clone());
-                    task.updated_at = Some(now_iso.clone());
-                    // status は team_update_task 由来の文字列 ("done" / "blocked" / "in_progress" など) を
-                    // そのまま採用してきたため、team_report の status enum と完全互換 (`done` / `blocked` /
-                    // `needs_input` / `failed`)。ステータスの上書きは team_report 由来の最新値を採用。
-                    task.status = status.clone();
-                    if let Some(first_next) = next_actions.first() {
-                        task.next_action = Some(first_next.clone());
-                    }
-                    if let Some(first_artifact) = artifact_refs.first() {
-                        task.artifact_path = Some(first_artifact.clone());
+                    if task.assigned_to == ctx.role || task.assigned_to == ctx.agent_id {
+                        task.summary = Some(summary.clone());
+                        task.updated_at = Some(now_iso.clone());
                     }
                 }
             }
@@ -474,8 +471,10 @@ mod tests {
         assert_eq!(saved.next_actions, vec!["Update SKILL.md", "Run cargo test"]);
     }
 
+    /// PR #575 review fix: assignee が呼んだ場合は summary / updated_at だけ反映する
+    /// (status / next_action / artifact_path は触らない = team_update_task の done_evidence 検証を迂回しない)。
     #[tokio::test]
-    async fn updates_associated_task_when_task_id_matches() {
+    async fn assignee_report_only_mutates_summary_and_updated_at() {
         let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
         let team_id = "team-572-task".to_string();
         {
@@ -523,14 +522,81 @@ mod tests {
         let state = hub.state.lock().await;
         let team = state.teams.get(&team_id).unwrap();
         let task = team.tasks.iter().find(|t| t.id == 7).unwrap();
-        assert_eq!(task.status, "done");
+        // status は team_update_task 経路に集約 = team_report で上書きしない。
+        assert_eq!(task.status, "in_progress");
+        // summary と updated_at は assignee 一致時のみ反映 = ここでは反映される。
         assert_eq!(task.summary.as_deref(), Some("fixture done"));
-        assert_eq!(task.next_action.as_deref(), Some("proceed to merge"));
-        assert_eq!(task.artifact_path.as_deref(), Some("pull-request-572"));
         assert!(task.updated_at.is_some());
-        // Reports backlog にも 1 件入っている
+        // next_action / artifact_path は team_report からは触らない (None のまま)。
+        assert!(task.next_action.is_none());
+        assert!(task.artifact_path.is_none());
+        // Reports backlog 自体は authorization に関係なく 1 件残る (= 報告は届く)。
         assert_eq!(team.team_reports.len(), 1);
-        assert_eq!(team.team_reports.back().unwrap().task_id_num, Some(7));
+        let report = team.team_reports.back().unwrap();
+        assert_eq!(report.task_id_num, Some(7));
+        assert_eq!(report.next_actions, vec!["proceed to merge"]);
+        assert_eq!(report.artifact_refs, vec!["pull-request-572"]);
+    }
+
+    /// PR #575 review fix: assignee 以外 (別 role / 別 agent_id) からの team_report は
+    /// task のフィールドを **一切** 触らない。報告自体 (= team_reports backlog) は届くので
+    /// Leader は見える。これにより worker A が worker B の task を勝手に done 扱いできる
+    /// 認可欠落 (任意ステータス操作 / done_evidence 検証バイパス) を構造的に消す。
+    #[tokio::test]
+    async fn non_assignee_report_does_not_mutate_task_fields() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let team_id = "team-572-task-non-assignee".to_string();
+        {
+            let mut state = hub.state.lock().await;
+            let team = state
+                .teams
+                .entry(team_id.clone())
+                .or_insert_with(TeamInfo::default);
+            team.tasks.push_back(TeamTask {
+                id: 9,
+                assigned_to: "programmer".into(),
+                description: "B's task".into(),
+                status: "in_progress".into(),
+                created_by: "leader".into(),
+                created_at: "2026-05-08T09:00:00Z".into(),
+                updated_at: None,
+                summary: None,
+                blocked_reason: None,
+                next_action: None,
+                artifact_path: None,
+                blocked_by_human_gate: false,
+                required_human_decision: None,
+                target_paths: Vec::new(),
+                lock_conflicts: Vec::new(),
+                pre_approval: None,
+                done_criteria: vec!["tests pass".into()],
+                done_evidence: Vec::new(),
+            });
+        }
+        // role = "researcher" は assigned_to "programmer" と一致しないので mutate 不可。
+        let ctx = make_ctx(&team_id, "researcher", "vc-r-malicious");
+        team_report(
+            &hub,
+            &ctx,
+            &json!({
+                "task_id": 9,
+                "status": "done",
+                "summary": "I (researcher) marked B's task done with no evidence"
+            }),
+        )
+        .await
+        .expect("report 自体は成功 (= state には残る) させて、task は触らない方針");
+
+        let state = hub.state.lock().await;
+        let team = state.teams.get(&team_id).unwrap();
+        let task = team.tasks.iter().find(|t| t.id == 9).unwrap();
+        // task は完全に元のまま。status は "in_progress"、summary も None、updated_at も None。
+        assert_eq!(task.status, "in_progress");
+        assert!(task.summary.is_none());
+        assert!(task.updated_at.is_none());
+        // Reports backlog には載る (Leader はレポート自体は見える)。
+        assert_eq!(team.team_reports.len(), 1);
+        assert_eq!(team.team_reports.back().unwrap().from_role, "researcher");
     }
 
     #[tokio::test]
