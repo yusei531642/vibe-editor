@@ -8,12 +8,17 @@ use crate::pty::scrollback::{
     scrollback_to_string, Scrollback, WriteBudget, MAX_TERMINAL_WRITE_BYTES_PER_CALL,
     MAX_TERMINAL_WRITE_BYTES_PER_SEC, TERMINAL_WRITE_WINDOW,
 };
+use crate::{commands::terminal::command_validation, util::log_redact::redact_home};
 use anyhow::{anyhow, Result};
 use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use std::collections::HashMap;
+#[cfg(windows)]
+use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::Path;
+#[cfg(windows)]
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
@@ -279,6 +284,251 @@ fn should_inherit_env(key: &str) -> bool {
     )
 }
 
+#[derive(Debug, Clone)]
+struct PreparedSpawnCommand {
+    requested_command: String,
+    resolved_command: String,
+    program: String,
+    args: Vec<String>,
+    path_entries: usize,
+    pathext_present: bool,
+}
+
+fn prepare_spawn_command(opts: &SpawnOptions) -> Result<PreparedSpawnCommand> {
+    let (command, args) = command_validation::normalize_terminal_command(
+        Some(opts.command.clone()),
+        Some(opts.args.clone()),
+    );
+    if !command_validation::is_allowed_terminal_command(&command) {
+        return Err(anyhow!(
+            "command is not allowed at spawn boundary: {command}"
+        ));
+    }
+    if let Some(reason) = command_validation::reject_immediate_exec_args(&command, &args) {
+        return Err(anyhow!("{reason}"));
+    }
+    resolve_spawn_command(&command, args, &opts.env)
+}
+
+fn env_value(env: &HashMap<String, String>, key: &str) -> Option<String> {
+    env.iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(key))
+        .map(|(_, v)| v.clone())
+        .or_else(|| std::env::var(key).ok())
+        .filter(|v| !v.trim().is_empty())
+}
+
+#[cfg(not(windows))]
+fn count_path_entries(path: Option<&str>) -> usize {
+    path.map(std::env::split_paths)
+        .map(|paths| paths.count())
+        .unwrap_or(0)
+}
+
+#[cfg(not(windows))]
+fn resolve_spawn_command(
+    command: &str,
+    args: Vec<String>,
+    env: &HashMap<String, String>,
+) -> Result<PreparedSpawnCommand> {
+    let resolved_command = which::which(command)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| command.to_string());
+    Ok(PreparedSpawnCommand {
+        requested_command: command.to_string(),
+        resolved_command: resolved_command.clone(),
+        program: resolved_command,
+        args,
+        path_entries: count_path_entries(env_value(env, "PATH").as_deref()),
+        pathext_present: false,
+    })
+}
+
+#[cfg(windows)]
+fn resolve_spawn_command(
+    command: &str,
+    args: Vec<String>,
+    env: &HashMap<String, String>,
+) -> Result<PreparedSpawnCommand> {
+    resolve_windows_spawn_command(command, args, env)
+}
+
+#[cfg(windows)]
+fn resolve_windows_spawn_command(
+    command: &str,
+    args: Vec<String>,
+    env: &HashMap<String, String>,
+) -> Result<PreparedSpawnCommand> {
+    let pathext_raw = env_value(env, "PATHEXT");
+    let pathext = windows_pathext(pathext_raw.as_deref());
+    let search_dirs = windows_search_dirs(env);
+    let resolved = resolve_windows_command_path(command, &search_dirs, &pathext)?;
+    let mut spawn_args = args;
+    let program = if is_windows_cmd_script(&resolved) {
+        let mut wrapped = Vec::with_capacity(spawn_args.len() + 2);
+        wrapped.push("/C".to_string());
+        wrapped.push(resolved.to_string_lossy().into_owned());
+        wrapped.append(&mut spawn_args);
+        spawn_args = wrapped;
+        env_value(env, "COMSPEC").unwrap_or_else(|| "cmd.exe".to_string())
+    } else {
+        resolved.to_string_lossy().into_owned()
+    };
+
+    Ok(PreparedSpawnCommand {
+        requested_command: command.to_string(),
+        resolved_command: resolved.to_string_lossy().into_owned(),
+        program,
+        args: spawn_args,
+        path_entries: search_dirs.len(),
+        pathext_present: pathext_raw.is_some(),
+    })
+}
+
+#[cfg(windows)]
+fn windows_pathext(raw: Option<&str>) -> Vec<String> {
+    let values = raw
+        .map(|s| {
+            s.split(';')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| {
+                    let ext = if s.starts_with('.') {
+                        s.to_string()
+                    } else {
+                        format!(".{s}")
+                    };
+                    ext.to_ascii_lowercase()
+                })
+                .collect::<Vec<_>>()
+        })
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| {
+            [".com", ".exe", ".bat", ".cmd"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect()
+        });
+
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for ext in values {
+        if seen.insert(ext.clone()) {
+            out.push(ext);
+        }
+    }
+    out
+}
+
+#[cfg(windows)]
+fn windows_search_dirs(env: &HashMap<String, String>) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let mut seen = HashSet::new();
+    let mut push_dir = |path: PathBuf| {
+        let key = path.to_string_lossy().to_ascii_lowercase();
+        if !key.trim().is_empty() && seen.insert(key) {
+            dirs.push(path);
+        }
+    };
+
+    if let Some(path) = env.iter().find(|(k, _)| k.eq_ignore_ascii_case("PATH")) {
+        for dir in std::env::split_paths(path.1) {
+            push_dir(dir);
+        }
+    }
+    if let Ok(path) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path) {
+            push_dir(dir);
+        }
+    }
+
+    if let Some(appdata) = env_value(env, "APPDATA") {
+        push_dir(PathBuf::from(appdata).join("npm"));
+    }
+    if let Some(userprofile) = env_value(env, "USERPROFILE") {
+        push_dir(PathBuf::from(userprofile).join(".local").join("bin"));
+    }
+    if let Some(localappdata) = env_value(env, "LOCALAPPDATA") {
+        let base = PathBuf::from(localappdata);
+        push_dir(base.join("Microsoft").join("WindowsApps"));
+        push_dir(base.join("OpenAI").join("Codex").join("bin"));
+    }
+
+    dirs
+}
+
+#[cfg(windows)]
+fn command_has_path_separator(command: &str) -> bool {
+    command.contains('\\') || command.contains('/')
+}
+
+#[cfg(windows)]
+fn command_has_extension(command: &str) -> bool {
+    Path::new(command).extension().is_some()
+}
+
+#[cfg(windows)]
+fn candidate_paths(base: &Path, pathext: &[String]) -> Vec<PathBuf> {
+    if base.extension().is_some() {
+        return vec![base.to_path_buf()];
+    }
+    let mut out = vec![base.to_path_buf()];
+    for ext in pathext {
+        out.push(PathBuf::from(format!("{}{}", base.to_string_lossy(), ext)));
+    }
+    out
+}
+
+#[cfg(windows)]
+fn resolve_windows_command_path(
+    command: &str,
+    search_dirs: &[PathBuf],
+    pathext: &[String],
+) -> Result<PathBuf> {
+    let direct_path = PathBuf::from(command);
+    if direct_path.is_absolute() || command_has_path_separator(command) {
+        for candidate in candidate_paths(&direct_path, pathext) {
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+        return Err(anyhow!(
+            "command executable was not found: {}",
+            redact_home(command)
+        ));
+    }
+
+    if command_has_extension(command) {
+        if let Ok(found) = which::which(command) {
+            return Ok(found);
+        }
+    } else if let Ok(found) = which::which(command) {
+        return Ok(found);
+    }
+
+    for dir in search_dirs {
+        for candidate in candidate_paths(&dir.join(command), pathext) {
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    Err(anyhow!(
+        "command executable was not found: {} (searched {} PATH entries)",
+        command,
+        search_dirs.len()
+    ))
+}
+
+#[cfg(windows)]
+fn is_windows_cmd_script(path: &Path) -> bool {
+    path.extension()
+        .and_then(|s| s.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("bat"))
+        .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod env_strip_tests {
     use super::should_inherit_env;
@@ -313,12 +563,126 @@ mod env_strip_tests {
     }
 }
 
+#[cfg(all(test, windows))]
+mod spawn_command_resolution_tests {
+    use super::*;
+
+    fn base_spawn_options(command: String, args: Vec<String>) -> SpawnOptions {
+        SpawnOptions {
+            command,
+            args,
+            cwd: ".".to_string(),
+            is_codex: false,
+            cols: 80,
+            rows: 24,
+            env: HashMap::new(),
+            agent_id: None,
+            session_key: None,
+            team_id: None,
+            role: None,
+        }
+    }
+
+    #[test]
+    fn resolves_cmd_from_opts_env_path_and_wraps_with_cmd_exe() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cli = tmp.path().join("fakeagent.cmd");
+        std::fs::write(&cli, "@echo off\r\n").unwrap();
+        let mut env = HashMap::new();
+        env.insert(
+            "PATH".to_string(),
+            tmp.path().to_string_lossy().into_owned(),
+        );
+
+        let prepared =
+            resolve_windows_spawn_command("fakeagent", vec!["--version".to_string()], &env)
+                .unwrap();
+
+        assert_eq!(
+            Path::new(&prepared.program)
+                .file_name()
+                .and_then(|s| s.to_str())
+                .map(str::to_ascii_lowercase)
+                .as_deref(),
+            Some("cmd.exe")
+        );
+        assert_eq!(prepared.args[0], "/C");
+        assert_eq!(PathBuf::from(&prepared.args[1]), cli);
+        assert_eq!(prepared.args[2], "--version");
+        assert_eq!(PathBuf::from(prepared.resolved_command), cli);
+    }
+
+    #[test]
+    fn resolves_exe_without_cmd_wrapper() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cli = tmp.path().join("fakeagent.exe");
+        std::fs::write(&cli, "").unwrap();
+        let mut env = HashMap::new();
+        env.insert(
+            "PATH".to_string(),
+            tmp.path().to_string_lossy().into_owned(),
+        );
+
+        let prepared =
+            resolve_windows_spawn_command("fakeagent", vec!["--help".to_string()], &env).unwrap();
+
+        assert_eq!(PathBuf::from(&prepared.program), cli);
+        assert_eq!(prepared.args, vec!["--help"]);
+    }
+
+    #[test]
+    fn normalizes_inline_command_again_at_spawn_boundary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let cli = tmp.path().join("codex.exe");
+        std::fs::write(&cli, "").unwrap();
+        let command = format!(
+            r#""{}" --dangerously-bypass-approvals-and-sandbox"#,
+            cli.display()
+        );
+        let mut opts = base_spawn_options(
+            command,
+            vec![
+                "--config".to_string(),
+                "disable_paste_burst=true".to_string(),
+            ],
+        );
+
+        let prepared = prepare_spawn_command(&opts).unwrap();
+
+        assert_eq!(PathBuf::from(&prepared.program), cli);
+        assert_eq!(
+            prepared.args,
+            vec![
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--config",
+                "disable_paste_burst=true",
+            ]
+        );
+
+        opts.command = "cmd /c echo unsafe".to_string();
+        opts.args.clear();
+        let err = prepare_spawn_command(&opts).unwrap_err().to_string();
+        assert!(err.contains("cmd immediate-exec flags"));
+    }
+}
+
 pub fn spawn_session(
     app: AppHandle,
     id: String,
     opts: SpawnOptions,
     registry: std::sync::Arc<crate::pty::SessionRegistry>,
 ) -> Result<SessionHandle> {
+    let prepared_command = prepare_spawn_command(&opts)?;
+    tracing::info!(
+        "[pty] spawn command requested={} resolved={} launcher={} args.len={} path_entries={} pathext_present={}",
+        redact_home(&prepared_command.requested_command),
+        redact_home(&prepared_command.resolved_command),
+        redact_home(&prepared_command.program),
+        prepared_command.args.len(),
+        prepared_command.path_entries,
+        prepared_command.pathext_present
+    );
+
     let pty_system = native_pty_system();
     let pair = pty_system.openpty(PtySize {
         rows: opts.rows.max(5),
@@ -327,13 +691,8 @@ pub fn spawn_session(
         pixel_height: 0,
     })?;
 
-    // Windows: PATHEXT 経由で .cmd / .bat / .exe を解決する。
-    // 旧 node-pty は内部で同等処理をしていたため、claude → claude.cmd の自動解決が必要。
-    let resolved_command = which::which(&opts.command)
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| opts.command.clone());
-    let mut cmd = CommandBuilder::new(&resolved_command);
-    for a in &opts.args {
+    let mut cmd = CommandBuilder::new(&prepared_command.program);
+    for a in &prepared_command.args {
         cmd.arg(a);
     }
     cmd.cwd(&opts.cwd);
