@@ -49,6 +49,13 @@ if let Some(window) = app.get_webview_window("main") {
 - `which::which("claude")` で事前に絶対パス + 拡張子付きに変換してから spawn する
 - エラー: `os error 193` (`%1 は有効な Win32 アプリケーションではありません`)
 
+### npm の拡張子なし shim を Windows で直接 spawn しない
+- Windows npm は `codex` / `claude` の拡張子なし shell shim と `.cmd` shim を同じディレクトリに作る。
+- 拡張子なし shim は `#!/bin/sh` のテキストなので、`CreateProcessW` に直接渡すと `os error 193` になる。
+- Windows の bare command resolver は `which` に任せきらず、PATHEXT 候補（`.com`, `.exe`, `.bat`, `.cmd`）を拡張子なし候補より先に見る。
+- `.cmd` / `.bat` を選んだ場合は `cmd.exe /C <shim> ...args` で起動する。
+- 回帰テストでは、同じ一時ディレクトリに `codex` と `codex.cmd` を置き、`.cmd` が選ばれることを必ず確認する。
+
 ## PTY / ConPTY
 
 ### Windows ConPTY の EOF 挙動
