@@ -3,7 +3,8 @@
  *   - team:recruit-request   (Leader / HR が team_recruit を呼んだ)
  *   - team:dismiss-request   (誰かが team_dismiss を呼んだ)
  *   - team:recruit-cancelled (timeout 等で取消)
- * の 3 イベントを受け、canvas store にカードを追加 / 削除する。
+ *   - team:recruit-rescued   (timeout 後 grace 中の ack 救済)
+ * のイベントを受け、canvas store にカードを追加 / 削除 / 維持通知する。
  *
  * App.tsx で 1 度だけ mount される想定。
  *
@@ -21,7 +22,7 @@ import type { CardData } from '../stores/canvas';
 import { useRoleProfiles } from './role-profiles-context';
 import { ackRecruit } from './recruit-ack';
 import { findRecruitPosition } from './canvas-recruit-position';
-import type { WaitPolicy } from '../../../types/shared';
+import type { RecruitRescuedPayload, WaitPolicy } from '../../../types/shared';
 import { useToast } from './toast-context';
 import { useT } from './i18n';
 import {
@@ -131,6 +132,8 @@ export function useRecruitListener(): void {
     count: 0,
     firstObservedAt: null
   });
+  // Issue #577: Hub 側の ack_done でも重複は防ぐが、renderer 側でも同じ agent の toast は 1 回に抑える。
+  const rescuedRecruitToastRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     return subscribeOnVisible(() => {
@@ -319,6 +322,25 @@ export function useRecruitListener(): void {
         // 既に立っている Leader / 他メンバーを巻き込まないようカスケード無効化。
         store.removeCard(target.id, { cascadeTeam: false });
       }
+    }).then((u) => {
+      if (cancelled) {
+        u();
+      } else {
+        unlistens.push(u);
+      }
+    });
+
+    void listen<RecruitRescuedPayload>('team:recruit-rescued', (e) => {
+      if (cancelled) return;
+      const p = e.payload;
+      if (rescuedRecruitToastRef.current.has(p.newAgentId)) return;
+      rescuedRecruitToastRef.current.add(p.newAgentId);
+      console.info(`[recruit] rescued late ack: ${p.newAgentId} (${p.lateByMs}ms)`);
+      // timeout cancel 後に ack が grace 内で届いた場合、カードは撤収せず維持する。
+      showToastRef.current(tRef.current('toast.recruitRescued', { ms: p.lateByMs }), {
+        tone: 'success',
+        duration: 6000
+      });
     }).then((u) => {
       if (cancelled) {
         u();

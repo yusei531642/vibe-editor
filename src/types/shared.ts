@@ -1103,6 +1103,17 @@ export interface RecruitObservedWhileHiddenArgs {
   hiddenForMs: number;
 }
 
+/**
+ * Issue #577: ack timeout 後の grace 期間中に遅着 ack が救済された通知。
+ * Rust 側 `RecruitRescuedPayload` (`serde(rename_all = "camelCase")`) と整合。
+ */
+export interface RecruitRescuedPayload {
+  /** 採用された新規 agent_id (recruit-request payload の newAgentId)。 */
+  newAgentId: string;
+  /** timeout から ack 遅着までの経過時間 (ms)。 */
+  lateByMs: number;
+}
+
 // ---------- Window Effects (Issue #260) ----------
 
 /**

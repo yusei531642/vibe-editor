@@ -14,10 +14,13 @@ use crate::pty::SessionRegistry;
 use anyhow::Result;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tauri::Emitter;
 use tokio::sync::{oneshot, Mutex, OwnedSemaphorePermit, Semaphore};
 pub(crate) struct HubState {
     /// チーム別の会話履歴・タスク
@@ -109,6 +112,14 @@ pub struct MemberDiagnostics {
 /// ファイルロガー無効 (stderr-only モード) の場合は `None` のままで、診断 API 側が
 /// `"<stderr>"` を返す。
 static SERVER_LOG_PATH: OnceCell<PathBuf> = OnceCell::new();
+
+const RECRUIT_GRACE_DEFAULT_MS: u64 = 2_000;
+const RECRUIT_GRACE_MAX_MS: u64 = 10_000;
+
+#[cfg(test)]
+static RECRUIT_RESCUED_EVENTS_FOR_TEST: once_cell::sync::Lazy<
+    std::sync::Mutex<Vec<RecruitRescuedPayload>>,
+> = once_cell::sync::Lazy::new(|| std::sync::Mutex::new(Vec::new()));
 
 /// init_logging() から起動時に 1 度だけ呼ぶ。2 回目以降は無視される。
 pub fn set_server_log_path(p: PathBuf) {
@@ -251,6 +262,16 @@ pub struct PendingRecruit {
     pub tx: oneshot::Sender<RecruitOutcome>,
     pub ack_tx: Option<oneshot::Sender<RecruitAckOutcome>>,
     pub ack_done: AtomicBool,
+    /// Issue #577: ack timeout 済みだが grace window 中で、遅着 ack を rescue できる状態。
+    pub timed_out_at: Option<Instant>,
+}
+
+/// Issue #577: timeout 後 grace 期間中に遅着 ack を救済したことを renderer に知らせる event payload。
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RecruitRescuedPayload {
+    pub new_agent_id: String,
+    pub late_by_ms: u64,
 }
 
 /// Issue #342 Phase 1: renderer から `app_recruit_ack` で渡される受領通知 outcome。
@@ -775,6 +796,7 @@ impl TeamHub {
                 tx,
                 ack_tx: Some(ack_tx),
                 ack_done: AtomicBool::new(false),
+                timed_out_at: None,
             },
         );
         Ok(PendingRecruitChannels {
@@ -859,10 +881,55 @@ impl TeamHub {
         true
     }
 
-    /// timeout 等でキャンセル: pending を破棄 (送信側 dropped で recv が Err になる)
+    /// timeout 等でキャンセル: ack channel は即時 close しつつ、短い grace window 中は
+    /// pending を残して renderer からの遅着 ack を rescue できるようにする (Issue #577)。
     pub async fn cancel_pending_recruit(&self, agent_id: &str) {
-        let mut s = self.state.lock().await;
-        s.pending_recruits.remove(agent_id);
+        self.cancel_pending_recruit_with_grace(agent_id, recruit_grace_from_env())
+            .await;
+    }
+
+    async fn cancel_pending_recruit_with_grace(&self, agent_id: &str, grace: Duration) {
+        let timed_out_at = Instant::now();
+        let should_schedule_cleanup = {
+            let mut s = self.state.lock().await;
+            let Some(pending) = s.pending_recruits.get_mut(agent_id) else {
+                return;
+            };
+
+            // 既に timeout 済みなら idempotent に扱う。重複 cleanup task を増やさない。
+            if pending.timed_out_at.is_some() {
+                return;
+            }
+
+            // ack waiter には従来どおり Err を返すため、ack_tx は timeout 時点で close する。
+            let _ = pending.ack_tx.take();
+
+            if grace.is_zero() {
+                // VIBE_TEAM_RECRUIT_GRACE_MS=0 は旧挙動互換: 即時に pending を破棄する。
+                s.pending_recruits.remove(agent_id);
+                false
+            } else {
+                pending.timed_out_at = Some(timed_out_at);
+                true
+            }
+        };
+
+        if should_schedule_cleanup {
+            let hub = self.clone();
+            let agent_id = agent_id.to_string();
+            tokio::spawn(async move {
+                tokio::time::sleep(grace).await;
+                let mut s = hub.state.lock().await;
+                let should_remove = s
+                    .pending_recruits
+                    .get(&agent_id)
+                    .and_then(|p| p.timed_out_at)
+                    .is_some_and(|ts| ts == timed_out_at);
+                if should_remove {
+                    s.pending_recruits.remove(&agent_id);
+                }
+            });
+        }
     }
 
     /// Issue #576: team 単位の同時 recruit permit を取得する。
@@ -987,6 +1054,25 @@ impl TeamHub {
             tracing::warn!("[teamhub] recruit_ack ignored: already acked agent={agent_id}");
             return Err(AckError::AlreadyAcked);
         }
+        if let Some(timed_out_at) = pending.timed_out_at {
+            // timeout 後 grace 中の遅着 ack。ack waiter は既に close 済みなので送信せず、
+            // renderer 側へ rescue event を出してカード維持を観測可能にする。
+            let _ = pending.ack_tx.take();
+            let late_by_ms = timed_out_at.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+            let payload = RecruitRescuedPayload {
+                new_agent_id: agent_id.to_string(),
+                late_by_ms,
+            };
+            drop(s);
+            tracing::info!(
+                "[teamhub] recruit_ack rescued agent={} late_by_ms={}",
+                agent_id,
+                late_by_ms
+            );
+            self.emit_recruit_rescued(payload).await;
+            return Ok(());
+        }
+
         let ack_tx = pending.ack_tx.take();
         // pending エントリ自体は handshake 待機中の `tx` をまだ保持している必要があるため remove しない。
         drop(s);
@@ -995,6 +1081,23 @@ impl TeamHub {
             let _ = tx.send(outcome);
         }
         Ok(())
+    }
+
+    async fn emit_recruit_rescued(&self, payload: RecruitRescuedPayload) {
+        #[cfg(test)]
+        {
+            RECRUIT_RESCUED_EVENTS_FOR_TEST
+                .lock()
+                .expect("recruit rescued test event mutex poisoned")
+                .push(payload.clone());
+        }
+
+        let app = self.app_handle.lock().await.clone();
+        if let Some(app) = app {
+            if let Err(err) = app.emit("team:recruit-rescued", payload) {
+                tracing::warn!("[teamhub] failed to emit recruit-rescued event: {err}");
+            }
+        }
     }
 
     /// setup 後に AppHandle を注入 (event::emit で使う)
@@ -1365,14 +1468,23 @@ impl TeamHub {
 /// `acquire_recruit_permit` の lazy 初期化時に 1 度だけ呼ばれる想定なので、env を読む
 /// オーバーヘッドは無視できる。
 fn recruit_concurrency_from_env() -> usize {
-    use crate::team_hub::protocol::consts::{
-        RECRUIT_DEFAULT_CONCURRENCY, RECRUIT_MAX_CONCURRENCY,
-    };
+    use crate::team_hub::protocol::consts::{RECRUIT_DEFAULT_CONCURRENCY, RECRUIT_MAX_CONCURRENCY};
     std::env::var("VIBE_TEAM_RECRUIT_CONCURRENCY")
         .ok()
         .and_then(|raw| raw.trim().parse::<usize>().ok())
         .filter(|&n| (1..=RECRUIT_MAX_CONCURRENCY).contains(&n))
         .unwrap_or(RECRUIT_DEFAULT_CONCURRENCY)
+}
+
+/// Issue #577: timeout 後に遅着 ack を rescue する grace window。
+/// `VIBE_TEAM_RECRUIT_GRACE_MS=0` は旧挙動互換、`>10000` / parse 失敗 / 未設定は default。
+fn recruit_grace_from_env() -> Duration {
+    let ms = std::env::var("VIBE_TEAM_RECRUIT_GRACE_MS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|&n| n <= RECRUIT_GRACE_MAX_MS)
+        .unwrap_or(RECRUIT_GRACE_DEFAULT_MS);
+    Duration::from_millis(ms)
 }
 
 /// Issue #513: `~/.vibe-editor/role-profiles.json#dynamic[]` から **指定 team_id に紐付く
@@ -1427,6 +1539,190 @@ async fn load_persisted_dynamic_for_team(
     out
 }
 
+/// Issue #577: timeout 後 grace 期間中の recruit ack rescue の単体テスト。
+#[cfg(test)]
+mod recruit_rescue_tests {
+    use super::{RecruitAckOutcome, TeamHub, RECRUIT_RESCUED_EVENTS_FOR_TEST};
+    use crate::pty::SessionRegistry;
+    use crate::team_hub::error::AckError;
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+    use tokio::sync::Barrier;
+    use tokio::time::sleep;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn make_hub() -> TeamHub {
+        TeamHub::new(Arc::new(SessionRegistry::new()))
+    }
+
+    fn ok_ack() -> RecruitAckOutcome {
+        RecruitAckOutcome {
+            ok: true,
+            reason: None,
+            phase: None,
+        }
+    }
+
+    async fn register(hub: &TeamHub, agent_id: &str) -> super::PendingRecruitChannels {
+        hub.try_register_pending_recruit(
+            agent_id.to_string(),
+            "team-a".to_string(),
+            "worker".to_string(),
+            "leader-a".to_string(),
+            false,
+            &[],
+        )
+        .await
+        .expect("pending recruit should be registered")
+    }
+
+    fn clear_rescue_events() {
+        RECRUIT_RESCUED_EVENTS_FOR_TEST
+            .lock()
+            .expect("recruit rescued test event mutex poisoned")
+            .clear();
+    }
+
+    fn rescue_events() -> Vec<super::RecruitRescuedPayload> {
+        RECRUIT_RESCUED_EVENTS_FOR_TEST
+            .lock()
+            .expect("recruit rescued test event mutex poisoned")
+            .clone()
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn timed_out_ack_within_grace_is_rescued_and_emits_event() {
+        let _env_guard = ENV_LOCK.lock().expect("env lock poisoned");
+        std::env::set_var("VIBE_TEAM_RECRUIT_GRACE_MS", "2000");
+        clear_rescue_events();
+
+        let hub = make_hub();
+        let channels = register(&hub, "agent-rescue").await;
+
+        hub.cancel_pending_recruit("agent-rescue").await;
+        assert!(
+            channels.ack.await.is_err(),
+            "ack waiter should be closed immediately at timeout"
+        );
+
+        sleep(Duration::from_millis(20)).await;
+        hub.resolve_recruit_ack("agent-rescue", "team-a", ok_ack())
+            .await
+            .expect("late ack within grace should be rescued");
+
+        let events = rescue_events();
+        assert_eq!(events.len(), 1, "rescue event should be recorded once");
+        assert_eq!(events[0].new_agent_id, "agent-rescue");
+        assert!(
+            events[0].late_by_ms > 0,
+            "late_by_ms should record elapsed time after timeout"
+        );
+
+        let timed_out = hub
+            .state
+            .lock()
+            .await
+            .pending_recruits
+            .get("agent-rescue")
+            .and_then(|p| p.timed_out_at)
+            .is_some();
+        assert!(timed_out, "pending should remain during grace window");
+
+        std::env::remove_var("VIBE_TEAM_RECRUIT_GRACE_MS");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn grace_zero_removes_pending_immediately_and_late_ack_is_not_found() {
+        let _env_guard = ENV_LOCK.lock().expect("env lock poisoned");
+        std::env::set_var("VIBE_TEAM_RECRUIT_GRACE_MS", "0");
+        clear_rescue_events();
+
+        let hub = make_hub();
+        let channels = register(&hub, "agent-zero").await;
+
+        hub.cancel_pending_recruit("agent-zero").await;
+        assert!(
+            channels.ack.await.is_err(),
+            "ack waiter should be closed immediately"
+        );
+        assert!(
+            !hub.state
+                .lock()
+                .await
+                .pending_recruits
+                .contains_key("agent-zero"),
+            "grace=0 should preserve the old immediate-remove behavior"
+        );
+
+        let err = hub
+            .resolve_recruit_ack("agent-zero", "team-a", ok_ack())
+            .await
+            .expect_err("late ack after immediate removal should be rejected");
+        assert!(matches!(err, AckError::NotFound));
+        assert!(rescue_events().is_empty());
+
+        std::env::remove_var("VIBE_TEAM_RECRUIT_GRACE_MS");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cancel_and_duplicate_ack_race_is_serialized_by_ack_done() {
+        clear_rescue_events();
+
+        let hub = make_hub();
+        let _channels = register(&hub, "agent-race").await;
+        let barrier = Arc::new(Barrier::new(3));
+
+        let cancel_hub = hub.clone();
+        let cancel_barrier = barrier.clone();
+        let cancel_task = tokio::spawn(async move {
+            cancel_barrier.wait().await;
+            cancel_hub
+                .cancel_pending_recruit_with_grace("agent-race", Duration::from_millis(2000))
+                .await;
+        });
+
+        let ack_hub_1 = hub.clone();
+        let ack_barrier_1 = barrier.clone();
+        let ack_task_1 = tokio::spawn(async move {
+            ack_barrier_1.wait().await;
+            ack_hub_1
+                .resolve_recruit_ack("agent-race", "team-a", ok_ack())
+                .await
+        });
+
+        let ack_hub_2 = hub.clone();
+        let ack_barrier_2 = barrier.clone();
+        let ack_task_2 = tokio::spawn(async move {
+            ack_barrier_2.wait().await;
+            ack_hub_2
+                .resolve_recruit_ack("agent-race", "team-a", ok_ack())
+                .await
+        });
+
+        cancel_task.await.expect("cancel task should not panic");
+        let ack_results = [
+            ack_task_1.await.expect("ack task 1 should not panic"),
+            ack_task_2.await.expect("ack task 2 should not panic"),
+        ];
+
+        let ok_count = ack_results.iter().filter(|r| r.is_ok()).count();
+        let already_acked_count = ack_results
+            .iter()
+            .filter(|r| matches!(r, Err(AckError::AlreadyAcked)))
+            .count();
+        assert_eq!(ok_count, 1, "exactly one ack should win the race");
+        assert_eq!(
+            already_acked_count, 1,
+            "the losing duplicate ack should be rejected by compare_exchange"
+        );
+        assert!(
+            rescue_events().len() <= 1,
+            "at most one rescue event should be emitted"
+        );
+    }
+}
+
 /// Issue #576: `acquire_recruit_permit` / `recruit_semaphores` の単体テスト。
 ///
 /// `team_recruit` 全体は renderer (app_handle) 依存なのでここでは結合せず、permit ヘルパ
@@ -1457,9 +1753,8 @@ mod recruit_semaphore_tests {
             .expect("first acquire should succeed");
 
         let hub_for_task = hub.clone();
-        let handle = tokio::spawn(async move {
-            hub_for_task.acquire_recruit_permit("team-a").await
-        });
+        let handle =
+            tokio::spawn(async move { hub_for_task.acquire_recruit_permit("team-a").await });
 
         // permit_a を握ったまま十分に待つ。直列化されているなら handle は完了しない。
         sleep(Duration::from_millis(150)).await;
