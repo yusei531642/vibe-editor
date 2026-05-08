@@ -620,6 +620,15 @@ export interface TeamTaskSnapshot {
   artifactPath?: string | null;
   blockedByHumanGate?: boolean;
   requiredHumanDecision?: string | null;
+  targetPaths?: string[];
+  lockConflicts?: FileLockConflictSnapshot[];
+}
+
+export interface FileLockConflictSnapshot {
+  path: string;
+  holderAgentId: string;
+  holderRole: string;
+  acquiredAt: string;
 }
 
 export interface HumanGateState {

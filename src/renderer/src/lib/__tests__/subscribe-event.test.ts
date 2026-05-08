@@ -5,6 +5,7 @@
  * - await pending 中に caller が dispose したら listener が orphan にならない
  * - await 解決後に dispose したら正しく unlisten される
  * - payload が複数到着しても disposed 後は cb を呼ばない
+ * - Tauri runtime がないテスト環境で listen() が reject しても落ちない
  * - subscribeEvent (sync ラッパ) も同等の挙動を持つ
  */
 
@@ -17,17 +18,19 @@ let pendingListens: Array<{
   event: string;
   listener: Listener<unknown>;
   resolve: (unlisten: () => void) => void;
+  reject: (error: unknown) => void;
 }>;
 let unlistenCalls: number;
 
 vi.mock('@tauri-apps/api/event', () => {
   return {
     listen: vi.fn(<T>(event: string, listener: Listener<T>) => {
-      return new Promise<() => void>((resolve) => {
+      return new Promise<() => void>((resolve, reject) => {
         pendingListens.push({
           event,
           listener: listener as Listener<unknown>,
           resolve: (unlisten) => resolve(unlisten),
+          reject,
         });
       });
     }),
@@ -55,6 +58,13 @@ function resolvePendingListen(index = 0): { listener: Listener<unknown> } {
   };
   pending.resolve(unlisten);
   return { listener: pending.listener };
+}
+
+/** mock listen() を reject させる。 */
+function rejectPendingListen(index = 0): void {
+  const pending = pendingListens[index];
+  if (!pending) throw new Error(`no pending listen at index ${index}`);
+  pending.reject(new Error('missing Tauri internals'));
 }
 
 describe('subscribeEventReady (Issue #294)', () => {
@@ -93,6 +103,16 @@ describe('subscribeEventReady (Issue #294)', () => {
     for (let i = 3; i < 6; i += 1) listener({ payload: i });
     expect(cb).toHaveBeenCalledTimes(3);
     expect(cb.mock.calls.map((c) => c[0])).toEqual([0, 1, 2]);
+  });
+
+  it('listen() が reject しても noop cleanup を返す', async () => {
+    const cb = vi.fn();
+    const cleanupPromise = subscribeEventReady<string>('test:event', cb);
+    rejectPendingListen();
+    const cleanup = await cleanupPromise;
+    cleanup();
+    expect(cb).not.toHaveBeenCalled();
+    expect(unlistenCalls).toBe(0);
   });
 
   // 注: subscribeEventReady 単体では「await pending 中に dispose する手段」を持たない
@@ -141,6 +161,17 @@ describe('subscribeEvent (sync ラッパ, Issue #294)', () => {
     cleanup();
     cleanup();
     expect(unlistenCalls).toBe(1);
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it('listen() が reject しても sync ラッパから未処理 rejection を出さない', async () => {
+    const cb = vi.fn();
+    const cleanup = subscribeEvent<string>('test:event', cb);
+    rejectPendingListen();
+    await Promise.resolve();
+    await Promise.resolve();
+    cleanup();
+    expect(unlistenCalls).toBe(0);
     expect(cb).not.toHaveBeenCalled();
   });
 });

@@ -406,13 +406,16 @@ team_unlock_files({ paths: ["src/foo.rs"] })
 これにより worker が `src\foo.rs` / `./src/foo.rs` / `src/foo.rs` のいずれを送っても同一
 path として扱われる。
 
-### Worker 運用ルール (recommended)
+### Worker 運用ルール (required)
 
 1. ファイル編集前に `team_lock_files({ paths: ["..."] })` を呼ぶ。`conflicts` が
    非空なら、編集を止めて `team_send("leader", "lock 競合: ... → 調整依頼")` を返す。
 2. 編集中に追加 path が必要になったら、追加で `team_lock_files` を呼ぶ。
 3. 編集が完了 (または失敗) したら必ず `team_unlock_files` で解放する。
 4. 自分が `team_dismiss` される場合は Hub が自動解放するので明示的 unlock は不要。
+
+この required ルールは、動的 worker の system prompt 末尾にも再 append される。SKILL.md を
+読まない worker でも、Edit / Write / MultiEdit 前の lock 取得は必須として扱う。
 
 ## 利用できるツール一覧
 

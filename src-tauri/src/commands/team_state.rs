@@ -17,6 +17,15 @@ pub const TEAM_STATE_SCHEMA_VERSION: u32 = 1;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]
+pub struct FileLockConflictSnapshot {
+    pub path: String,
+    pub holder_agent_id: String,
+    pub holder_role: String,
+    pub acquired_at: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct TeamTaskSnapshot {
     pub id: u32,
     pub assigned_to: String,
@@ -38,6 +47,10 @@ pub struct TeamTaskSnapshot {
     pub blocked_by_human_gate: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub required_human_decision: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub target_paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lock_conflicts: Vec<FileLockConflictSnapshot>,
 }
 
 /// Issue #516: 統合フェーズで Leader が複数 worker の成果を突き合わせるための構造化フィールド。

@@ -6,8 +6,8 @@ use super::{bridge, handle_client, hex_encode, TeamHub, MAX_CONCURRENT_CLIENTS};
 use super::{create_pipe_server, new_pipe_endpoint};
 use crate::commands::team_history::HandoffReference;
 use crate::commands::team_state::{
-    HandoffLifecycleEvent, HumanGateState, TeamOrchestrationState, TeamTaskSnapshot,
-    WorkerReportSnapshot, TEAM_STATE_SCHEMA_VERSION,
+    FileLockConflictSnapshot, HandoffLifecycleEvent, HumanGateState, TeamOrchestrationState,
+    TeamTaskSnapshot, WorkerReportSnapshot, TEAM_STATE_SCHEMA_VERSION,
 };
 use crate::pty::SessionRegistry;
 use anyhow::Result;
@@ -412,6 +412,8 @@ pub struct TeamTask {
     pub artifact_path: Option<String>,
     pub blocked_by_human_gate: bool,
     pub required_human_decision: Option<String>,
+    pub target_paths: Vec<String>,
+    pub lock_conflicts: Vec<FileLockConflictSnapshot>,
 }
 
 impl TeamTask {
@@ -430,6 +432,8 @@ impl TeamTask {
             artifact_path: self.artifact_path.clone(),
             blocked_by_human_gate: self.blocked_by_human_gate,
             required_human_decision: self.required_human_decision.clone(),
+            target_paths: self.target_paths.clone(),
+            lock_conflicts: self.lock_conflicts.clone(),
         }
     }
 
@@ -448,7 +452,51 @@ impl TeamTask {
             artifact_path: snapshot.artifact_path,
             blocked_by_human_gate: snapshot.blocked_by_human_gate,
             required_human_decision: snapshot.required_human_decision,
+            target_paths: snapshot.target_paths,
+            lock_conflicts: snapshot.lock_conflicts,
         }
+    }
+}
+
+#[cfg(test)]
+mod task_snapshot_tests {
+    use super::TeamTask;
+    use crate::commands::team_state::FileLockConflictSnapshot;
+
+    #[test]
+    fn team_task_snapshot_roundtrips_file_ownership_fields() {
+        let task = TeamTask {
+            id: 525,
+            assigned_to: "worker".into(),
+            description: "touch shared file".into(),
+            status: "pending".into(),
+            created_by: "leader".into(),
+            created_at: "2026-05-08T00:00:00Z".into(),
+            updated_at: None,
+            summary: None,
+            blocked_reason: None,
+            next_action: None,
+            artifact_path: None,
+            blocked_by_human_gate: false,
+            required_human_decision: None,
+            target_paths: vec!["src/foo.rs".into()],
+            lock_conflicts: vec![FileLockConflictSnapshot {
+                path: "src/foo.rs".into(),
+                holder_agent_id: "agent-a".into(),
+                holder_role: "programmer".into(),
+                acquired_at: "2026-05-08T00:01:00Z".into(),
+            }],
+        };
+
+        let snapshot = task.to_snapshot();
+        assert_eq!(snapshot.target_paths, vec!["src/foo.rs"]);
+        assert_eq!(snapshot.lock_conflicts.len(), 1);
+        assert_eq!(snapshot.lock_conflicts[0].holder_agent_id, "agent-a");
+
+        let restored = TeamTask::from_snapshot(snapshot);
+        assert_eq!(restored.target_paths, vec!["src/foo.rs"]);
+        assert_eq!(restored.lock_conflicts.len(), 1);
+        assert_eq!(restored.lock_conflicts[0].path, "src/foo.rs");
     }
 }
 
@@ -506,11 +554,7 @@ impl TeamHub {
     }
 
     /// 指定 agent が team 内で保持する全 lock を解放する。`team_dismiss` 時に呼ぶ想定。
-    pub async fn release_all_file_locks_for_agent(
-        &self,
-        team_id: &str,
-        agent_id: &str,
-    ) -> u32 {
+    pub async fn release_all_file_locks_for_agent(&self, team_id: &str, agent_id: &str) -> u32 {
         let mut s = self.state.lock().await;
         crate::team_hub::file_locks::release_all_for_agent(&mut s.file_locks, team_id, agent_id)
     }
@@ -1045,12 +1089,13 @@ impl TeamHub {
         // 既存 in-memory が空のままなら no-op、既存に entry が居れば「永続化済 = 真の状態」として
         // 完全置換する設計 (= renderer 側 cache が永続化と乖離していた場合に永続化を勝者とする)。
         if !persisted_dynamic_entries.is_empty() {
-            let skipped = crate::team_hub::protocol::dynamic_role::replay_persisted_dynamic_roles_for_team(
-                self,
-                team_id,
-                persisted_dynamic_entries,
-            )
-            .await;
+            let skipped =
+                crate::team_hub::protocol::dynamic_role::replay_persisted_dynamic_roles_for_team(
+                    self,
+                    team_id,
+                    persisted_dynamic_entries,
+                )
+                .await;
             if skipped > 0 {
                 tracing::warn!(
                     "[register_team] team={team_id}: {skipped} persisted dynamic entries skipped (expired / mismatch)"
@@ -1226,9 +1271,7 @@ async fn load_persisted_dynamic_for_team(
             match serde_json::from_value(item.clone()) {
                 Ok(e) => e,
                 Err(e) => {
-                    tracing::warn!(
-                        "[register_team] skipping malformed dynamic[] entry: {e}"
-                    );
+                    tracing::warn!("[register_team] skipping malformed dynamic[] entry: {e}");
                     continue;
                 }
             };

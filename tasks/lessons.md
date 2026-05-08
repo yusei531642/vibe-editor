@@ -176,3 +176,10 @@ codex exec --sandbox read-only --color never --ephemeral \
 - Glass + Canvas の視覚判定は Vite 単体では不足する。最終確認は `npm run dev` の Tauri 実機で行う。
 - 実装完了報告の前に対象 Issue の `state` を必ず確認する。完了条件を満たしているなら、E2E結果とクローズ根拠をコメントして `gh issue close --reason completed` まで実行する。
 - 検証未完了などの理由で Issue を閉じない場合は、最終報告で「OPENのままにした理由」と「残りのクローズ条件」を明示する。単に実装・検証結果だけを報告して Issue open 状態を見落とさない。
+
+## Issue #525 - File ownership guardrails
+
+- Issue 本文と planned コメントが食い違う場合は、Issue 本文を正とし、コードベースで裏取りしてから計画を作り直す。
+- 既存の lock / guardrail がある場合は「未実装」と決めつけず、task state、必須 prompt、UI visibility に接続されているかを確認する。
+- advisory lock を強化するときは、新しい lock engine を足す前に、既存 tool を「必ず使われる導線」へ接続する。
+- Tauri event helper を React effect から使う場合は、jsdom の `listen()` reject が未処理 rejection にならないよう helper 側で noop cleanup を返す。
