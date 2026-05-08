@@ -27,8 +27,9 @@ pub mod state;
 mod tests;
 
 pub use state::{
-    server_log_path_for_diagnostics, set_server_log_path, CallContext, DynamicRole,
-    MemberDiagnostics, RecruitAckOutcome, RoleProfileSummary, TeamInfo, TeamMessage, TeamTask,
+    server_log_path_for_diagnostics, set_server_log_path, CallContext, DynamicRole, EnginePolicy,
+    EnginePolicyKind, MemberDiagnostics, RecruitAckOutcome, RoleProfileSummary, TeamInfo,
+    TeamMessage, TeamTask,
 };
 
 use crate::pty::SessionRegistry;

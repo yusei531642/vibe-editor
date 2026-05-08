@@ -291,6 +291,76 @@ pub struct TeamInfo {
     pub next_message_id: u32,
     /// 次に採番する task_id (Issue #116)。message_id と同じ理由で単調増加カウンタ化。
     pub next_task_id: u32,
+    /// Issue #518: チーム単位の engine policy。`team_recruit` で engine 指定が
+    /// policy に反する場合は構造化エラー (`recruit_engine_policy_violation`) で拒否する。
+    /// 未設定 / レガシー team の既定は `MixedAllowed` (後方互換)。
+    pub engine_policy: EnginePolicy,
+}
+
+/// Issue #518: チーム単位の engine policy。`MixedAllowed` (既定) で従来通り、
+/// `ClaudeOnly` / `CodexOnly` で Codex-only / same-engine ルールを構造的に強制する。
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct EnginePolicy {
+    pub kind: EnginePolicyKind,
+    /// チームの既定 engine ("claude" | "codex")。`recruit` で engine 引数が省略された
+    /// ときに使われる。`ClaudeOnly` / `CodexOnly` では実質固定だが、`MixedAllowed` のときも
+    /// 「混合は許すが既定はこっち」と明示できる。**未設定 (`None`)** なら role profile の
+    /// default を使うので、TS 側でも `defaultEngine?: 'claude' | 'codex'` (undefined OK) として
+    /// 「未設定」と「空文字明示」を区別しない (= 空文字は許容しない)。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_engine: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum EnginePolicyKind {
+    /// 既定: claude / codex の混在を許可。レガシー team もこの扱い (後方互換)。
+    #[default]
+    MixedAllowed,
+    /// チーム全体で Claude のみを許可。`engine: "codex"` の recruit は拒否。
+    ClaudeOnly,
+    /// チーム全体で Codex のみを許可。`engine: "claude"` の recruit は拒否。
+    /// HR 経由採用で Codex 指定が消えて Claude にリセットされる事故を構造的に消す。
+    CodexOnly,
+}
+
+impl EnginePolicy {
+    /// `engine` (claude / codex) が本 policy に違反していれば人間可読なエラーメッセージを返す。
+    /// 違反が無ければ `Ok(())`。
+    pub fn validate(&self, engine: &str) -> Result<(), String> {
+        match (self.kind, engine) {
+            (EnginePolicyKind::ClaudeOnly, "codex") => Err(format!(
+                "team engine policy is ClaudeOnly, cannot recruit with engine='codex'"
+            )),
+            (EnginePolicyKind::CodexOnly, "claude") => Err(format!(
+                "team engine policy is CodexOnly, cannot recruit with engine='claude' \
+                 (this prevents accidental Claude recruitment into a Codex-only team)"
+            )),
+            _ => Ok(()),
+        }
+    }
+
+    /// `engine` 引数省略時に採用する engine 名を返す。
+    /// `ClaudeOnly` → "claude" / `CodexOnly` → "codex" / `MixedAllowed` →
+    /// `self.default_engine` が `Some` ならそれ、`None` なら `role_default`。
+    pub fn resolve_default_engine(&self, role_default: &str) -> String {
+        match self.kind {
+            EnginePolicyKind::ClaudeOnly => "claude".to_string(),
+            EnginePolicyKind::CodexOnly => "codex".to_string(),
+            EnginePolicyKind::MixedAllowed => self
+                .default_engine
+                .clone()
+                .unwrap_or_else(|| role_default.to_string()),
+        }
+    }
+
+    /// 「明示的な policy が設定されているか」を bool で返す (将来の info/UI 拡張で扱う)。
+    /// 現在は MCP API 経由の caller が居ないので `#[allow(dead_code)]`。
+    #[allow(dead_code)]
+    pub fn is_explicit(&self) -> bool {
+        !matches!(self.kind, EnginePolicyKind::MixedAllowed) || self.default_engine.is_some()
+    }
 }
 
 #[derive(Clone)]
@@ -511,6 +581,28 @@ impl TeamHub {
         for r in roles {
             entry.insert(r.id.clone(), r);
         }
+    }
+
+    // ===== Issue #518: engine policy helpers =====
+
+    /// `team_id` の現在の engine policy を返す。team が未登録 / 未設定なら既定 `MixedAllowed`。
+    pub async fn get_engine_policy(&self, team_id: &str) -> EnginePolicy {
+        let s = self.state.lock().await;
+        s.teams
+            .get(team_id)
+            .map(|t| t.engine_policy.clone())
+            .unwrap_or_default()
+    }
+
+    /// `team_id` の engine policy を上書きする。team entry が無ければ作成する。
+    /// 主に `team_create_leader` (チーム作成 / leader 引き継ぎ) で呼ばれる。
+    pub async fn set_engine_policy(&self, team_id: &str, policy: EnginePolicy) {
+        let mut s = self.state.lock().await;
+        let team = s
+            .teams
+            .entry(team_id.to_string())
+            .or_insert_with(TeamInfo::default);
+        team.engine_policy = policy;
     }
 
     /// renderer から role profile summary を同期 (team_list_role_profiles の戻り値)

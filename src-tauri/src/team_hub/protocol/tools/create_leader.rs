@@ -8,7 +8,7 @@
 //! 旧 leader はこの tool で新 leader を作ったあと `team_switch_leader` で
 //! active leader を切り替え、自身のカードを retire する流れを想定する。
 
-use crate::team_hub::{CallContext, TeamHub};
+use crate::team_hub::{CallContext, EnginePolicy, EnginePolicyKind, TeamHub};
 use serde_json::{json, Value};
 use std::time::Instant;
 use tauri::Emitter;
@@ -61,16 +61,39 @@ pub async fn team_create_leader(
         .filter(|v| !v.is_empty())
         .map(ToOwned::to_owned);
 
+    // Issue #518: 任意引数 `engine_policy: { kind, defaultEngine? }` を受け取り、team に保存する。
+    // 形式: `{"kind":"claude_only"|"codex_only"|"mixed_allowed", "defaultEngine":"claude"|"codex"|""}`
+    // チーム作成時 (新規 leader) / 引き継ぎ時 (replacement leader) のどちらでも policy 上書きを許す。
+    // 引数省略時は既存 policy を維持する (= 何もしない)。
+    if let Some(policy_value) = args.get("engine_policy").or_else(|| args.get("enginePolicy")) {
+        let parsed_policy = parse_engine_policy_value(policy_value)?;
+        if let Err(e) = parsed_policy.validate(&engine) {
+            return Err(RecruitError::new("create_leader_engine_policy_violation", e)
+                .with_phase("engine_policy")
+                .into_err_string());
+        }
+        hub.set_engine_policy(&ctx.team_id, parsed_policy).await;
+    }
+
     // builtin の leader profile から default engine を引く
     let summary = hub.get_role_profile_summary().await;
     let target = summary.iter().find(|p| p.id == role_profile_id);
+    // Issue #518: 上で set されたばかり (or 既存) の policy を尊重して既定 engine を解決する。
+    let engine_policy = hub.get_engine_policy(&ctx.team_id).await;
+    let role_default_engine = target
+        .map(|t| t.default_engine.clone())
+        .unwrap_or_else(|| "claude".to_string());
     let resolved_engine = if engine.is_empty() {
-        target
-            .map(|t| t.default_engine.clone())
-            .unwrap_or_else(|| "claude".to_string())
+        engine_policy.resolve_default_engine(&role_default_engine)
     } else {
         engine
     };
+    // engine 引数が policy 違反になっていないかも改めて検証する (set 後の policy 基準)。
+    if let Err(e) = engine_policy.validate(&resolved_engine) {
+        return Err(RecruitError::new("create_leader_engine_policy_violation", e)
+            .with_phase("engine_policy")
+            .into_err_string());
+    }
 
     let new_agent_id = format!("vc-{}", Uuid::new_v4());
 
@@ -243,5 +266,171 @@ pub async fn team_create_leader(
             }
             .into_err_string())
         }
+    }
+}
+
+/// Issue #518: `team_create_leader({engine_policy: {...}})` の任意引数を `EnginePolicy` に
+/// パースする。値が object でない / `kind` が不正なら `create_leader_invalid_engine_policy`
+/// エラー。`defaultEngine` は省略可 (ClaudeOnly / CodexOnly のときは自動で対応する engine が
+/// resolve される)、明示する場合は "claude" / "codex" のみ許可。
+fn parse_engine_policy_value(v: &Value) -> Result<EnginePolicy, String> {
+    let obj = v.as_object().ok_or_else(|| {
+        RecruitError::invalid_args(
+            "create_leader",
+            "engine_policy must be an object: { kind, defaultEngine? }",
+        )
+        .into_err_string()
+    })?;
+    let kind_str = obj
+        .get("kind")
+        .and_then(|x| x.as_str())
+        .map(str::to_lowercase)
+        .ok_or_else(|| {
+            RecruitError::invalid_args(
+                "create_leader",
+                "engine_policy.kind is required (claude_only / codex_only / mixed_allowed)",
+            )
+            .into_err_string()
+        })?;
+    let kind = match kind_str.as_str() {
+        "claude_only" | "claudeonly" => EnginePolicyKind::ClaudeOnly,
+        "codex_only" | "codexonly" => EnginePolicyKind::CodexOnly,
+        "mixed_allowed" | "mixedallowed" => EnginePolicyKind::MixedAllowed,
+        other => {
+            return Err(RecruitError::invalid_args(
+                "create_leader",
+                format!(
+                    "unknown engine_policy.kind '{other}' \
+                     (expected: claude_only / codex_only / mixed_allowed)"
+                ),
+            )
+            .into_err_string());
+        }
+    };
+    // `defaultEngine` (camelCase / 正) と `default_engine` (snake_case / alias) の両 case を accept する。
+    // 実装側ではどちらでも受け取れるが、SKILL.md / TS 型では camelCase を正として案内する。
+    // **空文字列 `""` は Some(empty) ではなく field 省略 (= None) として扱う** ことで、TS 側
+    // `defaultEngine?: 'claude' | 'codex'` (undefined = 未設定) と意味論を揃える。
+    let default_engine_raw = obj
+        .get("defaultEngine")
+        .or_else(|| obj.get("default_engine"))
+        .and_then(|x| x.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    if let Some(ref de) = default_engine_raw {
+        if de != "claude" && de != "codex" {
+            return Err(RecruitError::invalid_args(
+                "create_leader",
+                format!(
+                    "engine_policy.defaultEngine must be 'claude' or 'codex' (or omit the field), got '{de}'"
+                ),
+            )
+            .into_err_string());
+        }
+    }
+    Ok(EnginePolicy {
+        kind,
+        default_engine: default_engine_raw,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn parse_claude_only_policy() {
+        let v = json!({ "kind": "claude_only" });
+        let p = parse_engine_policy_value(&v).unwrap();
+        assert_eq!(p.kind, EnginePolicyKind::ClaudeOnly);
+        assert_eq!(p.default_engine, None);
+    }
+
+    #[test]
+    fn parse_codex_only_with_default_engine_camel() {
+        let v = json!({ "kind": "codex_only", "defaultEngine": "codex" });
+        let p = parse_engine_policy_value(&v).unwrap();
+        assert_eq!(p.kind, EnginePolicyKind::CodexOnly);
+        assert_eq!(p.default_engine.as_deref(), Some("codex"));
+    }
+
+    #[test]
+    fn parse_mixed_allowed_with_snake_case_alias() {
+        // snake_case `default_engine` も alias として accept される (camelCase が正)。
+        let v = json!({ "kind": "mixed_allowed", "default_engine": "claude" });
+        let p = parse_engine_policy_value(&v).unwrap();
+        assert_eq!(p.kind, EnginePolicyKind::MixedAllowed);
+        assert_eq!(p.default_engine.as_deref(), Some("claude"));
+    }
+
+    #[test]
+    fn parse_empty_string_default_engine_normalizes_to_none() {
+        // 空文字列 / 全空白は None として扱う (TS 側 `defaultEngine?: 'claude' | 'codex'` と整合)。
+        let v = json!({ "kind": "mixed_allowed", "defaultEngine": "" });
+        let p = parse_engine_policy_value(&v).unwrap();
+        assert_eq!(p.default_engine, None);
+        let v2 = json!({ "kind": "mixed_allowed", "defaultEngine": "   " });
+        let p2 = parse_engine_policy_value(&v2).unwrap();
+        assert_eq!(p2.default_engine, None);
+    }
+
+    #[test]
+    fn parse_rejects_unknown_kind() {
+        let v = json!({ "kind": "claude_or_codex" });
+        let err = parse_engine_policy_value(&v).unwrap_err();
+        assert!(err.contains("create_leader_invalid_args"));
+        assert!(err.contains("unknown engine_policy.kind"));
+    }
+
+    #[test]
+    fn parse_rejects_missing_kind() {
+        let v = json!({ "defaultEngine": "claude" });
+        let err = parse_engine_policy_value(&v).unwrap_err();
+        assert!(err.contains("engine_policy.kind is required"));
+    }
+
+    #[test]
+    fn parse_rejects_invalid_default_engine() {
+        let v = json!({ "kind": "mixed_allowed", "defaultEngine": "gpt" });
+        let err = parse_engine_policy_value(&v).unwrap_err();
+        assert!(err.contains("must be 'claude' or 'codex'"));
+    }
+
+    #[test]
+    fn parse_rejects_non_object() {
+        let v = json!("claude_only");
+        let err = parse_engine_policy_value(&v).unwrap_err();
+        assert!(err.contains("must be an object"));
+    }
+
+    #[test]
+    fn engine_policy_validate_blocks_violation() {
+        let p = EnginePolicy {
+            kind: EnginePolicyKind::CodexOnly,
+            default_engine: Some("codex".into()),
+        };
+        assert!(p.validate("claude").is_err());
+        assert!(p.validate("codex").is_ok());
+    }
+
+    #[test]
+    fn engine_policy_resolve_default_engine() {
+        let p = EnginePolicy {
+            kind: EnginePolicyKind::CodexOnly,
+            default_engine: Some("codex".into()),
+        };
+        assert_eq!(p.resolve_default_engine("claude"), "codex");
+        let p2 = EnginePolicy {
+            kind: EnginePolicyKind::MixedAllowed,
+            default_engine: None,
+        };
+        assert_eq!(p2.resolve_default_engine("claude"), "claude");
+        let p3 = EnginePolicy {
+            kind: EnginePolicyKind::MixedAllowed,
+            default_engine: Some("codex".into()),
+        };
+        assert_eq!(p3.resolve_default_engine("claude"), "codex");
     }
 }
