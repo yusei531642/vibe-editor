@@ -876,7 +876,7 @@ export function App(): JSX.Element {
         <div
           className="resize-handle"
           onMouseDown={onClaudePanelResizeStart}
-          title="ドラッグで Claude Code パネルの幅を調整"
+          title="ドラッグで IDE モードパネルの幅を調整"
           role="separator"
           aria-orientation="vertical"
         />
