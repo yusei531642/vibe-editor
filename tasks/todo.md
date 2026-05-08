@@ -1684,19 +1684,22 @@ Plan: `tasks/issue-560-plan.md`
 - [x] Windows resolver の候補順を PATHEXT 優先へ変える。
 - [x] npm shell shim 再現テストを追加する。
 - [x] targeted Rust test と主要品質ゲートを通す。
-- [ ] PR を作成し、CI / reviewer bot を確認する。
+- [x] PR を作成し、CI / reviewer bot を確認する。
 
 ### Next Steps
 
 - [x] `src-tauri/src/pty/session.rs` を最小修正する。
 - [x] `tasks/lessons.md` に再発防止を追記する。
-- [ ] Issue #560 に検証結果をコメントする。
+- [x] Issue #560 に検証結果をコメントする。
 
 ### 進捗
 
 - [x] `candidate_paths()` を PATHEXT 候補優先、拡張子なし候補を最後に変更。
 - [x] Windows bare command では `which::which(command)` を使わず、アプリ側の探索順で解決するよう変更。
 - [x] `prefers_cmd_over_extensionless_npm_shell_shim` を追加。
+- [x] PR #561 を作成し、CI と reviewer bot approval を確認。
+- [x] PR #561 の bot merge 後に `main` を同期。
+- [x] ローカル dev 版で Claude / Codex の実起動ログを確認。
 
 ### 検証結果
 
@@ -1707,3 +1710,55 @@ Plan: `tasks/issue-560-plan.md`
 - [x] `npm run test`: PASS (45 files / 288 tests、jsdom の Tauri `listen()` cleanup warning は既存)
 - [x] `npm run build:vite`: PASS
 - [x] `git diff --check`: PASS
+- [x] GitHub Actions `ci / verify`: PASS (run `25541771313`)
+- [x] Local dev verification: Claude は `~/.local/bin/claude.exe`、Codex は `~/AppData/Roaming/npm/codex.cmd` + `cmd.exe` に解決。
+- [x] Local dev verification: dev app start line 34472 以降に `CreateProcessW` / `os error 193` は出ていない。
+
+### 完了結果
+
+- [x] Issue #560: https://github.com/yusei531642/vibe-editor/issues/560
+- [x] PR #561: https://github.com/yusei531642/vibe-editor/pull/561
+- [x] Issue comment: https://github.com/yusei531642/vibe-editor/issues/560#issuecomment-4404243505
+- [x] Follow-up release: https://github.com/yusei531642/vibe-editor/releases/tag/v1.5.4
+
+## Release v1.5.4 (2026-05-08 / Codex)
+
+Plan: `tasks/release-v1.5.4.md`
+
+### 計画
+
+- [x] PR #561 の Windows CLI shim resolver fix が `main` に入っていることを確認する。
+- [x] ローカル dev 版で Claude / Codex の起動ログを確認する。
+- [x] `chore/release-v1.5.4` ブランチを作成する。
+- [x] npm / Rust / Tauri の version を `1.5.4` に更新する。
+- [x] 品質ゲートを通す。
+- [x] release PR を作成し、CI / reviewer bot を確認する。
+- [x] PR merge 後に `v1.5.4` tag を push する。
+- [x] release workflow を監視し、draft release の assets と `latest.json` を確認する。
+- [x] draft release を publish する。
+
+### Next Steps
+
+- [x] dev 起動で `CreateProcessW` / `os error 193` が再発しないことを確認する。
+- [x] `package.json` / `package-lock.json` / `src-tauri/Cargo.toml` / `src-tauri/Cargo.lock` / `src-tauri/tauri.conf.json` を `1.5.4` に更新する。
+- [x] `npm run typecheck`、`npm run build:vite`、`cargo check` を実行する。
+- [x] release PR を作成し、CI と reviewer bot を確認する。
+
+### 検証結果
+
+- [x] Local dev verification: Claude は `~/.local/bin/claude.exe` に解決。
+- [x] Local dev verification: Codex は `~/AppData/Roaming/npm/codex.cmd` に解決し、launcher は `C:\WINDOWS\system32\cmd.exe`。
+- [x] Local dev verification: dev app start line 34472 以降に `CreateProcessW` / `os error 193` は出ていない。
+- [x] `npm run typecheck`: PASS
+- [x] `npm run build:vite`: PASS
+- [x] `C:\Users\zooyo\.cargo\bin\cargo.exe check --manifest-path src-tauri\Cargo.toml`: PASS
+- [x] GitHub Actions `ci / verify`: PASS (run `25542614930`)
+- [x] Release workflow: PASS (run `25542885051`)
+- [x] `latest.json`: `version` が `1.5.4`、platforms が `darwin-aarch64` / `linux-x86_64` / `windows-x86_64`
+
+### 完了結果
+
+- [x] PR #562: https://github.com/yusei531642/vibe-editor/pull/562
+- [x] Release: https://github.com/yusei531642/vibe-editor/releases/tag/v1.5.4
+- [x] Assets: Windows `.exe`、macOS `.dmg` / `.app.tar.gz`、Linux `.AppImage` / `.deb` / `.rpm`、SBOM、signatures、`latest.json`
+- [x] Published at: 2026-05-08T07:37:39Z
