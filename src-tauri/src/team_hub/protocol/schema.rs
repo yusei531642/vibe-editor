@@ -71,8 +71,11 @@ pub(super) fn tool_defs() -> Value {
                  backlog (`team_reports[]`), surfaced to the active Leader via team_get_tasks, and \
                  a one-line human-readable summary is injected into the Leader's terminal for live \
                  awareness. `task_id` may be either the numeric `team_assign_task` id or an external \
-                 string id; if it parses as a u32 and matches an existing TeamTask, that task's status \
-                 / summary / next_action / artifact_path are also updated.",
+                 string id; if it parses as a u32 and matches an existing TeamTask **assigned to the \
+                 caller** (role match or agent_id match), that task's `summary` and `updated_at` are \
+                 refreshed. State transitions (`status`) and `next_action` / `artifact_path` are NOT \
+                 modified by this tool — call `team_update_task` for those, which validates \
+                 `done_evidence` against `done_criteria`.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
