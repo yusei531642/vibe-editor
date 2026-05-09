@@ -15,6 +15,22 @@ pub fn is_valid_terminal_id(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
+/// Issue #607: Claude `--resume <id>` に渡す session id を検証する (defense-in-depth)。
+///
+/// `resumeSessionId` は通常 `~/.claude/projects/<encoded>/<id>.jsonl` の file_stem や
+/// renderer の zustand persist (`team-history.json`) 由来で、信頼境界の外にある。
+/// `-` 始まりの文字列や shell metachar / 改行を埋められると `--resume <id>` の argv
+/// が引数注入や parse 破壊を起こすため、Rust 側で `^[A-Za-z0-9_-]{8,64}$` に絞る。
+///
+/// UUID v4 (36 文字, ハイフン含む) を最低限通すよう下限は 8 文字、Claude CLI 側の
+/// id 形式が将来変わる可能性を考慮して上限は 64 文字に緩めている。
+pub fn is_valid_resume_session_id(s: &str) -> bool {
+    let len = s.len();
+    (8..=64).contains(&len)
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 pub fn command_basename(command: &str) -> String {
     let lower = command.trim().to_ascii_lowercase().replace('\\', "/");
     std::path::Path::new(&lower)
@@ -257,6 +273,75 @@ mod terminal_id_validation_tests {
     fn rejects_non_ascii() {
         assert!(!is_valid_terminal_id("日本語"));
         assert!(!is_valid_terminal_id("café"));
+    }
+}
+
+#[cfg(test)]
+mod resume_session_id_validation_tests {
+    use super::is_valid_resume_session_id;
+
+    #[test]
+    fn accepts_uuid_v4() {
+        assert!(is_valid_resume_session_id("550e8400-e29b-41d4-a716-446655440000"));
+    }
+
+    #[test]
+    fn accepts_alphanumeric_and_separators() {
+        assert!(is_valid_resume_session_id("abc_123-XYZ_456"));
+        assert!(is_valid_resume_session_id("session-1761800000000-abcd1234"));
+    }
+
+    #[test]
+    fn accepts_min_and_max_length() {
+        assert!(is_valid_resume_session_id(&"a".repeat(8)));
+        assert!(is_valid_resume_session_id(&"a".repeat(64)));
+    }
+
+    #[test]
+    fn rejects_too_short() {
+        assert!(!is_valid_resume_session_id(""));
+        assert!(!is_valid_resume_session_id("a"));
+        assert!(!is_valid_resume_session_id(&"a".repeat(7)));
+    }
+
+    #[test]
+    fn rejects_too_long() {
+        assert!(!is_valid_resume_session_id(&"a".repeat(65)));
+        assert!(!is_valid_resume_session_id(&"a".repeat(256)));
+    }
+
+    #[test]
+    fn rejects_argument_injection_via_leading_dash() {
+        // `-` 始まりは UUID v4 (8-4-4-4-12) でも合法だが、`-` のみで始まる「フラグ風」は
+        // charset 的には通る。これは Rust 側で `Command::arg("--resume").arg(&id)` の 2 要素
+        // 分離で防御するので charset には含めて良いが、shell metachar は確実に弾く。
+        assert!(!is_valid_resume_session_id("--print=/etc/passwd"));
+        assert!(!is_valid_resume_session_id("-c rm -rf"));
+    }
+
+    #[test]
+    fn rejects_shell_metachars_and_whitespace() {
+        assert!(!is_valid_resume_session_id("abc;rm -rf"));
+        assert!(!is_valid_resume_session_id("abc|true123"));
+        assert!(!is_valid_resume_session_id("abc$VAR_test"));
+        assert!(!is_valid_resume_session_id("abc`whoami`"));
+        assert!(!is_valid_resume_session_id("abc def_long"));
+        assert!(!is_valid_resume_session_id("abc\nrm_rf"));
+        assert!(!is_valid_resume_session_id("abc\rm_rf12"));
+        assert!(!is_valid_resume_session_id("abc\tdef_long"));
+    }
+
+    #[test]
+    fn rejects_path_traversal() {
+        assert!(!is_valid_resume_session_id("../etc/passwd"));
+        assert!(!is_valid_resume_session_id("./session"));
+        assert!(!is_valid_resume_session_id("/abs/path/id"));
+    }
+
+    #[test]
+    fn rejects_non_ascii() {
+        assert!(!is_valid_resume_session_id("セッション-12345"));
+        assert!(!is_valid_resume_session_id("café-session-id"));
     }
 }
 
