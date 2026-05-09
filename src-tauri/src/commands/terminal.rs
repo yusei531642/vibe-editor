@@ -82,6 +82,60 @@ fn resolve_command(command: Option<String>, args: Option<Vec<String>>) -> (Strin
     command_validation::normalize_terminal_command(command, args)
 }
 
+/// Issue #607 (security): args に含まれる `--resume <id>` / `--resume=<id>` を validate して
+/// 不正な id を含むペアは strip + warn する defense-in-depth ヘルパー。
+///
+/// renderer (CardFrame / TerminalCard / use-team-launch-helpers / settings.claudeArgs) から
+/// 直接 args に積まれた `--resume <id>` も、構造化フィールド `opts.resume_session_id` と同じ
+/// `^[A-Za-z0-9_-]{8,64}$` 規則で守る。`--resume=<id>` の単一要素形式は 2 要素分離原則
+/// (`Command::arg("--resume").arg(&id)`) を破るため常に strip する。
+///
+/// 戻り値は filtered な args (Vec<String>) で、warn log は内部で発行済み。
+/// 入力が空または `--resume` を含まなければ no-op。
+fn filter_resume_args_in_place(args: Vec<String>) -> Vec<String> {
+    if args.is_empty() {
+        return args;
+    }
+    let mut out: Vec<String> = Vec::with_capacity(args.len());
+    let mut iter = args.into_iter();
+    while let Some(arg) = iter.next() {
+        if arg == "--resume" {
+            // 2 要素形式: 次の要素を validate
+            match iter.next() {
+                Some(id) if command_validation::is_valid_resume_session_id(&id) => {
+                    out.push(arg);
+                    out.push(id);
+                }
+                Some(bad) => {
+                    let preview: String = bad.chars().take(16).collect();
+                    tracing::warn!(
+                        "[terminal] --resume id in args rejected by validator (len={}, preview={:?}), stripping pair",
+                        bad.len(),
+                        preview
+                    );
+                }
+                None => {
+                    tracing::warn!(
+                        "[terminal] trailing --resume with no following id, stripping"
+                    );
+                }
+            }
+        } else if let Some(rest) = arg.strip_prefix("--resume=") {
+            // 単一要素形式 `--resume=<id>` は 2 要素分離原則を破るため、id の中身に関わらず
+            // 常に strip する。攻撃成立条件 (Claude CLI 側の parse 仕様) に依存しない厳しめの方針。
+            let preview: String = rest.chars().take(16).collect();
+            tracing::warn!(
+                "[terminal] --resume=<id> single-element form rejected (len={}, preview={:?}), stripping",
+                rest.len(),
+                preview
+            );
+        } else {
+            out.push(arg);
+        }
+    }
+    out
+}
+
 /// Codex の system prompt を、PTY (TUI) に直接「最初の入力」として注入する fallback 経路。
 ///
 /// 動作:
@@ -161,6 +215,19 @@ pub async fn terminal_create(
         });
     }
     let is_codex_command = command_validation::is_codex_command(&command);
+
+    // Issue #607 (security): Claude `--resume <id>` に渡される session id は renderer
+    // (CardFrame / TerminalCard / use-team-launch-helpers) が `args.push("--resume", id)`
+    // で直接積んでくる。id は `~/.claude/projects/<encoded>/<id>.jsonl` の file_stem や
+    // zustand persist の `team-history.json` 由来で信頼境界の外にあるため、`-` 始まりの
+    // 「フラグ風」文字列や shell metachar / 改行を含む id を埋められると引数注入や parse
+    // 破壊が成立する恐れがある。
+    //
+    // ここで args に含まれる `--resume <id>` / `--resume=<id>` をスキャンし、
+    // `^[A-Za-z0-9_-]{8,64}$` を満たさない id を含むペアは strip + warn で audit log に
+    // 残す (新規起動にフォールバック / UX 維持)。`--resume=<id>` の単一要素形式は
+    // 2 要素分離原則を破るため id 内容に関わらず常に strip。
+    args = filter_resume_args_in_place(args);
 
     // Issue #271: HMR remount 経路では renderer 側 hook が `attachIfExists: true` を立て、
     // 既存 PTY に bind し直したいシグナルを送る。allowlist / immediate-exec チェックを通った
@@ -498,4 +565,157 @@ pub async fn terminal_save_pasted_image(
     mime_type: String,
 ) -> SavePastedImageResult {
     paste_image::save(base64, mime_type).await
+}
+
+#[cfg(test)]
+mod resume_args_filter_tests {
+    use super::filter_resume_args_in_place;
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn keeps_valid_resume_pair() {
+        let input = s(&["--resume", "550e8400-e29b-41d4-a716-446655440000"]);
+        let out = filter_resume_args_in_place(input.clone());
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn keeps_valid_resume_pair_among_other_args() {
+        let input = s(&[
+            "--dangerously-skip-permissions",
+            "--resume",
+            "abcdef12-3456-7890-abcd-ef1234567890",
+            "--append-system-prompt",
+            "you are a helper",
+        ]);
+        let out = filter_resume_args_in_place(input.clone());
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn strips_invalid_resume_id_starting_with_dash() {
+        // `-c` / `-rf` / `--print=...` のような「フラグ風」id は引数注入の主経路。
+        let input = s(&["--resume", "--print=/etc/passwd"]);
+        let out = filter_resume_args_in_place(input);
+        assert!(out.is_empty(), "expected pair to be stripped, got {out:?}");
+    }
+
+    #[test]
+    fn strips_invalid_resume_id_with_shell_metachars() {
+        let input = s(&[
+            "--dangerously-skip-permissions",
+            "--resume",
+            "abc;rm -rf /",
+            "--append-system-prompt",
+            "trailing arg",
+        ]);
+        let out = filter_resume_args_in_place(input);
+        assert_eq!(
+            out,
+            s(&[
+                "--dangerously-skip-permissions",
+                "--append-system-prompt",
+                "trailing arg",
+            ])
+        );
+    }
+
+    #[test]
+    fn strips_invalid_resume_id_with_newline() {
+        let input = s(&["--resume", "line1\nline2-extra"]);
+        let out = filter_resume_args_in_place(input);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn strips_overlength_resume_id() {
+        let bad = "a".repeat(65);
+        let input = s(&["--resume", &bad]);
+        let out = filter_resume_args_in_place(input);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn strips_too_short_resume_id() {
+        let input = s(&["--resume", "abc"]);
+        let out = filter_resume_args_in_place(input);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn strips_empty_resume_id() {
+        let input = s(&["--resume", ""]);
+        let out = filter_resume_args_in_place(input);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn strips_trailing_resume_with_no_id() {
+        let input = s(&["--dangerously-skip-permissions", "--resume"]);
+        let out = filter_resume_args_in_place(input);
+        assert_eq!(out, s(&["--dangerously-skip-permissions"]));
+    }
+
+    #[test]
+    fn strips_single_element_resume_equals_form() {
+        // `--resume=<id>` は 2 要素分離原則を破るため id 内容に関わらず常に strip。
+        let input = s(&["--resume=550e8400-e29b-41d4-a716-446655440000"]);
+        let out = filter_resume_args_in_place(input);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn strips_single_element_resume_equals_with_injection() {
+        let input = s(&[
+            "--dangerously-skip-permissions",
+            "--resume=--print=/etc/passwd",
+            "tail",
+        ]);
+        let out = filter_resume_args_in_place(input);
+        assert_eq!(out, s(&["--dangerously-skip-permissions", "tail"]));
+    }
+
+    #[test]
+    fn does_not_touch_non_resume_args() {
+        let input = s(&[
+            "--dangerously-skip-permissions",
+            "--append-system-prompt",
+            "you are a helper; rm -rf /",
+            "--config",
+            "model_instructions_file=C:\\Users\\zooyo\\.vibe-editor\\instr.md",
+        ]);
+        let out = filter_resume_args_in_place(input.clone());
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn handles_empty_args() {
+        let out = filter_resume_args_in_place(Vec::new());
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn handles_multiple_resume_pairs_keeping_valid_only() {
+        let input = s(&[
+            "--resume",
+            "first-valid-uuid-1234",
+            "--resume",
+            "; rm -rf /",
+            "--resume",
+            "second-valid-uuid-5678",
+        ]);
+        let out = filter_resume_args_in_place(input);
+        assert_eq!(
+            out,
+            s(&[
+                "--resume",
+                "first-valid-uuid-1234",
+                "--resume",
+                "second-valid-uuid-5678",
+            ])
+        );
+    }
 }
