@@ -290,9 +290,13 @@ pub async fn git_diff(
     //   - safe_join() を git 呼び出しの「前」に移動し、境界外のパスは早期 reject する。
     //   - 加えて head_path が "-" で始まる場合 (CLI option 偽装) も拒否する。
     //     `HEAD:-foo` は git 的には rev spec の一部だが、防御的に弾いておく。
+    // Issue #622: substring `head_path.contains("..")` 検証は削除した。
+    //   - `safe_join` (Component::ParentDir を stack pop で処理) で構造的に防がれており、
+    //     文字列 substring は false positive (`foo..bar.txt` のような連続ドット名を持つ
+    //     正当ファイルを拒否) と false negative (組み合わせ次第での抜け) の双方を抱えていた。
+    //   - path traversal 防御の single source of truth を `safe_join` に集約する。
     let head_path = original_rel_path.as_deref().unwrap_or(&rel_path);
     if head_path.starts_with('-')
-        || head_path.contains("..")
         || crate::commands::files::safe_join(&project_root, head_path).is_none()
     {
         return GitDiffResult {
