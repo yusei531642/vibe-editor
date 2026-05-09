@@ -8,6 +8,25 @@
  *   - 寸法・色はすべてテーマ変数 (--bg/--fg/--border/--accent) と揃える
  * =========================================================================== */
 
+/* ---------- Background grid (Issue #610) ----------
+ * xyflow `<Background>` は受け取った `color` prop を SVG attribute (`fill` /
+ * `stroke`) に直接書き込むため、CSS variable 文字列を渡しても評価されず固定色
+ * になっていた (#585 縦線・テーマ追従しないグリッドの根因)。
+ *
+ * 修正: Canvas.tsx 側では `color` prop を渡さず、ここで CSS 経由で fill / stroke
+ * を `var(--canvas-grid)` に上書きする。CSS プロパティは SVG presentation
+ * attribute より優先されるので、xyflow が attribute に何を入れていても CSS が勝つ。
+ *  - `dots` variant: `<circle>` のみ
+ *  - `lines` / `cross` variant: `<path>` の stroke
+ * 両方カバーしておく。`--canvas-grid` の各テーマ値は tokens.css 参照。
+ */
+.react-flow__background-pattern circle {
+  fill: var(--canvas-grid, #1c1c20);
+}
+.react-flow__background-pattern path {
+  stroke: var(--canvas-grid, #1c1c20);
+}
+
 /* ---------- layout root ---------- */
 .canvas-layout {
   position: fixed;
