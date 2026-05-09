@@ -1205,6 +1205,15 @@ impl TeamHub {
                             continue;
                         }
                     };
+                    // Issue #603 (Security): peer UID 検証 — token 一致だけでは認可しない。
+                    // 同 user の任意プロセスからの token 盗み見 + 接続を別 user 越境からは塞ぐ。
+                    if let Err(e) = crate::team_hub::check_peer_is_self_unix(&sock) {
+                        tracing::warn!(
+                            "[teamhub] peer credential check failed, dropping connection: {e:#}"
+                        );
+                        drop(sock);
+                        continue;
+                    }
                     let permit = match sem.clone().try_acquire_owned() {
                         Ok(p) => p,
                         Err(_) => {
@@ -1255,6 +1264,15 @@ impl TeamHub {
                             break;
                         }
                     };
+                    // Issue #603 (Security): peer SID 検証 — token 一致だけでは認可しない。
+                    // 同 user の任意プロセスからの token 盗み見 + 接続を別 user 越境からは塞ぐ。
+                    if let Err(e) = crate::team_hub::check_peer_is_self_windows(&connected) {
+                        tracing::warn!(
+                            "[teamhub] peer credential check failed, dropping connection: {e:#}"
+                        );
+                        drop(connected);
+                        continue;
+                    }
                     let Ok(permit) = sem.clone().try_acquire_owned() else {
                         tracing::warn!(
                             "[teamhub] rejecting connection: client limit ({}) reached",
