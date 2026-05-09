@@ -959,12 +959,34 @@ impl TeamHub {
     ) -> Result<OwnedSemaphorePermit, String> {
         // semaphore の lookup / 挿入だけ HubState lock 内で済ませ、その後の `acquire_owned`
         // はロック外で行う (acquire 側で他の HubState 操作と競合しないように)。
+        //
+        // Issue #589: lazy init で 1 回だけ tracing log を出す。env を変えたのに反映されない
+        // 相談時に、起動ログから実際の permit 数を確認できるようにする。
+        // - 範囲内 env override → info "source=env"
+        // - env 未設定 (= default 採用) → info "source=default"
+        // - env 設定済みだが parse 失敗 / 範囲外で default にフォールバック → warn "source=fallback"
         let semaphore = {
             let mut s = self.state.lock().await;
-            s.recruit_semaphores
-                .entry(team_id.to_string())
-                .or_insert_with(|| Arc::new(Semaphore::new(recruit_concurrency_from_env())))
-                .clone()
+            if let Some(existing) = s.recruit_semaphores.get(team_id) {
+                existing.clone()
+            } else {
+                let (permits, source) = recruit_concurrency_from_env_with_source();
+                if matches!(source, RecruitConcurrencySource::InvalidEnvFallback) {
+                    tracing::warn!(
+                        "[teamhub] recruit semaphore initialized: team={team_id} permits={permits} source={source}",
+                        source = source.label(),
+                    );
+                } else {
+                    tracing::info!(
+                        "[teamhub] recruit semaphore initialized: team={team_id} permits={permits} source={source}",
+                        source = source.label(),
+                    );
+                }
+                let sem = Arc::new(Semaphore::new(permits));
+                s.recruit_semaphores
+                    .insert(team_id.to_string(), sem.clone());
+                sem
+            }
         };
         let timeout = crate::team_hub::protocol::consts::RECRUIT_TIMEOUT;
         match tokio::time::timeout(timeout, semaphore.acquire_owned()).await {
@@ -1461,19 +1483,58 @@ impl TeamHub {
     }
 }
 
-/// Issue #576: `VIBE_TEAM_RECRUIT_CONCURRENCY` 環境変数を読んで permit 数を決める。
-/// `1..=RECRUIT_MAX_CONCURRENCY` の範囲外、parse 失敗、未設定はいずれも
-/// `RECRUIT_DEFAULT_CONCURRENCY` にフォールバック。
+/// Issue #589: `recruit_concurrency_from_env_with_source` の戻り値。permit 数の選択経路を
+/// 区別して、lazy init 時のログレベル (info / warn) を切り替えるために使う。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecruitConcurrencySource {
+    /// `VIBE_TEAM_RECRUIT_CONCURRENCY` が `1..=RECRUIT_MAX_CONCURRENCY` の範囲内で設定済み。
+    Env,
+    /// `VIBE_TEAM_RECRUIT_CONCURRENCY` が未設定 (= 通常運用)。
+    Default,
+    /// `VIBE_TEAM_RECRUIT_CONCURRENCY` は設定されているが parse 失敗 / 範囲外で
+    /// `RECRUIT_DEFAULT_CONCURRENCY` にフォールバックした (= 設定ミスの可能性)。
+    InvalidEnvFallback,
+}
+
+impl RecruitConcurrencySource {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Env => "env",
+            Self::Default => "default",
+            Self::InvalidEnvFallback => "fallback",
+        }
+    }
+}
+
+/// Issue #576 / #589: `VIBE_TEAM_RECRUIT_CONCURRENCY` 環境変数を読んで permit 数を決め、
+/// その決定経路 (env override / default / 範囲外 fallback) も併せて返す。
 ///
-/// `acquire_recruit_permit` の lazy 初期化時に 1 度だけ呼ばれる想定なので、env を読む
-/// オーバーヘッドは無視できる。
-fn recruit_concurrency_from_env() -> usize {
+/// `1..=RECRUIT_MAX_CONCURRENCY` の範囲外・parse 失敗は `RECRUIT_DEFAULT_CONCURRENCY` に
+/// フォールバックし、`InvalidEnvFallback` を返す。未設定は `Default`、範囲内 override は
+/// `Env`。lazy init log の info / warn 分岐にこの source を使う (Issue #589)。
+///
+/// `acquire_recruit_permit` の lazy 初期化時に team_id ごとに 1 度だけ呼ばれる想定なので、
+/// env を読むオーバーヘッドは無視できる。
+fn recruit_concurrency_from_env_with_source() -> (usize, RecruitConcurrencySource) {
     use crate::team_hub::protocol::consts::{RECRUIT_DEFAULT_CONCURRENCY, RECRUIT_MAX_CONCURRENCY};
-    std::env::var("VIBE_TEAM_RECRUIT_CONCURRENCY")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<usize>().ok())
-        .filter(|&n| (1..=RECRUIT_MAX_CONCURRENCY).contains(&n))
-        .unwrap_or(RECRUIT_DEFAULT_CONCURRENCY)
+    match std::env::var("VIBE_TEAM_RECRUIT_CONCURRENCY") {
+        Err(_) => (RECRUIT_DEFAULT_CONCURRENCY, RecruitConcurrencySource::Default),
+        Ok(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                return (RECRUIT_DEFAULT_CONCURRENCY, RecruitConcurrencySource::Default);
+            }
+            match trimmed.parse::<usize>() {
+                Ok(n) if (1..=RECRUIT_MAX_CONCURRENCY).contains(&n) => {
+                    (n, RecruitConcurrencySource::Env)
+                }
+                _ => (
+                    RECRUIT_DEFAULT_CONCURRENCY,
+                    RecruitConcurrencySource::InvalidEnvFallback,
+                ),
+            }
+        }
+    }
 }
 
 /// Issue #577: timeout 後に遅着 ack を rescue する grace window。
@@ -1852,5 +1913,207 @@ mod recruit_semaphore_tests {
 
         drop(permit_y);
         drop(permit_x);
+    }
+}
+
+/// Issue #589: `acquire_recruit_permit` の lazy init 時に出力する tracing ログのテスト。
+///
+/// `tracing::subscriber::with_default` は thread-local で subscriber を差し替えるため、
+/// `current_thread` runtime で `block_on` した async コードからも捕捉できる。env を触る
+/// テストはプロセス global な VIBE_TEAM_RECRUIT_CONCURRENCY を共有するので Mutex で直列化。
+#[cfg(test)]
+mod recruit_semaphore_log_tests {
+    use super::TeamHub;
+    use crate::pty::SessionRegistry;
+    use std::io::Write;
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::fmt::MakeWriter;
+
+    static ENV_GUARD: Mutex<()> = Mutex::new(());
+
+    fn make_hub() -> TeamHub {
+        TeamHub::new(Arc::new(SessionRegistry::new()))
+    }
+
+    #[derive(Clone, Default)]
+    struct CapturedWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for CapturedWriter {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> MakeWriter<'a> for CapturedWriter {
+        type Writer = Self;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    fn capture<F: FnOnce()>(f: F) -> String {
+        let writer = CapturedWriter::default();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(writer.clone())
+            .with_max_level(tracing::Level::TRACE)
+            .with_target(false)
+            .with_ansi(false)
+            .finish();
+        tracing::subscriber::with_default(subscriber, f);
+        let buf = writer.0.lock().unwrap().clone();
+        String::from_utf8(buf).unwrap_or_default()
+    }
+
+    fn block_on<F: std::future::Future>(future: F) -> F::Output {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("build current_thread runtime")
+            .block_on(future)
+    }
+
+    /// 初回の `acquire_recruit_permit` で 1 回だけ `recruit semaphore initialized` が
+    /// 出力され、2 回目以降の acquire では再出力されない (lazy init 1 回限り)。
+    #[test]
+    fn lazy_init_log_emitted_only_once_per_team() {
+        let _g = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("VIBE_TEAM_RECRUIT_CONCURRENCY");
+
+        let logs = capture(|| {
+            block_on(async {
+                let hub = make_hub();
+                let p1 = hub
+                    .acquire_recruit_permit("team-init-once")
+                    .await
+                    .expect("first acquire should succeed");
+                drop(p1);
+                let p2 = hub
+                    .acquire_recruit_permit("team-init-once")
+                    .await
+                    .expect("second acquire should succeed");
+                drop(p2);
+            });
+        });
+
+        let init_count = logs.matches("recruit semaphore initialized").count();
+        assert_eq!(
+            init_count, 1,
+            "expected exactly 1 init log across 2 acquires; got: {logs}",
+        );
+        assert!(
+            logs.contains("team=team-init-once"),
+            "init log should include team_id; got: {logs}",
+        );
+        assert!(
+            logs.contains("source=default"),
+            "unset env should be logged as source=default; got: {logs}",
+        );
+        assert!(
+            logs.contains("INFO"),
+            "default source should be info-level; got: {logs}",
+        );
+    }
+
+    /// 範囲内 env override (`VIBE_TEAM_RECRUIT_CONCURRENCY=4`) は info で `source=env`。
+    #[test]
+    fn lazy_init_log_with_valid_env_uses_info_and_marks_env() {
+        let _g = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("VIBE_TEAM_RECRUIT_CONCURRENCY", "4");
+
+        let logs = capture(|| {
+            block_on(async {
+                let hub = make_hub();
+                let p = hub
+                    .acquire_recruit_permit("team-init-env")
+                    .await
+                    .expect("acquire should succeed");
+                drop(p);
+            });
+        });
+
+        std::env::remove_var("VIBE_TEAM_RECRUIT_CONCURRENCY");
+
+        assert!(
+            logs.contains("recruit semaphore initialized"),
+            "expected init log; got: {logs}",
+        );
+        assert!(
+            logs.contains("source=env"),
+            "in-range env should be logged as source=env; got: {logs}",
+        );
+        assert!(
+            logs.contains("permits=4"),
+            "permits should reflect env value; got: {logs}",
+        );
+        assert!(
+            logs.contains("INFO"),
+            "valid env should be info-level; got: {logs}",
+        );
+    }
+
+    /// 範囲外 env (= `VIBE_TEAM_RECRUIT_CONCURRENCY=999`) は warn で `source=fallback`。
+    #[test]
+    fn lazy_init_log_with_invalid_env_uses_warn_and_marks_fallback() {
+        let _g = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("VIBE_TEAM_RECRUIT_CONCURRENCY", "999");
+
+        let logs = capture(|| {
+            block_on(async {
+                let hub = make_hub();
+                let p = hub
+                    .acquire_recruit_permit("team-init-bad")
+                    .await
+                    .expect("acquire should still succeed (default fallback)");
+                drop(p);
+            });
+        });
+
+        std::env::remove_var("VIBE_TEAM_RECRUIT_CONCURRENCY");
+
+        assert!(
+            logs.contains("recruit semaphore initialized"),
+            "expected init log; got: {logs}",
+        );
+        assert!(
+            logs.contains("source=fallback"),
+            "out-of-range env should be logged as source=fallback; got: {logs}",
+        );
+        assert!(
+            logs.contains("WARN"),
+            "out-of-range env should be warn-level; got: {logs}",
+        );
+    }
+
+    /// parse 失敗 (= `VIBE_TEAM_RECRUIT_CONCURRENCY=not-a-number`) も warn + fallback。
+    #[test]
+    fn lazy_init_log_with_unparseable_env_uses_warn_and_marks_fallback() {
+        let _g = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("VIBE_TEAM_RECRUIT_CONCURRENCY", "not-a-number");
+
+        let logs = capture(|| {
+            block_on(async {
+                let hub = make_hub();
+                let p = hub
+                    .acquire_recruit_permit("team-init-garbage")
+                    .await
+                    .expect("acquire should still succeed (default fallback)");
+                drop(p);
+            });
+        });
+
+        std::env::remove_var("VIBE_TEAM_RECRUIT_CONCURRENCY");
+
+        assert!(
+            logs.contains("source=fallback"),
+            "unparseable env should be logged as source=fallback; got: {logs}",
+        );
+        assert!(
+            logs.contains("WARN"),
+            "unparseable env should be warn-level; got: {logs}",
+        );
     }
 }
