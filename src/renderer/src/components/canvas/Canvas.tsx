@@ -73,7 +73,13 @@ const FLOW_DELETE_KEYS = ['Delete'];
 const FLOW_PAN_BUTTONS = [0, 1, 2];
 const FLOW_PRO_OPTIONS = { hideAttribution: true } as const;
 const FLOW_STAGE_STYLE = { position: 'absolute' as const, inset: 0 };
-const BACKGROUND_COLOR_VAR = 'var(--canvas-grid, #1c1c20)';
+// Issue #610: 旧実装は `<Background color="var(--canvas-grid, #1c1c20)" />` のように
+//  CSS variable 文字列を SVG attribute に直接渡していたが、SVG attribute は CSS
+//  context ではないため `var(...)` は解釈されず、ブラウザは attribute 値を不正
+//  扱いして fallback の灰色 / 黒で固定描画していた (#585 縦線の根因)。
+//  CSS で `.react-flow__background-pattern circle` の fill を `var(--canvas-grid)`
+//  で上書きする方式 (styles/components/canvas.css 参照) に切替えたため、ここでは
+//  color prop を渡さず、xyflow の default attribute の上に CSS が乗るようにする。
 /** Issue #259 継承: zoom が 0.7 を下回ると TUI が読めなくなるため recruit focus 時のクランプ閾値。 */
 const MIN_RECRUIT_ZOOM = 0.7;
 
@@ -428,7 +434,7 @@ function FlowApp(): JSX.Element {
         // 多少の DOM 増加は呑んで全カードを常時マウントしておく。
         proOptions={FLOW_PRO_OPTIONS}
       >
-        <Background gap={32} color={BACKGROUND_COLOR_VAR} />
+        <Background gap={32} />
         {/* React Flow デフォルトの白い縦 4 ボタン (zoom/+/-、fit、lock) は UI と不整合なので非表示。
             ズームはマウスホイール / トラックパッド、fit はキー (KEYS.fitView)、lock は不要なため。 */}
         <MiniMap

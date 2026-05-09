@@ -324,6 +324,11 @@ samp,
   --surface-hover: var(--bg-hover);
   --surface-active: var(--bg-active);
   --surface-glass: rgba(23, 23, 22, 0.62);
+  /* Issue #610: Canvas Background grid (xyflow `<Background variant="dots">`) の
+   *  dot 色をテーマ追従させるための変数。SVG attribute では `var(...)` が解釈
+   *  されないため、Canvas.tsx 側で color prop は渡さず、CSS で
+   *  `.react-flow__background-pattern circle/path` の fill/stroke を上書きする。 */
+  --canvas-grid: #2a2a2e;
   --focus-ring: 0 0 0 3px rgba(217, 119, 87, 0.28);
   color-scheme: dark;
 }
@@ -367,6 +372,8 @@ samp,
   --surface-hover: var(--bg-hover);
   --surface-active: var(--bg-active);
   --surface-glass: rgba(248, 248, 246, 0.72);
+  /* Issue #610: dot 色は light bg (#f8f8f6) と弱コントラストの薄灰に。 */
+  --canvas-grid: #d4d4d8;
   --focus-ring: 0 0 0 3px rgba(217, 119, 87, 0.22);
   color-scheme: light;
 }
@@ -406,6 +413,8 @@ samp,
   --surface-hover: var(--bg-hover);
   --surface-active: var(--bg-active);
   --surface-glass: rgba(11, 13, 18, 0.62);
+  /* Issue #610: 旧 hardcode default と同じ #1c1c20 を維持 (= 互換)。 */
+  --canvas-grid: #1c1c20;
   --focus-ring: 0 0 0 1px rgba(8, 9, 10, 0.8), 0 0 0 3px rgba(94, 106, 210, 0.3);
   color-scheme: dark;
 }
@@ -445,6 +454,8 @@ samp,
   --surface-hover: var(--bg-hover);
   --surface-active: var(--bg-active);
   --surface-glass: rgba(5, 7, 12, 0.62);
+  /* Issue #610: midnight (#05070c) とほぼ同等の極暗色。 */
+  --canvas-grid: #15151a;
   --focus-ring: 0 0 0 1px rgba(5, 7, 12, 0.86), 0 0 0 3px rgba(124, 92, 255, 0.28);
   color-scheme: dark;
 }
@@ -484,6 +495,8 @@ samp,
   --surface-hover: var(--bg-hover);
   --surface-active: var(--bg-active);
   --surface-glass: rgba(255, 255, 255, 0.62);
+  /* Issue #610: pure white bg に対して薄灰 dot。 */
+  --canvas-grid: #d4d4d8;
   --focus-ring: 0 0 0 1px rgba(255, 255, 255, 0.92), 0 0 0 3px rgba(0, 0, 0, 0.14);
   color-scheme: light;
 }
@@ -529,6 +542,8 @@ samp,
   --surface-hover: var(--bg-hover);
   --surface-active: var(--bg-active);
   --surface-glass: rgba(10, 10, 26, 0.68);
+  /* Issue #610: 半透明白 dot で acrylic 上でも視認可、Cyber Neon の世界観を壊さない。 */
+  --canvas-grid: rgba(255, 255, 255, 0.18);
   --focus-ring: 0 0 0 2px rgba(0, 255, 255, 0.40);
   color-scheme: dark;
 }

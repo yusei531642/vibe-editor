@@ -48,4 +48,31 @@ describe('Canvas CSS contract', () => {
       /\.tc-list-row__status-dot\s*\{[\s\S]*background:\s*var\(--agent-accent,\s*var\(--role-color,\s*var\(--success\)\)\)\s*;/
     );
   });
+
+  it('Issue #610: --canvas-grid is defined for every theme so the Background grid follows the theme', () => {
+    const tokens = stripCssComments(readStyleFile('tokens.css'));
+
+    // 全 6 テーマ + :root fallback がカバーされていることを保証する。新規テーマを足したら
+    // 同じく tokens.css に --canvas-grid を 1 行足すことで Canvas.tsx は触らずに対応できる。
+    for (const theme of ['claude-dark', 'claude-light', 'dark', 'light', 'midnight', 'glass']) {
+      const blockRe = new RegExp(
+        String.raw`\[data-theme='${theme}'\][^{]*\{[\s\S]*?--canvas-grid\s*:[^;]+;[\s\S]*?\}`
+      );
+      expect(tokens, `theme '${theme}' must define --canvas-grid`).toMatch(blockRe);
+    }
+  });
+
+  it('Issue #610: canvas.css targets the React Flow background pattern via CSS so SVG attributes do not strand var()', () => {
+    const canvas = stripCssComments(readComponentCss('canvas.css'));
+
+    // dots variant (`<circle>`) と lines/cross variant (`<path>`) の両方を
+    // var(--canvas-grid) で上書きすることで、xyflow がどの variant を選んでも
+    // テーマ追従する。フォールバック値も hex で残しておく (variable 未定義時の保険)。
+    expect(canvas).toMatch(
+      /\.react-flow__background-pattern\s+circle\s*\{[\s\S]*fill:\s*var\(--canvas-grid[^)]*\)\s*;/
+    );
+    expect(canvas).toMatch(
+      /\.react-flow__background-pattern\s+path\s*\{[\s\S]*stroke:\s*var\(--canvas-grid[^)]*\)\s*;/
+    );
+  });
 });
