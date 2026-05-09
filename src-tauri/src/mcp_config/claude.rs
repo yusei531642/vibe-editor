@@ -2,23 +2,26 @@
 
 use anyhow::Result;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 
 const ENTRY: &str = "vibe-team";
 const LEGACY_ENTRY: &str = "vive-team";
 
-fn config_path() -> PathBuf {
+pub(crate) fn config_path() -> PathBuf {
     dirs::home_dir().unwrap_or_default().join(".claude.json")
 }
 
 /// `mcpServers["vibe-team"]` を `desired` で上書き。
 /// 既に同じ内容なら false (no-op)、変更したら true を返す。
 /// 旧 `vive-team` エントリがあれば同時に削除する (名前変更による自動マイグレーション)。
-pub async fn setup(desired: &Value) -> Result<bool> {
-    let path = config_path();
-    let mut config: Value = match fs::read(&path).await {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|_| Value::Object(Default::default())),
+///
+/// Issue #597: テスト容易化のため path を引数に取る (production code は config_path() を渡す)。
+pub(crate) async fn setup_at(path: &Path, desired: &Value) -> Result<bool> {
+    let mut config: Value = match fs::read(path).await {
+        Ok(bytes) => {
+            serde_json::from_slice(&bytes).unwrap_or_else(|_| Value::Object(Default::default()))
+        }
         Err(_) => Value::Object(Default::default()),
     };
     let obj = config
@@ -39,39 +42,36 @@ pub async fn setup(desired: &Value) -> Result<bool> {
     servers_obj.insert(ENTRY.into(), desired.clone());
     let json = serde_json::to_vec_pretty(&config)?;
     // Issue #37: ~/.claude.json は他アプリとも共有。半端書き込みで全消失するのを避けるため atomic に。
-    crate::commands::atomic_write::atomic_write(&path, &json).await?;
+    crate::commands::atomic_write::atomic_write(path, &json).await?;
     Ok(true)
 }
 
 /// Issue #118: setup/cleanup の rollback 用に、現状のファイル内容を丸ごとスナップショット。
-/// `Ok(None)` はファイル未存在 (= 元々何も無い)。restore() で None を渡すとファイル削除で原状回復する。
-pub async fn snapshot() -> Result<Option<Vec<u8>>> {
-    let path = config_path();
-    match fs::read(&path).await {
+/// `Ok(None)` はファイル未存在 (= 元々何も無い)。restore_at() で None を渡すとファイル削除で原状回復する。
+pub(crate) async fn snapshot_at(path: &Path) -> Result<Option<Vec<u8>>> {
+    match fs::read(path).await {
         Ok(b) => Ok(Some(b)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(e.into()),
     }
 }
 
-/// Issue #118: snapshot() で取った状態へ atomic に書き戻す。
-pub async fn restore(snap: Option<Vec<u8>>) -> Result<()> {
-    let path = config_path();
+/// Issue #118: snapshot_at() で取った状態へ atomic に書き戻す。
+pub(crate) async fn restore_at(path: &Path, snap: Option<Vec<u8>>) -> Result<()> {
     match snap {
         Some(bytes) => {
-            crate::commands::atomic_write::atomic_write(&path, &bytes).await?;
+            crate::commands::atomic_write::atomic_write(path, &bytes).await?;
         }
         None => {
             // 元々ファイルが無かった場合は削除して原状回復
-            let _ = fs::remove_file(&path).await;
+            let _ = fs::remove_file(path).await;
         }
     }
     Ok(())
 }
 
-pub async fn cleanup() -> Result<bool> {
-    let path = config_path();
-    let Ok(bytes) = fs::read(&path).await else {
+pub(crate) async fn cleanup_at(path: &Path) -> Result<bool> {
+    let Ok(bytes) = fs::read(path).await else {
         return Ok(false);
     };
     let mut config: Value = serde_json::from_slice(&bytes).unwrap_or_default();
@@ -88,7 +88,50 @@ pub async fn cleanup() -> Result<bool> {
         // Issue #108: setup と同じく cleanup も atomic_write を使う。
         // 直接 fs::write で上書きすると、書き込み中のクラッシュで `~/.claude.json` が
         // 空 / 半端な状態で残り、Claude Code 全体の設定が失われる事故になる。
-        crate::commands::atomic_write::atomic_write(&path, &json).await?;
+        crate::commands::atomic_write::atomic_write(path, &json).await?;
     }
     Ok(removed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn snapshot_returns_none_when_file_absent() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join(".claude.json");
+        assert!(snapshot_at(&path).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn restore_round_trips_existing_content() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join(".claude.json");
+        let original = br#"{"existing":true}"#.to_vec();
+        fs::write(&path, &original).await.unwrap();
+
+        let snap = snapshot_at(&path).await.unwrap();
+        // 何か壊して restore で元に戻す
+        fs::write(&path, b"corrupted").await.unwrap();
+        restore_at(&path, snap).await.unwrap();
+        let got = fs::read(&path).await.unwrap();
+        assert_eq!(got, original);
+    }
+
+    #[tokio::test]
+    async fn setup_at_returns_err_when_root_is_array() {
+        // 「~/.claude.json must be an object」エラー経路 (rollback テストで使う)
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join(".claude.json");
+        fs::write(&path, b"[]").await.unwrap();
+        let desired = json!({ "type": "stdio" });
+        let res = setup_at(&path, &desired).await;
+        assert!(res.is_err(), "array root should fail with object check");
+        // ファイルは触られていないはず
+        let still = fs::read(&path).await.unwrap();
+        assert_eq!(still, b"[]");
+    }
 }
