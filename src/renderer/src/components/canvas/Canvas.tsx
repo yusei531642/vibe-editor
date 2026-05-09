@@ -285,6 +285,12 @@ function FlowApp(): JSX.Element {
   const handlePaneContextMenu = useCallback(
     (e: React.MouseEvent | MouseEvent) => {
       e.preventDefault();
+      // Issue #616 / #593: stopPropagation を抜いていたため React Flow の pane の
+      //  mousedown が document まで bubble し、ContextMenu 内の outside-click 検知
+      //  に「メニューを開いた当の右クリック自身」が外クリックとして誤検出されて
+      //  即閉じる race を起こしていた (handleNodeContextMenu は両方呼んでいるので
+      //  node 上の右クリックは正常)。Pane 経路にも stopPropagation を揃える。
+      e.stopPropagation();
       const items: ContextMenuItem[] = [
         {
           label: t('canvasMenu.addClaudeHere'),
