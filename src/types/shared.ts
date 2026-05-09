@@ -740,6 +740,33 @@ export interface HandoffLifecycleEvent {
   createdAt: string;
 }
 
+/**
+ * `team_report` findings の TS 投影。Rust 側 `TeamReportFinding` (camelCase) と一致させる。
+ */
+export interface TeamReportFinding {
+  severity: string;
+  file: string;
+  message: string;
+}
+
+/**
+ * `team_reports` backlog の TS 投影。Rust 側 `TeamReportSnapshot` (camelCase) と一致させる。
+ */
+export interface TeamReportSnapshot {
+  id: string;
+  taskId: string;
+  taskIdNum?: number;
+  fromRole: string;
+  fromAgentId: string;
+  status: string;
+  summary: string;
+  findings?: TeamReportFinding[];
+  changedFiles?: string[];
+  artifactRefs?: string[];
+  nextActions?: string[];
+  createdAt: string;
+}
+
 export interface TeamOrchestrationState {
   schemaVersion: number;
   projectRoot: string;
@@ -749,6 +776,7 @@ export interface TeamOrchestrationState {
   tasks: TeamTaskSnapshot[];
   pendingTasks: TeamTaskSnapshot[];
   workerReports: WorkerReport[];
+  teamReports?: TeamReportSnapshot[];
   humanGate: HumanGateState;
   nextActions: string[];
   handoffEvents: HandoffLifecycleEvent[];
