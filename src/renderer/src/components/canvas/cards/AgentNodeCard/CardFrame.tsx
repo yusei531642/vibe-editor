@@ -33,6 +33,7 @@ import { deriveHealth, type HealthState } from '../../../../lib/agent-health';
 import { useTeamInjectFailed } from '../../../../lib/use-team-inject-failed';
 import { useTeamInboxRead } from '../../../../lib/use-team-inbox-read';
 import { useTeamHandoff } from '../../../../lib/use-team-handoff';
+import { applyHandoffArrival, applyInboxRead } from './unread-inbox-count';
 import { useSettings } from '../../../../lib/settings-context';
 import {
   useCanvasStore,
@@ -556,52 +557,25 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   // `team_read` を呼んだことが確定するので、自分宛の発火なら count を減らす。
   // 一番古い未読が 60s 以上残っている場合は警告色に切り替えて Leader に督促を促す
   // (`team_diagnostics.stalledInbound: true` と意味的に揃えてある)。
+  // Issue #596: closure-captured payload を読んでから書く形では 1 frame 内 2 件以上の
+  //  handoff/inbox_read が来ると undercount する race があった。
+  //  applyHandoffArrival / applyInboxRead は zustand store から最新値を直読みする
+  //  helper。React tree から切り離して unit test 可能。詳細は
+  //  `./unread-inbox-count.ts` の docstring 参照。
   useTeamHandoff(
     useCallback(
       (evt) => {
-        if (!payload.agentId || evt.toAgentId !== payload.agentId) return;
-        // 既存 oldestUnreadDeliveredAt は維持。新しく到着した分は last (新しい) なので
-        // oldest としては古い方を残す = undefined のときだけ初期化する。
-        const oldest = payload.oldestUnreadDeliveredAt ?? evt.timestamp;
-        setCardPayload(id, {
-          unreadInboxCount: (payload.unreadInboxCount ?? 0) + 1,
-          oldestUnreadDeliveredAt: oldest
-        });
+        applyHandoffArrival(useCanvasStore, id, evt, payload.agentId);
       },
-      [
-        id,
-        payload.agentId,
-        payload.unreadInboxCount,
-        payload.oldestUnreadDeliveredAt,
-        setCardPayload
-      ]
+      [id, payload.agentId]
     )
   );
   useTeamInboxRead(
     useCallback(
       (evt) => {
-        if (!payload.agentId || evt.readByAgentId !== payload.agentId) return;
-        const next = Math.max(
-          0,
-          (payload.unreadInboxCount ?? 0) - evt.messageIds.length
-        );
-        // 全件読了なら oldestUnreadDeliveredAt も undefined にして clean state に戻す。
-        // 部分既読 (= まだ未読が残っている) のときは oldest を維持 (本当の oldest が
-        // どれかを正確に知るには messageIds と delivered_at の照合が必要だが、現状
-        // event-driven 集計では粗い近似で十分)。
-        setCardPayload(id, {
-          unreadInboxCount: next,
-          oldestUnreadDeliveredAt:
-            next === 0 ? undefined : payload.oldestUnreadDeliveredAt
-        });
+        applyInboxRead(useCanvasStore, id, evt, payload.agentId);
       },
-      [
-        id,
-        payload.agentId,
-        payload.unreadInboxCount,
-        payload.oldestUnreadDeliveredAt,
-        setCardPayload
-      ]
+      [id, payload.agentId]
     )
   );
 
