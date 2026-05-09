@@ -56,10 +56,19 @@ function FileTreeCardImpl({ id, data, positionAbsoluteX, positionAbsoluteY }: No
   const handleRemoveWorkspaceFolder = useCallback(
     async (path: string) => {
       const current = settings.workspaceFolders ?? [];
-      if (!current.includes(path)) return;
-      await update({ workspaceFolders: current.filter((p) => p !== path) });
+      const isPrimary = path === projectRoot;
+      if (!isPrimary && !current.includes(path)) return;
+      if (isPrimary) {
+        const name = path.split(/[\\/]/).pop() ?? path;
+        if (!window.confirm(t('workspace.removePrimaryConfirm', { name }))) return;
+      }
+      const nextPrimary = isPrimary ? current.find((p) => p !== path) ?? '' : projectRoot;
+      await update({
+        workspaceFolders: current.filter((p) => p !== path && p !== nextPrimary),
+        ...(isPrimary ? { lastOpenedRoot: nextPrimary } : {})
+      });
     },
-    [settings.workspaceFolders, update]
+    [settings.workspaceFolders, projectRoot, update, t]
   );
 
   // Issue #273: 展開状態 / 永続化は FileTreeStateProvider に集約済み。FileTreeCard 自身は

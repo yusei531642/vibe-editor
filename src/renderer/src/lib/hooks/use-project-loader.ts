@@ -298,10 +298,15 @@ export function useProjectLoader(
   }, [workspaceFoldersFromSettings, projectRoot, updateSettings, t]);
 
   const handleRemoveWorkspaceFolder = useCallback(
-    (path: string) => {
+    async (path: string) => {
       const current = workspaceFoldersFromSettings ?? [];
-      if (!current.includes(path)) return;
+      const isPrimary = path === projectRoot;
+      if (!isPrimary && !current.includes(path)) return;
       const name = path.split(/[\\/]/).pop() ?? path;
+
+      if (isPrimary && !window.confirm(t('workspace.removePrimaryConfirm', { name }))) {
+        return;
+      }
 
       // Issue #33: 未保存タブの破棄確認を settings 更新より先に行う。
       // Cancel された場合は settings / tabs どちらも変更せず、UI と永続状態の整合を保つ。
@@ -310,10 +315,30 @@ export function useProjectLoader(
       if (!optsRef.current.discardEditorTabsForRoot(path)) {
         return;
       }
-      void updateSettings({ workspaceFolders: current.filter((p) => p !== path) });
+      if (isPrimary) {
+        const nextPrimary = current.find((p) => p !== path) ?? '';
+        const nextWorkspaceFolders = current.filter((p) => p !== path && p !== nextPrimary);
+        if (nextPrimary) {
+          const loaded = await loadProject(nextPrimary);
+          if (!loaded) return;
+          await updateSettings({ workspaceFolders: nextWorkspaceFolders });
+        } else {
+          setProjectRoot('');
+          setGitStatus(null);
+          setGitLoading(false);
+          optsRef.current.onProjectSwitched('');
+          useUiStore.getState().setStatus(t('status.noProject'));
+          await updateSettings({
+            lastOpenedRoot: '',
+            workspaceFolders: nextWorkspaceFolders
+          });
+        }
+      } else {
+        await updateSettings({ workspaceFolders: current.filter((p) => p !== path) });
+      }
       optsRef.current.showToast(t('workspace.removed', { name }), { tone: 'info' });
     },
-    [workspaceFoldersFromSettings, updateSettings, t]
+    [workspaceFoldersFromSettings, projectRoot, loadProject, updateSettings, t]
   );
 
   return {
