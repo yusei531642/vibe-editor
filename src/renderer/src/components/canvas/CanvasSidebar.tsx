@@ -15,6 +15,7 @@ import { useT } from '../../lib/i18n';
 import { useUiStore } from '../../stores/ui';
 import { ROLE_META } from '../../lib/team-roles';
 import { useFilesChanged } from '../../lib/use-files-changed';
+import { spawnTeam, type SpawnTeamMember } from '../../lib/canvas-team-spawn';
 
 interface CanvasSidebarProps {
   /** 外部 (CanvasLayout の Rail) から制御したい場合に渡す。省略時はローカル state */
@@ -142,56 +143,47 @@ export function CanvasSidebar({
   const handleResumeTeam = useCallback(
     async (entry: TeamHistoryEntry): Promise<void> => {
       const cwd = projectRoot || entry.projectRoot;
-      // Issue #72: agent を spawn する前に MCP 設定を反映する。
-      //   setupTeamMcp は ~/.claude.json の `mcpServers.vibe-team` を書き換えるため、
-      //   AgentNodeCard がマウント → usePtySession が Claude/Codex spawn する前に完了
-      //   させないと、初回の Claude 起動が vibe-team を認識せず team tool が使えない。
-      // mcpAutoSetup === false なら全スキップ (設定 → MCP タブ)。
-      if (settings.mcpAutoSetup !== false) {
-        try {
-          await window.api.app.setupTeamMcp(
-            cwd,
-            entry.id,
-            entry.name,
-            entry.members.map((m, i) => ({
-              agentId: `${m.role}-${i}-${entry.id}`,
-              role: m.role,
-              agent: m.agent
-            }))
-          );
-        } catch (err) {
-          console.warn('[resume-team] setupTeamMcp failed:', err);
-          // MCP 設定失敗でも agent は起動する (ユーザーに部分的な UI だけでも提供)
-        }
-      }
-      const cards = entry.members.map((m, i) => {
-        const agentId = `${m.role}-${i}-${entry.id}`;
-        const saved = entry.canvasState?.nodes.find((s) => s.agentId === agentId);
-        const pos = saved
-          ? { x: saved.x, y: saved.y }
-          : { x: (i % 3) * 520, y: Math.floor(i / 3) * 360 };
-        // Issue #69: 未知 role (旧バージョン / 手編集の team-history) でもクラッシュさせない
-        const label = ROLE_META[m.role]?.label ?? m.role ?? 'Agent';
+      // Issue #611 / #612: 旧実装は 520x360 hardcode grid + placeBatchAwayFromNodes
+      //   未経由 + latestHandoff 未同梱で、現行 NODE_W/NODE_H (#497) と不整合のうえ
+      //   既存カードと重なって配置されていた。CanvasLayout.applyPreset / restoreRecent
+      //   と完全に同じ spawnTeam helper 経由に統一して、配置 / setupTeamMcp / payload
+      //   同梱の責務を 1 関数に集約する。
+      const members: SpawnTeamMember[] = entry.members.map((m, i) => {
+        const fallbackAgentId = m.agentId ?? `${m.role}-${i}-${entry.id}`;
+        const saved = entry.canvasState?.nodes.find((s) => s.agentId === fallbackAgentId);
+        const savedX =
+          typeof saved?.x === 'number' && Number.isFinite(saved.x) ? saved.x : null;
+        const savedY =
+          typeof saved?.y === 'number' && Number.isFinite(saved.y) ? saved.y : null;
+        // saved 座標が無いとき、helper が placeBatchAwayFromNodes で空き地を探すので
+        // ここでは「衝突しがちでも仮置きの (0,0) ベース」で十分。
+        const position =
+          savedX !== null && savedY !== null ? { x: savedX, y: savedY } : { x: 0, y: 0 };
         return {
-          type: 'agent' as const,
-          title: label,
-          position: pos,
-          payload: {
-            agent: m.agent,
-            // 新スキーマは roleProfileId、旧コード互換のため role も書いておく
-            roleProfileId: m.role,
-            role: m.role,
-            teamId: entry.id,
-            agentId,
-            resumeSessionId: m.sessionId ?? null,
-            cwd,
-            organization: entry.organization
-          }
+          role: m.role,
+          agent: m.agent,
+          position,
+          // Issue #69: 未知 role (旧バージョン / 手編集の team-history) でもクラッシュさせない
+          title: ROLE_META[m.role]?.label ?? m.role ?? 'Agent',
+          resumeSessionId: m.sessionId ?? null,
+          // legacy team-history 由来の特殊 agentId は尊重する
+          agentId: m.agentId ?? undefined
         };
+      });
+      const { cards } = await spawnTeam({
+        teamId: entry.id,
+        teamName: entry.name,
+        cwd,
+        members,
+        organization: entry.organization,
+        latestHandoff: entry.latestHandoff,
+        existingNodes: useCanvasStore.getState().nodes,
+        mcpAutoSetup: settings.mcpAutoSetup !== false,
+        setupTeamMcp: window.api.app.setupTeamMcp
       });
       addCards(cards);
     },
-    [addCards, projectRoot]
+    [addCards, projectRoot, settings.mcpAutoSetup]
   );
 
   const handleDeleteTeamHistory = useCallback(
