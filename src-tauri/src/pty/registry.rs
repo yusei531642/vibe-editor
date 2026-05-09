@@ -56,10 +56,27 @@ fn recover<'a, T>(
     }
 }
 
+/// Issue #605 (Security): attach 候補の team_id と caller 期待 team_id の一致判定。
+///   - 双方 Some: 完全一致なら true
+///   - 双方 None: true (team_id を持たない単独 PTY の HMR remount 互換性のため許可)
+///   - 片方のみ Some: false (= attach 拒否、別 team の scrollback を吸い出される経路を塞ぐ)
+fn team_ids_match(actual: Option<&str>, expected: Option<&str>) -> bool {
+    match (actual, expected) {
+        (Some(a), Some(e)) => a == e,
+        (None, None) => true,
+        _ => false,
+    }
+}
+
 /// Issue #271: `find_attach_target` のロジック本体を side-effect 無しの pure 関数として
 /// 切り出す。production では Mutex 内で呼んで結果と「掃除すべき orphan key」を受け取り、
 /// テストでも同じ関数を直接呼ぶ。これにより production と test の lookup ルールが
 /// 一致することを機械的に保証する。
+///
+/// Issue #605 (Security): `expected_team_id` を取り、attach 候補の SessionHandle.team_id
+/// と一致しない場合は `None` を返して新規 spawn にフォールバックさせる。session_key /
+/// agent_id の文字列一致だけで attach を許すと、別 team の同名 agent_id 経由で PTY scrollback
+/// (Claude Code prompt / API キー / git diff / ファイル内容) を吸い出す情報漏洩経路になる。
 ///
 /// 戻り値:
 ///   `(Option<session_id>, orphan_session_key, orphan_agent_id)`
@@ -73,14 +90,25 @@ fn lookup_attach_target_pure(
     by_agent: &HashMap<String, String>,
     session_key: Option<&str>,
     agent_id: Option<&str>,
+    expected_team_id: Option<&str>,
 ) -> (Option<String>, Option<String>, Option<String>) {
     let mut orphan_skey: Option<String> = None;
     let mut orphan_agent: Option<String> = None;
 
     if let Some(k) = session_key {
         if let Some(sid) = by_session_key.get(k) {
-            if by_id.contains_key(sid) {
-                return (Some(sid.clone()), None, None);
+            if let Some(handle) = by_id.get(sid) {
+                if team_ids_match(handle.team_id.as_deref(), expected_team_id) {
+                    return (Some(sid.clone()), None, None);
+                }
+                // Issue #605: team_id mismatch — orphan ではなく単に attach 不可。
+                // index は別 team の生存 PTY を指し続けるので削除しない (= 旧 PTY 自身の
+                // attach は引き続き成立する)。caller は新規 spawn にフォールバック。
+                tracing::info!(
+                    "[registry] attach reject — team_id mismatch (session_key={k:?}, expected={expected_team_id:?}, actual={:?})",
+                    handle.team_id
+                );
+                return (None, None, None);
             }
             // by_id に存在しない id を指す index は orphan として掃除候補に
             orphan_skey = Some(k.to_string());
@@ -88,8 +116,15 @@ fn lookup_attach_target_pure(
     }
     if let Some(a) = agent_id {
         if let Some(sid) = by_agent.get(a) {
-            if by_id.contains_key(sid) {
-                return (Some(sid.clone()), orphan_skey, None);
+            if let Some(handle) = by_id.get(sid) {
+                if team_ids_match(handle.team_id.as_deref(), expected_team_id) {
+                    return (Some(sid.clone()), orphan_skey, None);
+                }
+                tracing::info!(
+                    "[registry] attach reject — team_id mismatch (agent_id={a:?}, expected={expected_team_id:?}, actual={:?})",
+                    handle.team_id
+                );
+                return (None, orphan_skey, None);
             }
             orphan_agent = Some(a.to_string());
         }
@@ -238,10 +273,15 @@ impl SessionRegistry {
     /// session_key を最優先 (Canvas 通常 Terminal は agent_id を持たないため)、
     /// 次に agent_id を見る。`by_id` に entry がない孤立 index は **その場で掃除する**。
     /// 長時間 dev/HMR を繰り返したとき index 側だけ肥大化しないようにするため。
+    ///
+    /// Issue #605 (Security): `expected_team_id` を取り、attach 候補の team_id と一致しない場合
+    /// は `None` を返す。caller は新規 spawn にフォールバックすること (= 別 team の scrollback
+    /// を吸い出す情報漏洩経路を塞ぐ)。
     pub fn find_attach_target(
         &self,
         session_key: Option<&str>,
         agent_id: Option<&str>,
+        expected_team_id: Option<&str>,
     ) -> Option<String> {
         let mut g = recover(self.inner.lock());
         // pure な lookup ロジックを共有 (テストでも同じ関数を呼ぶ)。
@@ -251,6 +291,7 @@ impl SessionRegistry {
             &g.by_agent,
             session_key,
             agent_id,
+            expected_team_id,
         );
         if let Some(k) = orphan_skey {
             g.by_session_key.remove(&k);
@@ -467,7 +508,7 @@ mod attach_lookup_tests {
         let by_agent = HashMap::new();
 
         let (result, orphan_skey, orphan_agent) =
-            lookup_attach_target_pure(&by_id, &by_session_key, &by_agent, Some("k1"), None);
+            lookup_attach_target_pure(&by_id, &by_session_key, &by_agent, Some("k1"), None, None);
         assert!(result.is_none(), "by_id 空なら attach 不能");
         assert_eq!(
             orphan_skey.as_deref(),
@@ -485,7 +526,7 @@ mod attach_lookup_tests {
         by_agent.insert("a1".to_string(), "sid-dead".to_string());
 
         let (result, orphan_skey, orphan_agent) =
-            lookup_attach_target_pure(&by_id, &by_session_key, &by_agent, None, Some("a1"));
+            lookup_attach_target_pure(&by_id, &by_session_key, &by_agent, None, Some("a1"), None);
         assert!(result.is_none());
         assert!(orphan_skey.is_none());
         assert_eq!(orphan_agent.as_deref(), Some("a1"));
@@ -497,7 +538,7 @@ mod attach_lookup_tests {
         let by_session_key = HashMap::new();
         let by_agent = HashMap::new();
         let (result, orphan_skey, orphan_agent) =
-            lookup_attach_target_pure(&by_id, &by_session_key, &by_agent, None, None);
+            lookup_attach_target_pure(&by_id, &by_session_key, &by_agent, None, None, None);
         assert!(result.is_none());
         assert!(orphan_skey.is_none());
         assert!(orphan_agent.is_none());
@@ -509,8 +550,14 @@ mod attach_lookup_tests {
         let by_id = by_id_with(&[]);
         let by_session_key = HashMap::new();
         let by_agent = HashMap::new();
-        let (result, orphan_skey, orphan_agent) =
-            lookup_attach_target_pure(&by_id, &by_session_key, &by_agent, Some("k1"), Some("a1"));
+        let (result, orphan_skey, orphan_agent) = lookup_attach_target_pure(
+            &by_id,
+            &by_session_key,
+            &by_agent,
+            Some("k1"),
+            Some("a1"),
+            None,
+        );
         assert!(result.is_none());
         assert!(orphan_skey.is_none());
         assert!(orphan_agent.is_none());
@@ -527,10 +574,30 @@ mod attach_lookup_tests {
         let mut by_agent = HashMap::new();
         by_agent.insert("a1".to_string(), "sid-dead-2".to_string());
 
-        let (result, orphan_skey, orphan_agent) =
-            lookup_attach_target_pure(&by_id, &by_session_key, &by_agent, Some("k1"), Some("a1"));
+        let (result, orphan_skey, orphan_agent) = lookup_attach_target_pure(
+            &by_id,
+            &by_session_key,
+            &by_agent,
+            Some("k1"),
+            Some("a1"),
+            None,
+        );
         assert!(result.is_none());
         assert_eq!(orphan_skey.as_deref(), Some("k1"));
         assert_eq!(orphan_agent.as_deref(), Some("a1"));
+    }
+
+    /// Issue #605: team_id 一致判定の各 corner case。
+    #[test]
+    fn team_ids_match_handles_all_combinations() {
+        // 双方 Some + 一致 → true
+        assert!(team_ids_match(Some("team-a"), Some("team-a")));
+        // 双方 Some + 不一致 → false (= attach 拒否)
+        assert!(!team_ids_match(Some("team-a"), Some("team-b")));
+        // 双方 None → true (team_id 持たない単独 PTY の HMR remount 互換)
+        assert!(team_ids_match(None, None));
+        // 片方のみ Some → false (片側のみ team 紐付けが残っている状況は cross-team risk)
+        assert!(!team_ids_match(Some("team-a"), None));
+        assert!(!team_ids_match(None, Some("team-b")));
     }
 }

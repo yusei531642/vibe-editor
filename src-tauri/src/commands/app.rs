@@ -43,15 +43,30 @@ pub fn app_get_project_root(state: State<AppState>) -> String {
 ///
 /// Issue #66: 同時に FS watcher を再起動し、外部変更 (git pull / 他エディタ保存) を
 /// `project:files-changed` イベントで renderer に通知する。
+///
+/// Issue #639 (Security): 改ざん bundle / DevTools から `app_set_project_root("/etc")` のような
+/// system 領域への切替が直接可能だったため、`fs_watch::is_safe_watch_root` と同じ判断
+/// (canonicalize / system 領域 denylist / home 直下拒否 / file ではなく dir であること) を
+/// 入口で必ず通す。検証失敗時は `CommandError::Validation` で reject し、project_root state は
+/// 変更しない (= 後続の git_*, fs_watch::start_for_root, file 読み書きが信頼できない場所で
+/// 発火するのを TOCTOU 含めて阻止する)。
 #[tauri::command]
 pub fn app_set_project_root(
     app: tauri::AppHandle,
     state: State<AppState>,
     project_root: String,
 ) -> crate::commands::error::CommandResult<()> {
+    let trimmed = project_root.trim().to_string();
+    // Issue #639: 空文字 (= clear) はそのまま許可。非空時のみ system 領域 reject 検証を通す。
+    if !trimmed.is_empty()
+        && !crate::commands::fs_watch::is_safe_watch_root(std::path::Path::new(&trimmed))
+    {
+        return Err(crate::commands::error::CommandError::validation(format!(
+            "project_root rejected by safety check (system / home / non-existent dir): {trimmed}"
+        )));
+    }
     // Issue #147: poison していても recovery して書き込む。失敗で常時死亡しない。
     let mut guard = crate::state::lock_project_root_recover(&state.project_root);
-    let trimmed = project_root.trim().to_string();
     *guard = if trimmed.is_empty() {
         None
     } else {

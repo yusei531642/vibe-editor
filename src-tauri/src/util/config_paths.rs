@@ -5,9 +5,20 @@
 use std::path::PathBuf;
 
 /// vibe-editor のユーザー設定ルート (`~/.vibe-editor`)。
-/// 既存実装と同じく home が解決できない環境では相対 `.vibe-editor` にフォールバックする。
+///
+/// Issue #631: 旧実装は `dirs::home_dir().unwrap_or_default()` を返しており、HOME 不在環境
+/// (sandbox / CI / サービスアカウント / 環境破損) では空 `PathBuf` にフォールバックしていた。
+/// `PathBuf::new().join(".vibe-editor")` は `.vibe-editor` という **相対 path** に解決され、
+/// プロセス CWD (= ユーザーのリポジトリ root 等) 配下に paste-images / settings.json 等を書き出し、
+/// `cleanup_old_paste_images` が CWD/paste-images/ 配下の古いファイルを 24h で消す事故を起こしていた。
+///
+/// HOME 不在時は OS の絶対 temp directory (`std::env::temp_dir()`) 配下にフォールバックして
+/// 必ず絶対 path を返す。
 pub fn vibe_root() -> PathBuf {
-    dirs::home_dir().unwrap_or_default().join(".vibe-editor")
+    match dirs::home_dir() {
+        Some(h) => h.join(".vibe-editor"),
+        None => std::env::temp_dir().join("vibe-editor"),
+    }
 }
 
 /// 設定ファイル `~/.vibe-editor/settings.json` のパス。
