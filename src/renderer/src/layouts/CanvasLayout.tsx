@@ -15,12 +15,15 @@ import type { Node } from '@xyflow/react';
 import {
   ArrowDownToLine,
   ChevronDown,
+  Command as CommandIcon,
+  ExternalLink,
   FilePlus,
   FolderTree,
   GitBranch,
   Layout,
   MonitorSmartphone,
   Plus,
+  Settings as SettingsIcon,
   Sparkles,
   History
 } from 'lucide-react';
@@ -32,10 +35,11 @@ import type {
   TeamRole,
   TerminalAgent
 } from '../../../types/shared';
-import { Canvas } from '../components/canvas/Canvas';
+import { Canvas, type CanvasActions } from '../components/canvas/Canvas';
 import { CanvasSidebar } from '../components/canvas/CanvasSidebar';
 import { Rail } from '../components/shell/Rail';
-import { WindowControls } from '../components/shell/WindowControls';
+import { Topbar } from '../components/shell/Topbar';
+import { MenuBar, MenuDivider, MenuItem } from '../components/shell/MenuBar';
 import type { SidebarView } from '../components/Sidebar';
 import { SettingsModal } from '../components/SettingsModal';
 import { useT } from '../lib/i18n';
@@ -106,8 +110,10 @@ export function CanvasLayout(): JSX.Element {
   const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || '';
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
+  const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const availableUpdate = useUiStore((s) => s.availableUpdate);
+  const status = useUiStore((s) => s.status);
   const { showToast, dismissToast } = useToast();
   const [spawnOpen, setSpawnOpen] = useState(false);
   const [tab, setTab] = useState<'preset' | 'recent'>('preset');
@@ -328,6 +334,60 @@ export function CanvasLayout(): JSX.Element {
     setAddCardOpen(false);
   };
 
+  const handleRestart = async (): Promise<void> => {
+    const dirty = getDirtyEditorCardSnapshots();
+    if (dirty.length > 0) {
+      const paths = dirty.map((d) => `• ${d.relPath}`).join('\n');
+      const message = t('canvas.clearConfirmWithDirtyEditors', {
+        count: dirty.length,
+        paths
+      });
+      if (!window.confirm(message)) return;
+    }
+    await window.api.app.restart();
+  };
+
+  const handleClickUpdate = (): void => {
+    void import('../lib/updater-check').then((m) =>
+      m.runUpdateInstall({
+        language: settings.language,
+        showToast,
+        dismissToast,
+        manual: true
+      })
+    );
+  };
+
+  const clearCanvas = (): void => {
+    const dirty = getDirtyEditorCardSnapshots();
+    if (dirty.length === 0) {
+      if (window.confirm(t('canvas.clearConfirm'))) clear();
+      return;
+    }
+    const paths = dirty.map((d) => `• ${d.relPath}`).join('\n');
+    const message = t('canvas.clearConfirmWithDirtyEditors', {
+      count: dirty.length,
+      paths
+    });
+    if (window.confirm(message)) clear();
+  };
+
+  const canvasActions = useMemo<CanvasActions>(
+    () => ({
+      addClaude: () => addAgent('claude'),
+      addCodex: () => addAgent('codex'),
+      addFileTree: () => addByType('fileTree'),
+      addChanges: () => addByType('changes'),
+      addEditor: () => addByType('editor'),
+      spawnDefaultTeam: () => void applyPreset(DEFAULT_SPAWN_PRESET)
+    }),
+    // addAgent / addByType / applyPreset are recreated with the current project/settings values.
+    // Keeping this object memoized prevents Canvas context-menu handlers from rebinding on
+    // unrelated CanvasLayout state changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [projectRoot, nodes.length, settings.language, settings.mcpAutoSetup, addCards, notifyRecruit]
+  );
+
   return (
     <div
       className="canvas-layout"
@@ -335,183 +395,89 @@ export function CanvasLayout(): JSX.Element {
       style={isCanvasActive ? undefined : { display: 'none' }}
       aria-hidden={!isCanvasActive}
     >
+      <Topbar
+        projectRoot={projectRoot}
+        status={status}
+        onRestart={handleRestart}
+        onOpenPalette={() => setPaletteOpen(true)}
+        availableUpdate={availableUpdate}
+        onClickUpdate={handleClickUpdate}
+        menuBar={
+          <MenuBar
+            items={[
+              {
+                label: t('menubar.file'),
+                children: (
+                  <>
+                    <MenuItem
+                      icon={<Layout size={14} strokeWidth={1.8} />}
+                      label={t('canvas.switchToIde.tooltip')}
+                      shortcut="Ctrl+Shift+M"
+                      onClick={() => setViewMode('ide')}
+                    />
+                    <MenuDivider />
+                    <MenuItem
+                      icon={<ExternalLink size={14} strokeWidth={1.8} />}
+                      label={t('menubar.openGithub')}
+                      onClick={() => {
+                        void window.api.app.openExternal('https://github.com/yusei531642/vibe-editor');
+                      }}
+                    />
+                  </>
+                )
+              },
+              {
+                label: t('menubar.view'),
+                children: (
+                  <>
+                    <MenuItem
+                      icon={<CommandIcon size={14} strokeWidth={1.8} />}
+                      label={t('menubar.openPalette')}
+                      shortcut="Ctrl+Shift+P"
+                      onClick={() => setPaletteOpen(true)}
+                    />
+                    <MenuItem
+                      icon={<Layout size={14} strokeWidth={1.8} />}
+                      label={t('menubar.toggleCanvas')}
+                      shortcut="Ctrl+Shift+M"
+                      onClick={() => setViewMode('ide')}
+                    />
+                  </>
+                )
+              },
+              {
+                label: t('menubar.help'),
+                children: (
+                  <>
+                    <MenuItem
+                      icon={<SettingsIcon size={14} strokeWidth={1.8} />}
+                      label={t('menubar.openSettings')}
+                      shortcut="Ctrl+,"
+                      onClick={() => setSettingsOpen(true)}
+                    />
+                  </>
+                )
+              }
+            ]}
+          />
+        }
+      />
       <header className="canvas-header" data-tauri-drag-region>
         <span className="canvas-header__brand" data-tauri-drag-region>
           <MonitorSmartphone size={14} strokeWidth={1.75} data-tauri-drag-region />
-          Canvas
         </span>
         <span className="canvas-header__count" data-tauri-drag-region>{formatCardCount(cardCount, settings.language)}</span>
         <div className="canvas-header__spacer" data-tauri-drag-region />
-
-        <div className="canvas-popover__wrap" ref={addPopoverRef}>
-          <button
-            type="button"
-            className="canvas-btn"
-            onClick={() => setAddCardOpen((v) => !v)}
-            aria-label={t('canvas.add.tooltip')}
-            title={t('canvas.add.tooltip')}
-          >
-            <Plus size={13} strokeWidth={1.8} />
-            {t('canvas.add')}
-          </button>
-          {addCardOpen && (
-            <div className="canvas-popover">
-              <AddItem
-                icon={<AgentBadge label="C" color="#5c5cff" />}
-                label={t('canvas.add.claude')}
-                onClick={() => addAgent('claude')}
-              />
-              <AddItem
-                icon={<AgentBadge label="X" color="#10b981" />}
-                label={t('canvas.add.codex')}
-                onClick={() => addAgent('codex')}
-              />
-              <div className="canvas-popover__section">{t('canvas.panels')}</div>
-              <AddItem
-                icon={<FolderTree size={13} />}
-                label={t('canvas.add.fileTree')}
-                onClick={() => addByType('fileTree')}
-              />
-              <AddItem
-                icon={<GitBranch size={13} />}
-                label={t('canvas.add.gitChanges')}
-                onClick={() => addByType('changes')}
-              />
-              <AddItem
-                icon={<FilePlus size={13} />}
-                label={t('canvas.add.emptyEditor')}
-                onClick={() => addByType('editor')}
-              />
-            </div>
-          )}
-        </div>
-
-        <div className="canvas-popover__wrap" ref={spawnPopoverRef}>
-          {/* Spawn Team は split button: メインクリックで dynamic-team を即起動、
-              caret 部分でカスタム/最近使ったチームの popover を開く。 */}
-          <div className="canvas-btn-split">
-            <button
-              type="button"
-              className="canvas-btn canvas-btn--primary canvas-btn-split__main"
-              onClick={() => void applyPreset(DEFAULT_SPAWN_PRESET)}
-              aria-label={t('canvas.spawnTeam.tooltip')}
-              title={t('canvas.spawnTeam.tooltip')}
-            >
-              <Sparkles size={13} strokeWidth={1.8} />
-              {t('canvas.spawnTeam')}
-            </button>
-            <button
-              type="button"
-              className="canvas-btn canvas-btn--primary canvas-btn-split__caret"
-              onClick={() => setSpawnOpen((v) => !v)}
-              aria-label={t('canvas.spawnTeamMore.tooltip')}
-              title={t('canvas.spawnTeamMore.tooltip')}
-              aria-expanded={spawnOpen}
-            >
-              <ChevronDown size={12} strokeWidth={2} />
-            </button>
-          </div>
-          {spawnOpen && (
-            <div className="canvas-popover canvas-popover--wide">
-              <div className="canvas-popover__tabs">
-                <TabBtn active={tab === 'preset'} onClick={() => setTab('preset')}>
-                  <Sparkles size={11} /> {t('canvas.preset')}
-                </TabBtn>
-                <TabBtn active={tab === 'recent'} onClick={() => setTab('recent')}>
-                  <History size={11} /> {t('canvas.recent')}
-                  {closeRecent.length > 0 && (
-                    <span className="canvas-popover__tab-badge">{closeRecent.length}</span>
-                  )}
-                </TabBtn>
-              </div>
-              {tab === 'preset' && (
-                <>
-                  {BUILTIN_PRESETS.map((preset) => (
-                    <BuiltinPresetItem
-                      key={preset.id}
-                      preset={preset}
-                      label={t(preset.i18nKey)}
-                      agentCountLabel={formatOrganizationAgentCount(
-                        presetOrganizationCount(preset),
-                        presetMemberCount(preset),
-                        settings.language
-                      )}
-                      onClick={() => void applyPreset(preset)}
-                    />
-                  ))}
-                </>
-              )}
-              {tab === 'recent' && (
-                <>
-                  {closeRecent.length === 0 && (
-                    <div className="canvas-popover__empty">{t('canvas.noRecentTeams')}</div>
-                  )}
-                  {closeRecent.map((entry) => (
-                    <RecentItem
-                      key={entry.id}
-                      entry={entry}
-                      fallbackName={t('team.defaultName')}
-                      agentCountLabel={formatOrganizationAgentCount(
-                        entry.organization ? 1 : 0,
-                        entry.members.length,
-                        settings.language
-                      )}
-                      lastUsedLabel={t('canvas.lastUsed', {
-                        value: dateTimeFormatter.format(new Date(entry.lastUsedAt))
-                      })}
-                      onClick={() => void restoreRecent(entry)}
-                    />
-                  ))}
-                </>
-              )}
-            </div>
-          )}
-        </div>
 
         {cardCount > 0 && (
           <button
             type="button"
             className="canvas-btn canvas-btn--ghost"
-            onClick={() => {
-              // Issue #595: dirty な EditorCard が残っていればファイル名一覧を提示して
-              // 単一 confirm で確認する。dirty が無いときは既存の「全部消す?」だけ。
-              const dirty = getDirtyEditorCardSnapshots();
-              if (dirty.length === 0) {
-                if (window.confirm(t('canvas.clearConfirm'))) clear();
-                return;
-              }
-              const paths = dirty.map((d) => `• ${d.relPath}`).join('\n');
-              const message = t('canvas.clearConfirmWithDirtyEditors', {
-                count: dirty.length,
-                paths
-              });
-              if (window.confirm(message)) clear();
-            }}
+            onClick={clearCanvas}
             title={t('canvas.clear.tooltip')}
             aria-label={t('canvas.clear.tooltip')}
           >
             {t('canvas.clear')}
-          </button>
-        )}
-        {availableUpdate && (
-          <button
-            type="button"
-            className="canvas-btn canvas-btn--update"
-            onClick={() => {
-              void import('../lib/updater-check').then((m) =>
-                m.runUpdateInstall({
-                  language: settings.language,
-                  showToast,
-                  dismissToast,
-                  manual: true
-                })
-              );
-            }}
-            title={t('updater.button.title', { version: availableUpdate.version })}
-            aria-label={t('updater.button.title', { version: availableUpdate.version })}
-          >
-            <ArrowDownToLine size={13} strokeWidth={1.9} />
-            {t('updater.button.label', { version: availableUpdate.version })}
           </button>
         )}
         <button
@@ -524,7 +490,6 @@ export function CanvasLayout(): JSX.Element {
           <Layout size={13} strokeWidth={1.8} />
           IDE
         </button>
-        <WindowControls />
       </header>
       <div className="canvas-layout__body">
         <Rail
@@ -543,7 +508,7 @@ export function CanvasLayout(): JSX.Element {
           />
         )}
         <div className="canvas-layout__stage">
-          <Canvas />
+          <Canvas actions={canvasActions} />
         </div>
       </div>
 

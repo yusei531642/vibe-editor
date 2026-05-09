@@ -124,9 +124,12 @@ describe('Glass CSS contract', () => {
     expect(glass).toMatch(
       /:root\[data-theme='glass'\][\s\S]*:root\[data-theme='glass'\]\s+body[\s\S]*:root\[data-theme='glass'\]\s+#root\s*\{[\s\S]*background:\s*transparent\s*!important/
     );
-    expect(glass).toMatch(
-      /:root\[data-theme='glass'\]\s+\.layout,\s*:root\[data-theme='glass'\]\s+\.canvas-layout\s*\{[\s\S]*backdrop-filter:\s*blur\(var\(--glass-blur\)\)/
-    );
+    const glassFilterSelectors = [
+      ...cssDeclarationsForProperty(glass, 'backdrop-filter'),
+      ...cssDeclarationsForProperty(glass, '-webkit-backdrop-filter')
+    ].map((d) => d.selector);
+    expect(glassFilterSelectors).not.toContain(":root[data-theme='glass'] .layout");
+    expect(glassFilterSelectors).not.toContain(":root[data-theme='glass'] .canvas-layout");
     expect(glass).toMatch(
       /:root\[data-theme='glass'\]\s+\.layout\s*\{[\s\S]*background:\s*var\(--glass-layout-tint,\s*rgba\(10,\s*10,\s*26,\s*0\.55\)\)/
     );

@@ -11,15 +11,6 @@
   background: transparent !important;
 }
 
-/* Keep the always-mounted IDE/Canvas roots dark enough over native Acrylic. */
-:root[data-theme='glass'] .layout,
-:root[data-theme='glass'] .canvas-layout {
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
-    brightness(var(--glass-brightness, 1));
-  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
-    brightness(var(--glass-brightness, 1));
-}
-
 :root[data-theme='glass'] .layout {
   background: var(--glass-layout-tint, rgba(10, 10, 26, 0.55));
 }

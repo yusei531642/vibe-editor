@@ -3,7 +3,7 @@
  *
  * payload: { projectRoot }
  */
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { GitStatus } from '../../../../../types/shared';
 import { CardFrame } from '../CardFrame';
@@ -26,15 +26,29 @@ function ChangesCardImpl({ id, data, positionAbsoluteX, positionAbsoluteY }: Nod
   const addCard = useCanvasStore((s) => s.addCard);
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [loading, setLoading] = useState(true);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const refresh = useCallback(() => {
     if (!projectRoot) return;
     setLoading(true);
     void window.api.git
       .status(projectRoot)
-      .then(setStatus)
-      .catch(() => setStatus(null))
-      .finally(() => setLoading(false));
+      .then((next) => {
+        if (mountedRef.current) setStatus(next);
+      })
+      .catch(() => {
+        if (mountedRef.current) setStatus(null);
+      })
+      .finally(() => {
+        if (mountedRef.current) setLoading(false);
+      });
   }, [projectRoot]);
 
   useEffect(() => {

@@ -209,22 +209,18 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   // CardFrame が unmount されても store にレコードを残さないよう effect で掃除する。
   const publishActivity = useAgentActivityStore((s) => s.setActivity);
   const clearActivity = useAgentActivityStore((s) => s.clearCard);
-  // setActivity wrapper: useState 更新 + store 通知を 1 関数にまとめる。
   // TerminalOverlay は React.Dispatch<SetStateAction<AgentStatus>> を期待するので、
-  // 関数形 updater を素通しできる shape を保つ。
+  // 関数形 updater を素通しできる shape を保つ。agent-activity store への publish は
+  // 下の effect に集約し、子コンポーネントの render 中に呼ばれても StageHud を同期更新しない。
   const setActivity: React.Dispatch<React.SetStateAction<AgentStatus>> = useCallback(
     (next) => {
-      setActivityState((prev) => {
-        const resolved =
-          typeof next === 'function'
-            ? (next as (p: AgentStatus) => AgentStatus)(prev)
-            : next;
-        publishActivity(id, resolved, Date.now());
-        return resolved;
-      });
+      setActivityState(next);
     },
-    [id, publishActivity]
+    []
   );
+  useEffect(() => {
+    publishActivity(id, activity, Date.now());
+  }, [id, activity, publishActivity]);
   useEffect(() => {
     return () => clearActivity(id);
   }, [id, clearActivity]);
@@ -245,8 +241,10 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   // 対策として primitive な signature 文字列 (agentId|role|agent を ; で連結) を購読し、
   // 文字列 equality で React がデフォルトで bailout できるようにする。drag/resize では
   // signature が変わらないので再レンダーが発生しない。
+  const lastTeamMembersSigRef = useRef('');
   const teamMembersSig = useCanvasStore((s) => {
     if (!payload.teamId) return '';
+    if (s.isDragging) return lastTeamMembersSigRef.current;
     const sigs: string[] = [];
     for (const n of s.nodes) {
       if (n.type !== 'agent') continue;
@@ -255,7 +253,9 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
       if (!p || p.teamId !== payload.teamId || !p.agentId || !rp) continue;
       sigs.push(`${p.agentId}:${rp}:${p.agent ?? 'claude'}`);
     }
-    return sigs.join(';');
+    const sig = sigs.join(';');
+    lastTeamMembersSigRef.current = sig;
+    return sig;
   });
   const teamMembers = useMemo(() => {
     if (!payload.teamId) return null;

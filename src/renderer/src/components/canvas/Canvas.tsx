@@ -83,7 +83,20 @@ const FLOW_STAGE_STYLE = { position: 'absolute' as const, inset: 0 };
 /** Issue #259 継承: zoom が 0.7 を下回ると TUI が読めなくなるため recruit focus 時のクランプ閾値。 */
 const MIN_RECRUIT_ZOOM = 0.7;
 
-function FlowApp(): JSX.Element {
+export interface CanvasActions {
+  addClaude: () => void;
+  addCodex: () => void;
+  addFileTree: () => void;
+  addChanges: () => void;
+  addEditor: () => void;
+  spawnDefaultTeam: () => void;
+}
+
+interface FlowAppProps {
+  actions: CanvasActions;
+}
+
+function FlowApp({ actions }: FlowAppProps): JSX.Element {
   const t = useT();
   const nodes = useCanvasNodes();
   const edges = useCanvasEdges();
@@ -92,7 +105,7 @@ function FlowApp(): JSX.Element {
   const setNodes = useCanvasStore((s) => s.setNodes);
   const setEdges = useCanvasStore((s) => s.setEdges);
   const setViewport = useCanvasStore((s) => s.setViewport);
-  const addCard = useCanvasStore((s) => s.addCard);
+  const setCanvasDragging = useCanvasStore((s) => s.setCanvasDragging);
   // ユーザー操作 (× / 右クリック / Delete) からの削除はチーム全員カスケード前に確認を挟む。
   const confirmRemoveCard = useConfirmRemoveCard();
   const pulseEdge = useCanvasStore((s) => s.pulseEdge);
@@ -122,6 +135,10 @@ function FlowApp(): JSX.Element {
         ? changes.filter((c) => c.type !== 'remove')
         : changes;
       if (remaining.length === 0) return;
+      const draggingNow = remaining.some((c) => c.type === 'position' && c.dragging);
+      if (useCanvasStore.getState().isDragging !== draggingNow) {
+        setCanvasDragging(draggingNow);
+      }
 
       // Issue #196: 旧実装は変更ごとに `nodes.find` + `for (other of nodes)` + 内側 `remaining.some(...)`
       // で O(N×M) になっており、6 人チーム × 4 種カード = 24 ノード規模で 1 px ドラッグごとに
@@ -224,7 +241,7 @@ function FlowApp(): JSX.Element {
       const allChanges = extra.length > 0 ? [...remaining, ...extra] : remaining;
       setNodes(applyNodeChanges(allChanges, currentNodes));
     },
-    [setNodes, confirmRemoveCard, isTeamLocked]
+    [setNodes, confirmRemoveCard, isTeamLocked, setCanvasDragging]
   );
   const onEdgesChange = useCallback(
     (changes: EdgeChange<Edge>[]) =>
@@ -243,18 +260,12 @@ function FlowApp(): JSX.Element {
     items: ContextMenuItem[];
   } | null>(null);
 
-  // Ctrl+Space / Pane 右クリック共通: 新規 AI Agent (Claude Code) を追加。
+  // Ctrl+Space: 新規 AI Agent (Claude Code) を追加。
   // 件数カウントは getState で都度参照し、callback 識別子を `nodes` の参照変化から切り離す
   // (ドラッグ中の毎フレーム再生成を抑え、useKeybinding の listener 再登録も発生させない)。
   const handleAddClaudeAgent = useCallback((): void => {
-    const currentNodes = useCanvasStore.getState().nodes;
-    const n = currentNodes.filter((x) => x.type === 'agent').length + 1;
-    addCard({
-      type: 'agent',
-      title: `Claude #${n}`,
-      payload: { agent: 'claude', role: 'leader' }
-    });
-  }, [addCard]);
+    actions.addClaude();
+  }, [actions]);
 
   const handleNodeContextMenu = useCallback(
     (e: React.MouseEvent, node: Node<CardData>) => {
@@ -279,7 +290,7 @@ function FlowApp(): JSX.Element {
     [isTeamLocked, confirmRemoveCard, setTeamLock, t]
   );
 
-  // 空のキャンバス (Pane) で右クリックされたとき: 「ここに Claude を追加」を出す。
+  // 空のキャンバス (Pane) で右クリックされたとき: カード追加 / チーム起動を集約する。
   // ユーザーが「右クリックしてもメニューが出ない」と感じる主因は、ノード上ではなく
   // Pane 上を狙ってしまっているケース。Pane 用にも明示的にハンドラを生やしておく。
   const handlePaneContextMenu = useCallback(
@@ -294,12 +305,33 @@ function FlowApp(): JSX.Element {
       const items: ContextMenuItem[] = [
         {
           label: t('canvasMenu.addClaudeHere'),
-          action: () => handleAddClaudeAgent()
+          action: actions.addClaude
+        },
+        {
+          label: t('canvasMenu.addCodexHere'),
+          action: actions.addCodex
+        },
+        {
+          label: t('canvasMenu.addFileTreeHere'),
+          action: actions.addFileTree
+        },
+        {
+          label: t('canvasMenu.addChangesHere'),
+          action: actions.addChanges
+        },
+        {
+          label: t('canvasMenu.addEditorHere'),
+          action: actions.addEditor,
+          divider: true
+        },
+        {
+          label: t('canvasMenu.spawnDefaultTeam'),
+          action: actions.spawnDefaultTeam
         }
       ];
       setContextMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [t, handleAddClaudeAgent]
+    [t, actions]
   );
 
   // Issue #158: hand-off event は use-team-handoff の集約 listener 経由で受け取る。
@@ -369,7 +401,13 @@ function FlowApp(): JSX.Element {
   const recruitFocusRequestedAt = useCanvasStore(
     (s) => s.lastRecruitFocus?.requestedAt ?? 0
   );
+  const viewportResetSeq = useCanvasStore((s) => s.viewportResetSeq);
   const reactFlow = useReactFlow();
+  useEffect(() => {
+    if (viewportResetSeq === 0) return;
+    reactFlow.setViewport({ x: 0, y: 0, zoom: 1 }, { duration: 0 });
+  }, [viewportResetSeq, reactFlow]);
+
   useEffect(() => {
     if (!recruitFocusNodeId || !recruitFocusRequestedAt) return;
     const timer = window.setTimeout(() => {
@@ -528,10 +566,10 @@ function StageListOverlay(): JSX.Element {
   );
 }
 
-export function Canvas(): JSX.Element {
+export function Canvas({ actions }: { actions: CanvasActions }): JSX.Element {
   return (
     <ReactFlowProvider>
-      <FlowApp />
+      <FlowApp actions={actions} />
     </ReactFlowProvider>
   );
 }
