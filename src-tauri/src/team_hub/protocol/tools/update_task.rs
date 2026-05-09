@@ -7,6 +7,8 @@ use crate::team_hub::{CallContext, TeamHub};
 use chrono::Utc;
 use serde_json::{json, Value};
 
+use super::error::ToolError;
+
 fn optional_string(args: &Value, snake: &str, camel: &str) -> Option<String> {
     args.get(snake)
         .or_else(|| args.get(camel))
@@ -195,6 +197,30 @@ pub async fn team_update_task(
             .iter_mut()
             .find(|t| t.id == task_id)
             .ok_or_else(|| format!("Task #{task_id} not found"))?;
+        // Issue #594 (Tier S-1): assignee / leader 検証。
+        // `team_report` (report.rs:285) で同等のガードを入れた対称穴の補完。
+        // これが無いと、同 team の任意 worker が他者 task を `done` 化 + `done_evidence` 捏造して
+        // Leader の承認サイクル (chain-of-responsibility) を bypass できてしまう。
+        let is_leader = ctx.role.eq_ignore_ascii_case("leader");
+        let is_assignee =
+            task.assigned_to == ctx.role || task.assigned_to == ctx.agent_id;
+        if !is_leader && !is_assignee {
+            tracing::warn!(
+                team_id = %ctx.team_id,
+                agent_id = %ctx.agent_id,
+                role = %ctx.role,
+                task_id = task_id,
+                attempted_status = %status,
+                task_assigned_to = %task.assigned_to,
+                "[team_update_task] permission denied: caller is not assignee nor leader"
+            );
+            return Err(ToolError::permission_denied(
+                "update_task",
+                &ctx.role,
+                "update task assigned to another agent",
+            )
+            .into_err_string());
+        }
         if is_done_status(status) && !task.done_criteria.is_empty() {
             let missing = task
                 .done_criteria
@@ -641,6 +667,193 @@ mod tests {
             .unwrap();
         assert_eq!(task.status, "pending");
         assert!(task.done_evidence.is_empty());
+    }
+
+    /// Issue #594 (Tier S-1): 同 team の第三者 worker (assignee でも leader でもない) からの
+    /// `team_update_task` は `update_task_permission_denied` で拒否され、task は一切 mutate されない。
+    /// done_evidence を捏造しても task.status / task.done_evidence は不変。
+    #[tokio::test]
+    async fn update_task_rejects_non_assignee_worker() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let team_id = "team-594-non-assignee".to_string();
+        {
+            let mut state = hub.state.lock().await;
+            let team = state
+                .teams
+                .entry(team_id.clone())
+                .or_insert_with(TeamInfo::default);
+            team.tasks.push_back(TeamTask {
+                id: 31,
+                assigned_to: "programmer".into(),
+                description: "B's task".into(),
+                status: "in_progress".into(),
+                created_by: "leader".into(),
+                created_at: "2026-05-09T10:00:00Z".into(),
+                updated_at: None,
+                summary: None,
+                blocked_reason: None,
+                next_action: None,
+                artifact_path: None,
+                blocked_by_human_gate: false,
+                required_human_decision: None,
+                target_paths: Vec::new(),
+                lock_conflicts: Vec::new(),
+                pre_approval: None,
+                done_criteria: vec!["tests pass".into()],
+                done_evidence: Vec::new(),
+            });
+        }
+        // role = "researcher" は task.assigned_to "programmer" と不一致 / agent_id も一致しない。
+        let ctx = CallContext {
+            team_id: team_id.clone(),
+            role: "researcher".into(),
+            agent_id: "vc-r-malicious".into(),
+        };
+
+        let err = team_update_task(
+            &hub,
+            &ctx,
+            &json!({
+                "task_id": 31,
+                "status": "done",
+                "summary": "fabricated done report",
+                "done_evidence": [
+                    { "criterion": "tests pass", "evidence": "trust me bro" }
+                ]
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(
+            err.contains("update_task_permission_denied"),
+            "expected permission_denied code, got: {err}"
+        );
+
+        let state = hub.state.lock().await;
+        let team = state.teams.get(&team_id).unwrap();
+        let task = team.tasks.iter().find(|t| t.id == 31).unwrap();
+        // 認可拒否されたので、status / done_evidence / summary / updated_at は完全に元のまま。
+        assert_eq!(task.status, "in_progress");
+        assert!(task.done_evidence.is_empty());
+        assert!(task.summary.is_none());
+        assert!(task.updated_at.is_none());
+        // worker_reports (= leader への通知 backlog) にも積まない
+        // (= status を done に書けなかったので report 生成パスを通らない)。
+        assert_eq!(team.worker_reports.len(), 0);
+    }
+
+    /// Issue #594: leader は assignee でなくても任意 task を更新できる (override 権限)。
+    #[tokio::test]
+    async fn update_task_allows_leader_override() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let team_id = "team-594-leader".to_string();
+        {
+            let mut state = hub.state.lock().await;
+            let team = state
+                .teams
+                .entry(team_id.clone())
+                .or_insert_with(TeamInfo::default);
+            team.tasks.push_back(TeamTask {
+                id: 32,
+                assigned_to: "programmer".into(),
+                description: "task to be cancelled by leader".into(),
+                status: "in_progress".into(),
+                created_by: "leader".into(),
+                created_at: "2026-05-09T10:00:00Z".into(),
+                updated_at: None,
+                summary: None,
+                blocked_reason: None,
+                next_action: None,
+                artifact_path: None,
+                blocked_by_human_gate: false,
+                required_human_decision: None,
+                target_paths: Vec::new(),
+                lock_conflicts: Vec::new(),
+                pre_approval: None,
+                done_criteria: Vec::new(),
+                done_evidence: Vec::new(),
+            });
+        }
+        let ctx = CallContext {
+            team_id: team_id.clone(),
+            role: "leader".into(),
+            agent_id: "vc-leader-1".into(),
+        };
+
+        team_update_task(
+            &hub,
+            &ctx,
+            &json!({
+                "task_id": 32,
+                "status": "blocked",
+                "summary": "leader cancelled this task",
+                "blocked_reason": "scope deferred to next sprint"
+            }),
+        )
+        .await
+        .expect("leader should be able to update any task");
+
+        let state = hub.state.lock().await;
+        let team = state.teams.get(&team_id).unwrap();
+        let task = team.tasks.iter().find(|t| t.id == 32).unwrap();
+        assert_eq!(task.status, "blocked");
+        assert_eq!(task.summary.as_deref(), Some("leader cancelled this task"));
+    }
+
+    /// Issue #594: assignee 一致は role 文字列だけでなく agent_id でも判定される
+    /// (例: leader が個別 agent_id を直接 assigned_to に書いたケース)。
+    #[tokio::test]
+    async fn update_task_allows_assignee_by_agent_id() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let team_id = "team-594-agent-id".to_string();
+        let worker_aid = "vc-prog-special".to_string();
+        {
+            let mut state = hub.state.lock().await;
+            let team = state
+                .teams
+                .entry(team_id.clone())
+                .or_insert_with(TeamInfo::default);
+            team.tasks.push_back(TeamTask {
+                id: 33,
+                // role 文字列ではなく agent_id を直接 assigned_to に書くケース。
+                assigned_to: worker_aid.clone(),
+                description: "task pinned to a specific agent_id".into(),
+                status: "in_progress".into(),
+                created_by: "leader".into(),
+                created_at: "2026-05-09T10:00:00Z".into(),
+                updated_at: None,
+                summary: None,
+                blocked_reason: None,
+                next_action: None,
+                artifact_path: None,
+                blocked_by_human_gate: false,
+                required_human_decision: None,
+                target_paths: Vec::new(),
+                lock_conflicts: Vec::new(),
+                pre_approval: None,
+                done_criteria: Vec::new(),
+                done_evidence: Vec::new(),
+            });
+        }
+        let ctx = CallContext {
+            team_id: team_id.clone(),
+            role: "programmer".into(),
+            agent_id: worker_aid.clone(),
+        };
+
+        team_update_task(
+            &hub,
+            &ctx,
+            &json!({ "task_id": 33, "status": "in_progress", "summary": "ack" }),
+        )
+        .await
+        .expect("assignee identified by agent_id should be allowed");
+
+        let state = hub.state.lock().await;
+        let team = state.teams.get(&team_id).unwrap();
+        let task = team.tasks.iter().find(|t| t.id == 33).unwrap();
+        assert_eq!(task.summary.as_deref(), Some("ack"));
     }
 
     #[tokio::test]
