@@ -183,12 +183,126 @@ impl SessionHandle {
 /// 子プロセス + reader thread が孤立リークしていた。
 ///
 /// drop でも kill を呼ぶことで「registry から外す = reader が EOF を読む = thread 終了」
-/// が確実に成立する。kill 時の Mutex poison はこの段階では recovery 不能なので無視 (best-effort)。
+/// が確実に成立する。kill 時の Mutex poison でも inner を回収し、child kill だけは試みる。
 impl Drop for SessionHandle {
     fn drop(&mut self) {
-        if let Ok(mut k) = self.killer.lock() {
-            let _ = k.kill();
+        let mut k = match self.killer.lock() {
+            Ok(g) => g,
+            Err(poisoned) => {
+                tracing::warn!("[pty] SessionHandle killer mutex poisoned - recovering for drop kill");
+                poisoned.into_inner()
+            }
+        };
+        if let Err(e) = k.kill() {
+            tracing::warn!(?e, "[pty] SessionHandle child kill failed during drop");
         }
+    }
+}
+
+#[cfg(test)]
+mod drop_tests {
+    use super::*;
+    use std::io::{Cursor, Result as IoResult};
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Debug, Clone)]
+    struct CountingKiller {
+        kills: Arc<AtomicUsize>,
+    }
+
+    impl portable_pty::ChildKiller for CountingKiller {
+        fn kill(&mut self) -> IoResult<()> {
+            self.kills.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn clone_killer(&self) -> Box<dyn portable_pty::ChildKiller + Send + Sync> {
+            Box::new(self.clone())
+        }
+    }
+
+    struct DummyMaster;
+
+    impl MasterPty for DummyMaster {
+        fn resize(&self, _size: PtySize) -> std::result::Result<(), anyhow::Error> {
+            Ok(())
+        }
+
+        fn get_size(&self) -> std::result::Result<PtySize, anyhow::Error> {
+            Ok(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+        }
+
+        fn try_clone_reader(
+            &self,
+        ) -> std::result::Result<Box<dyn Read + Send>, anyhow::Error> {
+            Ok(Box::new(Cursor::new(Vec::<u8>::new())))
+        }
+
+        fn take_writer(&self) -> std::result::Result<Box<dyn Write + Send>, anyhow::Error> {
+            Ok(Box::new(Vec::<u8>::new()))
+        }
+
+        #[cfg(unix)]
+        fn process_group_leader(&self) -> Option<libc::pid_t> {
+            None
+        }
+
+        #[cfg(unix)]
+        fn as_raw_fd(&self) -> Option<std::os::unix::io::RawFd> {
+            None
+        }
+
+        #[cfg(unix)]
+        fn tty_name(&self) -> Option<PathBuf> {
+            None
+        }
+    }
+
+    fn test_handle(kills: Arc<AtomicUsize>) -> SessionHandle {
+        SessionHandle {
+            writer: Mutex::new(Box::new(Vec::<u8>::new())),
+            master: Mutex::new(Box::new(DummyMaster)),
+            killer: Mutex::new(Box::new(CountingKiller { kills })),
+            agent_id: None,
+            session_key: None,
+            team_id: None,
+            role: None,
+            cwd: String::new(),
+            is_codex: false,
+            injecting: std::sync::atomic::AtomicBool::new(false),
+            write_budget: Mutex::new(WriteBudget {
+                window_started_at: Instant::now(),
+                bytes_in_window: 0,
+            }),
+            scrollback: crate::pty::scrollback::new_scrollback(),
+        }
+    }
+
+    #[test]
+    fn drop_recovers_poisoned_killer_mutex_and_kills_child() {
+        let kills = Arc::new(AtomicUsize::new(0));
+        let handle = test_handle(kills.clone());
+
+        let _ = catch_unwind(AssertUnwindSafe(|| {
+            let _guard = handle.killer.lock().unwrap();
+            panic!("poison killer mutex");
+        }));
+
+        drop(handle);
+        assert_eq!(kills.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn drop_kills_child_on_normal_path() {
+        let kills = Arc::new(AtomicUsize::new(0));
+        drop(test_handle(kills.clone()));
+        assert_eq!(kills.load(Ordering::SeqCst), 1);
     }
 }
 
