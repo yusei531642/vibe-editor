@@ -102,6 +102,11 @@ pub struct Settings {
     pub file_tree_expanded: Option<HashMap<String, Vec<String>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file_tree_collapsed_roots: Option<Vec<String>>,
+    /// Issue #618: Windows ConPTY で cmd.exe / PowerShell を起動する際に、初期コマンドとして
+    /// `chcp 65001` 等を inject して console output を UTF-8 へ強制するか (default true)。
+    /// 既存ユーザーは renderer 側 v10→v11 migration で `true` が入る。
+    #[serde(default = "default_terminal_force_utf8")]
+    pub terminal_force_utf8: bool,
 }
 
 /// shared.ts `AgentConfig` を mirror。`cwd` / `color` は optional。
@@ -151,16 +156,22 @@ impl Default for Settings {
             webview_zoom: None,
             file_tree_expanded: Some(HashMap::new()),
             file_tree_collapsed_roots: Some(Vec::new()),
+            terminal_force_utf8: default_terminal_force_utf8(),
         }
     }
+}
+
+/// Issue #618: Windows ConPTY + cmd.exe / PowerShell の出力 UTF-8 強制 (default true)。
+fn default_terminal_force_utf8() -> bool {
+    true
 }
 
 // ---- per-field defaults (`#[serde(default = "...")]` から参照) ----
 //
 // renderer 側 `DEFAULT_SETTINGS` と完全一致させる。新フィールド追加時は両方を同時に更新する。
 
-/// Issue #75 / #449: 現在のスキーマ版数。`shared.ts APP_SETTINGS_SCHEMA_VERSION` と同期。
-pub const APP_SETTINGS_SCHEMA_VERSION: u32 = 10;
+/// Issue #75 / #449 / #618: 現在のスキーマ版数。`shared.ts APP_SETTINGS_SCHEMA_VERSION` と同期。
+pub const APP_SETTINGS_SCHEMA_VERSION: u32 = 11;
 
 fn default_language() -> String {
     "ja".to_string()
@@ -283,8 +294,37 @@ mod tests {
         assert_eq!(v["sidebarWidth"], json!(272.0));
         assert_eq!(v["mcpAutoSetup"], json!(true));
         assert_eq!(v["hasCompletedOnboarding"], json!(false));
+        // Issue #618: Windows ConPTY UTF-8 強制 (default true)
+        assert_eq!(v["terminalForceUtf8"], json!(true));
         // webviewZoom は None なので skip_serializing
         assert!(v.get("webviewZoom").is_none());
+    }
+
+    /// Issue #618: 旧 settings.json (terminalForceUtf8 フィールドなし) を load しても、
+    /// `#[serde(default = "default_terminal_force_utf8")]` で `true` が入る。
+    #[test]
+    fn legacy_settings_without_terminal_force_utf8_default_to_true() {
+        let raw = json!({
+            "schemaVersion": 10,
+            "language": "ja",
+            "theme": "claude-dark",
+            // terminalForceUtf8 を意図的に省略
+        });
+        let s: Settings = serde_json::from_value(raw).unwrap();
+        assert!(s.terminal_force_utf8, "expected default true");
+    }
+
+    /// Issue #618: `terminalForceUtf8: false` を保存しているユーザー値はそのまま load される。
+    #[test]
+    fn explicit_false_terminal_force_utf8_is_preserved() {
+        let raw = json!({
+            "schemaVersion": 11,
+            "language": "ja",
+            "theme": "claude-dark",
+            "terminalForceUtf8": false,
+        });
+        let s: Settings = serde_json::from_value(raw).unwrap();
+        assert!(!s.terminal_force_utf8);
     }
 
     /// Issue #170 互換: 部分的な JSON でも `serde(default)` で field 単位 fallback が効く。

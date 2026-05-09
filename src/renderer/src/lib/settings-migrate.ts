@@ -214,6 +214,16 @@ export function migrateSettings(raw: unknown): AppSettings {
     }
   }
 
+  // --- Version 10 → 11: Windows ConPTY UTF-8 強制フラグの導入 (Issue #618) ---
+  // 旧 settings.json には `terminalForceUtf8` フィールドが存在しないため、`true` (default) で
+  // 在来挙動から切り替える: Windows + cmd.exe / PowerShell 起動時に `chcp 65001` を inject して
+  // CP932 シェルでの U+FFFD 化を防ぐ。ユーザーが既に明示的に false を保存している場合は尊重する。
+  if (version < 11) {
+    if (typeof data.terminalForceUtf8 !== 'boolean') {
+      data.terminalForceUtf8 = true;
+    }
+  }
+
   data.schemaVersion = APP_SETTINGS_SCHEMA_VERSION;
   // 最終マージで欠損フィールドを DEFAULT_SETTINGS で埋める
   return { ...DEFAULT_SETTINGS, ...data } as AppSettings;

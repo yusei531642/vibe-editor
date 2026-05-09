@@ -1028,7 +1028,33 @@ pub fn spawn_session(
 
     // reader thread (blocking IO -> mpsc)
     let mut reader = pair.master.try_clone_reader()?;
-    let writer = pair.master.take_writer()?;
+    let mut writer = pair.master.take_writer()?;
+
+    // Issue #618: Windows ConPTY で cmd.exe / PowerShell を起動する場合、最初に
+    // `chcp 65001` 等を inject してシェル出力を UTF-8 に強制する。これをしないと
+    // 既定の OEM コードページ (CP932 / ja-JP) で動くシェルが書き出すバイト列を
+    // batcher が `String::from_utf8_lossy` でそのまま UTF-8 として解釈してしまい、
+    // `dir` の漢字ファイル名 / `python -c "print('日本語')"` の出力が全 U+FFFD に
+    // 化ける (`#120` で files 経路に入れた CP932 デコードは PTY には届いていない)。
+    //
+    // inject 失敗は致命的ではない (子プロセス側の stdin が EOF / 既に閉じている等):
+    // tracing::warn! でログだけ残して spawn は続行する。
+    if cfg!(windows) {
+        let force_utf8 = command_validation::settings_terminal_force_utf8();
+        match maybe_inject_windows_utf8_init(&mut *writer, &opts.command, force_utf8) {
+            Ok(Some(injected)) => tracing::info!(
+                "[pty] Windows UTF-8 init command injected (command={}, len={})",
+                opts.command,
+                injected.len()
+            ),
+            Ok(None) => {} // not applicable / disabled — no-op
+            Err(e) => tracing::warn!(
+                "[pty] Windows UTF-8 init command write failed (command={}): {}",
+                opts.command,
+                e
+            ),
+        }
+    }
 
     let data_event = format!("terminal:data:{id}");
     let exit_event = format!("terminal:exit:{id}");
@@ -1152,4 +1178,277 @@ pub fn spawn_session(
         }),
         scrollback,
     })
+}
+
+/// Issue #618: Windows ConPTY 起動直後に shell の出力 codepage を UTF-8 に強制する初期コマンドを
+/// `writer` (PTY master) に流すヘルパー。`force_utf8` が false、対象シェルが cmd / pwsh /
+/// powershell でないとき、または `command_validation::windows_utf8_init_command` が None を
+/// 返すとき (= bash / sh / nu / claude / codex / 不明シェル) は no-op で `Ok(None)`。
+///
+/// 戻り値は inject されたバイト列の参照 (test 用、failure path と区別するため `Result<Option>`):
+///   - `Ok(Some(bytes))`: bytes が writer に書き込まれた
+///   - `Ok(None)`: no-op (force_utf8=false / 対象外シェル)
+///   - `Err(io::Error)`: writer.write_all / writer.flush 失敗
+///
+/// platform check (`cfg!(windows)`) は呼び出し側で行う想定。本関数自体は platform-agnostic で
+/// テスト時も統一的に動く (Linux CI でも `cmd` を渡せば bytes を返す)。
+fn maybe_inject_windows_utf8_init(
+    writer: &mut dyn Write,
+    command: &str,
+    force_utf8: bool,
+) -> std::io::Result<Option<&'static [u8]>> {
+    if !force_utf8 {
+        return Ok(None);
+    }
+    let Some(init) = command_validation::windows_utf8_init_command(command) else {
+        return Ok(None);
+    };
+    writer.write_all(init)?;
+    writer.flush()?;
+    Ok(Some(init))
+}
+
+/// Issue #618: Windows + cmd.exe で `chcp 65001` 後に `dir` が漢字ファイル名を UTF-8 で
+/// 吐くことを実機で確認する integration test。
+///
+/// **重要**: `cmd.exe /D /Q /C "chcp 65001 && dir"` のような 1 ショット混合では、cmd.exe が
+/// `/C` 起動時に固定した OEM codepage を内部 `dir` に引き継いでしまうため UTF-8 化されない。
+/// 一方、本 PR の prod 経路 (spawn_session 内で writer.write_all による inject) は対話的な
+/// cmd.exe に対し独立したコマンドとして `chcp 65001\r` → ユーザの `dir\r` を流すため正しく
+/// 切り替わる。本 test では同じセマンティクス (= stdin パイプで chcp と dir を順番に流す)
+/// を `std::process::Command` の piped stdin で再現して検証する。
+///
+/// CI では走らせず (`#[ignore]`)、ローカル Windows 環境で
+/// `cargo test ... -- --ignored issue_618` で実行する想定。
+#[cfg(test)]
+#[cfg(windows)]
+mod windows_utf8_e2e_tests {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    /// chcp + dir を **別々のコマンド** として cmd.exe にパイプで流す。これは prod 経路の
+    /// PTY writer による sequential inject と同じセマンティクス。
+    #[test]
+    #[ignore = "requires Windows + cmd.exe; run manually via -- --ignored"]
+    fn issue_618_dir_displays_japanese() {
+        // 1) 一時ディレクトリ + 漢字ファイル
+        let tmp = std::env::temp_dir().join(format!("vibe-issue-618-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).expect("mkdir tmp");
+        let jp_file = tmp.join("テスト_漢字_618.txt");
+        std::fs::write(&jp_file, b"hello").expect("write jp file");
+
+        // 2) cmd.exe /D /Q を起動し、stdin に chcp + dir + exit を順番に流す
+        let mut child = Command::new("cmd.exe")
+            .args(["/D", "/Q"])
+            .current_dir(&tmp)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn cmd.exe failed (PATH に cmd.exe が無い?)");
+
+        // stdin 経由で sequential 入力。これが prod の PTY writer 経由 inject と等価。
+        {
+            let stdin = child.stdin.as_mut().expect("stdin");
+            // prod 経路と同じバイト列を流す (chcp 65001 > nul + dir + exit)
+            stdin.write_all(b"chcp 65001 > nul\r\n").expect("write chcp");
+            stdin.write_all(b"dir\r\n").expect("write dir");
+            stdin.write_all(b"exit\r\n").expect("write exit");
+            stdin.flush().expect("flush stdin");
+        }
+
+        let output = child.wait_with_output().expect("wait child");
+        let stdout_lossy = String::from_utf8_lossy(&output.stdout).to_string();
+        let stderr_lossy = String::from_utf8_lossy(&output.stderr).to_string();
+        eprintln!(
+            "[issue-618 e2e] exit={:?} stdout={} bytes\n--- stdout ---\n{}\n--- stderr ---\n{}",
+            output.status.code(),
+            output.stdout.len(),
+            stdout_lossy,
+            stderr_lossy
+        );
+
+        // 3) lossy UTF-8 decode しても U+FFFD で化けず、漢字ファイル名がそのまま含まれること
+        assert!(output.status.success(), "cmd.exe exited non-zero");
+        assert!(!output.stdout.is_empty(), "expected non-empty dir output");
+        assert!(
+            !stdout_lossy.contains("\u{FFFD}_618.txt"),
+            "expected Japanese filename in UTF-8 (no U+FFFD before _618.txt), got:\n{stdout_lossy}"
+        );
+        assert!(
+            stdout_lossy.contains("テスト_漢字_618.txt"),
+            "expected exact Japanese filename in UTF-8 dir output, got:\n{stdout_lossy}"
+        );
+
+        // cleanup
+        let _ = std::fs::remove_file(&jp_file);
+        let _ = std::fs::remove_dir(&tmp);
+    }
+
+    /// 対比用: chcp 65001 を入れず、素の cmd.exe で `dir` を流すと CP932 で書かれ、
+    /// `String::from_utf8_lossy` で漢字が U+FFFD に化けることを示す。
+    /// host が既に UTF-8 codepage の場合 (例: chcp 65001 が host グローバルに効いている / ja 以外
+    /// の locale) はこの baseline が成立しないので、その時は assertion をスキップして pass させる。
+    #[test]
+    #[ignore = "requires Windows + cmd.exe (CP932 default); run manually via -- --ignored"]
+    fn issue_618_baseline_without_chcp_corrupts_japanese() {
+        let tmp = std::env::temp_dir().join(format!("vibe-issue-618-base-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).expect("mkdir tmp");
+        let jp_file = tmp.join("テスト_漢字_618.txt");
+        std::fs::write(&jp_file, b"hello").expect("write jp file");
+
+        // chcp なしで dir
+        let mut child = Command::new("cmd.exe")
+            .args(["/D", "/Q"])
+            .current_dir(&tmp)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn cmd.exe failed");
+        {
+            let stdin = child.stdin.as_mut().expect("stdin");
+            stdin.write_all(b"dir\r\n").expect("write dir");
+            stdin.write_all(b"exit\r\n").expect("write exit");
+        }
+        let output = child.wait_with_output().expect("wait child");
+        let stdout_lossy = String::from_utf8_lossy(&output.stdout).to_string();
+
+        eprintln!(
+            "[issue-618 e2e baseline] {} bytes, decoded as UTF-8:\n{}",
+            output.stdout.len(),
+            stdout_lossy
+        );
+        assert!(output.status.success());
+        assert!(!output.stdout.is_empty());
+
+        // host の active codepage を確認。932 のときだけ U+FFFD を期待 (= baseline 条件).
+        let active_cp = Command::new("cmd.exe")
+            .args(["/D", "/Q", "/C", "chcp"])
+            .output()
+            .expect("chcp query");
+        let cp_str = String::from_utf8_lossy(&active_cp.stdout).to_string();
+        eprintln!("[issue-618 e2e baseline] active codepage: {}", cp_str.trim());
+        if cp_str.contains("932") {
+            assert!(
+                stdout_lossy.contains("\u{FFFD}"),
+                "on CP932 host expected U+FFFD in lossy-UTF8 decode, got:\n{stdout_lossy}"
+            );
+        }
+
+        let _ = std::fs::remove_file(&jp_file);
+        let _ = std::fs::remove_dir(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod windows_utf8_inject_tests {
+    use super::maybe_inject_windows_utf8_init;
+    use std::io;
+
+    /// 書き込みが必ず失敗する Writer (write_all 試行で error を返す)。
+    /// inject failure path のログを検証するための test double。
+    struct FailingWriter;
+
+    impl io::Write for FailingWriter {
+        fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+            Err(io::Error::new(io::ErrorKind::BrokenPipe, "test EPIPE"))
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn writes_chcp_for_cmd_when_enabled() {
+        let mut buf: Vec<u8> = Vec::new();
+        let res = maybe_inject_windows_utf8_init(&mut buf, "cmd", true).unwrap();
+        assert_eq!(res, Some(&b"chcp 65001 > nul\r"[..]));
+        assert_eq!(buf, b"chcp 65001 > nul\r");
+    }
+
+    #[test]
+    fn writes_chcp_for_cmd_exe_full_path() {
+        let mut buf: Vec<u8> = Vec::new();
+        let res =
+            maybe_inject_windows_utf8_init(&mut buf, r"C:\Windows\System32\cmd.exe", true).unwrap();
+        assert!(res.is_some());
+        assert_eq!(buf, b"chcp 65001 > nul\r");
+    }
+
+    #[test]
+    fn writes_combined_init_for_powershell() {
+        let mut buf: Vec<u8> = Vec::new();
+        let res = maybe_inject_windows_utf8_init(&mut buf, "powershell", true).unwrap();
+        assert!(res.is_some());
+        let s = std::str::from_utf8(&buf).unwrap();
+        assert!(s.contains("[Console]::OutputEncoding"));
+        assert!(s.contains("UTF8Encoding"));
+        assert!(s.contains("chcp 65001"));
+        assert!(s.contains("> $null"));
+        assert!(s.ends_with("\r"));
+    }
+
+    #[test]
+    fn writes_combined_init_for_pwsh() {
+        let mut buf: Vec<u8> = Vec::new();
+        let res = maybe_inject_windows_utf8_init(&mut buf, "pwsh", true).unwrap();
+        assert!(res.is_some());
+        let s = std::str::from_utf8(&buf).unwrap();
+        assert!(s.contains("[Console]::OutputEncoding"));
+    }
+
+    #[test]
+    fn no_op_when_force_utf8_false() {
+        let mut buf: Vec<u8> = Vec::new();
+        let res = maybe_inject_windows_utf8_init(&mut buf, "cmd", false).unwrap();
+        assert!(res.is_none());
+        assert!(buf.is_empty(), "writer should not be touched when disabled");
+    }
+
+    #[test]
+    fn no_op_for_bash() {
+        let mut buf: Vec<u8> = Vec::new();
+        let res = maybe_inject_windows_utf8_init(&mut buf, "bash", true).unwrap();
+        assert!(res.is_none());
+        assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn no_op_for_zsh_fish_nu() {
+        for shell in ["zsh", "fish", "nu", "/usr/bin/zsh"] {
+            let mut buf: Vec<u8> = Vec::new();
+            let res = maybe_inject_windows_utf8_init(&mut buf, shell, true).unwrap();
+            assert!(res.is_none(), "expected no-op for {shell}");
+            assert!(buf.is_empty(), "expected empty buf for {shell}");
+        }
+    }
+
+    #[test]
+    fn no_op_for_claude_and_codex() {
+        // Issue #618: Claude / Codex CLI は内部で UTF-8 出力するので chcp inject すると
+        // CLI 側の prompt / banner と衝突する懸念があるため対象外。
+        for cli in ["claude", "codex", r"C:\tools\codex.exe", "/usr/local/bin/claude"] {
+            let mut buf: Vec<u8> = Vec::new();
+            let res = maybe_inject_windows_utf8_init(&mut buf, cli, true).unwrap();
+            assert!(res.is_none(), "expected no-op for {cli}");
+        }
+    }
+
+    #[test]
+    fn no_op_for_empty_or_unknown_command() {
+        for cmd in ["", "nonexistent-shell"] {
+            let mut buf: Vec<u8> = Vec::new();
+            let res = maybe_inject_windows_utf8_init(&mut buf, cmd, true).unwrap();
+            assert!(res.is_none(), "expected no-op for {:?}", cmd);
+        }
+    }
+
+    #[test]
+    fn propagates_write_error() {
+        let mut writer = FailingWriter;
+        let res = maybe_inject_windows_utf8_init(&mut writer, "cmd", true);
+        assert!(res.is_err(), "writer error should bubble up");
+        assert_eq!(res.unwrap_err().kind(), io::ErrorKind::BrokenPipe);
+    }
 }
