@@ -22,6 +22,7 @@ pub mod team_inject;
 pub mod team_presets;
 pub mod team_state;
 pub mod terminal;
+pub mod terminal_tabs;
 pub mod vibe_team_skill;
 
 /// Issue #494: `commands/*.rs` の integration test を集約する test-only module。

@@ -165,6 +165,10 @@ pub fn run() {
             commands::terminal::terminal_resize,
             commands::terminal::terminal_kill,
             commands::terminal::terminal_save_pasted_image,
+            // ---- terminal tabs persistence (Issue #661) ----
+            commands::terminal_tabs::terminal_tabs_load,
+            commands::terminal_tabs::terminal_tabs_save,
+            commands::terminal_tabs::terminal_tabs_clear,
             // ---- vibe-team Skill ----
             commands::vibe_team_skill::app_install_vibe_team_skill,
         ])

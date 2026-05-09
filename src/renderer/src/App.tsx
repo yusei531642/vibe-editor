@@ -61,6 +61,7 @@ import {
   useTerminalTabs
 } from './lib/hooks/use-terminal-tabs';
 import type { TerminalTab } from './lib/hooks/use-terminal-tabs';
+import { useTerminalTabsPersistence } from './lib/hooks/use-terminal-tabs-persistence';
 import { useTeamManagement } from './lib/hooks/use-team-management';
 import { useLayoutResize } from './lib/hooks/use-layout-resize';
 import { useAppShortcuts } from './lib/hooks/use-app-shortcuts';
@@ -247,6 +248,20 @@ export function App(): JSX.Element {
     projectRoot,
     showToast,
     closeTeam: stableCloseTeam
+  });
+
+  // Issue #661: IDE タブを `~/.vibe-editor/terminal-tabs.json` に永続化し、
+  // 再起動時に復元する。reportSize / reportCwd は Issue #662 (Commit 3) で
+  // TerminalView の `onResize` / cwd 経由で呼ばれるようになる。
+  const {
+    reportSize: reportTerminalSize,
+    reportCwd: reportTerminalCwd
+  } = useTerminalTabsPersistence({
+    projectRoot,
+    terminalTabs,
+    activeTerminalTabId,
+    setActiveTerminalTabId,
+    addTerminalTab
   });
 
   // Phase 1-4 (Issue #373): teams / team-history / launch helpers を hook に集約。

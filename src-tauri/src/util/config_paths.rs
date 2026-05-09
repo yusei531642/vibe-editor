@@ -29,3 +29,10 @@ pub fn handoffs_path() -> PathBuf {
 pub fn role_profiles_path() -> PathBuf {
     vibe_root().join("role-profiles.json")
 }
+
+/// Issue #661: IDE モード terminal タブの永続化先 `~/.vibe-editor/terminal-tabs.json` のパス。
+/// `team-history.json` とは独立した SSOT で、IDE 単独タブの cwd / cols / rows / Claude
+/// session id を再起動跨ぎで保持する。
+pub fn terminal_tabs_path() -> PathBuf {
+    vibe_root().join("terminal-tabs.json")
+}
