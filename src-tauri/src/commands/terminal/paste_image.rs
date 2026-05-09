@@ -104,7 +104,14 @@ pub async fn save(base64: String, mime_type: String) -> SavePastedImageResult {
 
     let name = format!("paste-{}.{ext}", uuid::Uuid::new_v4());
     let path = dir.join(&name);
-    if let Err(e) = tokio::fs::write(&path, bytes).await {
+    // Issue #623 (Security): paste image は scrollback prompt / 機密 UI 断片を含みうるため、
+    // multi-user host (Linux 共有 dev box / SSH 接続) で別 user が読み取れない 0o600 に絞る。
+    // atomic_write_with_mode は (1) tmp 作成時 OpenOptions::mode で race なく初期化し、
+    // (2) rename 後にも set_permissions(0o600) で defense-in-depth に再設定する。
+    // Windows では mode は no-op (Windows ACL 強制は別 issue 対応)。
+    if let Err(e) =
+        crate::commands::atomic_write::atomic_write_with_mode(&path, &bytes, Some(0o600)).await
+    {
         return SavePastedImageResult {
             ok: false,
             path: None,
