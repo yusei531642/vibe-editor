@@ -59,10 +59,15 @@ import {
   formatCardCount,
   formatOrganizationAgentCount
 } from '../lib/canvas-layout-helpers';
-import { placeBatchAwayFromNodes } from '../lib/canvas-placement';
 import { useCanvasTeamRestore } from '../lib/hooks/use-canvas-team-restore';
 import { useCanvasAutoSave } from '../lib/hooks/use-canvas-auto-save';
 import { getDirtyEditorCardSnapshots } from '../lib/editor-card-dirty-registry';
+import {
+  spawnTeam,
+  spawnTeams,
+  type SpawnTeamMember,
+  type SpawnTeamSpec
+} from '../lib/canvas-team-spawn';
 
 type Tab = 'preset' | 'recent';
 
@@ -186,56 +191,28 @@ export function CanvasLayout(): JSX.Element {
     const cwd = projectRoot;
     const presetName = t(preset.i18nKey);
     const organizations = expandPresetOrganizations(preset, t, presetName);
-    const plannedOrganizations = organizations.map((org) => {
+    // Issue #611: builtin / user / history の 3 経路で共通の spawnTeams helper を経由する。
+    //   teamId 発行 / setupTeamMcp / agentId 採番 / 配置整理を helper に集約してドリフトを防ぐ。
+    const teams: SpawnTeamSpec[] = organizations.map((org) => {
       const teamId = `team-${crypto.randomUUID()}`;
-      const organization: TeamOrganizationMeta = {
-        id: teamId,
-        ...org.meta
-      };
-      return { teamId, organization, members: org.members };
-    });
-    // Issue #72: setupTeamMcp を addCards より前に完了させる
-    if (settings.mcpAutoSetup !== false) {
-      for (const org of plannedOrganizations) {
-        try {
-          await window.api.app.setupTeamMcp(
-            cwd,
-            org.teamId,
-            org.organization.name,
-            org.members.map((m, i) => ({
-              agentId: `${m.role}-${i}-${org.teamId}`,
-              role: m.role,
-              agent: m.agent
-            }))
-          );
-        } catch (err) {
-          console.warn('[preset] setupTeamMcp failed:', err);
-        }
-      }
-    }
-    const cards = plannedOrganizations.flatMap((org) =>
-      org.members.map((m, i) => {
-        const agentId = `${m.role}-${i}-${org.teamId}`;
+      const organization: TeamOrganizationMeta = { id: teamId, ...org.meta };
+      const members: SpawnTeamMember[] = org.members.map((m) => ({
+        role: m.role,
+        agent: m.agent,
+        position: presetPosition(m.col, m.row),
         // Issue #69: 未知 role でもクラッシュしないよう fallback
-        const label = ROLE_META[m.role]?.label ?? m.role ?? 'Agent';
-        return {
-          type: 'agent' as const,
-          title: label,
-          position: presetPosition(m.col, m.row),
-          payload: {
-            agent: m.agent,
-            roleProfileId: m.role,
-            role: m.role,
-            teamId: org.teamId,
-            agentId,
-            cwd,
-            organization: org.organization
-          }
-        };
-      })
-    );
-    const placedCards = placeBatchAwayFromNodes(useCanvasStore.getState().nodes, cards);
-    const ids = addCards(placedCards);
+        title: ROLE_META[m.role]?.label ?? m.role ?? 'Agent'
+      }));
+      return { teamId, teamName: organization.name, organization, members };
+    });
+    const { cards } = await spawnTeams({
+      cwd,
+      teams,
+      existingNodes: useCanvasStore.getState().nodes,
+      mcpAutoSetup: settings.mcpAutoSetup !== false,
+      setupTeamMcp: window.api.app.setupTeamMcp
+    });
+    const ids = addCards(cards);
     if (ids[0]) notifyRecruit(ids[0]);
     setSpawnOpen(false);
     void loadRecent();
@@ -243,56 +220,44 @@ export function CanvasLayout(): JSX.Element {
 
   const restoreRecent = async (entry: TeamHistoryEntry): Promise<void> => {
     const cwd = projectRoot || entry.projectRoot;
-    // Issue #72: agent spawn 前に MCP 設定を反映
-    if (settings.mcpAutoSetup !== false) {
-      try {
-        await window.api.app.setupTeamMcp(
-          cwd,
-          entry.id,
-          entry.name,
-          entry.members.map((m, i) => ({
-            agentId: m.agentId ?? `${m.role}-${i}-${entry.id}`,
-            role: m.role,
-            agent: m.agent
-          }))
-        );
-      } catch (err) {
-        console.warn('[restore] setupTeamMcp failed:', err);
-      }
-    }
-    const cards = entry.members.map((m, i) => {
-      const agentId = m.agentId ?? `${m.role}-${i}-${entry.id}`;
-      const saved = entry.canvasState?.nodes.find((s) => s.agentId === agentId);
+    // Issue #611 / #612: history-based 復元も spawnTeam 経由に統一。
+    //   entry.latestHandoff / entry.organization の payload 同梱と placeBatchAwayFromNodes
+    //   による衝突回避を applyPreset と同じ 1 関数で扱うことでドリフトを防ぐ。
+    const members: SpawnTeamMember[] = entry.members.map((m, i) => {
+      const fallbackAgentId = m.agentId ?? `${m.role}-${i}-${entry.id}`;
+      const saved = entry.canvasState?.nodes.find((s) => s.agentId === fallbackAgentId);
       // Issue #385: 旧 team-history.json に NaN / Infinity / undefined な座標が残っていると、
       // 復元直後に React Flow が render 例外を出して Canvas 全体が黒画面になる。
       // 数値として有効でない場合は preset 配置にフォールバックする。
       const savedX = typeof saved?.x === 'number' && Number.isFinite(saved.x) ? saved.x : null;
       const savedY = typeof saved?.y === 'number' && Number.isFinite(saved.y) ? saved.y : null;
-      const pos =
+      const position =
         savedX !== null && savedY !== null
           ? { x: savedX, y: savedY }
           : presetPosition(i % 3, Math.floor(i / 3));
-      // Issue #69: 未知 role でも落ちないよう optional chain
-      const label = ROLE_META[m.role]?.label ?? m.role ?? 'Agent';
       return {
-        type: 'agent' as const,
-        title: label,
-        position: pos,
-        payload: {
-          agent: m.agent,
-          roleProfileId: m.role,
-          role: m.role,
-          teamId: entry.id,
-          agentId,
-          resumeSessionId: m.sessionId ?? null,
-          cwd,
-          organization: entry.organization,
-          latestHandoff: entry.latestHandoff
-        }
+        role: m.role,
+        agent: m.agent,
+        position,
+        // Issue #69: 未知 role でも落ちないよう optional chain
+        title: ROLE_META[m.role]?.label ?? m.role ?? 'Agent',
+        resumeSessionId: m.sessionId ?? null,
+        // legacy team-history が保持していた特殊 agentId を尊重 (helper 側に明示渡し)
+        agentId: m.agentId ?? undefined
       };
     });
-    const placedCards = placeBatchAwayFromNodes(useCanvasStore.getState().nodes, cards);
-    const ids = addCards(placedCards);
+    const { cards } = await spawnTeam({
+      teamId: entry.id,
+      teamName: entry.name,
+      cwd,
+      members,
+      organization: entry.organization,
+      latestHandoff: entry.latestHandoff,
+      existingNodes: useCanvasStore.getState().nodes,
+      mcpAutoSetup: settings.mcpAutoSetup !== false,
+      setupTeamMcp: window.api.app.setupTeamMcp
+    });
+    const ids = addCards(cards);
     if (ids[0]) notifyRecruit(ids[0]);
     const updatedEntry: TeamHistoryEntry = {
       ...entry,
