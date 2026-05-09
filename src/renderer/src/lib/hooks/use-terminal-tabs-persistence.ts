@@ -7,12 +7,13 @@
  * 流れ:
  *   1. projectRoot 確定後に `terminal_tabs_load()` を 1 度だけ呼ぶ
  *   2. 該当プロジェクトの persisted tabs を順に `addTerminalTab` で復元 (= --resume 経路)
- *   3. 以降 `terminalTabs` / `activeTerminalTabId` / `reportSize` / `reportCwd` の変化を
+ *   3. 以降 `terminalTabs` / `activeTerminalTabId` / `reportSize` の変化を
  *      500ms debounce で `terminal_tabs_save()` する
  *   4. ファイル全体の他プロジェクト entry は read-modify-write で保持する
  *
- * Issue #663 (Commit 3) で TerminalView の `onResize` / cwd 経由で reportSize / reportCwd を
- * 実際に呼ぶようになる。Commit 2 の段階では caller 不在で default 値が保存される。
+ * cwd は v1 では「mount 時 load → 復元」の片方向のみ更新する (runtime 中に cwd を
+ * 切替える UI が存在しないため)。サイズは TerminalView の `onResize` 経由で
+ * `reportSize()` が呼ばれる。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../tauri-api';
@@ -43,10 +44,8 @@ export interface UseTerminalTabsPersistenceOptions {
 export interface UseTerminalTabsPersistenceResult {
   /** 永続化ファイルから復元処理が完了 (or 復元対象なし確定) したか */
   isReady: boolean;
-  /** PTY size 変化を hook に通知 (TerminalView の onResize から呼ぶ予定) */
+  /** PTY size 変化を hook に通知 (TerminalView の onResize から呼ばれる) */
   reportSize: (tabId: number, cols: number, rows: number) => void;
-  /** cwd 変化を hook に通知 (将来 cwd 切替 UI で使う) */
-  reportCwd: (tabId: number, cwd: string) => void;
 }
 
 export function useTerminalTabsPersistence(
@@ -65,7 +64,7 @@ export function useTerminalTabsPersistence(
   const restoringRef = useRef(false);
   /** 各 tabId の PTY size。reportSize で更新、save で参照 */
   const sizeMapRef = useRef(new Map<number, { cols: number; rows: number }>());
-  /** 各 tabId の cwd。reportCwd で更新、save で参照。未設定なら projectRoot を fallback */
+  /** 各 tabId の cwd。load 時に焼き付ける (v1 では runtime 更新無し)。save で参照、未設定なら projectRoot を fallback */
   const cwdMapRef = useRef(new Map<number, string>());
   /** 永続化ファイルの直近キャッシュ。save 時に他プロジェクトの entry を保持する用途 */
   const fileCacheRef = useRef<PersistedTerminalTabsFile | null>(null);
@@ -177,15 +176,5 @@ export function useTerminalTabsPersistence(
     [bumpTick]
   );
 
-  const reportCwd = useCallback(
-    (tabId: number, cwd: string) => {
-      const prev = cwdMapRef.current.get(tabId);
-      if (prev === cwd) return;
-      cwdMapRef.current.set(tabId, cwd);
-      bumpTick();
-    },
-    [bumpTick]
-  );
-
-  return { isReady, reportSize, reportCwd };
+  return { isReady, reportSize };
 }

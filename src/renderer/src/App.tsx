@@ -250,13 +250,10 @@ export function App(): JSX.Element {
     closeTeam: stableCloseTeam
   });
 
-  // Issue #661: IDE タブを `~/.vibe-editor/terminal-tabs.json` に永続化し、
-  // 再起動時に復元する。reportSize / reportCwd は Issue #662 (Commit 3) で
-  // TerminalView の `onResize` / cwd 経由で呼ばれるようになる。
-  const {
-    reportSize: reportTerminalSize,
-    reportCwd: reportTerminalCwd
-  } = useTerminalTabsPersistence({
+  // Issue #661 / #662: IDE タブを `~/.vibe-editor/terminal-tabs.json` に永続化し、
+  // 再起動時に復元する。reportTerminalSize は TerminalView の `onResize` 経由で
+  // PTY size 変化を hook に流す。cwd は load 時の片方向のみ更新する v1 設計。
+  const { reportSize: reportTerminalSize } = useTerminalTabsPersistence({
     projectRoot,
     terminalTabs,
     activeTerminalTabId,
