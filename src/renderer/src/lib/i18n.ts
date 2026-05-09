@@ -207,6 +207,11 @@ const ja: Dict = {
   'canvasMenu.unlockTeam': 'チーム固定を解除',
   'canvasMenu.deleteCard': 'カードを削除',
   'canvasMenu.addClaudeHere': 'ここに Claude を追加',
+  'canvasMenu.addCodexHere': 'ここに Codex を追加',
+  'canvasMenu.addFileTreeHere': 'ここにファイルツリーを追加',
+  'canvasMenu.addChangesHere': 'ここに Git 変更を追加',
+  'canvasMenu.addEditorHere': 'ここに空のエディタを追加',
+  'canvasMenu.spawnDefaultTeam': '既定チームを起動',
 
   // ---------- Claude Code panel ----------
   'claudePanel.title': 'IDEモード',
@@ -856,6 +861,11 @@ const en: Dict = {
   'canvasMenu.unlockTeam': 'Unlock team movement',
   'canvasMenu.deleteCard': 'Delete card',
   'canvasMenu.addClaudeHere': 'Add Claude here',
+  'canvasMenu.addCodexHere': 'Add Codex here',
+  'canvasMenu.addFileTreeHere': 'Add file tree here',
+  'canvasMenu.addChangesHere': 'Add Git changes here',
+  'canvasMenu.addEditorHere': 'Add empty editor here',
+  'canvasMenu.spawnDefaultTeam': 'Spawn default team',
 
   // ---------- Claude Code panel ----------
   'claudePanel.title': 'IDE Mode',

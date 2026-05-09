@@ -3,7 +3,7 @@
  *
  * payload: { projectRoot, relPath }
  */
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { GitDiffResult } from '../../../../../types/shared';
 import { CardFrame } from '../CardFrame';
@@ -25,20 +25,32 @@ function DiffCardImpl({ id, data }: NodeProps): JSX.Element {
   const [result, setResult] = useState<GitDiffResult | null>(null);
   const [loading, setLoading] = useState(true);
   const [sideBySide, setSideBySide] = useState(true);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const refresh = useCallback(() => {
     if (!projectRoot || !relPath) {
-      setLoading(false);
+      if (mountedRef.current) setLoading(false);
       return;
     }
     setLoading(true);
     void window.api.git
       .diff(projectRoot, relPath, originalRelPath)
-      .then(setResult)
+      .then((r) => {
+        if (mountedRef.current) setResult(r);
+      })
       .catch(() => {
         /* noop */
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (mountedRef.current) setLoading(false);
+      });
   }, [projectRoot, relPath, originalRelPath]);
 
   useEffect(() => {

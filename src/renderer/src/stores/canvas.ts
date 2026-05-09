@@ -34,9 +34,13 @@ interface CanvasState {
   nodes: Node<CardData>[];
   edges: Edge[];
   viewport: Viewport;
+  isDragging: boolean;
   setNodes: (nodes: Node<CardData>[]) => void;
   setEdges: (edges: Edge[]) => void;
   setViewport: (v: Viewport) => void;
+  setCanvasDragging: (dragging: boolean) => void;
+  /** clear() 後に React Flow の内部 viewport も同期リセットするための signal。 */
+  viewportResetSeq: number;
   addCard: (card: {
     type: CardType;
     title: string;
@@ -150,9 +154,12 @@ export const useCanvasStore = create<CanvasState>()(
       nodes: [],
       edges: [],
       viewport: { x: 0, y: 0, zoom: 1 },
+      isDragging: false,
+      viewportResetSeq: 0,
       setNodes: (nodes) => set({ nodes }),
       setEdges: (edges) => set({ edges }),
       setViewport: (viewport) => set({ viewport }),
+      setCanvasDragging: (isDragging) => set({ isDragging }),
       addCard: ({ type, title, payload, position }) => {
         const id = newId(type);
         const existing = get().nodes;
@@ -261,7 +268,13 @@ export const useCanvasStore = create<CanvasState>()(
           window.clearTimeout(h);
         }
         pulseTimers.clear();
-        set({ nodes: [], edges: [], viewport: { x: 0, y: 0, zoom: 1 }, teamLocks: {} });
+        set((state) => ({
+          nodes: [],
+          edges: [],
+          viewport: { x: 0, y: 0, zoom: 1 },
+          viewportResetSeq: state.viewportResetSeq + 1,
+          teamLocks: {}
+        }));
       },
       stageView: 'stage',
       setStageView: (v) => set({ stageView: v }),

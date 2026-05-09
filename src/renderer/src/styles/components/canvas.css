@@ -1124,10 +1124,14 @@
   box-shadow: var(--shadow-md);
   z-index: 20;
   font-size: 11.5px;
+  max-width: calc(100vw - 32px);
+  overflow-x: auto;
+  scrollbar-width: thin;
 }
 .tc__hud button {
   display: flex;
   align-items: center;
+  flex-shrink: 0;
   gap: 5px;
   padding: 5px 12px;
   border-radius: 999px;
@@ -1137,6 +1141,10 @@
   background: transparent;
   border: none;
   font: inherit;
+  white-space: nowrap;
+}
+.tc__hud button > span {
+  white-space: nowrap;
 }
 .tc__hud button:hover {
   color: var(--text);

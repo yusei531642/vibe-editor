@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import type { Node } from '@xyflow/react';
 import type { CardData } from '../../stores/canvas';
 
@@ -30,20 +30,12 @@ export function useCanvasTeamRestore(opts: UseCanvasTeamRestoreOptions): void {
   const restoredTeamsRef = useRef<Map<string, { state: RestoreState; nextRetryAt?: number }>>(
     new Map()
   );
-  useEffect(() => {
-    if (nodes.length === 0) {
-      // Clear 後は次のチームでまた setup したいので ref をリセット
-      restoredTeamsRef.current.clear();
-    }
-  }, [nodes.length]);
-  useEffect(() => {
-    if (!projectRoot) return;
-    if (mcpAutoSetup === false) return;
+  const byTeam = useMemo(() => {
     interface TeamRestoreInfo {
       name: string;
       members: { agentId: string; role: string; agent: string }[];
     }
-    const byTeam = new Map<string, TeamRestoreInfo>();
+    const map = new Map<string, TeamRestoreInfo>();
     for (const n of nodes) {
       const p = (n.data?.payload ?? {}) as {
         teamId?: string;
@@ -56,10 +48,22 @@ export function useCanvasTeamRestore(opts: UseCanvasTeamRestoreOptions): void {
       const role = p.roleProfileId ?? p.role;
       if (!p.teamId || !p.agentId || !role || !p.agent) continue;
       const title = String(n.data?.title ?? 'Team');
-      const tm = byTeam.get(p.teamId) ?? { name: p.organization?.name ?? title, members: [] };
+      const tm = map.get(p.teamId) ?? { name: p.organization?.name ?? title, members: [] };
       tm.members.push({ agentId: p.agentId, role, agent: p.agent });
-      byTeam.set(p.teamId, tm);
+      map.set(p.teamId, tm);
     }
+    return map;
+  }, [nodes]);
+
+  useEffect(() => {
+    if (nodes.length === 0) {
+      // Clear 後は次のチームでまた setup したいので ref をリセット
+      restoredTeamsRef.current.clear();
+    }
+  }, [nodes.length]);
+  useEffect(() => {
+    if (!projectRoot) return;
+    if (mcpAutoSetup === false) return;
     const now = Date.now();
     for (const [teamId, info] of byTeam) {
       const cur = restoredTeamsRef.current.get(teamId);
@@ -82,5 +86,5 @@ export function useCanvasTeamRestore(opts: UseCanvasTeamRestoreOptions): void {
           console.warn('[restore] setupTeamMcp failed:', err);
         });
     }
-  }, [projectRoot, nodes, mcpAutoSetup]);
+  }, [projectRoot, byTeam, mcpAutoSetup]);
 }

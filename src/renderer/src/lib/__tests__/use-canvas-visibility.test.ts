@@ -45,6 +45,7 @@ describe('useCanvasVisibility', () => {
 
   afterEach(() => {
     __resetCanvasVisibilityForTests();
+    vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
@@ -80,6 +81,7 @@ describe('useCanvasVisibility', () => {
   });
 
   it('subscribeOnVisible は hidden→visible 遷移時のみ発火する (edge trigger)', () => {
+    vi.useFakeTimers();
     const cb = vi.fn();
     const unsub = subscribeOnVisible(cb);
 
@@ -91,6 +93,8 @@ describe('useCanvasVisibility', () => {
     expect(cb).not.toHaveBeenCalled(); // hidden 遷移では発火しない
 
     setVisibilityState('visible');
+    expect(cb).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(200);
     expect(cb).toHaveBeenCalledTimes(1);
 
     // 連続して visible のまま focus が来ても再発火しない
@@ -100,15 +104,18 @@ describe('useCanvasVisibility', () => {
     // 再度 hidden → visible で再発火
     setVisibilityState('hidden');
     setVisibilityState('visible');
+    vi.advanceTimersByTime(200);
     expect(cb).toHaveBeenCalledTimes(2);
 
     unsub();
     setVisibilityState('hidden');
     setVisibilityState('visible');
+    vi.advanceTimersByTime(200);
     expect(cb).toHaveBeenCalledTimes(2); // unsub 後は発火しない
   });
 
   it('複数 subscriber が独立して発火する', () => {
+    vi.useFakeTimers();
     const a = vi.fn();
     const b = vi.fn();
     subscribeOnVisible(a);
@@ -116,8 +123,26 @@ describe('useCanvasVisibility', () => {
 
     setVisibilityState('hidden');
     setVisibilityState('visible');
+    vi.advanceTimersByTime(200);
 
     expect(a).toHaveBeenCalledTimes(1);
     expect(b).toHaveBeenCalledTimes(1);
+  });
+
+  it('短時間の visible パカパカでは安定後に 1 回だけ発火する', () => {
+    vi.useFakeTimers();
+    const cb = vi.fn();
+    subscribeOnVisible(cb);
+
+    setVisibilityState('hidden');
+    setVisibilityState('visible');
+    vi.advanceTimersByTime(100);
+    setVisibilityState('hidden');
+    setVisibilityState('visible');
+    vi.advanceTimersByTime(199);
+    expect(cb).not.toHaveBeenCalled();
+
+    vi.advanceTimersByTime(1);
+    expect(cb).toHaveBeenCalledTimes(1);
   });
 });

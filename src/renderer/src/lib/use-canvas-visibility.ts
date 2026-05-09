@@ -42,6 +42,7 @@ const state: CanvasVisibilityState = {
 };
 
 const subscribers = new Set<() => void>();
+const VISIBLE_STABLE_MS = 200;
 
 let initialized = false;
 let unlistenDoc: (() => void) | null = null;
@@ -156,11 +157,24 @@ export function getHiddenSinceMs(): number | null {
  */
 export function subscribeOnVisible(cb: () => void): () => void {
   ensureInit();
+  let timer: number | null = null;
   const wrapped = (): void => {
-    if (isVisibleNowInternal()) cb();
+    if (timer !== null) {
+      window.clearTimeout(timer);
+      timer = null;
+    }
+    if (!isVisibleNowInternal()) return;
+    timer = window.setTimeout(() => {
+      timer = null;
+      if (isVisibleNowInternal()) cb();
+    }, VISIBLE_STABLE_MS);
   };
   subscribers.add(wrapped);
   return () => {
+    if (timer !== null) {
+      window.clearTimeout(timer);
+      timer = null;
+    }
     subscribers.delete(wrapped);
   };
 }
