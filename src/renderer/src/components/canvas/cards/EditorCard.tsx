@@ -3,12 +3,18 @@
  *
  * payload: { projectRoot, relPath }
  * 自前で files.read/write を呼び、dirty 管理 + Ctrl+S 保存。
+ *
+ * Issue #595: dirty な編集内容が × ボタンや Clear で確認なく失われる data-loss
+ * バグを塞ぐため、mount 時に editor-card-dirty-registry へ snapshot provider
+ * を登録する。これにより `useConfirmRemoveCard` / Canvas Clear が削除前に
+ * dirty card 一覧を覗いて confirm dialog を出せる。
  */
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import { CardFrame } from '../CardFrame';
 import { EditorView } from '../../EditorView';
 import { detectLanguage } from '../../../lib/language';
+import { registerEditorCardDirty } from '../../../lib/editor-card-dirty-registry';
 
 interface EditorPayload {
   projectRoot: string;
@@ -64,6 +70,18 @@ function EditorCardImpl({ id, data }: NodeProps): JSX.Element {
   }, [projectRoot, relPath, isImage]);
 
   const dirty = content !== original;
+
+  // Issue #595: dirty 状態を Canvas モード共通の registry へ snapshot 経由で公開する。
+  // ref を介すことで content/dirty が変わるたびに register を作り直さずに済み、
+  // useConfirmRemoveCard / Canvas Clear の削除直前 lookup でも常に最新値を返せる。
+  // relPath は「空 EditorCard」(payload.relPath = '') もあり得るので、空文字なら
+  // title (= 'エディタ' / 'Editor') にフォールバックして confirm dialog で空白行が
+  // 出ないようにする (`??` だと空文字を素通ししてしまうので `||` を使う)。
+  const dirtySnapshotRef = useRef({ relPath: relPath || '', isDirty: false });
+  dirtySnapshotRef.current = { relPath: relPath || title || '', isDirty: dirty };
+  useEffect(() => {
+    return registerEditorCardDirty(id, () => dirtySnapshotRef.current);
+  }, [id]);
 
   const onSave = useCallback(async () => {
     if (!dirty) return;
