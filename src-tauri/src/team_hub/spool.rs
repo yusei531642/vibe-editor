@@ -27,10 +27,46 @@
 
 use crate::team_hub::protocol::consts::{SPOOL_DIR, SPOOL_SUMMARY_LINES, SPOOL_TTL_HOURS};
 use anyhow::{anyhow, Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, SystemTime};
 use tokio::fs;
 use uuid::Uuid;
+
+/// Issue #636 (Security): spool 書き出し前に `project_root` を厳格検証する共通 helper。
+///
+/// 1. `trim` 後 empty 不可
+/// 2. 絶対 path (relative 不可)
+/// 3. `..` (Component::ParentDir) を含まない
+/// 4. canonicalize 成功 (= 実在 + symlink resolution)
+///
+/// 旧実装は (1) のみで、`team_send({ data: <大>, project_root: "../../tmp/.../" })` のような
+/// payload が hub state 経由で渡されたケースで spool が想定外ディレクトリに書ける余地があった。
+/// canonicalize 失敗時の素 path フォールバック (line 81-85 旧) も廃止。
+async fn validate_spool_root(project_root: &str) -> Result<PathBuf> {
+    let project_root = project_root.trim();
+    if project_root.is_empty() {
+        return Err(anyhow!(
+            "spool: project_root is empty; cannot write spool file"
+        ));
+    }
+    let raw_root = Path::new(project_root);
+    if !raw_root.is_absolute() {
+        return Err(anyhow!(
+            "spool: project_root must be absolute (got: {project_root})"
+        ));
+    }
+    if raw_root
+        .components()
+        .any(|c| matches!(c, Component::ParentDir))
+    {
+        return Err(anyhow!(
+            "spool: project_root must not contain `..` (got: {project_root})"
+        ));
+    }
+    fs::canonicalize(raw_root).await.map_err(|e| {
+        anyhow!("spool: project_root canonicalize failed for {project_root}: {e}")
+    })
+}
 
 /// spool 化結果。caller は `replacement_message` を inject に流し、`spool_path` をログ用に保持する。
 #[derive(Debug, Clone)]
@@ -56,13 +92,11 @@ pub async fn spool_long_payload(
     content: &str,
     prefix: &str,
 ) -> Result<SpoolResult> {
-    let project_root = project_root.trim();
-    if project_root.is_empty() {
-        return Err(anyhow!(
-            "spool: project_root is empty; cannot write spool file"
-        ));
-    }
-    let dir = Path::new(project_root).join(SPOOL_DIR);
+    // Issue #636 (Security): project_root の厳格検証 (絶対 path / `..` 不可 / canonicalize 必須)
+    // を入口で走らせ、`team_send({ project_root: "../../etc/..." })` 等の payload で spool が
+    // 想定外ディレクトリに書かれるのを防ぐ。canonicalize 後の絶対 path を以後一貫して使う。
+    let canonical_root = validate_spool_root(project_root).await?;
+    let dir = canonical_root.join(SPOOL_DIR);
     fs::create_dir_all(&dir)
         .await
         .with_context(|| format!("spool: failed to create dir {}", dir.display()))?;
@@ -78,11 +112,10 @@ pub async fn spool_long_payload(
     fs::write(&path, content)
         .await
         .with_context(|| format!("spool: failed to write {}", path.display()))?;
-    let abs_path = match fs::canonicalize(&path).await {
-        Ok(p) => p,
-        // canonicalize 失敗 (Windows の長いパス等) は構築済み path をそのまま返す
-        Err(_) => path.clone(),
-    };
+    // Issue #636: dir が canonical_root 配下なので、path も既に canonical 系の絶対 path。
+    // 念のため canonicalize を試み、失敗時は構築済みの (canonical_root 配下の) path をそのまま使う
+    // (raw な project_root に戻る fallback は Issue #636 で削除済み)。
+    let abs_path = fs::canonicalize(&path).await.unwrap_or_else(|_| path.clone());
     let replacement_message = build_replacement_message(content, &abs_path);
     Ok(SpoolResult {
         spool_path: abs_path,
@@ -236,6 +269,53 @@ mod tests {
     async fn spool_long_payload_rejects_empty_project_root() {
         let err = spool_long_payload("", "body", "send").await.unwrap_err();
         assert!(err.to_string().contains("project_root is empty"));
+    }
+
+    /// Issue #636: relative path (絶対でない) は reject されること。
+    #[tokio::test]
+    async fn spool_long_payload_rejects_relative_project_root() {
+        let err = spool_long_payload("relative/path", "body", "send")
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("must be absolute"),
+            "expected `must be absolute` error, got: {err}"
+        );
+    }
+
+    /// Issue #636: `..` を含む project_root は reject されること。
+    #[tokio::test]
+    async fn spool_long_payload_rejects_parent_dir_in_project_root() {
+        // 絶対 path だが `..` を含む payload (canonicalize 前の段階で構文 reject)
+        #[cfg(unix)]
+        let bad = "/tmp/../etc";
+        #[cfg(windows)]
+        let bad = "C:\\Windows\\..\\Users";
+        let err = spool_long_payload(bad, "body", "send").await.unwrap_err();
+        assert!(
+            err.to_string().contains("must not contain"),
+            "expected `must not contain ..` error, got: {err}"
+        );
+    }
+
+    /// Issue #636: 不存在 project_root は canonicalize 失敗で reject されること
+    /// (旧実装では canonicalize 失敗時に raw path fallback で書こうとして別 dir 作成事故になりうる)。
+    #[tokio::test]
+    async fn spool_long_payload_rejects_nonexistent_project_root() {
+        // tempdir の子 (= 実在しない一意 path) を渡す
+        let tmp = TempDir::new().unwrap();
+        let nonexistent = tmp.path().join("definitely-not-here-636");
+        let err = spool_long_payload(
+            nonexistent.to_string_lossy().as_ref(),
+            "body",
+            "send",
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("canonicalize failed"),
+            "expected `canonicalize failed` error, got: {err}"
+        );
     }
 
     #[tokio::test]
