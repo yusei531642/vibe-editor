@@ -5,6 +5,7 @@
 
 pub mod app;
 pub mod atomic_write;
+pub mod authz;
 pub mod dialog;
 pub mod error;
 pub mod files;

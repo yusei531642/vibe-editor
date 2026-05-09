@@ -13,6 +13,9 @@ pub enum CommandError {
     Validation(String),
     NotFound(String),
     Internal(String),
+    /// Issue #600 (Tier A-2): authorization 失敗 (例: renderer から渡された project_root が
+    /// active project_root と一致しないなど cross-project leak の阻止)。
+    Authz(String),
 }
 
 impl CommandError {
@@ -28,13 +31,19 @@ impl CommandError {
         Self::Internal(message.into())
     }
 
+    /// Issue #600: cross-project access の reject 等 authorization 失敗用。
+    pub fn authz(message: impl Into<String>) -> Self {
+        Self::Authz(message.into())
+    }
+
     fn message(&self) -> &str {
         match self {
             Self::Io(message)
             | Self::Parse(message)
             | Self::Validation(message)
             | Self::NotFound(message)
-            | Self::Internal(message) => message,
+            | Self::Internal(message)
+            | Self::Authz(message) => message,
         }
     }
 }
