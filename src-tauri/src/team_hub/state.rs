@@ -610,16 +610,27 @@ impl TeamHub {
 
     // ===== Issue #526: file lock helpers (TeamHub method 経由で HubState の file_locks を操作) =====
 
-    /// `paths` を team_id × agent_id でロック取得試行する。partial success (一部 conflict でも残りは locked)。
-    pub async fn try_acquire_file_locks(
+    /// Issue #599 (Tier A-1): team あたりの lock 数 cap を atomic に enforce しつつ acquire する。
+    /// HubState の Mutex を 1 セッションだけ取って count → cap check → try_acquire を完結させる
+    /// (= count と insert の間に別 agent が割り込んで cap を踏み越える race を排除)。
+    pub async fn try_acquire_file_locks_with_cap(
         &self,
         team_id: &str,
         agent_id: &str,
         role: &str,
         paths: &[String],
-    ) -> crate::team_hub::file_locks::LockResult {
+        cap: usize,
+    ) -> Result<crate::team_hub::file_locks::LockResult, crate::team_hub::file_locks::FileLockCapExceeded>
+    {
         let mut s = self.state.lock().await;
-        crate::team_hub::file_locks::try_acquire(&mut s.file_locks, team_id, agent_id, role, paths)
+        crate::team_hub::file_locks::try_acquire_with_cap(
+            &mut s.file_locks,
+            team_id,
+            agent_id,
+            role,
+            paths,
+            cap,
+        )
     }
 
     /// `paths` のうち自分が保持するロックを解放する。

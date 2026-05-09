@@ -23,8 +23,24 @@ fn parse_target_paths(args: &Value) -> Vec<String> {
             let Some(raw) = v.as_str() else {
                 continue;
             };
-            let normalized = normalize_path(raw);
-            if !normalized.is_empty() && !out.contains(&normalized) {
+            // Issue #599: invalid path (`..` / 絶対 / 制御文字 / 過大長 / 空) は silent skip。
+            // task.target_paths は team_lock_files 側 validator と独立した経路なので、ここでも
+            // 同じ validator を通して traversal や絶対 path が task に紐付かないようにする。
+            // 完全 reject ではなく skip にする理由: target_paths は assign_task の "hint" 扱いで、
+            // 1 件壊れていても task 全体を作れないと assignee が困る。実害ある reject は
+            // team_lock_files / team_unlock_files の IPC 段で完了済み。
+            let normalized = match normalize_path(raw) {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!(
+                        raw_path = %raw.chars().take(80).collect::<String>(),
+                        error = %e,
+                        "[parse_target_paths] skipped invalid target_path"
+                    );
+                    continue;
+                }
+            };
+            if !out.contains(&normalized) {
                 out.push(normalized);
             }
         }
