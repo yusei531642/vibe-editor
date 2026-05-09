@@ -1117,7 +1117,7 @@ export function App(): JSX.Element {
                       if (el) terminalRefs.current.set(tab.id, el);
                       else terminalRefs.current.delete(tab.id);
                     }}
-                    cwd={settings.claudeCwd || projectRoot}
+                    cwd={tab.cwd || settings.claudeCwd || projectRoot}
                     fallbackCwd={projectRoot}
                     command={
                       tab.agent === 'codex'
@@ -1149,6 +1149,7 @@ export function App(): JSX.Element {
                       // 確認できたので freshSessionId を倒す。次回以降は --resume 経路。
                       markSessionPersisted(tab.id);
                     }}
+                    onResize={(cols, rows) => reportTerminalSize(tab.id, cols, rows)}
                   />
                 ) : claudeCheck.state === 'checking' ? (
                   <div className="claude-not-found__body" style={{ padding: 40, textAlign: 'center' }}>

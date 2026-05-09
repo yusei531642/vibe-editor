@@ -29,6 +29,11 @@ export interface TerminalTab {
    * `markSessionPersisted` で `onSessionId` 受信時に false へ倒す。
    */
   freshSessionId: boolean;
+  /**
+   * Issue #662: 起動時に PTY に渡す cwd (絶対パス)。永続化復元用。
+   * null なら App.tsx 側 fallback (`settings.claudeCwd ?? projectRoot`) を使う。
+   */
+  cwd: string | null;
   /** チーム履歴で使う member インデックス。未所属タブは null */
   teamHistoryMemberIdx: number | null;
   /** 自動生成されたデフォルトラベル（"Claude #1" / "Programmer A" など） */
@@ -58,6 +63,11 @@ export interface AddTerminalTabOptions {
   teamHistoryMemberIdx?: number | null;
   /** team-history からの resume 時に復元する手動リネーム名 */
   customLabel?: string | null;
+  /**
+   * Issue #662: 永続化復元時に PTY 起動 cwd として渡す絶対パス。
+   * 未指定なら App.tsx 側 fallback (`settings.claudeCwd ?? projectRoot`) を使う。
+   */
+  cwd?: string | null;
 }
 
 type ToastFn = (
@@ -285,6 +295,7 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
           exited: false,
           resumeSessionId,
           freshSessionId,
+          cwd: addOpts?.cwd ?? null,
           teamHistoryMemberIdx: addOpts?.teamHistoryMemberIdx ?? null,
           label,
           customLabel: addOpts?.customLabel ?? null

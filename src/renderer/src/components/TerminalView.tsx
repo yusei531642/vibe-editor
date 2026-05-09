@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useRef, useState, useCallback } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, useCallback } from 'react';
 import { useSettings } from '../lib/settings-context';
 import { useT } from '../lib/i18n';
 import { useXtermInstance } from '../lib/use-xterm-instance';
@@ -65,6 +65,12 @@ interface TerminalViewProps {
   onExit?: () => void;
   /** Claude Code の起動ログから session id を抽出したとき（初回1回のみ） */
   onSessionId?: (sessionId: string) => void;
+  /**
+   * Issue #662: PTY size が変化したときに呼ばれる。永続化復元用。
+   * xterm の `term.onResize` を経由するため、re-fit / 手動 resize / SIGWINCH 等
+   * 全ての size 変化を 1 か所で捕まえる。
+   */
+  onResize?: (cols: number, rows: number) => void;
   /** ユーザーが xterm 上で入力したキーストロークの sniff (タイトル auto-summary 等の用途) */
   onUserInput?: (data: string) => void;
   /**
@@ -130,6 +136,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       onActivity,
       onExit,
       onSessionId,
+      onResize,
       onUserInput,
       onSpawnError,
       disableWebgl,
@@ -257,6 +264,34 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       writeToPty,
       langRef
     });
+
+    // --- xterm `term.onResize` を caller (永続化 hook 等) にブリッジ (Issue #662) ---
+    // term は useXtermInstance の useEffect 内で生成される。このコンポーネントの
+    // 別 useEffect は登録順で必ずその後に走るが、term ready が遅延するケースに備えて
+    // setTimeout で再試行する。実 size 変化のときのみ発火するため、初期 size は
+    // emit されない (= 永続化値の初期 seed として cols/rows を渡す側で補完する)。
+    useEffect(() => {
+      if (!onResize) return;
+      let disposed = false;
+      let unbind: (() => void) | null = null;
+      const tryBind = (): void => {
+        if (disposed) return;
+        const term = termRef.current;
+        if (!term) {
+          window.setTimeout(tryBind, 50);
+          return;
+        }
+        const handler = term.onResize((evt) => onResize(evt.cols, evt.rows));
+        unbind = (): void => handler.dispose();
+      };
+      tryBind();
+      return () => {
+        disposed = true;
+        unbind?.();
+      };
+      // termRef は stable
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [onResize]);
 
     // --- ResizeObserver + 可視化時 re-fit (不変式 #5) ---
     // Issue #113: refitTriggers に terminalFontFamily が抜けていてフォント変更時に

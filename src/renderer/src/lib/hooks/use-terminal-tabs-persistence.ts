@@ -97,7 +97,8 @@ export function useTerminalTabsPersistence(
             role: p.role ?? null,
             teamId: p.teamId ?? null,
             agentId: p.agentId ?? undefined,
-            customLabel: p.label ?? null
+            customLabel: p.label ?? null,
+            cwd: p.cwd
           });
           if (newId !== null) {
             numericByPersistedId.set(p.tabId, newId);
