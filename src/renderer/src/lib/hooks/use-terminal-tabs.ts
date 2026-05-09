@@ -204,10 +204,30 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
 
   const addTerminalTab = useCallback(
     (addOpts?: AddTerminalTabOptions): number | null => {
-      const id = nextTerminalIdRef.current++;
+      // Issue #588: 旧実装は updater 外で `nextTerminalIdRef.current++` と
+      // `let accepted = false` を行い、updater 内で `accepted = true` をセットしていた。
+      // React 18 の自動 batching 下では setState の updater は同期実行されないことがあり、
+      // 同期で N 回連打した場合に
+      //   (a) `accepted` が false のまま return null されて `setActiveTerminalTabId` がスキップ、
+      //   (b) reject 分まで `nextTerminalIdRef.current` が無駄消費される
+      // という race が起きていた。
+      //
+      // 修正: id 採番と active 切替を updater 内に閉じ込め、reject 時は (return prev で) 純粋に
+      // 何も起こらない設計に変える。これで updater が直列に走ってもタブ数は MAX_TERMINALS で
+      // 確実に頭打ちになり、id ref も accepted 数しか進まない。`setActiveTerminalTabId` を
+      // updater 内から呼ぶのは「同コンポーネント内の setState を queue する」だけなので
+      // strict mode の二重実行下でも同じ id を再代入するだけで idempotent。
       const agentType = addOpts?.agent ?? 'claude';
-      let accepted = false;
+      let assignedId: number | null = null;
       setTerminalTabs((prev) => {
+        if (prev.length >= MAX_TERMINALS) {
+          optsRef.current.showToast(`ターミナル上限（${MAX_TERMINALS}）に達しました`, {
+            tone: 'warning'
+          });
+          return prev;
+        }
+        const id = nextTerminalIdRef.current++;
+        assignedId = id;
         // ラベル自動生成: チームロール or 連番
         let label: string;
         if (addOpts?.role) {
@@ -235,12 +255,6 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
           label,
           customLabel: addOpts?.customLabel ?? null
         };
-        if (prev.length >= MAX_TERMINALS) {
-          optsRef.current.showToast(`ターミナル上限（${MAX_TERMINALS}）に達しました`, {
-            tone: 'warning'
-          });
-          return prev;
-        }
         // 閾値を超えそうなら軽く警告
         if (prev.length + 1 === TERMINAL_WARN_THRESHOLD) {
           optsRef.current.showToast(
@@ -248,12 +262,12 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
             { tone: 'info' }
           );
         }
-        accepted = true;
+        // 新タブを active に切り替える。reject パスは return prev で先に抜けているので、
+        // ここに到達する = タブ追加が確定している。
+        setActiveTerminalTabId(id);
         return [...prev, tab];
       });
-      if (!accepted) return null;
-      setActiveTerminalTabId(id);
-      return id;
+      return assignedId;
     },
     []
   );
