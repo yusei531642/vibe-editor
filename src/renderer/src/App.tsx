@@ -239,7 +239,8 @@ export function App(): JSX.Element {
     editingLabelTabId,
     setEditingLabelTabId,
     nextTerminalIdRef,
-    resetForProjectSwitch: resetTerminalsForProjectSwitch
+    resetForProjectSwitch: resetTerminalsForProjectSwitch,
+    markSessionPersisted
   } = useTerminalTabs({
     viewMode,
     claudeReady: claudeCheck.state === 'ok',
@@ -1127,7 +1128,12 @@ export function App(): JSX.Element {
                         prev.map((t) => (t.id === tab.id ? { ...t, exited: true } : t))
                       )
                     }
-                    onSessionId={(sid) => handleTerminalSessionId(tab, sid)}
+                    onSessionId={(sid) => {
+                      handleTerminalSessionId(tab, sid);
+                      // Issue #660: 初回 spawn の `--session-id` 注入 → jsonl 永続化が
+                      // 確認できたので freshSessionId を倒す。次回以降は --resume 経路。
+                      markSessionPersisted(tab.id);
+                    }}
                   />
                 ) : claudeCheck.state === 'checking' ? (
                   <div className="claude-not-found__body" style={{ padding: 40, textAlign: 'center' }}>

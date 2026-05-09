@@ -9,6 +9,15 @@
 //      `terminal:sessionId:{terminal_id}` event を emit
 //   4. is_alive (`SessionRegistry.get(terminal_id).is_some()`) で false になったら停止
 //
+// Issue #660 後の役割 (= "fallback detector"):
+//   - 通常経路では renderer 側が UUID を事前生成し `claude --session-id <uuid>` を args に
+//     注入する。renderer が session id を **先に** 知っているため、watcher が emit する
+//     値は renderer の値と一致する no-op になる。renderer 側の cb は冪等 (同値書込みで
+//     zustand が skip / `markSessionPersisted` も idempotent) なので副作用は無い。
+//   - 本 watcher の存在意義は (a) 外部から `claude` を直接起動された場合 (= vibe-editor
+//     経由でない PTY)、(b) 旧 schema の永続化データで `--session-id` 注入未対応の tab、
+//     の 2 ケースで session id を後追い検出して renderer に届けること。
+//
 // 注意:
 //   - Claude Code 以外 (codex 等) は jsonl を作らないので呼び出さない (renderer 制御)
 //   - notify は OS の inotify/ReadDirectoryChangesW に依存。Windows でも動く

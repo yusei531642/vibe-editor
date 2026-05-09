@@ -47,7 +47,14 @@ export function useTeamLaunchHelpers(
       const isCodex = tab.agent === 'codex';
       const base = parseShellArgs(isCodex ? codexArgs || '' : claudeArgs || '');
       if (tab.resumeSessionId && !isCodex) {
-        base.push('--resume', tab.resumeSessionId);
+        // Issue #660: 初回 spawn は `--session-id <uuid>` で id を claude に強制注入し、
+        // 新規 jsonl を確定させる。`onSessionId` 受信で freshSessionId が false に倒れた
+        // 後 (= jsonl 永続化済み) の再 spawn は `--resume <uuid>` で前回会話を resume する。
+        if (tab.freshSessionId) {
+          base.push('--session-id', tab.resumeSessionId);
+        } else {
+          base.push('--resume', tab.resumeSessionId);
+        }
       }
       // Claude のチーム指示は --append-system-prompt で直接渡す。
       if (!isCodex && tab.teamId) {
