@@ -3,7 +3,7 @@
 // ~/.vibe-editor/role-profiles.json (RoleProfilesFile) の load / save。
 // 形式の検証は renderer 側の TS で行う想定なので、ここでは raw JSON を扱うだけ。
 
-use crate::commands::atomic_write::atomic_write;
+use crate::commands::atomic_write::atomic_write_with_mode;
 use once_cell::sync::Lazy;
 use serde_json::Value;
 use tokio::fs;
@@ -27,7 +27,9 @@ pub async fn role_profiles_load() -> Value {
                 e
             );
             let bak = path.with_extension("json.bak");
-            let _ = atomic_write(&bak, &bytes).await;
+            // Issue #608 (Security): role profile instructions は injection-prone な
+            // ユーザー定義 prompt を含むため、バックアップも 0o600 で書く。
+            let _ = atomic_write_with_mode(&bak, &bytes, Some(0o600)).await;
             Value::Null
         }
     }
@@ -41,7 +43,8 @@ pub async fn role_profiles_save(file: Value) -> crate::commands::error::CommandR
         let _ = fs::create_dir_all(dir).await;
     }
     let json = serde_json::to_vec_pretty(&file).map_err(|e| e.to_string())?;
-    Ok(atomic_write(&path, &json)
+    // Issue #608 (Security): instructions が機密扱いなので 0o600 で永続化。
+    Ok(atomic_write_with_mode(&path, &json, Some(0o600))
         .await
         .map_err(|e| e.to_string())?)
 }

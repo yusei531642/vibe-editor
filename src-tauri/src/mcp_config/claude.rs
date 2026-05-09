@@ -42,7 +42,8 @@ pub(crate) async fn setup_at(path: &Path, desired: &Value) -> Result<bool> {
     servers_obj.insert(ENTRY.into(), desired.clone());
     let json = serde_json::to_vec_pretty(&config)?;
     // Issue #37: ~/.claude.json は他アプリとも共有。半端書き込みで全消失するのを避けるため atomic に。
-    crate::commands::atomic_write::atomic_write(path, &json).await?;
+    // Issue #608 (Security): API token 等を含むため 0o600 を強制 (Unix のみ effective)。
+crate::commands::atomic_write::atomic_write_with_mode(path, &json, Some(0o600)).await?;
     Ok(true)
 }
 
@@ -60,7 +61,9 @@ pub(crate) async fn snapshot_at(path: &Path) -> Result<Option<Vec<u8>>> {
 pub(crate) async fn restore_at(path: &Path, snap: Option<Vec<u8>>) -> Result<()> {
     match snap {
         Some(bytes) => {
-            crate::commands::atomic_write::atomic_write(path, &bytes).await?;
+            // Issue #608 (Security): rollback 経路でも 0o600 を維持。
+            crate::commands::atomic_write::atomic_write_with_mode(path, &bytes, Some(0o600))
+                .await?;
         }
         None => {
             // 元々ファイルが無かった場合は削除して原状回復
@@ -88,7 +91,8 @@ pub(crate) async fn cleanup_at(path: &Path) -> Result<bool> {
         // Issue #108: setup と同じく cleanup も atomic_write を使う。
         // 直接 fs::write で上書きすると、書き込み中のクラッシュで `~/.claude.json` が
         // 空 / 半端な状態で残り、Claude Code 全体の設定が失われる事故になる。
-        crate::commands::atomic_write::atomic_write(path, &json).await?;
+        // Issue #608 (Security): API token 等を含むため 0o600 を強制 (Unix のみ effective)。
+crate::commands::atomic_write::atomic_write_with_mode(path, &json, Some(0o600)).await?;
     }
     Ok(removed)
 }

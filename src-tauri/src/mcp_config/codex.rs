@@ -74,8 +74,9 @@ pub(crate) async fn setup_at(path: &Path, bridge_path: &str) -> Result<()> {
         "\n[{SECTION}]\ncommand = \"node\"\nargs = [\"{escaped}\"]\nenv_vars = [\"VIBE_TEAM_ID\", \"VIBE_TEAM_ROLE\", \"VIBE_AGENT_ID\", \"VIBE_TEAM_SOCKET\", \"VIBE_TEAM_TOKEN\"]\n",
     );
     // Issue #37: ~/.codex/config.toml も他アプリと共有なので atomic に上書き
+    // Issue #608 (Security): codex の MCP 接続情報も機密。0o600 を強制 (Unix のみ effective)。
     let data = (content + &section).into_bytes();
-    crate::commands::atomic_write::atomic_write(path, &data).await?;
+    crate::commands::atomic_write::atomic_write_with_mode(path, &data, Some(0o600)).await?;
     Ok(())
 }
 
@@ -86,7 +87,9 @@ pub(crate) async fn cleanup_at(path: &Path) -> Result<()> {
     let stripped = remove_toml_section(&content, SECTION);
     let stripped = remove_toml_section(&stripped, LEGACY_SECTION);
     let cleaned = format!("{}\n", stripped.trim_end());
-    crate::commands::atomic_write::atomic_write(path, cleaned.as_bytes()).await?;
+    // Issue #608: cleanup でも 0o600 を維持。
+    crate::commands::atomic_write::atomic_write_with_mode(path, cleaned.as_bytes(), Some(0o600))
+        .await?;
     Ok(())
 }
 
@@ -105,7 +108,9 @@ pub(crate) async fn snapshot_at(path: &Path) -> Result<Option<Vec<u8>>> {
 pub(crate) async fn restore_at(path: &Path, snap: Option<Vec<u8>>) -> Result<()> {
     match snap {
         Some(bytes) => {
-            crate::commands::atomic_write::atomic_write(path, &bytes).await?;
+            // Issue #608 (Security): rollback 経路でも 0o600 を維持。
+            crate::commands::atomic_write::atomic_write_with_mode(path, &bytes, Some(0o600))
+                .await?;
         }
         None => {
             // 元々ファイルが無かった場合は削除して原状回復。
