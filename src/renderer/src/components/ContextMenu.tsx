@@ -67,6 +67,15 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Ele
   }, [items]);
 
   useEffect(() => {
+    // Issue #616 / #593: 旧実装は `mousedown` で外クリックを検知していたが、ContextMenu を
+    //  開いた当の右クリックの mousedown 自体が、React の commit + useEffect 登録までの
+    //  わずかな間に document に bubble して「外クリック」として誤検知され、メニューが
+    //  即閉じていた (Pane 上で `e.stopPropagation()` 抜けが trigger だが、開いた経路に
+    //  関わらず race し得る)。
+    //  `click` (mouseup 完了後の合成イベント) に切替えると、メニューを開いた右クリックは
+    //  contextmenu イベントを発火するだけで `click` を発火しないため、安全に外クリック
+    //  クローズだけを拾える。defense-in-depth として handlePaneContextMenu 側にも
+    //  stopPropagation を追加してある。
     const handleClick = (e: MouseEvent): void => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         onClose();
@@ -103,10 +112,10 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Ele
         itemRefs.current[next]?.focus();
       }
     };
-    document.addEventListener('mousedown', handleClick);
+    document.addEventListener('click', handleClick);
     document.addEventListener('keydown', handleKey);
     return () => {
-      document.removeEventListener('mousedown', handleClick);
+      document.removeEventListener('click', handleClick);
       document.removeEventListener('keydown', handleKey);
     };
   }, [onClose, items, focusedIndex]);

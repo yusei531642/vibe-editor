@@ -285,6 +285,12 @@ function FlowApp(): JSX.Element {
   const handlePaneContextMenu = useCallback(
     (e: React.MouseEvent | MouseEvent) => {
       e.preventDefault();
+      // Issue #616 / #593: stopPropagation を抜いていたため React Flow の pane の
+      //  mousedown が document まで bubble し、ContextMenu 内の outside-click 検知
+      //  に「メニューを開いた当の右クリック自身」が外クリックとして誤検出されて
+      //  即閉じる race を起こしていた (handleNodeContextMenu は両方呼んでいるので
+      //  node 上の右クリックは正常)。Pane 経路にも stopPropagation を揃える。
+      e.stopPropagation();
       const items: ContextMenuItem[] = [
         {
           label: t('canvasMenu.addClaudeHere'),
@@ -328,10 +334,16 @@ function FlowApp(): JSX.Element {
 
   // ---- Phase 4: keybindings ----
   const setViewMode = useUiStore((s) => s.setViewMode);
+  // Issue #613: <CanvasLayout> は IDE モードでも常時 mount されているため、Canvas 内の
+  //  useKeybinding が IDE モード中も capture phase で window keydown を奪っていた。
+  //  Ctrl+Shift+K (QuickNav) / Ctrl+Shift+I (Inspector ≒ DevTools) / Ctrl+Shift+N (新規 agent)
+  //  は **Canvas モード時のみ** 有効にして、IDE 中は Chromium 標準ショートカット (DevTools) や
+  //  通常の入力に影響を与えないようにする。
+  const isCanvasActive = useUiStore((s) => s.viewMode === 'canvas');
   const [quickNavOpen, setQuickNavOpen] = useState(false);
-  useKeybinding(KEYS.quickNav, () => setQuickNavOpen(true));
-  useKeybinding(KEYS.toggleIde, () => setViewMode('ide'));
-  useKeybinding(KEYS.newTerminal, handleAddClaudeAgent);
+  useKeybinding(KEYS.quickNav, () => setQuickNavOpen(true), isCanvasActive);
+  useKeybinding(KEYS.toggleIde, () => setViewMode('ide'), isCanvasActive);
+  useKeybinding(KEYS.newTerminal, handleAddClaudeAgent, isCanvasActive);
 
   const stageView = useCanvasStageView();
 
