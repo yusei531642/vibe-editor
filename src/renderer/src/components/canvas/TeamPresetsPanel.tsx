@@ -16,6 +16,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Hand, Plus, Save, Trash2 } from 'lucide-react';
 import { useT } from '../../lib/i18n';
 import { useToast } from '../../lib/toast-context';
+import { useSettings } from '../../lib/settings-context';
 import { useCanvasNodes } from '../../stores/canvas-selectors';
 import { useCanvasStore, NODE_W, NODE_H, type CardData } from '../../stores/canvas';
 import type {
@@ -26,6 +27,7 @@ import type {
 import type {
   AgentPayload
 } from './cards/AgentNodeCard/types';
+import { spawnTeam, type SpawnTeamMember } from '../../lib/canvas-team-spawn';
 
 interface TeamPresetsPanelProps {
   open: boolean;
@@ -104,6 +106,10 @@ function buildPresetFromCanvas(
 export function TeamPresetsPanel({ open, onClose }: TeamPresetsPanelProps): JSX.Element | null {
   const t = useT();
   const { showToast } = useToast();
+  // Issue #611: handleApply で setupTeamMcp / projectRoot / cwd payload が必要になるため、
+  //   IDE / Canvas 共通の settings から projectRoot を解決する。
+  const { settings } = useSettings();
+  const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || '';
   const allNodes = useCanvasNodes();
   const addCards = useCanvasStore((s) => s.addCards);
   const agentNodes = useMemo(
@@ -184,36 +190,48 @@ export function TeamPresetsPanel({ open, onClose }: TeamPresetsPanelProps): JSX.
   }, [agentNodes, draftDescription, draftName, showToast, t]);
 
   const handleApply = useCallback(
-    (preset: TeamPreset) => {
-      // layout が無いときの cascading 配置: 既存カードと重ならないよう右下に並べる。
+    async (preset: TeamPreset): Promise<void> => {
+      // Issue #611: builtin preset (CanvasLayout.applyPreset) と完全に同じ
+      //   spawnTeam helper を経由して、teamId / agentId / setupTeamMcp /
+      //   placeBatchAwayFromNodes / cwd payload をすべて 1 関数に集約する。
+      //   旧実装は teamId/agentId/setupTeamMcp を全部抜いていて、apply 後の agent が
+      //   standalone 化して `--append-system-prompt` も handoff 連携も全滅していた。
+      const teamId = `team-${crypto.randomUUID()}`;
+      // layout が無い role は cascading 配置: 既存カードと重ならないよう右下に並べる。
       const baseX = 60;
       const baseY = 60;
       const stride = NODE_W + 40;
-      const cards = preset.roles.map((role, idx) => {
+      const stepY = NODE_H + 40;
+      const members: SpawnTeamMember[] = preset.roles.map((role, idx) => {
         const layoutEntry = preset.layout?.byRole[role.roleProfileId];
         const position = layoutEntry
           ? { x: layoutEntry.x, y: layoutEntry.y }
-          : { x: baseX + (idx % 4) * stride, y: baseY + Math.floor(idx / 4) * (NODE_H + 40) };
-        const payload: AgentPayload = {
+          : { x: baseX + (idx % 4) * stride, y: baseY + Math.floor(idx / 4) * stepY };
+        return {
+          role: role.roleProfileId,
           agent: role.agent === 'codex' ? 'codex' : 'claude',
-          roleProfileId: role.roleProfileId,
+          position,
+          title: role.label ?? role.roleProfileId,
           customInstructions: role.customInstructions ?? undefined
         };
-        return {
-          type: 'agent' as const,
-          title: role.label ?? role.roleProfileId,
-          payload: payload as unknown,
-          position
-        };
+      });
+      const { cards } = await spawnTeam({
+        teamId,
+        teamName: preset.name,
+        cwd: projectRoot,
+        members,
+        existingNodes: allNodes,
+        mcpAutoSetup: settings.mcpAutoSetup !== false,
+        setupTeamMcp: window.api.app.setupTeamMcp
       });
       const ids = addCards(cards);
-      showToast(
-        t('preset.applied', { name: preset.name, count: ids.length }),
-        { tone: 'success', duration: 5000 }
-      );
+      showToast(t('preset.applied', { name: preset.name, count: ids.length }), {
+        tone: 'success',
+        duration: 5000
+      });
       onClose();
     },
-    [addCards, onClose, showToast, t]
+    [addCards, allNodes, onClose, projectRoot, settings.mcpAutoSetup, showToast, t]
   );
 
   const handleDelete = useCallback(
@@ -340,7 +358,7 @@ export function TeamPresetsPanel({ open, onClose }: TeamPresetsPanelProps): JSX.
                 <button
                   type="button"
                   className="tc__preset-panel-action tc__preset-panel-action--primary"
-                  onClick={() => handleApply(preset)}
+                  onClick={() => void handleApply(preset)}
                   title={t('preset.apply.tooltip')}
                 >
                   <Hand size={12} strokeWidth={2} />
