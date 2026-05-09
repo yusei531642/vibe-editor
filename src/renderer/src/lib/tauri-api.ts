@@ -27,6 +27,7 @@ import { teamHistory } from './tauri-api/team-history';
 import { teamPresets } from './tauri-api/team-presets';
 import { teamState } from './tauri-api/team-state';
 import { terminal } from './tauri-api/terminal';
+import { terminalTabs } from './tauri-api/terminal-tabs';
 
 // 既存 import { RoleProfileSummary } from '../lib/tauri-api' との互換維持。
 // Tauri 側 TeamHub に同期する role profile の要約形。
@@ -52,7 +53,8 @@ export const api = {
   settings,
   roleProfiles,
   logs,
-  terminal
+  terminal,
+  terminalTabs
 };
 
 export type Api = typeof api;

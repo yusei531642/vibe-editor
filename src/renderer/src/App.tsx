@@ -61,6 +61,7 @@ import {
   useTerminalTabs
 } from './lib/hooks/use-terminal-tabs';
 import type { TerminalTab } from './lib/hooks/use-terminal-tabs';
+import { useTerminalTabsPersistence } from './lib/hooks/use-terminal-tabs-persistence';
 import { useTeamManagement } from './lib/hooks/use-team-management';
 import { useLayoutResize } from './lib/hooks/use-layout-resize';
 import { useAppShortcuts } from './lib/hooks/use-app-shortcuts';
@@ -239,13 +240,25 @@ export function App(): JSX.Element {
     editingLabelTabId,
     setEditingLabelTabId,
     nextTerminalIdRef,
-    resetForProjectSwitch: resetTerminalsForProjectSwitch
+    resetForProjectSwitch: resetTerminalsForProjectSwitch,
+    markSessionPersisted
   } = useTerminalTabs({
     viewMode,
     claudeReady: claudeCheck.state === 'ok',
     projectRoot,
     showToast,
     closeTeam: stableCloseTeam
+  });
+
+  // Issue #661 / #662: IDE タブを `~/.vibe-editor/terminal-tabs.json` に永続化し、
+  // 再起動時に復元する。reportTerminalSize は TerminalView の `onResize` 経由で
+  // PTY size 変化を hook に流す。cwd は load 時の片方向のみ更新する v1 設計。
+  const { reportSize: reportTerminalSize } = useTerminalTabsPersistence({
+    projectRoot,
+    terminalTabs,
+    activeTerminalTabId,
+    setActiveTerminalTabId,
+    addTerminalTab
   });
 
   // Phase 1-4 (Issue #373): teams / team-history / launch helpers を hook に集約。
@@ -1101,7 +1114,7 @@ export function App(): JSX.Element {
                       if (el) terminalRefs.current.set(tab.id, el);
                       else terminalRefs.current.delete(tab.id);
                     }}
-                    cwd={settings.claudeCwd || projectRoot}
+                    cwd={tab.cwd || settings.claudeCwd || projectRoot}
                     fallbackCwd={projectRoot}
                     command={
                       tab.agent === 'codex'
@@ -1127,7 +1140,13 @@ export function App(): JSX.Element {
                         prev.map((t) => (t.id === tab.id ? { ...t, exited: true } : t))
                       )
                     }
-                    onSessionId={(sid) => handleTerminalSessionId(tab, sid)}
+                    onSessionId={(sid) => {
+                      handleTerminalSessionId(tab, sid);
+                      // Issue #660: 初回 spawn の `--session-id` 注入 → jsonl 永続化が
+                      // 確認できたので freshSessionId を倒す。次回以降は --resume 経路。
+                      markSessionPersisted(tab.id);
+                    }}
+                    onResize={(cols, rows) => reportTerminalSize(tab.id, cols, rows)}
                   />
                 ) : claudeCheck.state === 'checking' ? (
                   <div className="claude-not-found__body" style={{ padding: 40, textAlign: 'center' }}>

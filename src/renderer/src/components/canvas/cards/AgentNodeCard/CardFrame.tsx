@@ -318,6 +318,24 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   //          プロンプト注入方法が不明のため、チーム役割分担の注入はスキップ)
   const isClaude = payload.agent === 'claude' || !payload.agent;
   const isCodex = payload.agent === 'codex';
+
+  // Issue #660: client-side UUID 事前注入。
+  // payload.resumeSessionId が無い (= 新規 mount) なら UUID v4 を採番して
+  // `--session-id <uuid>` で起動 → 新規 jsonl が確定する。次回以降は payload に
+  // 焼き付いた id を `--resume <uuid>` で読み戻す経路に切替わる。
+  const ensuredSessionId = useMemo<string | null>(() => {
+    if (!isClaude) return null;
+    return payload.resumeSessionId ?? crypto.randomUUID();
+  }, [isClaude, payload.resumeSessionId]);
+
+  useEffect(() => {
+    // 採番した UUID を Canvas store に書き戻して永続化する。
+    // payload に既に値があれば書き込まない (zustand 側で同値検出)。
+    if (isClaude && ensuredSessionId && !payload.resumeSessionId) {
+      setCardPayload(id, { resumeSessionId: ensuredSessionId });
+    }
+  }, [id, isClaude, ensuredSessionId, payload.resumeSessionId, setCardPayload]);
+
   const args = useMemo<string[] | undefined>(() => {
     const rawArgs = isClaude
       ? settings.claudeArgs || ''
@@ -334,11 +352,17 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
         base.push('-c', 'disable_paste_burst=true');
       }
     }
-    // Claude のみ `--resume <id>` で前回会話を復元 (Codex は --resume 非対応)。
-    // payload.resumeSessionId は onSessionId で書き戻されるため、
-    // アプリ再起動時もそのまま `--resume` 付き spawn になる。
-    if (isClaude && payload.resumeSessionId) {
-      base.push('--resume', payload.resumeSessionId);
+    // Issue #660: Claude のみ session 制御フラグを付与 (Codex は両方とも非対応)。
+    //   - payload.resumeSessionId 既存 → 永続化済みなので `--resume` で前回会話を継続
+    //   - payload.resumeSessionId 空 → 採番した UUID を `--session-id` で強制注入
+    // useEffect 側で payload に書き戻すと次 render で `--resume` 経路に切り替わる。
+    // 初回 spawn の args は本 render の値が snapRef に固定されるので問題ない。
+    if (isClaude && ensuredSessionId) {
+      if (payload.resumeSessionId) {
+        base.push('--resume', ensuredSessionId);
+      } else {
+        base.push('--session-id', ensuredSessionId);
+      }
     }
     return base.length > 0 ? base : undefined;
   }, [
@@ -347,6 +371,7 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     resolved.args,
     sysPrompt,
     payload.teamId,
+    ensuredSessionId,
     payload.resumeSessionId,
     settings.claudeArgs,
     settings.codexArgs

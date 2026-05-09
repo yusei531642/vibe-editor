@@ -20,6 +20,20 @@ export interface TerminalTab {
   status: string;
   exited: boolean;
   resumeSessionId: string | null;
+  /**
+   * Issue #660: Claude session id がまだ jsonl に永続化されていない初回 spawn かどうか。
+   * - true: タブ生成時に renderer が UUID を採番した直後。args 構築時に
+   *   `--session-id <uuid>` を渡して claude に id を強制注入する (新規 jsonl 作成)。
+   * - false: 既に jsonl が存在する (team-history resume / restart / 永続化復元) ので
+   *   `--resume <uuid>` で再接続する。
+   * `markSessionPersisted` で `onSessionId` 受信時に false へ倒す。
+   */
+  freshSessionId: boolean;
+  /**
+   * Issue #662: 起動時に PTY に渡す cwd (絶対パス)。永続化復元用。
+   * null なら App.tsx 側 fallback (`settings.claudeCwd ?? projectRoot`) を使う。
+   */
+  cwd: string | null;
   /** チーム履歴で使う member インデックス。未所属タブは null */
   teamHistoryMemberIdx: number | null;
   /** 自動生成されたデフォルトラベル（"Claude #1" / "Programmer A" など） */
@@ -49,6 +63,11 @@ export interface AddTerminalTabOptions {
   teamHistoryMemberIdx?: number | null;
   /** team-history からの resume 時に復元する手動リネーム名 */
   customLabel?: string | null;
+  /**
+   * Issue #662: 永続化復元時に PTY 起動 cwd として渡す絶対パス。
+   * 未指定なら App.tsx 側 fallback (`settings.claudeCwd ?? projectRoot`) を使う。
+   */
+  cwd?: string | null;
 }
 
 type ToastFn = (
@@ -102,6 +121,11 @@ export interface UseTerminalTabsResult {
   doCloseTab: (tabId: number) => void;
   restartTerminalTab: (tabId: number) => void;
   restartTerminal: () => void;
+  /**
+   * Issue #660: `onSessionId` で claude の session 永続化が確認できたら呼び、
+   * `freshSessionId` を false に倒す。次回以降の spawn は `--resume <uuid>` 経路になる。
+   */
+  markSessionPersisted: (tabId: number) => void;
 
   // ---- tab create menu UI ----
   tabCreateMenuOpen: boolean;
@@ -218,6 +242,25 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
       // updater 内から呼ぶのは「同コンポーネント内の setState を queue する」だけなので
       // strict mode の二重実行下でも同じ id を再代入するだけで idempotent。
       const agentType = addOpts?.agent ?? 'claude';
+      // Issue #660: client-side UUID 事前注入。
+      //   - resumeSessionId が外部指定 (team-history resume / 永続化復元) → そのまま使い
+      //     freshSessionId=false (既に jsonl が存在する前提なので `--resume` 経路)
+      //   - 未指定 & claude → UUID v4 を採番して `--session-id` 経路で起動 (新規 jsonl 作成)
+      //   - 未指定 & codex/その他 → resumeSessionId は null (--session-id も --resume も付けない)
+      // updater の外で生成するのは副作用 (UUID) のため。strict mode 二重呼び出しでも同 UUID で
+      // idempotent。MAX_TERMINALS で reject されたら 1 個無駄になるが極小コストなので許容。
+      let resumeSessionId: string | null;
+      let freshSessionId: boolean;
+      if (addOpts?.resumeSessionId !== undefined) {
+        resumeSessionId = addOpts.resumeSessionId;
+        freshSessionId = false;
+      } else if (agentType === 'claude') {
+        resumeSessionId = crypto.randomUUID();
+        freshSessionId = true;
+      } else {
+        resumeSessionId = null;
+        freshSessionId = false;
+      }
       let assignedId: number | null = null;
       setTerminalTabs((prev) => {
         if (prev.length >= MAX_TERMINALS) {
@@ -250,7 +293,9 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
           agentId: addOpts?.agentId ?? `agent-${id}`,
           status: '',
           exited: false,
-          resumeSessionId: addOpts?.resumeSessionId ?? null,
+          resumeSessionId,
+          freshSessionId,
+          cwd: addOpts?.cwd ?? null,
           teamHistoryMemberIdx: addOpts?.teamHistoryMemberIdx ?? null,
           label,
           customLabel: addOpts?.customLabel ?? null
@@ -319,6 +364,21 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
     );
   }, []);
 
+  /**
+   * Issue #660: Claude session が jsonl に永続化された (= `onSessionId` 受信) 時点で呼び、
+   * `freshSessionId` を false に倒す。これ以降の spawn は `--resume <uuid>` 経路になる。
+   * 既に false なら no-op (zustand-style 同値 skip)。
+   */
+  const markSessionPersisted = useCallback((tabId: number) => {
+    setTerminalTabs((prev) => {
+      const idx = prev.findIndex((t) => t.id === tabId);
+      if (idx < 0 || !prev[idx].freshSessionId) return prev;
+      const next = [...prev];
+      next[idx] = { ...prev[idx], freshSessionId: false };
+      return next;
+    });
+  }, []);
+
   const restartTerminal = useCallback(() => {
     restartTerminalTab(activeTerminalTabId);
   }, [activeTerminalTabId, restartTerminalTab]);
@@ -384,6 +444,7 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
     doCloseTab,
     restartTerminalTab,
     restartTerminal,
+    markSessionPersisted,
     tabCreateMenuOpen,
     setTabCreateMenuOpen,
     pendingTeamClose,

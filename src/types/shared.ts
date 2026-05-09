@@ -936,6 +936,57 @@ export interface TerminalExitInfo {
   signal?: number;
 }
 
+// ---------- IDE 端末タブ永続化 (Issue #661) ----------
+
+/** terminal-tabs.json schema 版番号。format 互換が壊れる変更で bump する。 */
+export const TERMINAL_TABS_SCHEMA_VERSION = 1;
+
+/**
+ * 1 個の terminal タブを再起動跨ぎで復元するためのスナップショット。
+ *
+ * 永続化先は `~/.vibe-editor/terminal-tabs.json`。`team-history.json` (Canvas / TeamHub
+ * 配下のタブ) とは独立した SSOT で、IDE モードの単独タブが対象。
+ */
+export interface PersistedTerminalTab {
+  /** renderer 側 stable id。v1 では `String(numericId)` で number 採番をそのまま文字列化 */
+  tabId: string;
+  /** Claude / Codex / 素 shell / カスタム engine (`TerminalAgent` と同じ) */
+  kind: TerminalAgent;
+  /** 起動時に渡した cwd (絶対パス)。symlink 解決はしない (jsonl の cwd と乖離するため) */
+  cwd: string;
+  /** 最終 PTY size。復元時に `terminal.create({ cols, rows })` の initial seed として渡す */
+  cols: number;
+  rows: number;
+  /** Claude のみ事前注入 UUID。codex / shell は null */
+  sessionId: string | null;
+  /** ユーザーが手動でリネームしたタブ名。null / 未指定なら自動生成名にフォールバック */
+  label?: string | null;
+  /** TeamHub に attach していたタブを将来検出するための任意参照 (v1 では検出しない) */
+  teamId?: string | null;
+  agentId?: string | null;
+  role?: string | null;
+}
+
+/** 1 プロジェクトの全タブ + アクティブタブ id。 */
+export interface PersistedTerminalTabsByProject {
+  /** 配列順 = タブの表示順序 */
+  tabs: PersistedTerminalTab[];
+  /** 最後にアクティブだった tabId (復元時にフォーカスする)。null で先頭タブ採用 */
+  activeTabId: string | null;
+}
+
+/** terminal-tabs.json のトップレベル形 (atomic write 単位)。 */
+export interface PersistedTerminalTabsFile {
+  schemaVersion: number;
+  /** 最後に save した RFC3339 (debug / orphan 検出用) */
+  lastSavedAt: string;
+  /**
+   * プロジェクトルート毎のタブ集合。raw projectRoot を key にし、検索側で
+   * `normalize_project_root` を経由して照合する (`team_history.rs` と同流儀)。
+   */
+  byProject: Record<string, PersistedTerminalTabsByProject>;
+}
+
 // ---------- TeamHub inject failure (Issue #511) ----------
 
 /**
