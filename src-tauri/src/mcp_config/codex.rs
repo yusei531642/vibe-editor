@@ -99,7 +99,14 @@ pub(crate) async fn cleanup_at(path: &Path) -> Result<()> {
 pub(crate) async fn snapshot_at(path: &Path) -> Result<Option<Vec<u8>>> {
     match fs::read(path).await {
         Ok(b) => Ok(Some(b)),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e)
+            if matches!(
+                e.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+            ) =>
+        {
+            Ok(None)
+        }
         Err(e) => Err(e.into()),
     }
 }
@@ -132,6 +139,16 @@ mod tests {
         let path = tmp.path().join("config.toml");
         let snap = snapshot_at(&path).await.unwrap();
         assert!(snap.is_none(), "absent file should yield None");
+    }
+
+    #[tokio::test]
+    async fn snapshot_returns_none_when_parent_is_file() {
+        let tmp = TempDir::new().unwrap();
+        let blocker = tmp.path().join("blocker");
+        fs::write(&blocker, b"not a directory").await.unwrap();
+        let path = blocker.join("config.toml");
+        let snap = snapshot_at(&path).await.unwrap();
+        assert!(snap.is_none(), "path under a file cannot have a snapshot");
     }
 
     #[tokio::test]

@@ -207,6 +207,21 @@ export function FileTreePanel({
     [showToast, t]
   );
 
+  const handleRootContextMenu = useCallback(
+    (e: React.MouseEvent, rootPath: string) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const items: ContextMenuItem[] = [
+        {
+          label: t('workspace.remove'),
+          action: () => onRemoveWorkspaceFolder(rootPath)
+        }
+      ];
+      setContextMenu({ x: e.clientX, y: e.clientY, items });
+    },
+    [onRemoveWorkspaceFolder, t]
+  );
+
   const renderChildren = (
     rootPath: string,
     relPath: string,
@@ -306,6 +321,7 @@ export function FileTreePanel({
               <div
                 className={`filetree__root-header${isPrimary ? ' is-primary' : ''}`}
                 title={root}
+                onContextMenu={(e) => handleRootContextMenu(e, root)}
               >
                 <button
                   type="button"
@@ -321,17 +337,15 @@ export function FileTreePanel({
                   )}
                   <span className="filetree__root-name">{shortName(root)}</span>
                 </button>
-                {!isPrimary && (
-                  <button
-                    type="button"
-                    className="filetree__root-remove"
-                    onClick={() => onRemoveWorkspaceFolder(root)}
-                    title={t('workspace.remove')}
-                    aria-label={t('workspace.remove')}
-                  >
-                    <X size={12} strokeWidth={2} />
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="filetree__root-remove"
+                  onClick={() => onRemoveWorkspaceFolder(root)}
+                  title={t('workspace.remove')}
+                  aria-label={t('workspace.remove')}
+                >
+                  <X size={12} strokeWidth={2} />
+                </button>
               </div>
               {!collapsed && renderChildren(root, '', 0)}
             </div>

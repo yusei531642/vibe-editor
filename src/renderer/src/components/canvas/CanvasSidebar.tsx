@@ -240,11 +240,20 @@ export function CanvasSidebar({
 
   const handleRemoveWorkspaceFolder = useCallback(
     async (path: string) => {
-      const next = workspaceFolders.filter((p) => p !== path);
+      const isPrimary = path === projectRoot;
+      if (isPrimary) {
+        const name = path.split(/[\\/]/).pop() ?? path;
+        if (!window.confirm(t('workspace.removePrimaryConfirm', { name }))) return;
+      }
+      const nextPrimary = isPrimary ? workspaceFolders.find((p) => p !== path) ?? '' : projectRoot;
+      const next = workspaceFolders.filter((p) => p !== path && p !== nextPrimary);
       setWorkspaceFolders(next);
-      await update({ workspaceFolders: next });
+      await update({
+        workspaceFolders: next,
+        ...(isPrimary ? { lastOpenedRoot: nextPrimary } : {})
+      });
     },
-    [workspaceFolders, update]
+    [workspaceFolders, projectRoot, update, t]
   );
 
   const handleOpenRecent = useCallback(
