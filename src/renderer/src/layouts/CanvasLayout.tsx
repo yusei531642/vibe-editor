@@ -62,6 +62,7 @@ import {
 import { placeBatchAwayFromNodes } from '../lib/canvas-placement';
 import { useCanvasTeamRestore } from '../lib/hooks/use-canvas-team-restore';
 import { useCanvasAutoSave } from '../lib/hooks/use-canvas-auto-save';
+import { getDirtyEditorCardSnapshots } from '../lib/editor-card-dirty-registry';
 
 type Tab = 'preset' | 'recent';
 
@@ -507,7 +508,19 @@ export function CanvasLayout(): JSX.Element {
             type="button"
             className="canvas-btn canvas-btn--ghost"
             onClick={() => {
-              if (window.confirm(t('canvas.clearConfirm'))) clear();
+              // Issue #595: dirty な EditorCard が残っていればファイル名一覧を提示して
+              // 単一 confirm で確認する。dirty が無いときは既存の「全部消す?」だけ。
+              const dirty = getDirtyEditorCardSnapshots();
+              if (dirty.length === 0) {
+                if (window.confirm(t('canvas.clearConfirm'))) clear();
+                return;
+              }
+              const paths = dirty.map((d) => `• ${d.relPath}`).join('\n');
+              const message = t('canvas.clearConfirmWithDirtyEditors', {
+                count: dirty.length,
+                paths
+              });
+              if (window.confirm(message)) clear();
             }}
             title={t('canvas.clear.tooltip')}
             aria-label={t('canvas.clear.tooltip')}

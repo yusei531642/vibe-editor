@@ -178,6 +178,11 @@ const ja: Dict = {
   'editor.discardSingle': '未保存の変更があります。このファイルを閉じますか？\n\n{path}',
   'editor.discardMultiple': '未保存の変更があります。このまま切り替えると {count} 個のファイルの変更が失われます。続行しますか？',
   'editor.restartConfirm': '未保存の変更があります。このままアプリを再起動すると変更が失われます。続行しますか？',
+  // Issue #595: Canvas 上の EditorCard を × / Clear で閉じる際に未保存編集を確認するダイアログ。
+  'editor.confirmDiscardChanges':
+    '未保存の編集が残っています。このカードを閉じると編集内容は失われます。続行しますか？\n\n{path}',
+  'editor.confirmDiscardChangesPlural':
+    '未保存の編集が {count} 件残っています。これらのカードを閉じると編集内容はすべて失われます。続行しますか？\n\n{paths}',
 
   // ---------- Welcome ----------
   'welcome.subtitle': 'vibe coding with Claude Code',
@@ -260,6 +265,9 @@ const ja: Dict = {
   'canvas.clear': 'クリア',
   'canvas.clear.tooltip': 'クリア — Canvas 上のカードをすべて削除',
   'canvas.clearConfirm': 'Canvas 上のカードをすべて削除しますか？',
+  // Issue #595: Clear 実行時に dirty な EditorCard が居ればファイル名一覧と件数を表示する。
+  'canvas.clearConfirmWithDirtyEditors':
+    'Canvas 上のカードをすべて削除します。未保存の編集が {count} 件あり、これらは破棄されます。続行しますか？\n\n{paths}',
   'canvas.switchToIde': 'IDE モードに戻る',
   'canvas.switchToIde.tooltip': 'IDE — エディタとターミナル中心の IDE モードへ切替',
   'canvas.modeToggle': 'Canvas モードに切り替え',
@@ -819,6 +827,11 @@ const en: Dict = {
   'editor.discardSingle': 'This file has unsaved changes. Close it anyway?\n\n{path}',
   'editor.discardMultiple': 'There are unsaved changes. Switching now will discard {count} file(s). Continue?',
   'editor.restartConfirm': 'There are unsaved changes. Restarting the app will discard them. Continue?',
+  // Issue #595: Confirmation shown when closing a Canvas EditorCard with unsaved edits via × / Clear.
+  'editor.confirmDiscardChanges':
+    'This card has unsaved changes that will be lost if you close it. Continue?\n\n{path}',
+  'editor.confirmDiscardChangesPlural':
+    '{count} cards have unsaved changes that will be lost if you close them. Continue?\n\n{paths}',
 
   // ---------- Welcome ----------
   'welcome.subtitle': 'vibe coding with Claude Code',
@@ -901,6 +914,9 @@ const en: Dict = {
   'canvas.clear': 'Clear',
   'canvas.clear.tooltip': 'Clear — Remove every card from the canvas',
   'canvas.clearConfirm': 'Clear every card on the canvas?',
+  // Issue #595: Shown when Clear is invoked while one or more EditorCards have unsaved edits.
+  'canvas.clearConfirmWithDirtyEditors':
+    'Clearing the canvas will discard {count} unsaved edit(s). Continue?\n\n{paths}',
   'canvas.switchToIde': 'Switch to IDE mode',
   'canvas.switchToIde.tooltip': 'IDE — Return to the editor + terminal IDE mode',
   'canvas.modeToggle': 'Switch to Canvas mode',
