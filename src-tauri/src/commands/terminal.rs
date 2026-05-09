@@ -233,11 +233,18 @@ pub async fn terminal_create(
     // 既存 PTY に bind し直したいシグナルを送る。allowlist / immediate-exec チェックを通った
     // 後・コマンドラインを組み立てる前 (codex 一時ファイル作成より前) に preflight して、
     // 同じ session_key / agent_id の生存 PTY があれば spawn せず既存 id をそのまま返す。
+    //
+    // Issue #605 (Security): `opts.team_id` を find_attach_target に渡し、attach 候補の
+    // SessionHandle.team_id と一致しない場合は attach せず通常 spawn にフォールバックする。
+    // session_key / agent_id 文字列一致だけで attach を許すと、別 team の同名 agent_id 経由で
+    // PTY scrollback (Claude Code prompt / API キー / git diff / ファイル内容) を吸い出す
+    // 情報漏洩経路になる。
     if opts.attach_if_exists {
-        if let Some(existing_id) = state
-            .pty_registry
-            .find_attach_target(opts.session_key.as_deref(), opts.agent_id.as_deref())
-        {
+        if let Some(existing_id) = state.pty_registry.find_attach_target(
+            opts.session_key.as_deref(),
+            opts.agent_id.as_deref(),
+            opts.team_id.as_deref(),
+        ) {
             tracing::info!(
                 "[terminal] attach_if_exists hit — reusing existing pty {} (session_key={:?}, agent_id={:?})",
                 existing_id,
