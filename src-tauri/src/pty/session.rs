@@ -249,7 +249,7 @@ mod drop_tests {
         }
 
         #[cfg(unix)]
-        fn process_group_leader(&self) -> Option<libc::pid_t> {
+        fn process_group_leader(&self) -> Option<i32> {
             None
         }
 
