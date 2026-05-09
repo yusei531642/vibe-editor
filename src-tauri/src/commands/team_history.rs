@@ -148,9 +148,13 @@ async fn save_all(entries: &[TeamHistoryEntry]) -> crate::commands::error::Comma
     let path = store_path();
     let json = serde_json::to_vec_pretty(entries).map_err(|e| e.to_string())?;
     // Issue #37: クラッシュ耐性のため atomic write を使う
-    Ok(crate::commands::atomic_write::atomic_write(&path, &json)
-        .await
-        .map_err(|e| e.to_string())?)
+    // Issue #608 (Security): team-history.json は project_root / agent_id / session_id を
+    // 含み、外部から読まれると過去の作業範囲を推定されうるため 0o600 で永続化。
+    Ok(
+        crate::commands::atomic_write::atomic_write_with_mode(&path, &json, Some(0o600))
+            .await
+            .map_err(|e| e.to_string())?,
+    )
 }
 
 #[tauri::command]

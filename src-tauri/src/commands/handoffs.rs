@@ -265,12 +265,15 @@ async fn write_handoff(
     md_path: &Path,
 ) -> crate::commands::error::CommandResult<()> {
     let json = serde_json::to_vec_pretty(handoff).map_err(|e| e.to_string())?;
-    crate::commands::atomic_write::atomic_write(json_path, &json)
+    // Issue #608 (Security): handoff body には引き継ぎ context (file path / 内部メモ等)
+    // が含まれるため 0o600 で永続化。restrict_private_file() の二重 set は冗長だが、
+    // atomic_write_with_mode が umask 等で失敗してもリカバリできるよう defense-in-depth。
+    crate::commands::atomic_write::atomic_write_with_mode(json_path, &json, Some(0o600))
         .await
         .map_err(|e| e.to_string())?;
     restrict_private_file(json_path)?;
     let markdown = render_markdown(handoff);
-    crate::commands::atomic_write::atomic_write(md_path, markdown.as_bytes())
+    crate::commands::atomic_write::atomic_write_with_mode(md_path, markdown.as_bytes(), Some(0o600))
         .await
         .map_err(|e| e.to_string())?;
     restrict_private_file(md_path)

@@ -208,7 +208,9 @@ pub async fn team_presets_save(mut preset: TeamPreset) -> PresetMutationResult {
             }
         }
     };
-    match crate::commands::atomic_write::atomic_write(&path, &json).await {
+    // Issue #608 (Security): preset の roles[].custom_instructions は injection-prone な
+    // ユーザー定義 prompt を含み得るため 0o600 で永続化。
+    match crate::commands::atomic_write::atomic_write_with_mode(&path, &json, Some(0o600)).await {
         Ok(_) => PresetMutationResult {
             ok: true,
             preset: Some(preset),
