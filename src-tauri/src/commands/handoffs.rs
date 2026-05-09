@@ -280,11 +280,27 @@ async fn write_handoff(
 }
 
 #[tauri::command]
-pub async fn handoffs_create(req: HandoffCreateRequest) -> HandoffCreateResult {
+pub async fn handoffs_create(
+    state: tauri::State<'_, crate::state::AppState>,
+    req: HandoffCreateRequest,
+) -> HandoffCreateResult {
     if req.project_root.trim().is_empty() {
         return HandoffCreateResult {
             ok: false,
             error: Some("projectRoot is required".into()),
+            handoff: None,
+        };
+    }
+    // Issue #606 (Security): renderer 由来の project_root が active project_root と一致するか検証。
+    // 不一致なら handoff body (= 引き継ぎ context / 機微テキスト) の cross-project write を阻止。
+    // 既存戻り値型 `HandoffCreateResult` を維持するため Authz reject は error フィールドで表現する。
+    if let Err(e) =
+        crate::commands::authz::assert_active_project_root(&state.project_root, &req.project_root)
+            .await
+    {
+        return HandoffCreateResult {
+            ok: false,
+            error: Some(e.to_string()),
             handoff: None,
         };
     }
@@ -339,9 +355,18 @@ pub async fn handoffs_create(req: HandoffCreateRequest) -> HandoffCreateResult {
 
 #[tauri::command]
 pub async fn handoffs_list(
+    state: tauri::State<'_, crate::state::AppState>,
     project_root: String,
     team_id: Option<String>,
 ) -> Vec<HandoffCheckpoint> {
+    // Issue #606 (Security): cross-project read を阻止するため active project_root 一致を検証。
+    // 既存 signature を維持するため reject 時は空 Vec を返す (authz が warn ログを出す)。
+    if crate::commands::authz::assert_active_project_root(&state.project_root, &project_root)
+        .await
+        .is_err()
+    {
+        return Vec::new();
+    }
     let dir = handoff_dir(&project_root, team_id.as_deref());
     let mut out = Vec::new();
     let Ok(mut rd) = fs::read_dir(&dir).await else {
@@ -366,10 +391,18 @@ pub async fn handoffs_list(
 
 #[tauri::command]
 pub async fn handoffs_read(
+    state: tauri::State<'_, crate::state::AppState>,
     project_root: String,
     team_id: Option<String>,
     handoff_id: String,
 ) -> Option<HandoffCheckpoint> {
+    // Issue #606 (Security): cross-project read を阻止。reject 時は None (= 該当なし表現) で返す。
+    if crate::commands::authz::assert_active_project_root(&state.project_root, &project_root)
+        .await
+        .is_err()
+    {
+        return None;
+    }
     let id = safe_segment(&handoff_id);
     let path = handoff_dir(&project_root, team_id.as_deref()).join(format!("{id}.json"));
     let bytes = fs::read(&path).await.ok()?;
@@ -378,12 +411,25 @@ pub async fn handoffs_read(
 
 #[tauri::command]
 pub async fn handoffs_update_status(
+    state: tauri::State<'_, crate::state::AppState>,
     project_root: String,
     team_id: Option<String>,
     handoff_id: String,
     status: String,
     to_agent_id: Option<String>,
 ) -> HandoffMutationResult {
+    // Issue #606 (Security): cross-project write を阻止。既存戻り値型を維持するため
+    // Authz reject は error フィールドで返す。
+    if let Err(e) =
+        crate::commands::authz::assert_active_project_root(&state.project_root, &project_root)
+            .await
+    {
+        return HandoffMutationResult {
+            ok: false,
+            error: Some(e.to_string()),
+            handoff: None,
+        };
+    }
     match update_handoff_status_file(
         &project_root,
         team_id.as_deref(),
