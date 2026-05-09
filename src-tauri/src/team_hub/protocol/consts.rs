@@ -27,9 +27,20 @@ pub(crate) const RECRUIT_MAX_CONCURRENCY: usize = 8;
 ///
 /// Issue #574: Windows + WebView 環境で同時 6 件 recruit 等のとき 5s では addCard 完了前に
 /// cancel が走る事故が報告されたため 5s → 15s に拡大。実行時値は環境変数
-/// `VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS` (有効範囲は 1 以上の u64 秒) で上書き可能。
-/// 参照は `protocol/tools/recruit.rs` の `recruit_ack_timeout()` ヘルパ経由。
+/// `VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS` (有効範囲は `1..=RECRUIT_ACK_TIMEOUT_MAX_SECS` 秒)
+/// で上書き可能。参照は `protocol/tools/recruit.rs` の `recruit_ack_timeout()` ヘルパ経由。
 pub(crate) const RECRUIT_ACK_TIMEOUT: Duration = Duration::from_secs(15);
+/// Issue #587: `VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS` で受け付ける ack timeout 秒数の上限。
+///
+/// 上限なしのままだと `VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS=999999999` 等で ack 待ちが
+/// 事実上永久になり、`recruit_ack` が来るまで pending が永続化 → 後続 recruit semaphore も
+/// 塞がれて team が事実上 lock される事故が起きうる (`VIBE_TEAM_RECRUIT_GRACE_MS` /
+/// `VIBE_TEAM_RECRUIT_CONCURRENCY` は既にクランプ済みで非対称)。
+///
+/// 600 秒 (= 10 分) は「Windows + WebView で同時 6 件 recruit したとき addCard 完了まで
+/// 観測上 ~30s 程度 (#574)」を 1 桁オーダーで上回り、かつ「user が UI で待つ限界」を
+/// 大きく超えない中間値として採用する。
+pub(crate) const RECRUIT_ACK_TIMEOUT_MAX_SECS: u64 = 600;
 /// 動的ロール instructions の最大長。Leader が暴走して巨大プロンプトを投げてくるのを抑える。
 pub(crate) const MAX_DYNAMIC_INSTRUCTIONS_LEN: usize = 16 * 1024; // 16 KiB
 /// 動的ロール label / description の最大長
