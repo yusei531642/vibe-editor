@@ -16,12 +16,22 @@ use std::sync::Mutex;
 
 use crate::commands::error::{CommandError, CommandResult};
 use crate::state::lock_project_root_recover;
+use crate::team_hub::TeamHub;
 
 /// 監査ログに raw path を出すときの clamp (制御文字を `?` に置換 + 240 文字で truncate)。
 /// renderer 由来の project_root に改行や ESC が混じっていても tracing 行を破壊しないようにする。
 fn clamp_for_log(raw: &str) -> String {
     raw.chars()
         .take(240)
+        .map(|c| if c.is_control() { '?' } else { c })
+        .collect()
+}
+
+/// 監査ログ用に team_id を clamp する (制御文字 `?` 置換 + 96 文字 truncate)。
+/// `team_id` 自体は ASCII 系の short string が想定だが、renderer から来る入力は信用しない。
+fn clamp_team_id_for_log(raw: &str) -> String {
+    raw.chars()
+        .take(96)
         .map(|c| if c.is_control() { '?' } else { c })
         .collect()
 }
@@ -102,6 +112,46 @@ pub async fn assert_active_project_root(
     }
 
     Ok(active_canon)
+}
+
+/// Issue #601 (Tier A-3): renderer 由来の `team_id` が `TeamHub` の active set に含まれるかを
+/// 検証する。`team_diagnostics_read` (#601) のような **renderer がリーダー視点を impersonate
+/// する** IPC で、過去 / 別プロジェクト / 任意 fabricated な team_id を probe されないように
+/// recon を抑止するための helper。
+///
+/// 設計判断:
+/// - 「空 team_id」「未登録 team_id」「正常な team_id」のうち最初の 2 つは同じ
+///   `Authz("team is not active or does not exist")` で reject する。これは存在 / 非存在を
+///   区別しない recon 抑止の方針 (issue #601 案1)。
+/// - reject 時は `tracing::warn!` で clamp 済み team_id を audit log に残す。
+/// - 返却型は `()` (active 確認だけが目的、戻り値で team の詳細を返さない)。
+pub async fn assert_active_team(hub: &TeamHub, team_id: &str) -> CommandResult<()> {
+    let trimmed = team_id.trim();
+    if trimmed.is_empty() {
+        tracing::warn!(
+            team_id = %clamp_team_id_for_log(team_id),
+            "[authz] assert_active_team rejected: empty team_id"
+        );
+        return Err(CommandError::authz(
+            "team is not active or does not exist",
+        ));
+    }
+
+    let state = hub.state.lock().await;
+    if !state.active_teams.contains(trimmed) {
+        // `members` の中に過去の (= dismiss 済み) team_id が残っていても probe させない。
+        let active_count = state.active_teams.len();
+        drop(state);
+        tracing::warn!(
+            team_id = %clamp_team_id_for_log(team_id),
+            active_count,
+            "[authz] assert_active_team rejected: team_id not in active set"
+        );
+        return Err(CommandError::authz(
+            "team is not active or does not exist",
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -216,5 +266,99 @@ mod tests {
             .await
             .expect("trailing separator should canonicalize equal");
         assert_eq!(canon, std::fs::canonicalize(project.path()).expect("canon"));
+    }
+
+    // ===== Issue #601 (Tier A-3): assert_active_team helper =====
+
+    mod active_team {
+        use super::*;
+        use crate::pty::SessionRegistry;
+        use crate::team_hub::TeamHub;
+        use std::sync::Arc;
+
+        async fn insert_active_team(hub: &TeamHub, team_id: &str) {
+            let mut s = hub.state.lock().await;
+            s.active_teams.insert(team_id.to_string());
+        }
+
+        /// active set に登録された team_id は accept される。
+        #[tokio::test]
+        async fn accepts_team_id_in_active_set() {
+            let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+            insert_active_team(&hub, "team-active-001").await;
+            assert_active_team(&hub, "team-active-001")
+                .await
+                .expect("active team_id should be accepted");
+        }
+
+        /// active set に居ない team_id は recon 抑止の generic message で reject される。
+        #[tokio::test]
+        async fn rejects_team_id_not_in_active_set() {
+            let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+            insert_active_team(&hub, "team-active-002").await;
+            // 別の team_id (= 過去に dismiss した / 別 project の team / fabricated) を渡す
+            let err = assert_active_team(&hub, "team-of-projectA-fabricated")
+                .await
+                .unwrap_err();
+            assert!(
+                matches!(err, CommandError::Authz(ref m) if m == "team is not active or does not exist"),
+                "got: {err}"
+            );
+        }
+
+        /// 存在しない / 空の team_id は同じ generic message で reject される
+        /// (= recon 抑止: 存在 / 非存在を区別しない)。
+        #[tokio::test]
+        async fn rejects_empty_team_id_with_same_message_as_unknown() {
+            let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+            insert_active_team(&hub, "team-active-003").await;
+
+            let err_empty = assert_active_team(&hub, "").await.unwrap_err();
+            let err_whitespace = assert_active_team(&hub, "   ").await.unwrap_err();
+            let err_unknown = assert_active_team(&hub, "team-unknown-xyz").await.unwrap_err();
+
+            // 全部同じ generic message にすることで「team_id がそもそも空」と
+            // 「team_id が active set に居ない」を caller から区別できなくする。
+            for err in [&err_empty, &err_whitespace, &err_unknown] {
+                assert!(
+                    matches!(err, CommandError::Authz(ref m) if m == "team is not active or does not exist"),
+                    "got: {err}"
+                );
+            }
+        }
+
+        /// dismiss された team_id は accept されない
+        /// (= state.active_teams.remove で集合から外れているはず)。
+        #[tokio::test]
+        async fn rejects_team_id_after_remove() {
+            let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+            insert_active_team(&hub, "team-tmp").await;
+            // 一度 accept される
+            assert_active_team(&hub, "team-tmp")
+                .await
+                .expect("should accept while in active set");
+            // 集合から外す (dismiss 相当)
+            {
+                let mut s = hub.state.lock().await;
+                s.active_teams.remove("team-tmp");
+            }
+            // 以降は generic reject に変わる
+            let err = assert_active_team(&hub, "team-tmp").await.unwrap_err();
+            assert!(
+                matches!(err, CommandError::Authz(ref m) if m == "team is not active or does not exist"),
+                "got: {err}"
+            );
+        }
+
+        /// `team_id` を trim したうえで active set と比較する
+        /// (= `"  team-x  "` のような padding は無害化して accept させる)。
+        #[tokio::test]
+        async fn accepts_team_id_after_trim() {
+            let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+            insert_active_team(&hub, "team-trimmed").await;
+            assert_active_team(&hub, "  team-trimmed  ")
+                .await
+                .expect("trim 済み team_id should be accepted");
+        }
     }
 }
