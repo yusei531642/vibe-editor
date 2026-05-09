@@ -34,7 +34,13 @@ fn path_is_ignored(path: &Path, root: &Path) -> bool {
 /// renderer 由来の root を無条件に再帰監視しない。
 /// ユーザーの「プロジェクト」として自然なディレクトリだけを許可し、
 /// ルートドライブ / ホーム直下 / 明らかなシステム領域は拒否する。
-fn is_safe_watch_root(root: &Path) -> bool {
+///
+/// Issue #639: app_set_project_root も同水準の検証を行うため `pub(crate)` で公開する。
+/// 「fs_watch 用」と「project_root setter 用」で同じ judgement (canonicalize / system
+/// 領域 denylist / home 直下拒否) を共有することで、TOCTOU で project_root が system 領域に
+/// 切り替わって後続 IPC (git_*, fs_watch::start_for_root, file 読み書き) が信頼できない
+/// 場所で発火するのを防ぐ defense-in-depth とする。
+pub(crate) fn is_safe_watch_root(root: &Path) -> bool {
     let Ok(canon) = root.canonicalize() else {
         return false;
     };
