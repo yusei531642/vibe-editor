@@ -382,12 +382,23 @@ pub async fn orchestration_summary(
     Some(summarize_state(project_root, &state))
 }
 
+/// Issue #600 (Tier A-2 security): renderer から `project_root` を受け取って team-state を
+/// 返す IPC。`AppState` の active project_root と canonicalize 比較で一致しないと reject する
+/// (cross-project leak 防止)。一致しない場合は `CommandError::Authz` が返り、renderer 側は
+/// `.catch` で握り潰す (`use-team-dashboard.ts:120`)。
+///
+/// 戻り値は `Result<Option<...>>`:
+/// - `Ok(Some(state))` — active project と一致 + state ファイルが存在
+/// - `Ok(None)` — active project と一致するが state ファイルが未保存 (= 通常状態の一つ)
+/// - `Err(CommandError::Authz)` — project_root が active と不一致 / 未設定 / canonicalize 失敗
 #[tauri::command]
 pub async fn team_state_read(
+    state: tauri::State<'_, crate::state::AppState>,
     project_root: String,
     team_id: String,
-) -> Option<TeamOrchestrationState> {
-    load_orchestration_state(&project_root, &team_id).await
+) -> crate::commands::error::CommandResult<Option<TeamOrchestrationState>> {
+    crate::commands::authz::assert_active_project_root(&state.project_root, &project_root).await?;
+    Ok(load_orchestration_state(&project_root, &team_id).await)
 }
 
 /// Issue #578: Canvas (= Tauri webview) が非表示の間に `team:recruit-request` が走った
