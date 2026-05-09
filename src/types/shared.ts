@@ -17,9 +17,11 @@ export type StatusMascotVariant = 'vibe' | 'spark' | 'mono';
 /**
  * Issue #75: AppSettings の現在スキーマ。
  * Issue #449 で claudeArgs / codexArgs / customAgents[].args の Unicode dash (U+2013 等)
- * を ASCII '-' に正規化する migration を追加し v10。スキーマ自体のフィールド構成は v9 と同じ。
+ * を ASCII '-' に正規化する migration を追加し v10。
+ * Issue #618 で `terminalForceUtf8` (default true) を追加し v11。Windows + cmd.exe / PowerShell
+ * で起動時に `chcp 65001` を inject して CP932 シェルでの U+FFFD 化を防ぐ。
  */
-export const APP_SETTINGS_SCHEMA_VERSION = 10;
+export const APP_SETTINGS_SCHEMA_VERSION = 11;
 
 /**
  * ユーザーが自由に追加できるエージェントの設定。
@@ -128,6 +130,20 @@ export interface AppSettings {
    * primary は通常展開、ユーザーが手動で折り畳んだものだけここに残る。
    */
   fileTreeCollapsedRoots?: string[];
+  /**
+   * Issue #618: Windows ConPTY で cmd.exe / PowerShell を起動する際に、初期コマンドとして
+   * `chcp 65001` 等を inject して console output を UTF-8 へ強制するか。default true。
+   *
+   * - cmd.exe: `chcp 65001 > nul\r` を流す (CP932 → UTF-8)。`dir` 等の漢字ファイル名や
+   *   `python -c "print('日本語')"` の出力が U+FFFD 化するのを防ぐ。
+   * - PowerShell (pwsh / powershell): `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); chcp 65001 > $null\r`
+   *   を流す。
+   * - その他のシェル (bash / zsh / fish / nu) や非 Windows 環境では何もしない (no-op)。
+   *
+   * OEM コードページを意図的に使いたい (= chcp 932 のままにしたい) ユーザーは
+   * 設定で false に opt-out できる。
+   */
+  terminalForceUtf8?: boolean;
 }
 
 export interface ClaudeCheckResult {
@@ -186,7 +202,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   customAgents: [],
   mcpAutoSetup: true,
   fileTreeExpanded: {},
-  fileTreeCollapsedRoots: []
+  fileTreeCollapsedRoots: [],
+  // Issue #618: Windows + cmd.exe / PowerShell で UTF-8 を強制する (CP932 化対策)。
+  // 既存ユーザーも v11 migration で true 既定が入る。
+  terminalForceUtf8: true
 };
 
 /** git status --porcelain のエントリ */

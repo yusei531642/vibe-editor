@@ -105,4 +105,64 @@ describe('migrateSettings', () => {
       expect(migrated.codexArgs).toBe('–foo');
     });
   });
+
+  // ---------- Issue #618: v10 → v11 terminalForceUtf8 default ----------
+  describe('v10 → v11 terminalForceUtf8 default (Issue #618)', () => {
+    it('inserts terminalForceUtf8 = true for legacy v10 settings', () => {
+      const migrated = migrateSettings({
+        schemaVersion: 10,
+        language: 'ja',
+        theme: 'claude-dark'
+      });
+
+      expect(migrated.terminalForceUtf8).toBe(true);
+      expect(migrated.schemaVersion).toBe(APP_SETTINGS_SCHEMA_VERSION);
+    });
+
+    it('inserts terminalForceUtf8 = true even for very old v0 settings', () => {
+      // v0 (= schemaVersion 未定義) でも shallow merge 後に true が入ること。
+      const migrated = migrateSettings({
+        language: 'en',
+        theme: 'dark'
+      });
+
+      expect(migrated.terminalForceUtf8).toBe(true);
+    });
+
+    it('preserves an explicit false from the user', () => {
+      // ユーザーが OEM コードページを意図的に維持したくて false を保存しているケース。
+      const migrated = migrateSettings({
+        schemaVersion: 11,
+        language: 'ja',
+        theme: 'claude-dark',
+        terminalForceUtf8: false
+      });
+
+      expect(migrated.terminalForceUtf8).toBe(false);
+    });
+
+    it('preserves an explicit false set on legacy v10 (re-migration)', () => {
+      // v10 のうちに先行で false が書き込まれていたら、v10 → v11 migration はそれを尊重する。
+      const migrated = migrateSettings({
+        schemaVersion: 10,
+        language: 'ja',
+        theme: 'claude-dark',
+        terminalForceUtf8: false
+      });
+
+      expect(migrated.terminalForceUtf8).toBe(false);
+    });
+
+    it('coerces non-boolean values to true (default)', () => {
+      // 型壊れ (string や null) はサポート外なので default に戻す。
+      const migrated = migrateSettings({
+        schemaVersion: 10,
+        language: 'ja',
+        theme: 'claude-dark',
+        terminalForceUtf8: 'yes' as unknown as boolean
+      });
+
+      expect(migrated.terminalForceUtf8).toBe(true);
+    });
+  });
 });

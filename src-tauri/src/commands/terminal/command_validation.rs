@@ -101,6 +101,47 @@ pub fn normalize_terminal_command(
     (cmd, parts)
 }
 
+/// Issue #618: `~/.vibe-editor/settings.json` から `terminalForceUtf8` を読み出す。
+/// settings.json が無い / parse 失敗 / フィールド未定義のいずれの場合も `true` (default) を返す。
+/// `terminal_create` 経路から spawn 直前にだけ呼ぶ想定 (1 spawn = 1 file read のオーバーヘッドのみ)。
+pub fn settings_terminal_force_utf8() -> bool {
+    let path = crate::util::config_paths::settings_path();
+    let Ok(bytes) = std::fs::read(path) else {
+        return true;
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return true;
+    };
+    value
+        .get("terminalForceUtf8")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+}
+
+/// Issue #618: Windows ConPTY で起動するシェルが UTF-8 になるよう、最初に PTY 入力ストリームへ
+/// 流す初期コマンドを返す (バイト列 + `\r` 終端で「Enter 押下」相当の確定送信になる)。
+///
+/// - cmd.exe (`cmd` / `cmd.exe`): `chcp 65001 > nul\r`
+///   `> nul` で active code page 切替の echo を抑止する (banner 直後の余分な行を avoid)。
+/// - PowerShell (`pwsh` / `powershell`): `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); chcp 65001 > $null\r`
+///   PowerShell は `[Console]::OutputEncoding` を別途 UTF-8 にしないと .NET 出力 (Write-Host 等) が
+///   UTF-8 にならないので、`chcp` と同時に設定する。
+/// - その他 (bash / sh / zsh / fish / nu / claude / codex / 解決前の任意 path): `None`
+///   modern な POSIX シェルや WSL は既定で UTF-8。Claude / Codex CLI は ConPTY 経由でも文字列
+///   出力を内部で UTF-8 で書き出す (chcp inject すると CLI 側の prompt が壊れる懸念がある)。
+///
+/// 非 Windows OS ではそもそも CP932 問題が無いので、呼び出し側で `cfg!(windows)` でガードする想定。
+pub fn windows_utf8_init_command(command: &str) -> Option<&'static [u8]> {
+    let basename = command_basename(command);
+    match basename.as_str() {
+        "cmd" => Some(b"chcp 65001 > nul\r"),
+        "powershell" | "pwsh" => Some(
+            b"[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new(); chcp 65001 > $null\r",
+        ),
+        _ => None,
+    }
+}
+
 pub fn configured_terminal_commands() -> HashSet<String> {
     let mut out = HashSet::new();
     let path = crate::util::config_paths::settings_path();
@@ -342,6 +383,85 @@ mod resume_session_id_validation_tests {
     fn rejects_non_ascii() {
         assert!(!is_valid_resume_session_id("セッション-12345"));
         assert!(!is_valid_resume_session_id("café-session-id"));
+    }
+}
+
+#[cfg(test)]
+mod windows_utf8_init_command_tests {
+    use super::windows_utf8_init_command;
+
+    #[test]
+    fn cmd_returns_chcp_only() {
+        let init = windows_utf8_init_command("cmd").expect("cmd should have init");
+        assert_eq!(init, b"chcp 65001 > nul\r");
+    }
+
+    #[test]
+    fn cmd_exe_path_returns_chcp() {
+        let init = windows_utf8_init_command(r"C:\Windows\System32\cmd.exe").expect("cmd.exe");
+        assert_eq!(init, b"chcp 65001 > nul\r");
+    }
+
+    #[test]
+    fn cmd_uppercase_returns_chcp() {
+        let init = windows_utf8_init_command("CMD.EXE").expect("CMD.EXE");
+        assert_eq!(init, b"chcp 65001 > nul\r");
+    }
+
+    #[test]
+    fn powershell_returns_combined_init() {
+        let init = windows_utf8_init_command("powershell").expect("powershell");
+        let s = std::str::from_utf8(init).unwrap();
+        assert!(s.starts_with("[Console]::OutputEncoding ="));
+        assert!(s.contains("UTF8Encoding"));
+        assert!(s.contains("chcp 65001"));
+        assert!(s.contains("> $null"));
+        assert!(s.ends_with("\r"));
+    }
+
+    #[test]
+    fn pwsh_returns_combined_init() {
+        let init = windows_utf8_init_command("pwsh").expect("pwsh");
+        let s = std::str::from_utf8(init).unwrap();
+        assert!(s.contains("[Console]::OutputEncoding"));
+        assert!(s.contains("chcp 65001"));
+    }
+
+    #[test]
+    fn pwsh_full_path_returns_init() {
+        let init =
+            windows_utf8_init_command(r"C:\Program Files\PowerShell\7\pwsh.exe").expect("pwsh.exe");
+        let s = std::str::from_utf8(init).unwrap();
+        assert!(s.contains("[Console]::OutputEncoding"));
+    }
+
+    #[test]
+    fn bash_returns_none() {
+        assert!(windows_utf8_init_command("bash").is_none());
+        assert!(windows_utf8_init_command("/usr/bin/bash").is_none());
+    }
+
+    #[test]
+    fn other_posix_shells_return_none() {
+        assert!(windows_utf8_init_command("sh").is_none());
+        assert!(windows_utf8_init_command("zsh").is_none());
+        assert!(windows_utf8_init_command("fish").is_none());
+        assert!(windows_utf8_init_command("nu").is_none());
+    }
+
+    #[test]
+    fn claude_and_codex_return_none() {
+        // Claude / Codex は内部で UTF-8 出力する CLI なので chcp inject しない。
+        // CLI の prompt / banner と衝突する懸念の方が大きい。
+        assert!(windows_utf8_init_command("claude").is_none());
+        assert!(windows_utf8_init_command("codex").is_none());
+        assert!(windows_utf8_init_command(r"C:\tools\codex.exe").is_none());
+    }
+
+    #[test]
+    fn empty_or_unknown_returns_none() {
+        assert!(windows_utf8_init_command("").is_none());
+        assert!(windows_utf8_init_command("nonexistent-shell").is_none());
     }
 }
 
