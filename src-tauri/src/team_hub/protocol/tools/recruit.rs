@@ -9,6 +9,7 @@ use tauri::Emitter;
 use uuid::Uuid;
 
 use super::super::consts::RECRUIT_ACK_TIMEOUT;
+use super::super::consts::RECRUIT_ACK_TIMEOUT_MAX_SECS;
 use super::super::consts::RECRUIT_TIMEOUT;
 use super::super::dynamic_role::{validate_and_register_dynamic_role, DynamicRoleOutcome};
 use super::super::instruction_lint::{lint_all, LintReport};
@@ -19,20 +20,43 @@ use crate::team_hub::role_lint::{compute_role_overlap, RoleSnapshot};
 
 const DEFAULT_WAIT_POLICY: &str = "strict";
 
-/// Issue #574: `RECRUIT_ACK_TIMEOUT` の実行時値を env override 込みで返す。
+/// Issue #574 / #587: `RECRUIT_ACK_TIMEOUT` の実行時値を env override 込みで返す。
 ///
-/// `VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS` を u64 秒として読み出し、`>= 1` の値が
-/// パースできればその Duration を返す。未設定 / パース失敗 / 0 のときは
-/// `RECRUIT_ACK_TIMEOUT` (= 15s) を返す。
+/// `VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS` を u64 秒として読み出し、
+/// `1..=RECRUIT_ACK_TIMEOUT_MAX_SECS` の範囲に収まっていればその Duration を返す。
+/// 未設定 / parse 失敗 / 0 / 上限超過のときは `RECRUIT_ACK_TIMEOUT` (= 15s) を返す。
+///
+/// 範囲外の値が渡された場合は `tracing::warn!` で notice する
+/// (= 「env を設定したのに反映されない」相談時に運用が即座に気付けるようにする)。
 ///
 /// `team_recruit` / `team_create_leader` の双方から参照される共通入口。
 pub(super) fn recruit_ack_timeout() -> Duration {
-    std::env::var("VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u64>().ok())
-        .filter(|&secs| secs > 0)
-        .map(Duration::from_secs)
-        .unwrap_or(RECRUIT_ACK_TIMEOUT)
+    let Ok(raw) = std::env::var("VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS") else {
+        return RECRUIT_ACK_TIMEOUT;
+    };
+    let trimmed = raw.trim();
+    let parsed = match trimmed.parse::<u64>() {
+        Ok(v) => v,
+        Err(_) => {
+            tracing::warn!(
+                "[teamhub] VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS={trimmed:?} could not be parsed as u64; \
+                 falling back to default {default}s",
+                default = RECRUIT_ACK_TIMEOUT.as_secs(),
+            );
+            return RECRUIT_ACK_TIMEOUT;
+        }
+    };
+    if (1..=RECRUIT_ACK_TIMEOUT_MAX_SECS).contains(&parsed) {
+        Duration::from_secs(parsed)
+    } else {
+        tracing::warn!(
+            "[teamhub] VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS={parsed} is out of range \
+             (must be 1..={max}); falling back to default {default}s",
+            max = RECRUIT_ACK_TIMEOUT_MAX_SECS,
+            default = RECRUIT_ACK_TIMEOUT.as_secs(),
+        );
+        RECRUIT_ACK_TIMEOUT
+    }
 }
 
 fn parse_wait_policy(args: &Value) -> Result<String, String> {
@@ -539,8 +563,29 @@ pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Res
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_wait_policy, DEFAULT_WAIT_POLICY};
+    use super::{
+        parse_wait_policy, recruit_ack_timeout, DEFAULT_WAIT_POLICY, RECRUIT_ACK_TIMEOUT,
+        RECRUIT_ACK_TIMEOUT_MAX_SECS,
+    };
     use serde_json::json;
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    /// `VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS` はプロセス global な env var なので、
+    /// 境界値テストを並列に走らせると set / unset が交差して flaky になる。
+    /// テスト間で直列化するための Mutex。`std::env::set_var` の unsafe 化に巻き込まれない
+    /// よう、テスト中は guard を必ず保持する。
+    static ENV_GUARD: Mutex<()> = Mutex::new(());
+
+    fn with_env<F: FnOnce()>(value: Option<&str>, f: F) {
+        let _g = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        match value {
+            Some(v) => std::env::set_var("VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS", v),
+            None => std::env::remove_var("VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS"),
+        }
+        f();
+        std::env::remove_var("VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS");
+    }
 
     #[test]
     fn parse_wait_policy_defaults_to_strict() {
@@ -564,5 +609,65 @@ mod tests {
 
         assert!(err.contains("recruit_invalid_wait_policy"));
         assert!(err.contains("strict, standard, or proactive"));
+    }
+
+    /// Issue #587: `VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS=0` は default にフォールバック。
+    #[test]
+    fn ack_timeout_zero_falls_back_to_default() {
+        with_env(Some("0"), || {
+            assert_eq!(recruit_ack_timeout(), RECRUIT_ACK_TIMEOUT);
+        });
+    }
+
+    /// Issue #587: 下限 1 はそのまま採用される。
+    #[test]
+    fn ack_timeout_lower_bound_one_is_accepted() {
+        with_env(Some("1"), || {
+            assert_eq!(recruit_ack_timeout(), Duration::from_secs(1));
+        });
+    }
+
+    /// Issue #587: 上限 600 はそのまま採用される。
+    #[test]
+    fn ack_timeout_upper_bound_is_accepted() {
+        with_env(Some("600"), || {
+            assert_eq!(
+                recruit_ack_timeout(),
+                Duration::from_secs(RECRUIT_ACK_TIMEOUT_MAX_SECS)
+            );
+        });
+    }
+
+    /// Issue #587: 上限 + 1 (= 601) は範囲外なので default にフォールバック。
+    #[test]
+    fn ack_timeout_just_above_upper_bound_falls_back_to_default() {
+        with_env(Some("601"), || {
+            assert_eq!(recruit_ack_timeout(), RECRUIT_ACK_TIMEOUT);
+        });
+    }
+
+    /// Issue #587: 巨大値 (= 約 31 年) も範囲外なので default にフォールバック。
+    /// クランプを忘れると pending が事実上永久に残る事故になるため、明示的に確認する。
+    #[test]
+    fn ack_timeout_extreme_value_falls_back_to_default() {
+        with_env(Some("999999999"), || {
+            assert_eq!(recruit_ack_timeout(), RECRUIT_ACK_TIMEOUT);
+        });
+    }
+
+    /// Issue #587: 未設定なら default。
+    #[test]
+    fn ack_timeout_unset_returns_default() {
+        with_env(None, || {
+            assert_eq!(recruit_ack_timeout(), RECRUIT_ACK_TIMEOUT);
+        });
+    }
+
+    /// Issue #587: parse 失敗 (非 u64 文字列) も default にフォールバック。
+    #[test]
+    fn ack_timeout_garbage_value_falls_back_to_default() {
+        with_env(Some("not-a-number"), || {
+            assert_eq!(recruit_ack_timeout(), RECRUIT_ACK_TIMEOUT);
+        });
     }
 }
