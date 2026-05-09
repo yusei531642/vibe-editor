@@ -67,6 +67,11 @@ pub(crate) struct HubState {
     /// permit 数は `VIBE_TEAM_RECRUIT_CONCURRENCY` 環境変数で `1..=RECRUIT_MAX_CONCURRENCY` の
     /// 範囲に tunable (既定 `RECRUIT_DEFAULT_CONCURRENCY`)。team 単位で lazy 初期化される。
     pub(crate) recruit_semaphores: HashMap<String, Arc<Semaphore>>,
+    /// Issue #634: `team_status` の rate limit 用、agent_id → 最終呼び出し Instant。
+    /// `MIN_STATUS_INTERVAL` 以内の連続呼び出しは silent reject し、
+    /// `last_status_at` / `last_seen_at` も更新しない (autoStale 偽装防止)。
+    /// in-memory only (Hub 再起動で clear)。
+    pub(crate) last_status_call_at: HashMap<String, std::time::Instant>,
 }
 
 /// Issue #342 Phase 3 (3.1): `team_diagnostics` で返す診断 timestamp / counter。
@@ -603,6 +608,7 @@ impl TeamHub {
                 member_diagnostics: HashMap::new(),
                 file_locks: HashMap::new(),
                 recruit_semaphores: HashMap::new(),
+                last_status_call_at: HashMap::new(),
             })),
             app_handle: Arc::new(Mutex::new(None)),
         }
