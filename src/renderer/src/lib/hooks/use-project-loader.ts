@@ -54,7 +54,7 @@ export interface UseProjectLoaderResult {
   handleOpenRecent: (path: string) => Promise<void>;
   handleClearRecent: () => void;
   handleAddWorkspaceFolder: () => Promise<void>;
-  handleRemoveWorkspaceFolder: (path: string) => void;
+  handleRemoveWorkspaceFolder: (path: string) => Promise<void>;
 }
 
 export function useProjectLoader(
