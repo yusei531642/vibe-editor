@@ -23,6 +23,58 @@ use chrono::Utc;
 use serde::Serialize;
 use std::collections::HashMap;
 
+/// Issue #599 (Tier A-1): 1 path 文字列の最大バイト長。
+/// `MAX_LOCK_PATH_LEN` (4 KiB) は IPC 層の payload 上限、こちらは正規化後の論理 path 上限。
+/// 1024 byte で repo 内の現実的な深さ (git index も 1 KiB 前後で truncate される) をカバー。
+pub const MAX_LOCK_PATH_BYTES: usize = 1024;
+
+/// `normalize_path` で reject される入力理由。Issue #599: traversal / 絶対 path / 制御文字 /
+/// 過大長 / 空 path を validator として弾けるようにする。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FileLockError {
+    /// path が空 (trim 後)。
+    Empty,
+    /// path が `MAX_LOCK_PATH_BYTES` を超える。
+    TooLong { len: usize, limit: usize },
+    /// NUL や ESC などの制御文字 (0x00..=0x1F、tab 含む) を含む。
+    /// CRLF や ESC は audit log / Leader terminal 表示の prompt injection に使われ得る。
+    ControlChar,
+    /// 絶対 path (Unix の `/` 始まり / Windows の `C:\` `\\` `\\?\` 等) — repo-relative のみ許可。
+    Absolute,
+    /// `..` セグメントを含む — traversal 防止。
+    ParentDir,
+}
+
+impl std::fmt::Display for FileLockError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FileLockError::Empty => write!(f, "path must not be empty"),
+            FileLockError::TooLong { len, limit } => {
+                write!(f, "path too long: {len} bytes (limit {limit})")
+            }
+            FileLockError::ControlChar => {
+                write!(f, "path must not contain control characters (0x00..=0x1F)")
+            }
+            FileLockError::Absolute => write!(
+                f,
+                "absolute path is not allowed (must be repo-relative; reject Unix '/...', Windows 'C:\\...' / '\\\\...')"
+            ),
+            FileLockError::ParentDir => {
+                write!(f, "parent directory ('..') segments are not allowed")
+            }
+        }
+    }
+}
+
+/// Issue #599: team あたり lock 数上限を超えたとき返す詳細。`team_lock_files` で
+/// `too_many_locks` ToolError にマップする。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileLockCapExceeded {
+    pub current: usize,
+    pub requested: usize,
+    pub cap: usize,
+}
+
 /// 1 path に対する 1 件のロック情報。
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -69,17 +121,44 @@ pub struct UnlockResult {
     pub unlocked: Vec<String>,
 }
 
-/// path を正規化: backslash → slash、`./` prefix 除去、連続 slash 圧縮、末尾 slash 除去、trim。
-pub fn normalize_path(raw: &str) -> String {
+/// path を正規化 + バリデーションする。Issue #599 (Tier A-1) で `String` 返しから
+/// `Result<String, FileLockError>` に変更。`..` / 絶対 path / 制御文字 / 過大長 / 空 path を
+/// 全て reject することで、advisory lock 表に traversal や別 team の path が紛れ込まないようにする。
+///
+/// 正規化処理: backslash → slash、`./` prefix 除去、連続 slash 圧縮、末尾 slash 除去、trim。
+pub fn normalize_path(raw: &str) -> Result<String, FileLockError> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return String::new();
+        return Err(FileLockError::Empty);
+    }
+    if trimmed.len() > MAX_LOCK_PATH_BYTES {
+        return Err(FileLockError::TooLong {
+            len: trimmed.len(),
+            limit: MAX_LOCK_PATH_BYTES,
+        });
+    }
+    // 制御文字 (NUL / 0x01..=0x1F、tab 含む) — audit log / Leader 端末 inject の改行混入を防ぐ。
+    if trimmed.bytes().any(|b| b <= 0x1F || b == 0x7F) {
+        return Err(FileLockError::ControlChar);
+    }
+    // Windows のドライブレター ("C:" / "c:" / "C:\..." / "C:/...") は backslash 統一の前に検出。
+    let bytes = trimmed.as_bytes();
+    if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+        return Err(FileLockError::Absolute);
+    }
+    // UNC / extended-length prefix ("\\\\server\\share" / "\\\\?\\..." / "//server/share") を弾く。
+    if trimmed.starts_with(r"\\") || trimmed.starts_with("//") {
+        return Err(FileLockError::Absolute);
     }
     // backslash → forward slash
     let unified: String = trimmed
         .chars()
         .map(|c| if c == '\\' { '/' } else { c })
         .collect();
+    // Unix 絶対 path (`/etc/passwd`) — UNC / `//` は上で弾いたので、ここは単発 `/` 始まりだけ。
+    if unified.starts_with('/') {
+        return Err(FileLockError::Absolute);
+    }
     // 連続 slash を 1 個に圧縮
     let mut compressed = String::with_capacity(unified.len());
     let mut prev_slash = false;
@@ -100,11 +179,42 @@ pub fn normalize_path(raw: &str) -> String {
     } else {
         compressed
     };
-    // 末尾 slash 削除 (root `/` だけは残す)
+    // 末尾 slash 削除
     while out.len() > 1 && out.ends_with('/') {
         out.pop();
     }
-    out
+    // `..` セグメントを含む path は traversal とみなして reject。
+    // 部分文字列ではなくセグメント単位で判定 (例: `..foo` や `foo..bar` は許可)。
+    if out.split('/').any(|seg| seg == "..") {
+        return Err(FileLockError::ParentDir);
+    }
+    Ok(out)
+}
+
+/// Issue #599 (Tier A-1): `try_acquire` を team-cap 付きで呼ぶ atomic helper。
+/// HubState の Mutex 内で「count → cap check → try_acquire」を 1 セッションで完結させ、
+/// race による cap 超過 (= 別 agent が同時に push して上限を踏み越える) を防ぐ。
+///
+/// idempotent な再 lock (= 同一 agent_id が既に持っている path) も `paths.len()` で数えるため、
+/// `current + paths.len() > cap` の判定はやや over-conservative だが、cap は DoS 防止のための
+/// 概算値なので正確性より単純さ・atomic 性を優先する。
+pub fn try_acquire_with_cap(
+    map: &mut HashMap<(String, String), FileLock>,
+    team_id: &str,
+    agent_id: &str,
+    role: &str,
+    paths: &[String],
+    cap: usize,
+) -> Result<LockResult, FileLockCapExceeded> {
+    let current = map.iter().filter(|((tid, _), _)| tid == team_id).count();
+    if current.saturating_add(paths.len()) > cap {
+        return Err(FileLockCapExceeded {
+            current,
+            requested: paths.len(),
+            cap,
+        });
+    }
+    Ok(try_acquire(map, team_id, agent_id, role, paths))
 }
 
 /// `paths` のうち取得できたものは map に追加し、既に他 agent が保持しているものは
@@ -121,10 +231,12 @@ pub fn try_acquire(
     let mut locked = Vec::new();
     let mut conflicts = Vec::new();
     for raw in paths {
-        let path = normalize_path(raw);
-        if path.is_empty() {
+        // Issue #599: invalid path (`..` / 絶対 / 制御文字 / 過大長 / 空) は silent skip。
+        // 通常 IPC 層 (`team_lock_files`) で先に reject される (= ここに到達しないはず) が、
+        // 内部 caller のための defense-in-depth として silent skip する。
+        let Ok(path) = normalize_path(raw) else {
             continue;
-        }
+        };
         let key = (team_id.to_string(), path.clone());
         if let Some(existing) = map.get(&key) {
             if existing.agent_id == agent_id {
@@ -165,10 +277,10 @@ pub fn release(
 ) -> UnlockResult {
     let mut unlocked = Vec::new();
     for raw in paths {
-        let path = normalize_path(raw);
-        if path.is_empty() {
+        // Issue #599: invalid path は silent skip (defense-in-depth、IPC で先に reject される)。
+        let Ok(path) = normalize_path(raw) else {
             continue;
-        }
+        };
         let key = (team_id.to_string(), path.clone());
         if let Some(existing) = map.get(&key) {
             if existing.agent_id == agent_id {
@@ -210,10 +322,10 @@ pub fn peek(
 ) -> Vec<LockConflict> {
     let mut out = Vec::new();
     for raw in paths {
-        let path = normalize_path(raw);
-        if path.is_empty() {
+        // Issue #599: invalid path は silent skip (defense-in-depth、IPC で先に reject される)。
+        let Ok(path) = normalize_path(raw) else {
             continue;
-        }
+        };
         let key = (team_id.to_string(), path);
         if let Some(existing) = map.get(&key) {
             if let Some(self_aid) = agent_id_filter {
@@ -253,34 +365,220 @@ mod tests {
 
     #[test]
     fn normalize_path_handles_basic_cases() {
-        assert_eq!(normalize_path("src/foo.ts"), "src/foo.ts");
-        assert_eq!(normalize_path("  src/foo.ts  "), "src/foo.ts");
-        assert_eq!(normalize_path(""), "");
-        assert_eq!(normalize_path("   "), "");
+        assert_eq!(normalize_path("src/foo.ts").unwrap(), "src/foo.ts");
+        assert_eq!(normalize_path("  src/foo.ts  ").unwrap(), "src/foo.ts");
+        // Issue #599: 空 / 空白のみは Empty で reject される。
+        assert_eq!(normalize_path(""), Err(FileLockError::Empty));
+        assert_eq!(normalize_path("   "), Err(FileLockError::Empty));
     }
 
     #[test]
     fn normalize_path_unifies_separators() {
-        assert_eq!(normalize_path(r"src\foo\bar.rs"), "src/foo/bar.rs");
-        assert_eq!(normalize_path("src/foo\\bar.rs"), "src/foo/bar.rs");
+        assert_eq!(normalize_path(r"src\foo\bar.rs").unwrap(), "src/foo/bar.rs");
+        assert_eq!(normalize_path("src/foo\\bar.rs").unwrap(), "src/foo/bar.rs");
     }
 
     #[test]
     fn normalize_path_compresses_double_slashes() {
-        assert_eq!(normalize_path("src//foo///bar.rs"), "src/foo/bar.rs");
+        assert_eq!(normalize_path("src//foo///bar.rs").unwrap(), "src/foo/bar.rs");
     }
 
     #[test]
     fn normalize_path_strips_dot_prefix() {
-        assert_eq!(normalize_path("./src/foo.ts"), "src/foo.ts");
+        assert_eq!(normalize_path("./src/foo.ts").unwrap(), "src/foo.ts");
     }
 
     #[test]
     fn normalize_path_strips_trailing_slash() {
-        assert_eq!(normalize_path("src/foo/"), "src/foo");
-        assert_eq!(normalize_path("src/foo///"), "src/foo");
-        // root `/` は残す
-        assert_eq!(normalize_path("/"), "/");
+        assert_eq!(normalize_path("src/foo/").unwrap(), "src/foo");
+        assert_eq!(normalize_path("src/foo///").unwrap(), "src/foo");
+        // Issue #599: root `/` は絶対 path として reject される。
+        assert_eq!(normalize_path("/"), Err(FileLockError::Absolute));
+    }
+
+    /// Issue #599 (Tier A-1): `..` セグメントを含む path は reject される。
+    /// セグメント単位での判定なので `..foo` や `foo..bar` (= 単独 `..` ではない) は通る。
+    #[test]
+    fn normalize_path_rejects_parent_dir_traversal() {
+        assert_eq!(
+            normalize_path("../etc/passwd"),
+            Err(FileLockError::ParentDir)
+        );
+        assert_eq!(
+            normalize_path("../../etc/passwd"),
+            Err(FileLockError::ParentDir)
+        );
+        assert_eq!(
+            normalize_path("src/../../etc/passwd"),
+            Err(FileLockError::ParentDir)
+        );
+        assert_eq!(
+            normalize_path(r"..\..\windows\system32"),
+            Err(FileLockError::ParentDir)
+        );
+        assert_eq!(
+            normalize_path("src/..//etc"),
+            Err(FileLockError::ParentDir)
+        );
+        // Issue #599: traversal で **ない** パターン (= `..` を部分文字列にしか含まない) は通る。
+        assert_eq!(normalize_path("src/foo..bar.rs").unwrap(), "src/foo..bar.rs");
+        assert_eq!(normalize_path("..foo/bar").unwrap(), "..foo/bar");
+    }
+
+    /// Issue #599: 絶対 path (Unix の `/` 始まり / Windows のドライブレター / UNC) は reject。
+    #[test]
+    fn normalize_path_rejects_absolute_paths() {
+        // Unix
+        assert_eq!(
+            normalize_path("/etc/passwd"),
+            Err(FileLockError::Absolute)
+        );
+        assert_eq!(normalize_path("/"), Err(FileLockError::Absolute));
+        // Windows drive letter (大文字 / 小文字 / forward / backward)
+        assert_eq!(
+            normalize_path(r"C:\Windows\System32"),
+            Err(FileLockError::Absolute)
+        );
+        assert_eq!(
+            normalize_path("C:/Windows/System32"),
+            Err(FileLockError::Absolute)
+        );
+        assert_eq!(
+            normalize_path("d:/users/yusei"),
+            Err(FileLockError::Absolute)
+        );
+        assert_eq!(normalize_path("C:"), Err(FileLockError::Absolute));
+        // UNC / extended-length
+        assert_eq!(
+            normalize_path(r"\\server\share\foo"),
+            Err(FileLockError::Absolute)
+        );
+        assert_eq!(
+            normalize_path(r"\\?\C:\foo"),
+            Err(FileLockError::Absolute)
+        );
+        assert_eq!(
+            normalize_path("//server/share/foo"),
+            Err(FileLockError::Absolute)
+        );
+    }
+
+    /// Issue #599: 制御文字 (NUL / 0x01..=0x1F、tab、DEL=0x7F) を含む path は reject。
+    /// 改行や ESC が path に紛れ込むと audit log や Leader 端末 inject の format を破壊するため。
+    #[test]
+    fn normalize_path_rejects_control_characters() {
+        assert_eq!(
+            normalize_path("src/foo\nbar.rs"),
+            Err(FileLockError::ControlChar)
+        );
+        assert_eq!(
+            normalize_path("src/foo\rbar.rs"),
+            Err(FileLockError::ControlChar)
+        );
+        assert_eq!(
+            normalize_path("src/foo\x1b[31mred.rs"),
+            Err(FileLockError::ControlChar)
+        );
+        assert_eq!(
+            normalize_path("src/foo\0bar.rs"),
+            Err(FileLockError::ControlChar)
+        );
+        assert_eq!(
+            normalize_path("src/foo\tbar.rs"),
+            Err(FileLockError::ControlChar)
+        );
+        assert_eq!(
+            normalize_path("src/foo\x7fbar.rs"),
+            Err(FileLockError::ControlChar)
+        );
+    }
+
+    /// Issue #599: `MAX_LOCK_PATH_BYTES` (1024) 超は reject。
+    #[test]
+    fn normalize_path_rejects_too_long() {
+        let just_ok = "a".repeat(MAX_LOCK_PATH_BYTES);
+        assert!(normalize_path(&just_ok).is_ok());
+
+        let over = "a".repeat(MAX_LOCK_PATH_BYTES + 1);
+        let err = normalize_path(&over).unwrap_err();
+        assert!(matches!(err, FileLockError::TooLong { .. }));
+    }
+
+    /// Issue #599 (Tier A-1): `try_acquire_with_cap` は team あたり lock 数上限を atomic に enforce。
+    /// 既存件数 + 新規要求 が cap を超えると `FileLockCapExceeded` で reject される。
+    /// idempotent な再 lock (= paths.len() に含まれるが新規 insert はゼロ) でも reject 側で数える
+    /// (over-conservative だが atomic 性を優先する設計)。
+    #[test]
+    fn try_acquire_with_cap_rejects_over_limit() {
+        let mut map = make_map();
+        let cap = 3;
+        // 3 件を pre-insert
+        try_acquire_with_cap(
+            &mut map,
+            "team-1",
+            "vc-alice",
+            "programmer",
+            &[
+                "src/a.rs".to_string(),
+                "src/b.rs".to_string(),
+                "src/c.rs".to_string(),
+            ],
+            cap,
+        )
+        .expect("3/3 should fit");
+
+        // 4 件目を追加 → cap 超過で reject。
+        let err = try_acquire_with_cap(
+            &mut map,
+            "team-1",
+            "vc-bob",
+            "reviewer",
+            &["src/d.rs".to_string()],
+            cap,
+        )
+        .unwrap_err();
+        assert_eq!(err.current, 3);
+        assert_eq!(err.requested, 1);
+        assert_eq!(err.cap, cap);
+        // map は変化しない (atomic)
+        assert_eq!(map.len(), 3);
+    }
+
+    /// Issue #599: cap は team scope。別 team の lock は count されない。
+    #[test]
+    fn try_acquire_with_cap_is_team_scoped() {
+        let mut map = make_map();
+        // team-2 に 5 件入れても team-1 の cap=3 には影響しない
+        try_acquire_with_cap(
+            &mut map,
+            "team-2",
+            "vc-other",
+            "programmer",
+            &[
+                "src/a.rs".to_string(),
+                "src/b.rs".to_string(),
+                "src/c.rs".to_string(),
+                "src/d.rs".to_string(),
+                "src/e.rs".to_string(),
+            ],
+            10,
+        )
+        .expect("team-2 fits in cap=10");
+        let result = try_acquire_with_cap(
+            &mut map,
+            "team-1",
+            "vc-alice",
+            "programmer",
+            &[
+                "src/a.rs".to_string(),
+                "src/b.rs".to_string(),
+                "src/c.rs".to_string(),
+            ],
+            3,
+        )
+        .expect("team-1 fits in its own cap=3");
+        assert_eq!(result.locked.len(), 3);
+        assert_eq!(map.len(), 8);
     }
 
     #[test]
