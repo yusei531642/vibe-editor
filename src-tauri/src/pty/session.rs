@@ -1214,7 +1214,7 @@ fn maybe_inject_windows_utf8_init(
 /// **重要**: `cmd.exe /D /Q /C "chcp 65001 && dir"` のような 1 ショット混合では、cmd.exe が
 /// `/C` 起動時に固定した OEM codepage を内部 `dir` に引き継いでしまうため UTF-8 化されない。
 /// 一方、本 PR の prod 経路 (spawn_session 内で writer.write_all による inject) は対話的な
-/// cmd.exe に対し独立したコマンドとして `chcp 65001\r` → ユーザの `dir\r` を流すため正しく
+/// cmd.exe に対し独立したコマンドとして `chcp 65001\r` → ユーザーの `dir\r` を流すため正しく
 /// 切り替わる。本 test では同じセマンティクス (= stdin パイプで chcp と dir を順番に流す)
 /// を `std::process::Command` の piped stdin で再現して検証する。
 ///
