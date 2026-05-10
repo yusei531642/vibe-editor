@@ -25,7 +25,7 @@ import {
   aggregateTeamSummary,
   type CardSummary
 } from '../../lib/agent-summary';
-import { useTeamHealth } from '../../lib/use-team-health';
+import { useTeamHealthMulti } from '../../lib/use-team-health';
 import { deriveHealth } from '../../lib/agent-health';
 import { TeamPresetsPanel } from './TeamPresetsPanel';
 import { TeamDashboard } from './TeamDashboard';
@@ -181,22 +181,19 @@ export function StageHud(): JSX.Element {
   );
   const showTeamSummary = teamSummary.total > 0;
 
-  // Issue #510: TeamHub diagnostics から dead 数を集計し、HUD に 5 番目のピルとして出す。
-  // teamId は activeTeamId 1 件しか想定しないので、agent ノード群の最頻 teamId を採る。
-  // teamId が無い (= スタンドアロンカードのみ) なら null で hook が no-op になる。
-  const aggregatedTeamId = useMemo<string | null>(() => {
-    let leader: string | null = null;
-    let first: string | null = null;
+  // Issue #510 / #615: TeamHub diagnostics から dead 数を集計し、HUD に 5 番目のピルとして出す。
+  // dual preset (`dual-claude-claude` 等) で 2 つの team が並ぶケースに対応するため、
+  // canvas 上に存在する **全ての agent teamId** を集めて useTeamHealthMulti で同時購読する。
+  // 単一 team preset のときは長さ 1 の配列になり、従来挙動と等価。
+  const aggregatedTeamIds = useMemo<string[]>(() => {
+    const seen = new Set<string>();
     for (const node of agentNodes) {
       const payload = (node.data as CardData | undefined)?.payload as AgentPayload | undefined;
-      if (!payload?.teamId) continue;
-      if (first === null) first = payload.teamId;
-      const role = payload.roleProfileId ?? payload.role;
-      if (role === 'leader' && leader === null) leader = payload.teamId;
+      if (payload?.teamId) seen.add(payload.teamId);
     }
-    return leader ?? first;
+    return Array.from(seen);
   }, [agentNodes]);
-  const healthSnapshot = useTeamHealth(aggregatedTeamId);
+  const healthSnapshot = useTeamHealthMulti(aggregatedTeamIds);
   const deadCount = useMemo(() => {
     let n = 0;
     for (const node of agentNodes) {
@@ -209,20 +206,30 @@ export function StageHud(): JSX.Element {
     return n;
   }, [agentNodes, healthSnapshot]);
 
-  // Issue #514: dashboard に渡す teamId / projectRoot を canvas state + settings から導出。
-  // 複数 team が並ぶ稀なケースは「Leader カードがある team を優先」、無ければ最初の agent team を採る。
+  // Issue #514 / #615: dashboard に渡す teamId / projectRoot を canvas state + settings から導出。
+  // dual preset で 2 team が並ぶケースに対応するため、active な全 teamId を array で渡す。
+  // ソート順は「Leader カードがある team を先頭」。Leader 不在の team は末尾に。
   const { settings } = useSettings();
-  const dashboardTeamId = useMemo<string | null>(() => {
-    let leaderTeam: string | null = null;
-    let firstTeam: string | null = null;
+  const dashboardTeamIds = useMemo<string[]>(() => {
+    const leaderTeams = new Set<string>();
+    const allTeams: string[] = [];
+    const seen = new Set<string>();
     for (const node of agentNodes) {
       const payload = (node.data as CardData | undefined)?.payload as AgentPayload | undefined;
       if (!payload?.teamId) continue;
-      if (firstTeam === null) firstTeam = payload.teamId;
+      if (!seen.has(payload.teamId)) {
+        seen.add(payload.teamId);
+        allTeams.push(payload.teamId);
+      }
       const role = payload.roleProfileId ?? payload.role;
-      if (role === 'leader' && leaderTeam === null) leaderTeam = payload.teamId;
+      if (role === 'leader') leaderTeams.add(payload.teamId);
     }
-    return leaderTeam ?? firstTeam;
+    // Leader を持つ team を先に、無い team を後に並べる (順序のみ調整、欠落させない)。
+    return allTeams.slice().sort((a, b) => {
+      const la = leaderTeams.has(a) ? 0 : 1;
+      const lb = leaderTeams.has(b) ? 0 : 1;
+      return la - lb;
+    });
   }, [agentNodes]);
   const dashboardProjectRoot = settings.lastOpenedRoot || null;
 
@@ -356,7 +363,7 @@ export function StageHud(): JSX.Element {
         </button>
         {dashboardOpen ? (
           <TeamDashboard
-            teamId={dashboardTeamId}
+            teamIds={dashboardTeamIds}
             projectRoot={dashboardProjectRoot}
             onClose={() => setDashboardOpen(false)}
           />
