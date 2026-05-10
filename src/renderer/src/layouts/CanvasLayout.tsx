@@ -485,7 +485,9 @@ export function CanvasLayout(): JSX.Element {
         <span className="canvas-header__brand" data-tauri-drag-region>
           <MonitorSmartphone size={14} strokeWidth={1.75} data-tauri-drag-region />
         </span>
-        <span className="canvas-header__count" data-tauri-drag-region>{formatCardCount(cardCount, settings.language)}</span>
+        {cardCount > 0 && (
+          <span className="canvas-header__count" data-tauri-drag-region>{formatCardCount(cardCount, settings.language)}</span>
+        )}
         <div className="canvas-header__spacer" data-tauri-drag-region />
 
         {cardCount > 0 && (
