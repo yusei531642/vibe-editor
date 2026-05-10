@@ -17,6 +17,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
@@ -71,6 +72,11 @@ pub struct SessionHandle {
     /// Issue #285 follow-up: attach 経路で renderer に過去出力を replay するための
     /// 直近 64 KiB の出力リングバッファ。`spawn_batcher` の flush で更新される。
     scrollback: Scrollback,
+    /// Issue #632: PTY 寿命に bind した watcher cancel signal。`kill()` / `Drop` で
+    /// `true` に flip され、`claude_watcher::spawn_watcher` が短い polling 間隔で
+    /// 観測して即時 exit する。これにより「session が 1 秒で死んでも watcher が 60 秒
+    /// 並走する」リソース蓄積を防ぐ。
+    watcher_cancel: Arc<AtomicBool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -171,12 +177,22 @@ impl SessionHandle {
     }
 
     pub fn kill(&self) -> Result<()> {
+        // Issue #632: kill 時点で watcher_cancel を立てる。これにより claude_watcher が
+        // 60 秒 deadline まで待たずに即座 (短い polling 間隔以内で) exit する。
+        self.watcher_cancel.store(true, Ordering::Release);
         let mut k = self
             .killer
             .lock()
             .map_err(|e| anyhow!("killer lock poisoned: {e}"))?;
         let _ = k.kill();
         Ok(())
+    }
+
+    /// Issue #632: claude_watcher が共有する cancel signal。`spawn_watcher` の caller
+    /// (terminal_create) はこれを clone して watcher thread に渡す。session 寿命に追従して
+    /// watcher を停止できる (= 60 秒 deadline での polling 漏れ問題を解消)。
+    pub fn watcher_cancel_token(&self) -> Arc<AtomicBool> {
+        self.watcher_cancel.clone()
     }
 
     pub fn cleanup_codex_broker_if_stale(&self) {
@@ -206,6 +222,10 @@ impl SessionHandle {
 /// が確実に成立する。kill 時の Mutex poison でも inner を回収し、child kill だけは試みる。
 impl Drop for SessionHandle {
     fn drop(&mut self) {
+        // Issue #632: 明示 kill() を経ずに drop されるパスでも watcher を解放する。
+        // 例: registry::insert_if_absent が Err を返して caller 側が handle を捨てるとき、
+        //     terminal_create の早期 return パスで insert に到達しないとき、等。
+        self.watcher_cancel.store(true, Ordering::Release);
         let mut k = match self.killer.lock() {
             Ok(g) => g,
             Err(poisoned) => {
@@ -333,6 +353,7 @@ mod drop_tests {
                 bytes_in_window: 0,
             }),
             scrollback: crate::pty::scrollback::new_scrollback(),
+            watcher_cancel: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -355,6 +376,37 @@ mod drop_tests {
         let kills = Arc::new(AtomicUsize::new(0));
         drop(test_handle(kills.clone()));
         assert_eq!(kills.load(Ordering::SeqCst), 1);
+    }
+
+    /// Issue #632: `kill()` で watcher_cancel が立つことを検証する。これにより
+    /// claude_watcher が短い polling 間隔で session 終了を検知して即時 exit できる。
+    #[test]
+    fn kill_flips_watcher_cancel_token() {
+        let kills = Arc::new(AtomicUsize::new(0));
+        let handle = test_handle(kills);
+        let token = handle.watcher_cancel_token();
+        assert!(!token.load(Ordering::Acquire), "初期状態は false");
+        handle.kill().expect("kill ok");
+        assert!(
+            token.load(Ordering::Acquire),
+            "kill() 直後に watcher_cancel が true になっていること"
+        );
+    }
+
+    /// Issue #632: 明示 kill() を経ずに Drop されたパスでも watcher_cancel が立つことを
+    /// 検証する。registry::insert_if_absent が衝突で Err を返したときなど、caller が
+    /// handle を捨てる経路で watcher が orphan として 60 秒残らないようにするため。
+    #[test]
+    fn drop_flips_watcher_cancel_token() {
+        let kills = Arc::new(AtomicUsize::new(0));
+        let handle = test_handle(kills);
+        let token = handle.watcher_cancel_token();
+        assert!(!token.load(Ordering::Acquire));
+        drop(handle);
+        assert!(
+            token.load(Ordering::Acquire),
+            "Drop 後に watcher_cancel が true になっていること"
+        );
     }
 
     /// Issue #619: `begin_injecting()` の戻り値が drop されると `injecting` が必ず false に戻る。
@@ -1422,6 +1474,8 @@ pub fn spawn_session(
             bytes_in_window: 0,
         }),
         scrollback,
+        // Issue #632: watcher cancel token は session 起動と同寿命。kill() / Drop で flip。
+        watcher_cancel: Arc::new(AtomicBool::new(false)),
     })
 }
 
