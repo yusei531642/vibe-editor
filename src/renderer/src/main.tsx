@@ -23,7 +23,6 @@ import React, { useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { CanvasLayout } from './layouts/CanvasLayout';
-import { useT } from './lib/i18n';
 import { SettingsProvider } from './lib/settings-context';
 import { ToastProvider } from './lib/toast-context';
 import { RoleProfilesProvider } from './lib/role-profiles-context';
@@ -136,7 +135,6 @@ class AppErrorBoundary extends React.Component<
 function Root(): JSX.Element {
   const viewMode = useUiStore((s) => s.viewMode);
   const setViewMode = useUiStore((s) => s.setViewMode);
-  const t = useT();
 
   // Phase 4: グローバルキーバインド (両モード共通)
   //   Ctrl+Shift+M / Cmd+Shift+M → Canvas / IDE モード切替
@@ -189,43 +187,11 @@ function Root(): JSX.Element {
   // 同様の理由で <CanvasLayout/> も常時マウントし、IDE モードでは display:none で
   // 隠す (CanvasLayout 自身が viewMode を読んでルート div を toggle する)。
   // これで Canvas 上の AgentNodeCard も unmount されず、PTY が kill されない。
-  const floatingLabel = t('canvas.modeToggleShortcut');
   return (
     <>
       <App />
       <CanvasLayout />
-      {viewMode === 'ide' && (
-        <FloatingCanvasToggle
-          label={floatingLabel}
-          onClick={() => setViewMode('canvas')}
-        />
-      )}
     </>
-  );
-}
-
-function FloatingCanvasToggle({
-  onClick,
-  label
-}: {
-  onClick: () => void;
-  label: string;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={label}
-      aria-label={label}
-      className="canvas-floating-toggle"
-    >
-      <span aria-hidden="true" className="canvas-floating-toggle__grid">
-        <span />
-        <span />
-        <span />
-        <span />
-      </span>
-    </button>
   );
 }
 
