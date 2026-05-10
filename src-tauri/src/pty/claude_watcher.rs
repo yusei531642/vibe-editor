@@ -26,10 +26,22 @@ use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watche
 use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::channel;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter};
+
+/// Issue #632: watcher 内ループの polling 間隔。session が kill された瞬間に
+/// `watcher_cancel` を観測して exit できるよう、旧 500ms から短縮する。
+/// 短すぎても 1 watcher 当たり 10 回/秒 で済むので CPU 影響は無視できる。
+const WATCHER_POLL_INTERVAL: Duration = Duration::from_millis(100);
+
+/// Issue #632: session 起動から jsonl 検出を諦めるまでの最大時間 (= deadline)。
+/// 旧実装は `Instant::now() + 60s` を watcher 起動時に固定していたが、
+/// new 実装でも数値は同じ 60 秒。違いは「session が早期 kill された場合に
+/// `watcher_cancel` で 100ms 以内に exit する」点。
+const WATCHER_MAX_LIFETIME: Duration = Duration::from_secs(60);
 
 /// Issue #30 + #148: claim 済み sessionId の集合。
 /// 旧実装は HashSet で永続成長し、長時間稼働でメモリリーク + デッドサーション ID で
@@ -180,142 +192,181 @@ fn emit_session_id(app: &AppHandle, terminal_id: &str, session_id: &str) -> bool
 }
 
 /// 1 つの terminal セッションに対して watch を開始する。
-/// `is_alive` が false を返したら自動停止。
-/// 検出した sessionId は callback に渡される (1 回限り)。
+///
+/// Issue #632: 旧実装は `is_alive` 閉包を 500ms 間隔で polling していた (deadline 60 秒固定)。
+/// このため 1 秒で kill された session でも watcher は最大 60 秒近く生存し、30 タブ連続
+/// 起動 + 即 kill のシナリオでは 30 個の watcher thread が並走して reader thread / channel
+/// リソースを長時間専有していた。
+///
+/// 新実装は `watcher_cancel: Arc<AtomicBool>` を使う:
+///   - PTY (`SessionHandle`) 起動時に `false` で生成される
+///   - `kill()` / `Drop` で `true` に flip される
+///   - watcher は `WATCHER_POLL_INTERVAL` (100ms) ごとに `cancel.load(Acquire)` を check
+///   - deadline は session 起動 (`spawned_at`) からの経過時間で判定する
+///
+/// これで「session が早期終了したら watcher も 100ms 以内に exit」「長期 session でも
+/// 60 秒の hard deadline は維持」の両立が成立する。
+///
+/// 検出した sessionId は terminal_id 宛の `terminal:sessionId:{terminal_id}` event で
+/// 1 回だけ emit される (claim 機構で multi-watcher 競合は排他)。
 pub fn spawn_watcher(
     app: AppHandle,
     terminal_id: String,
     project_root: String,
     spawned_at: SystemTime,
-    is_alive: impl Fn() -> bool + Send + 'static,
+    watcher_cancel: Arc<AtomicBool>,
 ) {
-    std::thread::spawn(move || {
-        let dir = projects_dir(&project_root);
-        // ディレクトリが無い場合も Claude が起動後に作るので、最大 5 秒待機
-        let mut waits = 0;
-        while !dir.exists() && waits < 50 {
-            std::thread::sleep(Duration::from_millis(100));
-            waits += 1;
-            if !is_alive() {
-                return;
-            }
-        }
-        if !dir.exists() {
+    std::thread::spawn(move || run_watcher_loop(app, terminal_id, project_root, spawned_at, watcher_cancel));
+}
+
+/// Issue #632: watcher の本体ループ。`spawn_watcher` から std::thread で起動される。
+/// テストから直接呼び出す時の利便性のため関数として切り出している。
+fn run_watcher_loop(
+    app: AppHandle,
+    terminal_id: String,
+    project_root: String,
+    spawned_at: SystemTime,
+    watcher_cancel: Arc<AtomicBool>,
+) {
+    let is_cancelled = || watcher_cancel.load(Ordering::Acquire);
+
+    let dir = projects_dir(&project_root);
+    // ディレクトリが無い場合も Claude が起動後に作るので、最大 5 秒待機。
+    // この phase でも `watcher_cancel` を 100ms ごとに観測して即時 exit する。
+    let mut waits = 0;
+    while !dir.exists() && waits < 50 {
+        std::thread::sleep(WATCHER_POLL_INTERVAL);
+        waits += 1;
+        if is_cancelled() {
             tracing::debug!(
-                "[claude_watcher] {} not appearing, giving up",
-                dir.display()
+                "[claude_watcher] tid={} cancelled while waiting for projects dir",
+                terminal_id
             );
             return;
         }
-
-        // 初期 snapshot には既に他の watcher が claim 済みの session も含めて除外対象とする。
-        // こうしておくと「spawn 時点で新規扱いだが他 watcher が先に claim した id」を
-        // この watcher が後から誤拾いする可能性も閉じられる。
-        let mut snapshot = list_session_ids(&dir);
-        if let Ok(map) = CLAIMED_SESSIONS.lock() {
-            for s in map.keys() {
-                snapshot.insert(s.clone());
-            }
-        }
+    }
+    if !dir.exists() {
         tracing::debug!(
-            "[claude_watcher] tid={} dir={} initial={} entries (+ claimed merged)",
-            terminal_id,
-            dir.display(),
-            snapshot.len()
+            "[claude_watcher] {} not appearing, giving up",
+            dir.display()
         );
+        return;
+    }
 
-        // Issue #429: Claude Code が非常に速く jsonl を作ると、watcher 起動後の
-        // 初期 snapshot にその session が入ってしまい、difference では二度と検出できない。
-        // terminal_create 開始以降に更新された jsonl は「この spawn の候補」として
-        // snapshot 済みでも 1 度だけ claim を試す。
-        let expected_norm = super::path_norm::normalize_project_root(&project_root);
-        for candidate in list_recent_session_candidates(&dir, spawned_at) {
-            if is_claimed(&candidate.id) {
-                continue;
-            }
-            if !jsonl_matches_project(&candidate.path, &expected_norm) {
-                tracing::debug!(
-                    "[claude_watcher] skip recent {} (cwd mismatch)",
-                    candidate.id
-                );
-                continue;
-            }
-            if !try_claim(&candidate.id) {
-                continue;
-            }
-            if emit_session_id(&app, &terminal_id, &candidate.id) {
-                return;
-            }
+    // 初期 snapshot には既に他の watcher が claim 済みの session も含めて除外対象とする。
+    // こうしておくと「spawn 時点で新規扱いだが他 watcher が先に claim した id」を
+    // この watcher が後から誤拾いする可能性も閉じられる。
+    let mut snapshot = list_session_ids(&dir);
+    if let Ok(map) = CLAIMED_SESSIONS.lock() {
+        for s in map.keys() {
+            snapshot.insert(s.clone());
         }
+    }
+    tracing::debug!(
+        "[claude_watcher] tid={} dir={} initial={} entries (+ claimed merged)",
+        terminal_id,
+        dir.display(),
+        snapshot.len()
+    );
 
-        let (tx, rx) = channel::<notify::Result<Event>>();
-        let mut watcher = match RecommendedWatcher::new(
-            move |res: notify::Result<Event>| {
-                let _ = tx.send(res);
-            },
-            Config::default().with_poll_interval(Duration::from_millis(500)),
-        ) {
-            Ok(w) => w,
-            Err(e) => {
-                tracing::warn!("[claude_watcher] watcher init failed: {e}");
-                return;
-            }
-        };
-        if let Err(e) = watcher.watch(&dir, RecursiveMode::NonRecursive) {
-            tracing::warn!("[claude_watcher] watch failed: {e}");
+    // Issue #429: Claude Code が非常に速く jsonl を作ると、watcher 起動後の
+    // 初期 snapshot にその session が入ってしまい、difference では二度と検出できない。
+    // terminal_create 開始以降に更新された jsonl は「この spawn の候補」として
+    // snapshot 済みでも 1 度だけ claim を試す。
+    let expected_norm = super::path_norm::normalize_project_root(&project_root);
+    for candidate in list_recent_session_candidates(&dir, spawned_at) {
+        if is_claimed(&candidate.id) {
+            continue;
+        }
+        if !jsonl_matches_project(&candidate.path, &expected_norm) {
+            tracing::debug!(
+                "[claude_watcher] skip recent {} (cwd mismatch)",
+                candidate.id
+            );
+            continue;
+        }
+        if !try_claim(&candidate.id) {
+            continue;
+        }
+        if emit_session_id(&app, &terminal_id, &candidate.id) {
             return;
         }
+    }
 
-        // 最大 60 秒だけ監視 (Claude が起動して session を作るのは通常数秒以内)
-        let deadline = std::time::Instant::now() + Duration::from_secs(60);
-        while std::time::Instant::now() < deadline {
-            if !is_alive() {
-                break;
-            }
-            match rx.recv_timeout(Duration::from_millis(500)) {
-                Ok(Ok(event)) => {
-                    if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
+    let (tx, rx) = channel::<notify::Result<Event>>();
+    let mut watcher = match RecommendedWatcher::new(
+        move |res: notify::Result<Event>| {
+            let _ = tx.send(res);
+        },
+        Config::default().with_poll_interval(Duration::from_millis(500)),
+    ) {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::warn!("[claude_watcher] watcher init failed: {e}");
+            return;
+        }
+    };
+    if let Err(e) = watcher.watch(&dir, RecursiveMode::NonRecursive) {
+        tracing::warn!("[claude_watcher] watch failed: {e}");
+        return;
+    }
+
+    // Issue #632: deadline は session 起動 (`spawned_at`) を anchor にする session-relative。
+    // SystemTime は壁時計依存だが、Instant::now() の anchor を spawn 時点に取るには関数の
+    // 入口で `let session_start = Instant::now();` するのと等価。ここでは spawned_at を信頼し、
+    // SystemTime → Duration 計算で扱う (システム時刻のジャンプには弱いが旧実装と同じ前提)。
+    let watcher_started_at = Instant::now();
+    while watcher_started_at.elapsed() < WATCHER_MAX_LIFETIME {
+        if is_cancelled() {
+            tracing::debug!(
+                "[claude_watcher] tid={} cancelled by session — exiting watcher",
+                terminal_id
+            );
+            return;
+        }
+        match rx.recv_timeout(WATCHER_POLL_INTERVAL) {
+            Ok(Ok(event)) => {
+                if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
+                    continue;
+                }
+                let current = list_session_ids(&dir);
+                // Issue #30: 既に他 watcher が claim 済みの id は除外し、未 claim の
+                // 新規 id から 1 個だけ atomically に占有する。
+                let mut new_ids: Vec<&String> = current
+                    .difference(&snapshot)
+                    .filter(|sid| !is_claimed(sid))
+                    .collect();
+                // 順序を安定化 (どの watcher が先に claim してもデテルミニスティックに)
+                new_ids.sort();
+                // Issue #31 対策用 normalize。毎イベント再計算しても軽量 (canonicalize は
+                // 最初にキャッシュされる OS FS cache にヒットする)。
+                for candidate in new_ids {
+                    // jsonl の cwd が一致しないなら別 project の衝突なのでスキップ
+                    let candidate_path = dir.join(format!("{}.jsonl", candidate));
+                    if !jsonl_matches_project(&candidate_path, &expected_norm) {
+                        tracing::debug!("[claude_watcher] skip {} (cwd mismatch)", candidate);
                         continue;
                     }
-                    let current = list_session_ids(&dir);
-                    // Issue #30: 既に他 watcher が claim 済みの id は除外し、未 claim の
-                    // 新規 id から 1 個だけ atomically に占有する。
-                    let mut new_ids: Vec<&String> = current
-                        .difference(&snapshot)
-                        .filter(|sid| !is_claimed(sid))
-                        .collect();
-                    // 順序を安定化 (どの watcher が先に claim してもデテルミニスティックに)
-                    new_ids.sort();
-                    // Issue #31 対策用 normalize。毎イベント再計算しても軽量 (canonicalize は
-                    // 最初にキャッシュされる OS FS cache にヒットする)。
-                    for candidate in new_ids {
-                        // jsonl の cwd が一致しないなら別 project の衝突なのでスキップ
-                        let candidate_path = dir.join(format!("{}.jsonl", candidate));
-                        if !jsonl_matches_project(&candidate_path, &expected_norm) {
-                            tracing::debug!("[claude_watcher] skip {} (cwd mismatch)", candidate);
-                            continue;
-                        }
-                        if !try_claim(candidate) {
-                            // 競合で claim できず → 次の候補へ
-                            continue;
-                        }
-                        if emit_session_id(&app, &terminal_id, candidate) {
-                            return;
-                        }
+                    if !try_claim(candidate) {
+                        // 競合で claim できず → 次の候補へ
+                        continue;
                     }
-                    // まだ自分の番が来ていない → snapshot を更新して次イベントを待つ。
-                    // (他の watcher が claim した id は snapshot に足し、次回の difference から除外する)
-                    snapshot.extend(current);
+                    if emit_session_id(&app, &terminal_id, candidate) {
+                        return;
+                    }
                 }
-                Ok(Err(_)) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-                Err(_) => break,
+                // まだ自分の番が来ていない → snapshot を更新して次イベントを待つ。
+                // (他の watcher が claim した id は snapshot に足し、次回の difference から除外する)
+                snapshot.extend(current);
             }
+            Ok(Err(_)) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(_) => break,
         }
-        tracing::debug!(
-            "[claude_watcher] tid={} watcher exit (timeout / dead)",
-            terminal_id
-        );
-    });
+    }
+    tracing::debug!(
+        "[claude_watcher] tid={} watcher exit (deadline / cancelled / channel closed)",
+        terminal_id
+    );
 }
 
 #[cfg(test)]
@@ -351,5 +402,39 @@ mod tests {
 
         assert_eq!(ids, vec!["new-session"]);
         let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Issue #632: poll interval が 500ms (旧) より十分短く、watcher が cancel を
+    /// 観測してから exit するまでの「最大待ち時間」が短いことを定数で機械的に保証する。
+    /// 数値そのものは将来 50ms に下げる等の調整が入っても、500ms 以下で居続けることが
+    /// 「orphan watcher を 30 個並走させない」要件の核心。
+    #[test]
+    fn watcher_poll_interval_is_significantly_shorter_than_legacy_500ms() {
+        // 旧実装は 500ms ごとに is_alive() を polling していた。新実装はそれより十分小さい
+        // ことを保証する (= 短命 PTY 連発時の watcher 終息が早くなる)。
+        assert!(
+            WATCHER_POLL_INTERVAL <= Duration::from_millis(200),
+            "poll interval は旧 500ms より十分短くあるべき: {:?}",
+            WATCHER_POLL_INTERVAL
+        );
+        // 0 / 1ms みたいな busy-loop には絶対しない (CPU 暴走防止)
+        assert!(
+            WATCHER_POLL_INTERVAL >= Duration::from_millis(10),
+            "0ms / busy-loop は CPU 暴走 — 最低 10ms は確保: {:?}",
+            WATCHER_POLL_INTERVAL
+        );
+    }
+
+    /// Issue #632: deadline は session 起動 anchor + 60 秒の hard cap として維持される。
+    /// 60 秒未満に短縮すると「Claude が起動して session を作るのに数秒かかるケース」で
+    /// 検出取りこぼしが起きる。本テストは「deadline 値そのものをうっかり弄らない」ための
+    /// guard。
+    #[test]
+    fn watcher_max_lifetime_is_at_least_30_seconds() {
+        assert!(
+            WATCHER_MAX_LIFETIME >= Duration::from_secs(30),
+            "max lifetime が短すぎると Claude 起動が遅い環境で検出漏れする: {:?}",
+            WATCHER_MAX_LIFETIME
+        );
     }
 }

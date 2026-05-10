@@ -463,7 +463,6 @@ pub async fn terminal_create(
             }
             // Claude Code 起動時のみ session watcher を仕掛ける (codex は jsonl を作らない)
             if command.to_lowercase().contains("claude") {
-                let registry = state.pty_registry.clone();
                 let watcher_id = id.clone();
                 // Issue #147: poison でも recovery して読む
                 let watcher_root = crate::state::lock_project_root_recover(&state.project_root)
@@ -477,13 +476,25 @@ pub async fn terminal_create(
                 } else {
                     watcher_root
                 };
-                crate::pty::claude_watcher::spawn_watcher(
-                    app.clone(),
-                    watcher_id.clone(),
-                    actual_root,
-                    spawned_at,
-                    move || registry.get(&watcher_id).is_some(),
-                );
+                // Issue #632: SessionHandle が公開する watcher_cancel token を渡す。
+                // PTY が `kill()` / `Drop` で寿命終了した瞬間に flip され、watcher は
+                // 100ms 以内に exit する。registry.get(...).is_some() を 500ms ごとに
+                // polling していた旧実装より反応が早く、cleanup の遅延を解消する。
+                if let Some(handle) = state.pty_registry.get(&watcher_id) {
+                    let cancel = handle.watcher_cancel_token();
+                    crate::pty::claude_watcher::spawn_watcher(
+                        app.clone(),
+                        watcher_id,
+                        actual_root,
+                        spawned_at,
+                        cancel,
+                    );
+                } else {
+                    // insert 直後に外部から remove されるレース。watcher を起こす意味は無い。
+                    tracing::debug!(
+                        "[terminal] session {watcher_id} disappeared before claude_watcher spawn"
+                    );
+                }
             }
             let cmdline = std::iter::once(command.clone())
                 .chain(args.iter().cloned())
