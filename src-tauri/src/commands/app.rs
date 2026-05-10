@@ -85,6 +85,7 @@ pub fn app_restart(app: tauri::AppHandle) {
     app.restart();
 }
 pub(crate) mod team_mcp;
+pub(crate) mod updater;
 pub(crate) mod window;
 
 #[allow(unused_imports)]
@@ -93,6 +94,10 @@ pub(crate) use team_mcp::{
     app_get_team_hub_info, app_recruit_ack, app_set_active_leader, app_set_role_profile_summary,
     app_setup_team_mcp, ActiveLeaderResult, CleanupTeamMcpResult, SetupTeamMcpResult, TeamHubInfo,
     TeamMcpMember,
+};
+#[allow(unused_imports)]
+pub(crate) use updater::{
+    app_updater_record_signature_warning, app_updater_should_warn_signature, ShouldWarnResult,
 };
 #[allow(unused_imports)]
 pub(crate) use window::{

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSettingsValue } from '../settings-context';
 import { useUiStore } from '../../stores/ui';
+import { useToast } from '../toast-context';
 
 export interface ClaudeCheckState {
   state: 'checking' | 'ok' | 'missing';
@@ -34,6 +35,10 @@ export interface UseClaudeCheckResult {
  */
 export function useClaudeCheck(): UseClaudeCheckResult {
   const claudeCommand = useSettingsValue('claudeCommand');
+  // Issue #609: silent check で signature 系 error を検知したとき、24h cooldown 付きで
+  // 1 度だけ toast を出す経路を hook 内で確保する。
+  const language = useSettingsValue('language');
+  const { showToast } = useToast();
 
   const [claudeCheck, setClaudeCheck] = useState<ClaudeCheckState>({
     state: 'checking'
@@ -61,11 +66,14 @@ export function useClaudeCheck(): UseClaudeCheckResult {
   // 更新の有無を検出して useUiStore.availableUpdate に書き、Topbar / CanvasLayout の
   // 「Update」ボタンを点灯させる。実 install はユーザーがボタンを押したときだけ走る。
   // 起動直後の負荷を避けるため少し遅延させる (5 秒)。
+  //
+  // Issue #609: signature 系 error を検出したときは silentCheckForUpdate 内部で
+  // 24h cooldown 付き toast を出すため、deps として { language, showToast } を渡す。
   useEffect(() => {
     let cancelled = false;
     const handle = window.setTimeout(() => {
       void import('../updater-check').then(async (m) => {
-        const info = await m.silentCheckForUpdate();
+        const info = await m.silentCheckForUpdate({ language, showToast });
         if (cancelled) return;
         useUiStore.getState().setAvailableUpdate(info);
       });
@@ -74,6 +82,9 @@ export function useClaudeCheck(): UseClaudeCheckResult {
       cancelled = true;
       window.clearTimeout(handle);
     };
+    // language / showToast の値が起動 5 秒以内に変わるケースは想定しないため、
+    // deps を空のままにして「起動時 1 回」を厳守する。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return { claudeCheck, runClaudeCheck };

@@ -47,3 +47,14 @@ pub fn role_profiles_path() -> PathBuf {
 pub fn terminal_tabs_path() -> PathBuf {
     vibe_root().join("terminal-tabs.json")
 }
+
+/// Issue #609 (Security): updater の minisign 署名検証失敗を「24h に 1 度だけ」ユーザーに
+/// 通知するための最終警告タイムスタンプ永続化先 `~/.vibe-editor/updater-warned.json` のパス。
+///
+/// renderer 側 `silentCheckForUpdate` が signature 系 error を検知したとき、Rust 側の
+/// `app_updater_should_warn_signature` でこのファイルを読み、24h 以上経過していれば
+/// toast を 1 度だけ出して `app_updater_record_signature_warning` で再記録する。
+/// 永続化することで、複数起動・短時間再起動でも spam にならない。
+pub fn updater_warned_path() -> PathBuf {
+    vibe_root().join("updater-warned.json")
+}

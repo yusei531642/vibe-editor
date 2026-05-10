@@ -14,6 +14,15 @@
  *
  * 進捗 toast / Issue #121 (toast 重ね焼け回避) / Issue #142 (downgrade 防止) /
  * Issue #59 (i18n) / Windows NSIS 二重 relaunch 回避 はすべて維持する。
+ *
+ * Issue #609 (Security): silent check で minisign 署名検証 error を握りつぶしていた。
+ *   - endpoints は `tauri.conf.json` で primary GitHub Releases + backup GitHub Pages の
+ *     2 本構成に二重化済み (DNS / TLS 起源 diversification)。
+ *   - signature 系 error 検出時は `app_updater_should_warn_signature` で 24h cooldown を
+ *     確認し、許可されたときだけ 1 度 toast を出して `app_updater_record_signature_warning`
+ *     で記録する。preview / unsigned build (`VITE_APP_SIGNING_ENABLED !== 'true'`) では
+ *     toast を抑止する (false positive で開発者が困るのを防ぐ)。
+ *   - network / その他 error は静かに skip。
  */
 import type { Language } from '../../../types/shared';
 import { translate } from './i18n';
@@ -78,12 +87,134 @@ function truncateBody(raw: string): string {
 }
 
 /**
+ * Issue #609: error message を「signature 系 / network 系 / その他」に分類する。
+ *
+ * tauri-plugin-updater の error 文字列は安定していないため、英語キーワードの
+ * substring match で判定する。最低限以下を拾う:
+ *   - "signature" / "minisign" / "verify" / "untrusted" → signature
+ *   - "network" / "http" / "dns" / "tls" / "ssl" / "connect" / "request" / "fetch"
+ *     / "endpoint" / "timeout" → network
+ *   - 上記以外 → other
+ *
+ * 過剰一致を避けるため大文字小文字を ignore して string contains で見る。
+ */
+export type UpdaterErrorKind = 'signature' | 'network' | 'other';
+
+export function classifyUpdaterError(err: unknown): UpdaterErrorKind {
+  const raw = (() => {
+    if (typeof err === 'string') return err;
+    if (err && typeof err === 'object') {
+      // Error / ErrorLike の message を最優先
+      const msg = (err as { message?: unknown }).message;
+      if (typeof msg === 'string') return msg;
+      try {
+        return JSON.stringify(err);
+      } catch {
+        return String(err);
+      }
+    }
+    return String(err);
+  })().toLowerCase();
+
+  // signature 系: 改竄 / 鍵不一致 / 検証失敗
+  if (
+    raw.includes('signature') ||
+    raw.includes('minisign') ||
+    raw.includes('verify') ||
+    raw.includes('untrusted')
+  ) {
+    return 'signature';
+  }
+  // network 系: GitHub TLS/DNS/Releases asset 障害など
+  if (
+    raw.includes('network') ||
+    raw.includes('dns') ||
+    raw.includes('tls') ||
+    raw.includes('ssl') ||
+    raw.includes('connect') ||
+    raw.includes('request') ||
+    raw.includes('fetch') ||
+    raw.includes('endpoint') ||
+    raw.includes('http') ||
+    raw.includes('timed out') ||
+    raw.includes('timeout')
+  ) {
+    return 'network';
+  }
+  return 'other';
+}
+
+/**
+ * Issue #609: build が minisign で署名されているか (= signature error が「真の」失敗か)
+ * を vite ビルド変数で判定する。`VITE_APP_SIGNING_ENABLED='true'` のときだけ署名警告を
+ * 出す。preview / unsigned build (CI の dev build / pull request build) では false 扱い。
+ */
+function isSigningEnabled(): boolean {
+  // import.meta.env は vite ビルド時に文字列リテラル置換される。
+  const flag = (import.meta.env as Record<string, string | undefined>).VITE_APP_SIGNING_ENABLED;
+  return typeof flag === 'string' && flag.toLowerCase() === 'true';
+}
+
+/**
+ * Issue #609: signature 系 error を 24h に 1 度だけ toast で通知する。
+ * cooldown は Rust 側 `~/.vibe-editor/updater-warned.json` に永続化されている。
+ * deps が無い (preview / test) ときは toast を出さず終わる。
+ */
+async function maybeWarnSignatureFailure(deps?: SilentCheckDeps): Promise<void> {
+  if (!deps) return;
+  if (!isSigningEnabled()) {
+    console.debug('[updater] signature error toast suppressed (signing disabled in build)');
+    return;
+  }
+  try {
+    const w = window as unknown as {
+      api?: {
+        app?: {
+          updaterShouldWarnSignature?: () => Promise<{ shouldWarn: boolean }>;
+          updaterRecordSignatureWarning?: () => Promise<void>;
+        };
+      };
+    };
+    const shouldFn = w.api?.app?.updaterShouldWarnSignature;
+    const recordFn = w.api?.app?.updaterRecordSignatureWarning;
+    if (!shouldFn || !recordFn) return;
+    const { shouldWarn } = await shouldFn();
+    if (!shouldWarn) {
+      console.debug('[updater] signature error toast skipped (cooldown active)');
+      return;
+    }
+    deps.showToast(translate(deps.language, 'updater.signatureFailed'), {
+      tone: 'warning',
+      duration: 12_000
+    });
+    await recordFn();
+  } catch (e) {
+    console.debug('[updater] signature warning gate failed:', e);
+  }
+}
+
+/** silentCheckForUpdate に渡す軽量 deps。toast を出す経路を持たない呼び出し
+ *  (test / 旧来の hook) では undefined を渡す。 */
+export interface SilentCheckDeps {
+  language: Language;
+  showToast: (
+    message: string,
+    options?: { duration?: number; tone?: 'info' | 'success' | 'warning' | 'error' }
+  ) => number;
+}
+
+/**
  * UI 副作用なしで「より新しい更新があるか」だけを返す。
  * - prod でしか走らせない (dev は plugin-updater の signature 検証で常に失敗する)
  * - 失敗時は console.debug に落として null を返す (起動を止めない)
  * - 無更新 / 同等以下バージョンの場合も null
+ *
+ * Issue #609: deps を受け取った場合のみ、signature 系 error を 24h cooldown 付きで
+ * 1 度だけ toast 通知する。network / その他 error は従来どおり静かに skip。
  */
-export async function silentCheckForUpdate(): Promise<AvailableUpdateInfo | null> {
+export async function silentCheckForUpdate(
+  deps?: SilentCheckDeps
+): Promise<AvailableUpdateInfo | null> {
   if (!import.meta.env.PROD) return null;
 
   try {
@@ -108,7 +239,13 @@ export async function silentCheckForUpdate(): Promise<AvailableUpdateInfo | null
       body: truncateBody(update.body ?? '')
     };
   } catch (err) {
-    console.debug('[updater] silent check skipped:', err);
+    const kind = classifyUpdaterError(err);
+    if (kind === 'signature') {
+      console.warn('[updater] minisign signature verification failed:', err);
+      await maybeWarnSignatureFailure(deps);
+    } else {
+      console.debug('[updater] silent check skipped (', kind, '):', err);
+    }
     return null;
   }
 }

@@ -5,7 +5,8 @@ import type {
   AppUserInfo,
   ClaudeCheckResult,
   SetWindowEffectsResult,
-  ThemeName
+  ThemeName,
+  UpdaterShouldWarnResult
 } from '../../../../types/shared';
 
 /** Tauri 側 TeamHub に同期する role profile の要約形 */
@@ -112,5 +113,15 @@ export const app = {
   openExternal: (url: string): Promise<OpenExternalResult> => invoke('app_open_external', { url }),
   /** Issue #251: OS のファイルマネージャで親フォルダを開き該当ファイルをハイライト */
   revealInFileManager: (path: string): Promise<OpenExternalResult> =>
-    invoke('app_reveal_in_file_manager', { path })
+    invoke('app_reveal_in_file_manager', { path }),
+  /**
+   * Issue #609 (Security): updater の minisign 署名検証失敗を「24h に 1 度だけ」
+   * ユーザーに通知するための cooldown 判定。`shouldWarn=true` のときだけ renderer は
+   * toast を出し、その直後に必ず `updaterRecordSignatureWarning()` を呼ぶ。
+   */
+  updaterShouldWarnSignature: (): Promise<UpdaterShouldWarnResult> =>
+    invoke('app_updater_should_warn_signature'),
+  /** Issue #609: 警告 toast 表示直後に最終警告 timestamp を更新する。 */
+  updaterRecordSignatureWarning: (): Promise<void> =>
+    invoke('app_updater_record_signature_warning')
 };
