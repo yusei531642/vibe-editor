@@ -12,7 +12,7 @@
 use crate::commands::team_history::MutationResult;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::Mutex;
 
@@ -104,6 +104,52 @@ async fn ensure_loaded(cache: &mut Option<PersistedTerminalTabsFile>) {
     *cache = Some(load_from_disk().await.unwrap_or_default());
 }
 
+/// Issue #702: cwd + session_id から `~/.claude/projects/<encoded(cwd)>/<session_id>.jsonl` を構築する。
+/// `home` は通常 `dirs::home_dir()`。テスト用に切り出して mock 可能にしてある。
+/// encoding 規則は `pty::path_norm::encode_project_path` (= claude_watcher.rs と同じ) を共有する。
+fn claude_jsonl_path(home: &Path, cwd: &str, session_id: &str) -> PathBuf {
+    home.join(".claude")
+        .join("projects")
+        .join(crate::pty::path_norm::encode_project_path(cwd))
+        .join(format!("{session_id}.jsonl"))
+}
+
+/// Issue #702: 復元データ内の sessionId を sanitize する。
+/// `kind == "claude"` かつ jsonl 不在の sessionId を None に倒す。
+///
+/// 背景: PR #663 (Issue #660/#661/#662) で IDE モードの terminal タブを永続化したが、
+/// `terminal-tabs.json` に記録された sessionId に対応する jsonl が無いケースがある:
+///   - ユーザーが prompt を 1 件も送らずに閉じた → claude が jsonl を作らないまま終了
+///   - `~/.claude/projects/` を手動削除 / 別マシン環境移行 / Claude Code クリーンアップ
+///   - cwd が変わって encoded path が別ディレクトリを指す
+///
+/// このまま `--resume <存在しない uuid>` で起動すると claude CLI が
+/// `No conversation found with session ID: ...` を出して exitCode=1 で死ぬ。
+/// renderer 側 `use-terminal-tabs-persistence.ts` は sessionId が None なら resumeSessionId を
+/// 渡さず addTerminalTab を呼び、新規 UUID 採番 → `--session-id <new-uuid>` 経路に倒す。
+async fn sanitize_missing_jsonl(file: &mut PersistedTerminalTabsFile, home: &Path) {
+    for slot in file.by_project.values_mut() {
+        for tab in slot.tabs.iter_mut() {
+            if tab.kind != "claude" {
+                continue;
+            }
+            let Some(sid) = tab.session_id.as_deref() else {
+                continue;
+            };
+            let path = claude_jsonl_path(home, &tab.cwd, sid);
+            if fs::metadata(&path).await.is_err() {
+                tracing::info!(
+                    "[terminal_tabs] session jsonl missing for tab={} sid={} cwd={}, dropping sessionId",
+                    tab.tab_id,
+                    sid,
+                    tab.cwd
+                );
+                tab.session_id = None;
+            }
+        }
+    }
+}
+
 async fn save_to_disk(file: &PersistedTerminalTabsFile) -> Result<(), String> {
     let path = store_path();
     let json = serde_json::to_vec_pretty(file).map_err(|e| e.to_string())?;
@@ -118,6 +164,12 @@ async fn save_to_disk(file: &PersistedTerminalTabsFile) -> Result<(), String> {
 
 /// load: 永続化ファイルが空 / 未存在 / schemaVersion 不一致なら `None` 返却。
 /// renderer 側はこれで「素の IDE モード起動」と判定して順序復元をスキップする。
+///
+/// Issue #702: 戻り値は `sanitize_missing_jsonl` で post-process し、jsonl 不在の
+/// sessionId を None に倒す。cache 自体には触らない (= 次回 load でも同じ check が走る、
+/// idempotent。renderer 側 save が走るまで disk 上の sessionId はそのまま温存され、
+/// 例えばユーザーが claude を直接起動して同じ sessionId の jsonl を作れば次回 load で
+/// 復活できる)。
 #[tauri::command]
 pub async fn terminal_tabs_load() -> Option<PersistedTerminalTabsFile> {
     let _g = LOCK.lock().await;
@@ -127,7 +179,10 @@ pub async fn terminal_tabs_load() -> Option<PersistedTerminalTabsFile> {
     if file.by_project.is_empty() && file.last_saved_at.is_empty() {
         return None;
     }
-    Some(file.clone())
+    let mut sanitized = file.clone();
+    let home = dirs::home_dir().unwrap_or_default();
+    sanitize_missing_jsonl(&mut sanitized, &home).await;
+    Some(sanitized)
 }
 
 /// save: renderer から渡された全体を atomic 上書き。
@@ -262,5 +317,167 @@ mod tests {
         assert!(tab.team_id.is_none());
         assert!(tab.agent_id.is_none());
         assert!(tab.role.is_none());
+    }
+
+    // ---- Issue #702: sanitize_missing_jsonl tests ----
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir()
+            .join(format!("vibe-editor-{name}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).expect("create temp dir");
+        dir
+    }
+
+    fn make_file_with_tab(
+        kind: &str,
+        cwd: &str,
+        sid: Option<&str>,
+    ) -> PersistedTerminalTabsFile {
+        let mut by_project = HashMap::new();
+        by_project.insert(
+            cwd.to_string(),
+            PersistedTerminalTabsByProject {
+                tabs: vec![PersistedTerminalTab {
+                    tab_id: "1".to_string(),
+                    kind: kind.to_string(),
+                    cwd: cwd.to_string(),
+                    cols: 80,
+                    rows: 24,
+                    session_id: sid.map(String::from),
+                    label: None,
+                    team_id: None,
+                    agent_id: None,
+                    role: None,
+                }],
+                active_tab_id: None,
+            },
+        );
+        PersistedTerminalTabsFile {
+            schema_version: TERMINAL_TABS_SCHEMA_VERSION,
+            last_saved_at: "2026-05-10T00:00:00Z".to_string(),
+            by_project,
+        }
+    }
+
+    fn write_jsonl(home: &Path, cwd: &str, sid: &str) {
+        let dir = home
+            .join(".claude")
+            .join("projects")
+            .join(crate::pty::path_norm::encode_project_path(cwd));
+        std::fs::create_dir_all(&dir).expect("create projects dir");
+        std::fs::write(dir.join(format!("{sid}.jsonl")), "{}\n").expect("write jsonl");
+    }
+
+    #[tokio::test]
+    async fn sanitize_drops_session_id_when_jsonl_missing() {
+        let tmp = unique_temp_dir("terminal-tabs-sanitize-missing");
+        let cwd = "/tmp/repo";
+        let sid = "11111111-2222-3333-4444-555555555555";
+        // jsonl は意図的に作らない
+        let mut file = make_file_with_tab("claude", cwd, Some(sid));
+        sanitize_missing_jsonl(&mut file, &tmp).await;
+        assert!(
+            file.by_project[cwd].tabs[0].session_id.is_none(),
+            "missing jsonl should drop sessionId"
+        );
+        let _ = std::fs::remove_dir_all(tmp);
+    }
+
+    #[tokio::test]
+    async fn sanitize_keeps_session_id_when_jsonl_exists() {
+        let tmp = unique_temp_dir("terminal-tabs-sanitize-exists");
+        let cwd = "/tmp/some-repo";
+        let sid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        write_jsonl(&tmp, cwd, sid);
+
+        let mut file = make_file_with_tab("claude", cwd, Some(sid));
+        sanitize_missing_jsonl(&mut file, &tmp).await;
+        assert_eq!(
+            file.by_project[cwd].tabs[0].session_id.as_deref(),
+            Some(sid),
+            "existing jsonl should keep sessionId"
+        );
+        let _ = std::fs::remove_dir_all(tmp);
+    }
+
+    #[tokio::test]
+    async fn sanitize_skips_non_claude_tabs() {
+        let tmp = unique_temp_dir("terminal-tabs-sanitize-codex");
+        let cwd = "/tmp/repo-codex";
+        let sid = "yyy-codex-id";
+        // codex は jsonl を作らないので存在チェック対象外。session_id は維持されるべき。
+        let mut file = make_file_with_tab("codex", cwd, Some(sid));
+        sanitize_missing_jsonl(&mut file, &tmp).await;
+        assert_eq!(
+            file.by_project[cwd].tabs[0].session_id.as_deref(),
+            Some(sid),
+            "non-claude kind should skip jsonl check"
+        );
+        let _ = std::fs::remove_dir_all(tmp);
+    }
+
+    #[tokio::test]
+    async fn sanitize_handles_null_session_id() {
+        let tmp = unique_temp_dir("terminal-tabs-sanitize-null");
+        let cwd = "/tmp/repo-null";
+        let mut file = make_file_with_tab("claude", cwd, None);
+        sanitize_missing_jsonl(&mut file, &tmp).await;
+        assert!(file.by_project[cwd].tabs[0].session_id.is_none());
+        let _ = std::fs::remove_dir_all(tmp);
+    }
+
+    #[tokio::test]
+    async fn sanitize_processes_each_tab_independently() {
+        let tmp = unique_temp_dir("terminal-tabs-sanitize-mixed");
+        let cwd = "/tmp/mixed";
+        let sid_alive = "alive-aaaa-bbbb-cccc-dddddddddddd";
+        let sid_dead = "dead-aaaa-bbbb-cccc-dddddddddddd";
+        write_jsonl(&tmp, cwd, sid_alive);
+
+        let mut by_project = HashMap::new();
+        by_project.insert(
+            cwd.to_string(),
+            PersistedTerminalTabsByProject {
+                tabs: vec![
+                    PersistedTerminalTab {
+                        tab_id: "1".to_string(),
+                        kind: "claude".to_string(),
+                        cwd: cwd.to_string(),
+                        cols: 80,
+                        rows: 24,
+                        session_id: Some(sid_alive.to_string()),
+                        label: None,
+                        team_id: None,
+                        agent_id: None,
+                        role: None,
+                    },
+                    PersistedTerminalTab {
+                        tab_id: "2".to_string(),
+                        kind: "claude".to_string(),
+                        cwd: cwd.to_string(),
+                        cols: 80,
+                        rows: 24,
+                        session_id: Some(sid_dead.to_string()),
+                        label: None,
+                        team_id: None,
+                        agent_id: None,
+                        role: None,
+                    },
+                ],
+                active_tab_id: None,
+            },
+        );
+        let mut file = PersistedTerminalTabsFile {
+            schema_version: TERMINAL_TABS_SCHEMA_VERSION,
+            last_saved_at: "2026-05-10T00:00:00Z".to_string(),
+            by_project,
+        };
+        sanitize_missing_jsonl(&mut file, &tmp).await;
+
+        let tabs = &file.by_project[cwd].tabs;
+        assert_eq!(tabs[0].session_id.as_deref(), Some(sid_alive), "alive sid kept");
+        assert!(tabs[1].session_id.is_none(), "dead sid dropped");
+
+        let _ = std::fs::remove_dir_all(tmp);
     }
 }
