@@ -108,6 +108,185 @@ fn create_pipe_server(endpoint: &str, first_instance: bool) -> Result<NamedPipeS
     Ok(options.create(endpoint)?)
 }
 
+// =====================================================================================
+// Issue #603 (Security): Peer credential 検証 — handshake 直前に呼んで、token 一致だけで
+// 成立する旧設計に「同 user の同一 UID/SID プロセスかどうか」の壁を 1 段加える。
+//
+// 攻撃モデル: VIBE_TEAM_TOKEN は env 経由で worker に渡され、`/proc/<pid>/environ` (Linux) /
+// `Get-Process | Select StartInfo` (Windows) で同 user の他プロセスから盗み見られる。
+// token 盗難で「同 user 内の任意のローカルプロセス」が Hub に接続できるのを、UID/SID 一致
+// 検証で「親 vibe-editor 自身が起動した子プロセスのみ」(= 同 user) に閉じ込める。
+//
+// 制限: 「同 user 内の別プロセス」は引き続き Hub に到達できる (UID/SID は同じ)。
+// 真の親子関係まで縛るには ANCILLARY data / DuplicateHandle 経路が必要だが、それは Wave 2 候補。
+// 本実装は「別 user / sandbox 越境」を防ぐだけで、issue 本文の Tier A スコープを満たす。
+// =====================================================================================
+
+#[cfg(target_os = "linux")]
+pub(crate) fn check_peer_is_self_unix(
+    stream: &tokio::net::UnixStream,
+) -> Result<()> {
+    use std::os::unix::io::AsRawFd;
+    let fd = stream.as_raw_fd();
+    let cred = nix::sys::socket::getsockopt(&fd, nix::sys::socket::sockopt::PeerCredentials)
+        .map_err(|e| anyhow!("getsockopt(SO_PEERCRED) failed: {e}"))?;
+    let own_uid = nix::unistd::getuid().as_raw();
+    if cred.uid() != own_uid {
+        return Err(anyhow!(
+            "peer uid {} != own uid {} (pid={})",
+            cred.uid(),
+            own_uid,
+            cred.pid()
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "freebsd",
+    target_os = "dragonfly",
+    target_os = "openbsd",
+    target_os = "netbsd"
+))]
+pub(crate) fn check_peer_is_self_unix(
+    stream: &tokio::net::UnixStream,
+) -> Result<()> {
+    use std::os::unix::io::AsRawFd;
+    let fd = stream.as_raw_fd();
+    let mut uid: libc::uid_t = 0;
+    let mut gid: libc::gid_t = 0;
+    let ret = unsafe { libc::getpeereid(fd, &mut uid, &mut gid) };
+    if ret != 0 {
+        return Err(anyhow!(
+            "getpeereid failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let own_uid = unsafe { libc::getuid() };
+    if uid != own_uid {
+        return Err(anyhow!("peer uid {uid} != own uid {own_uid}"));
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+pub(crate) fn check_peer_is_self_windows(
+    pipe: &NamedPipeServer,
+) -> Result<()> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Foundation::{CloseHandle, FALSE, HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Security::{
+        EqualSid, GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows_sys::Win32::System::Pipes::GetNamedPipeClientProcessId;
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    /// HANDLE を Drop で必ず閉じる薄い RAII guard。
+    struct HandleGuard(HANDLE);
+    impl Drop for HandleGuard {
+        fn drop(&mut self) {
+            if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE {
+                unsafe {
+                    let _ = CloseHandle(self.0);
+                }
+            }
+        }
+    }
+
+    /// 指定 token の TokenUser SID raw bytes (size + buf) を返す。
+    fn read_token_user_sid_bytes(token: HANDLE) -> Result<Vec<u8>> {
+        let mut size: u32 = 0;
+        // 1st pass: required size を取得 (戻り値は 0 = 失敗扱いだが ERROR_INSUFFICIENT_BUFFER で OK)
+        unsafe {
+            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut size);
+        }
+        if size == 0 {
+            return Err(anyhow!(
+                "GetTokenInformation(TokenUser) size probe returned 0: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let mut buf: Vec<u8> = vec![0u8; size as usize];
+        let ok = unsafe {
+            GetTokenInformation(
+                token,
+                TokenUser,
+                buf.as_mut_ptr() as *mut _,
+                size,
+                &mut size,
+            )
+        };
+        if ok == 0 {
+            return Err(anyhow!(
+                "GetTokenInformation(TokenUser) failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        Ok(buf)
+    }
+
+    let pipe_handle: HANDLE = pipe.as_raw_handle() as HANDLE;
+    let mut client_pid: u32 = 0;
+    let ok = unsafe { GetNamedPipeClientProcessId(pipe_handle, &mut client_pid) };
+    if ok == 0 {
+        return Err(anyhow!(
+            "GetNamedPipeClientProcessId failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    // Open client process (read-only)
+    let raw_proc =
+        unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, client_pid) };
+    if raw_proc.is_null() || raw_proc == INVALID_HANDLE_VALUE {
+        return Err(anyhow!(
+            "OpenProcess({client_pid}, QUERY_LIMITED_INFORMATION) failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let proc_guard = HandleGuard(raw_proc);
+
+    // Open client token (read-only)
+    let mut raw_client_token: HANDLE = std::ptr::null_mut();
+    let ok =
+        unsafe { OpenProcessToken(proc_guard.0, TOKEN_QUERY, &mut raw_client_token) };
+    if ok == 0 {
+        return Err(anyhow!(
+            "OpenProcessToken(client pid={client_pid}) failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let client_token_guard = HandleGuard(raw_client_token);
+    let client_buf = read_token_user_sid_bytes(client_token_guard.0)?;
+    let client_sid = unsafe { (*(client_buf.as_ptr() as *const TOKEN_USER)).User.Sid };
+
+    // Open self token (read-only)
+    let mut raw_self_token: HANDLE = std::ptr::null_mut();
+    let ok = unsafe {
+        OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut raw_self_token)
+    };
+    if ok == 0 {
+        return Err(anyhow!(
+            "OpenProcessToken(self) failed: {}",
+            std::io::Error::last_os_error()
+        ));
+    }
+    let self_token_guard = HandleGuard(raw_self_token);
+    let self_buf = read_token_user_sid_bytes(self_token_guard.0)?;
+    let self_sid = unsafe { (*(self_buf.as_ptr() as *const TOKEN_USER)).User.Sid };
+
+    // Compare SIDs (EqualSid: 0 = mismatch / nonzero = equal)
+    let same = unsafe { EqualSid(client_sid, self_sid) };
+    if same == 0 {
+        return Err(anyhow!(
+            "peer SID does not match own SID (client_pid={client_pid})"
+        ));
+    }
+    Ok(())
+}
+
 /// Issue #50: 固定長バイト列の constant-time 比較。
 /// 先頭一致 prefix の長さに処理時間が依存しないようにする。
 /// ※ 長さだけは leak するが、token 長は固定なので問題ない。
