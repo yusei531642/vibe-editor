@@ -81,6 +81,15 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
   // 外部から渡されたらそれを使い、初回 spawn 時の seed が dedupe を効かせる。
   const internalLastScheduledRef = useRef<{ cols: number; rows: number } | null>(null);
   const lastScheduledRef = externalLastScheduledRef ?? internalLastScheduledRef;
+  // Issue #665: refit() が grid (cols/rows) を実際に term へ適用した直近の値。
+  //   `lastScheduledRef` (= IPC 側 dedup 用「最後にスケジュールした値」) と分離する責務:
+  //     IPC 側は spawn 時に usePtySession から seed されるので、その時点で値があっても
+  //     local 側は未適用扱いにして初回 refit を必ず通したい (xterm が seeded 状態と
+  //     同じ cols/rows で動いているとは限らないため)。
+  //   refit が実際に term.resize() / term.refresh() を呼んだ後に書き込み、次回以降の
+  //   refit で grid 不変なら xterm 側の更新を skip する。container resize / font 変更で
+  //   cellW/cellH が変われば grid が変わるため、見え方の正しさは保たれる。
+  const lastAppliedGridRef = useRef<{ cols: number; rows: number } | null>(null);
 
   // Issue #253 review (#6): refit と整合させるため useCallback でラップして identity を
   // 安定化。内部で参照する lastScheduledRef / ptyResizeTimerRef / ptyIdRef / lastSizeRef は
@@ -150,9 +159,40 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
         cell.cellH
       );
       if (!grid) return;
+      // Issue #665: zoom 変化のたびに refit が呼ばれるが、`container.clientWidth/Height` は
+      //   transform: scale(zoom) の影響を受けない論理 px のため、ズーム単独で grid (cols/rows)
+      //   は変わらない。それでも従来は無条件に `term.resize()` + `term.refresh(0, rows-1)` を
+      //   毎回叩いていたため、zoom 操作中 / Claude が長文出力中の Canvas ターミナルで
+      //   xterm の DOM 全行が再ラスタライズされ、フレーム落ちの主因となっていた。
+      //   `xterm.resize()` は同サイズなら内部で短絡するが、明示の `refresh()` は常に走る。
+      //   ここで grid 同値時は xterm 側更新を skip し、IPC 側 dedup と協調させて完全 no-op に。
+      const lastApplied = lastAppliedGridRef.current;
+      if (
+        lastApplied &&
+        lastApplied.cols === grid.cols &&
+        lastApplied.rows === grid.rows
+      ) {
+        if (ptyIdRef.current) {
+          schedulePtyResize(grid.cols, grid.rows);
+        }
+        if (import.meta.env.DEV) {
+          console.debug('pty.resize', {
+            cols: grid.cols,
+            rows: grid.rows,
+            zoom: getZoomRef.current?.() ?? null,
+            source,
+            cellW: cell.cellW,
+            cellH: cell.cellH,
+            fallback: runtimeCell ? false : fallbackCell?.fallback,
+            skipped: 'grid-unchanged'
+          });
+        }
+        return;
+      }
       try {
         term.resize(grid.cols, grid.rows);
         term.refresh(0, Math.max(0, term.rows - 1));
+        lastAppliedGridRef.current = { cols: grid.cols, rows: grid.rows };
         if (ptyIdRef.current) {
           schedulePtyResize(grid.cols, grid.rows);
         }
@@ -178,7 +218,19 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
     if (!fit) return;
     try {
       fit.fit();
-      term.refresh(0, Math.max(0, term.rows - 1));
+      // Issue #665: IDE 経路でも grid (cols/rows) が前回と同じなら xterm 全行 refresh は
+      //   不要 (フォント変更時は use-xterm-instance.ts の fonts.ready effect で別途 refresh
+      //   される)。fit.fit() は内部で getBoundingClientRect を読むので、container サイズが
+      //   実際に変わったときだけ cols/rows が変わる。grid 不変時に refresh を skip。
+      const lastApplied = lastAppliedGridRef.current;
+      const gridUnchanged =
+        lastApplied !== null &&
+        lastApplied.cols === term.cols &&
+        lastApplied.rows === term.rows;
+      if (!gridUnchanged) {
+        term.refresh(0, Math.max(0, term.rows - 1));
+        lastAppliedGridRef.current = { cols: term.cols, rows: term.rows };
+      }
       if (ptyIdRef.current) {
         schedulePtyResize(term.cols, term.rows);
       }
@@ -187,7 +239,7 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
           cols: term.cols,
           rows: term.rows,
           zoom: null,
-          source: 'fit'
+          source: gridUnchanged ? 'fit-skip' : 'fit'
         });
       }
     } catch {
