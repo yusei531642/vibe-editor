@@ -1032,44 +1032,6 @@
   50% { opacity: 0.35; }
 }
 
-/* ---------- floating canvas toggle (IDE 側) ---------- */
-.canvas-floating-toggle {
-  position: fixed;
-  bottom: 14px;
-  right: 14px;
-  width: 32px;
-  height: 32px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--bg-panel);
-  color: var(--fg-muted);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 8px);
-  cursor: pointer;
-  z-index: var(--z-canvas-toggle);
-  box-shadow: var(--shadow-sm);
-  transition:
-    color 120ms ease,
-    border-color 120ms ease,
-    background-color 120ms ease;
-}
-.canvas-floating-toggle:hover {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
-  background: var(--bg-elev, var(--bg-panel));
-}
-.canvas-floating-toggle__grid {
-  display: inline-grid;
-  grid-template-columns: 5px 5px;
-  grid-template-rows: 5px 5px;
-  gap: 2px;
-}
-.canvas-floating-toggle__grid > span {
-  background: currentColor;
-  border-radius: 1px;
-}
-
 /* ==================== Redesign: Stage decorations ====================
  * Claude Design バンドルの .tc__leader-glow / .tc__hud / handoff edge flow
  * を移植。既存 ReactFlow レイアウトと共存する追加レイヤーとして振る舞う。
