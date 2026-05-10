@@ -13,6 +13,7 @@
 pub mod batcher;
 pub mod claude_watcher;
 pub mod codex_broker;
+pub mod inflight;
 pub mod path_norm;
 pub mod registry;
 pub mod scrollback;
@@ -22,5 +23,6 @@ pub mod session;
 #[cfg(test)]
 mod tests;
 
+pub use inflight::InFlightTracker;
 pub use registry::SessionRegistry;
 pub use session::{spawn_session, SpawnOptions, UserWriteOutcome};

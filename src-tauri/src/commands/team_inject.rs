@@ -96,8 +96,14 @@ pub async fn team_send_retry_inject(
     let (text, from_role, from_agent_id) = lookup?;
 
     // Step 2: inject 再実行。state lock は drop 済み。
+    // Issue #630: tracker.track_async で計上することで、window CloseRequested handler が
+    // in-flight retry inject の自然完了を待てるようにする。
     let preview: String = text.chars().take(80).collect();
-    match inject::inject(registry, &args.agent_id, &from_role, &text).await {
+    match hub
+        .inflight
+        .track_async(inject::inject(registry, &args.agent_id, &from_role, &text))
+        .await
+    {
         Ok(()) => {
             let delivered_at = Utc::now().to_rfc3339();
             // message.delivered_to / delivered_at を更新 (再送成功時)。
