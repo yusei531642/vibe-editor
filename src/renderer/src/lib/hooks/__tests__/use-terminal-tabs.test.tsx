@@ -136,6 +136,39 @@ describe('useTerminalTabs', () => {
     );
   });
 
+  // ---- Issue #662: 永続化復元から渡された PTY size seed をタブに焼き付ける ----
+
+  it('seeds initialCols/initialRows on the tab when AddTerminalTabOptions provides them (#662)', () => {
+    const { result } = renderHook(() => useTerminalTabs(options()));
+
+    act(() => {
+      result.current.addTerminalTab({
+        agent: 'claude',
+        cwd: 'C:\\Users\\zooyo\\repo',
+        initialCols: 142,
+        initialRows: 38
+      });
+    });
+
+    expect(result.current.terminalTabs).toHaveLength(1);
+    const tab = result.current.terminalTabs[0]!;
+    expect(tab.cwd).toBe('C:\\Users\\zooyo\\repo');
+    expect(tab.initialCols).toBe(142);
+    expect(tab.initialRows).toBe(38);
+  });
+
+  it('defaults initialCols/initialRows to null on a fresh user-created tab (#662)', () => {
+    const { result } = renderHook(() => useTerminalTabs(options()));
+
+    act(() => {
+      result.current.addTerminalTab({ agent: 'claude' });
+    });
+
+    const tab = result.current.terminalTabs[0]!;
+    expect(tab.initialCols).toBeNull();
+    expect(tab.initialRows).toBeNull();
+  });
+
   it('after the limit is reached, closing one tab allows adding exactly one more (#588)', () => {
     const { result } = renderHook(() => useTerminalTabs(options({ showToast: vi.fn() })));
 
