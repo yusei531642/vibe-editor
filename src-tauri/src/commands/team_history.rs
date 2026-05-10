@@ -157,6 +157,49 @@ async fn save_all(entries: &[TeamHistoryEntry]) -> crate::commands::error::Comma
     )
 }
 
+/// Issue #640: write-ahead pattern。disk write が成功した後だけ cache に commit する。
+///
+/// 旧実装は `cache を mutate → save_all` の順で動いていたため、disk write が失敗 (ENOSPC /
+/// 読み取り専用ファイル / 権限不足等) すると cache だけが新しい状態のまま残り、renderer 側に
+/// IPC エラーを返しても cache は新規 entry を保持したまま、再起動で disk から旧 state が
+/// load された瞬間に「保存できなかったはずの entry が消える」UX バグが起きていた。
+///
+/// `apply_with_disk_commit` は write-ahead に変更:
+/// 1. `mutate` を cache の clone に対して適用 → 候補 state を作る
+/// 2. `save_fn` で候補 state を disk に書く
+/// 3. write 成功なら cache に candidate を commit、失敗なら cache はそのまま
+///
+/// テスト容易性のため `save_fn` を引数に取り、失敗 mock を差し込めるようにしている。
+async fn apply_with_disk_commit<F, Fut>(
+    cache: &mut Vec<TeamHistoryEntry>,
+    mutate: impl FnOnce(&mut Vec<TeamHistoryEntry>),
+    save_fn: F,
+) -> MutationResult
+where
+    F: FnOnce(Vec<TeamHistoryEntry>) -> Fut,
+    Fut: std::future::Future<Output = crate::commands::error::CommandResult<()>>,
+{
+    // 1. cache を clone した上で mutate (cache 本体はまだ触らない)
+    let mut candidate: Vec<TeamHistoryEntry> = cache.clone();
+    mutate(&mut candidate);
+
+    // 2. disk 書き込み — 失敗したら cache は旧 state のまま (rollback 不要)
+    match save_fn(candidate.clone()).await {
+        Ok(_) => {
+            // 3. 成功した場合のみ cache に commit
+            *cache = candidate;
+            MutationResult {
+                ok: true,
+                error: None,
+            }
+        }
+        Err(e) => MutationResult {
+            ok: false,
+            error: Some(e.to_string()),
+        },
+    }
+}
+
 #[tauri::command]
 pub async fn team_history_list(project_root: String) -> Vec<TeamHistoryEntry> {
     let _g = LOCK.lock().await;
@@ -213,18 +256,13 @@ pub async fn team_history_save(mut entry: TeamHistoryEntry) -> MutationResult {
     let all = cache.as_mut().expect("ensured");
 
     // Issue #46: 新エントリは必ず残す。merge_entry で per-project MAX 件まで圧縮。
-    merge_entry(all, entry);
-
-    match save_all(all).await {
-        Ok(_) => MutationResult {
-            ok: true,
-            error: None,
-        },
-        Err(e) => MutationResult {
-            ok: false,
-            error: Some(e.to_string()),
-        },
-    }
+    // Issue #640: write-ahead — disk write 成功時だけ cache に commit する。
+    apply_with_disk_commit(
+        all,
+        |candidate| merge_entry(candidate, entry),
+        |entries| async move { save_all(&entries).await },
+    )
+    .await
 }
 
 /// Issue #132: 複数チームの保存を 1 IPC + 1 disk write にまとめる。
@@ -237,24 +275,29 @@ pub async fn team_history_save_batch(entries: Vec<TeamHistoryEntry>) -> Mutation
             error: None,
         };
     }
+    // hydrate は disk I/O を伴うので LOCK の外で行う (cache mutate は行わないので安全)
+    let mut hydrated: Vec<TeamHistoryEntry> = Vec::with_capacity(entries.len());
+    for mut entry in entries {
+        hydrate_orchestration_summary(&mut entry).await;
+        hydrated.push(entry);
+    }
+
     let _g = LOCK.lock().await;
     let mut cache = CACHE.lock().await;
     ensure_loaded(&mut cache).await;
     let all = cache.as_mut().expect("ensured");
-    for mut entry in entries {
-        hydrate_orchestration_summary(&mut entry).await;
-        merge_entry(all, entry);
-    }
-    match save_all(all).await {
-        Ok(_) => MutationResult {
-            ok: true,
-            error: None,
+
+    // Issue #640: write-ahead — disk write 成功時だけ cache に commit する。
+    apply_with_disk_commit(
+        all,
+        |candidate| {
+            for entry in hydrated {
+                merge_entry(candidate, entry);
+            }
         },
-        Err(e) => MutationResult {
-            ok: false,
-            error: Some(e.to_string()),
-        },
-    }
+        |entries| async move { save_all(&entries).await },
+    )
+    .await
 }
 
 #[tauri::command]
@@ -263,22 +306,187 @@ pub async fn team_history_delete(id: String) -> MutationResult {
     let mut cache = CACHE.lock().await;
     ensure_loaded(&mut cache).await;
     let all = cache.as_mut().expect("ensured");
-    let before = all.len();
-    all.retain(|e| e.id != id);
-    if all.len() == before {
+    // 該当 entry が無ければ disk write 自体不要 (ok を返す)
+    if !all.iter().any(|e| e.id == id) {
         return MutationResult {
             ok: true,
             error: None,
         };
     }
-    match save_all(all).await {
-        Ok(_) => MutationResult {
-            ok: true,
-            error: None,
-        },
-        Err(e) => MutationResult {
-            ok: false,
-            error: Some(e.to_string()),
-        },
+
+    // Issue #640: write-ahead — disk write 成功時だけ cache に commit する。
+    apply_with_disk_commit(
+        all,
+        |candidate| candidate.retain(|e| e.id != id),
+        |entries| async move { save_all(&entries).await },
+    )
+    .await
+}
+
+#[cfg(test)]
+mod tests {
+    //! Issue #640: write-ahead pattern (`apply_with_disk_commit`) の振る舞いを検証する。
+    //!
+    //! 旧実装は cache を mutate してから disk write していたため、disk write 失敗時に
+    //! cache が新規 state のまま残り、renderer 側に IPC エラーを返しても再起動で消える
+    //! データ不整合が起きていた。新実装は write-ahead 化しているので、failure path で
+    //! cache が old state のまま保持されることを下記で担保する。
+    use super::*;
+
+    fn make_entry(id: &str, project: &str, last_used_at: &str) -> TeamHistoryEntry {
+        TeamHistoryEntry {
+            id: id.to_string(),
+            name: format!("team-{}", id),
+            project_root: project.to_string(),
+            created_at: last_used_at.to_string(),
+            last_used_at: last_used_at.to_string(),
+            members: Vec::new(),
+            organization: None,
+            canvas_state: None,
+            latest_handoff: None,
+            orchestration: None,
+        }
+    }
+
+    /// Issue #640 root cause: 旧実装は cache を mutate してから disk write していたので
+    /// failure path で「renderer に Err を返したのに cache だけ更新済み」状態が残った。
+    /// 新実装は disk write 失敗時 cache が touch されないことを検証する。
+    #[tokio::test]
+    async fn apply_with_disk_commit_does_not_mutate_cache_on_save_failure() {
+        use crate::commands::error::CommandError;
+        let mut cache = vec![make_entry("a", "/proj/x", "2026-05-09T00:00:00Z")];
+        let snapshot_before = cache.clone();
+
+        let result = apply_with_disk_commit(
+            &mut cache,
+            |candidate| {
+                merge_entry(
+                    candidate,
+                    make_entry("b", "/proj/x", "2026-05-10T00:00:00Z"),
+                );
+            },
+            |_entries| async { Err(CommandError::Io("disk full".to_string())) },
+        )
+        .await;
+
+        // IPC は失敗を返す
+        assert!(!result.ok);
+        assert_eq!(result.error.as_deref(), Some("disk full"));
+        // cache は old state のまま (新 entry "b" は入っていない)
+        assert_eq!(cache.len(), snapshot_before.len());
+        assert_eq!(cache[0].id, "a");
+        assert!(cache.iter().all(|e| e.id != "b"));
+    }
+
+    /// 成功 path では cache に candidate が commit される。
+    #[tokio::test]
+    async fn apply_with_disk_commit_commits_cache_on_save_success() {
+        let mut cache = vec![make_entry("a", "/proj/x", "2026-05-09T00:00:00Z")];
+
+        let result = apply_with_disk_commit(
+            &mut cache,
+            |candidate| {
+                merge_entry(
+                    candidate,
+                    make_entry("b", "/proj/x", "2026-05-10T00:00:00Z"),
+                );
+            },
+            |_entries| async { Ok(()) },
+        )
+        .await;
+
+        assert!(result.ok);
+        assert!(result.error.is_none());
+        // cache に新 entry が反映されている
+        assert_eq!(cache.len(), 2);
+        assert!(cache.iter().any(|e| e.id == "b"));
+        assert!(cache.iter().any(|e| e.id == "a"));
+    }
+
+    /// delete 経路の write-ahead: disk write 失敗時に cache から entry が消えていないこと。
+    #[tokio::test]
+    async fn apply_with_disk_commit_delete_path_rolls_back_on_failure() {
+        use crate::commands::error::CommandError;
+        let mut cache = vec![
+            make_entry("a", "/proj/x", "2026-05-09T00:00:00Z"),
+            make_entry("b", "/proj/x", "2026-05-10T00:00:00Z"),
+        ];
+
+        let target_id = "a".to_string();
+        let result = apply_with_disk_commit(
+            &mut cache,
+            |candidate| candidate.retain(|e| e.id != target_id),
+            |_entries| async { Err(CommandError::Io("permission denied".to_string())) },
+        )
+        .await;
+
+        assert!(!result.ok);
+        // "a" がまだ cache に残っている (renderer に IPC Err を返したのに消えた、を防ぐ)
+        assert_eq!(cache.len(), 2);
+        assert!(cache.iter().any(|e| e.id == "a"));
+    }
+
+    /// batch save 経路: 複数 entry を 1 候補に重ねた後、disk 失敗で全部 rollback される。
+    #[tokio::test]
+    async fn apply_with_disk_commit_batch_save_rolls_back_all_on_failure() {
+        use crate::commands::error::CommandError;
+        let mut cache = vec![make_entry("a", "/proj/x", "2026-05-09T00:00:00Z")];
+        let new_entries = vec![
+            make_entry("b", "/proj/x", "2026-05-10T00:00:00Z"),
+            make_entry("c", "/proj/x", "2026-05-10T01:00:00Z"),
+        ];
+
+        let result = apply_with_disk_commit(
+            &mut cache,
+            |candidate| {
+                for entry in new_entries {
+                    merge_entry(candidate, entry);
+                }
+            },
+            |_entries| async { Err(CommandError::Io("io error".to_string())) },
+        )
+        .await;
+
+        assert!(!result.ok);
+        // batch 全件 rollback (b, c は cache に存在しない)
+        assert_eq!(cache.len(), 1);
+        assert_eq!(cache[0].id, "a");
+        assert!(cache.iter().all(|e| e.id != "b" && e.id != "c"));
+    }
+
+    /// save_fn に渡される候補 state は mutate 適用済みであることを検証
+    /// (renderer に書き出される正しい state が disk へ流れていく)。
+    #[tokio::test]
+    async fn apply_with_disk_commit_passes_candidate_state_to_save_fn() {
+        let mut cache = vec![make_entry("a", "/proj/x", "2026-05-09T00:00:00Z")];
+        let captured: std::sync::Arc<std::sync::Mutex<Option<Vec<String>>>> =
+            std::sync::Arc::new(std::sync::Mutex::new(None));
+        let captured_for_fn = captured.clone();
+
+        let result = apply_with_disk_commit(
+            &mut cache,
+            |candidate| {
+                merge_entry(
+                    candidate,
+                    make_entry("b", "/proj/x", "2026-05-10T00:00:00Z"),
+                );
+            },
+            |entries| {
+                let captured_for_fn = captured_for_fn.clone();
+                async move {
+                    let ids: Vec<String> = entries.iter().map(|e| e.id.clone()).collect();
+                    *captured_for_fn.lock().unwrap() = Some(ids);
+                    Ok(())
+                }
+            },
+        )
+        .await;
+
+        assert!(result.ok);
+        let saved = captured.lock().unwrap().clone().expect("save_fn was called");
+        // disk へ書き出された候補は mutate 適用後 (a, b の両方を含む)
+        assert_eq!(saved.len(), 2);
+        assert!(saved.iter().any(|id| id == "a"));
+        assert!(saved.iter().any(|id| id == "b"));
     }
 }
