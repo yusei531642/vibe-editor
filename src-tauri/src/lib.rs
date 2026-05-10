@@ -15,10 +15,15 @@ use tauri::Manager;
 #[allow(unused_imports)]
 use tracing::info;
 
-/// Issue #326: tracing を stderr + ファイル両方に書き出す。
-/// ファイルは `~/.vibe-editor/logs/vibe-editor.log` (1 ファイル無回転、tracing-appender::never)。
-/// 設定モーダルからこのファイルを読み返してエラーログを GUI 上で確認できる。
+/// Issue #326 → #643: tracing を stderr + ファイル両方に書き出す。
+/// ファイルは `~/.vibe-editor/logs/vibe-editor.log.YYYY-MM-DD` で **日次回転**する
+/// (tracing-appender 0.2 の `rolling::Builder` + `Rotation::DAILY`)。
+/// 古い世代は appender 自身が `max_log_files()` で GC し、加えて起動時に
+/// 14 日を超える残骸 / 旧 `vibe-editor.log` 単体ファイルも `prune_old_log_files()` で
+/// best-effort 削除する。これで長期稼働時に `vibe-editor.log` が肥大化して
+/// disk full → DoS に繋がる経路を塞ぐ。
 fn init_logging() {
+    use tracing_appender::rolling::{Builder as RollingBuilder, Rotation};
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
     use tracing_subscriber::{fmt, EnvFilter};
@@ -28,30 +33,54 @@ fn init_logging() {
 
     let log_dir = commands::logs::log_dir();
     let _ = std::fs::create_dir_all(&log_dir); // best-effort
-    let log_path = log_dir.join("vibe-editor.log");
+
+    // Issue #643: 起動時 sweep。`max_log_files` は appender が新たに rotate した世代しか
+    // 管理しないため、(1) アプリが長期間起動されなかったケースの旧世代、
+    // (2) Issue #326 時代の無回転 `vibe-editor.log` 単体ファイル、
+    // を best-effort で削除する。失敗は無視 (ログ書き込み自体には影響させない)。
+    prune_old_log_files(&log_dir, LOG_KEEP_DAYS);
+
+    // `team_diagnostics` の `serverLogPath` 用に「ベースファイル」のパスを記録する。
+    // 実ファイルは `vibe-editor.log.YYYY-MM-DD` だが、診断 UI 上はディレクトリ位置の
+    // 目印として `vibe-editor.log` を返す形を維持する (renderer の commands::logs 側も
+    // 同ディレクトリの最新世代を解決して表示するため、リテラルが残っていても矛盾しない)。
+    let base_log_path = log_dir.join("vibe-editor.log");
 
     // Issue #342 Phase 3 (3.12): ログファイル ACL を強制する。
     //   - Unix: 0o600 (既存 `bind_local_listener` / `team-bridge.js` 書き出しと同流儀)
     //   - Windows: ~ 配下の user profile default ACL に依存 (新規 ACE は付けない)
     // tracing-appender が append open する前に空ファイルを先行作成しておくことで、
     // 「ログファイル作成された瞬間」にも ACL が掛かっている状態を保証する。
+    // 日次回転後の新ファイル (`vibe-editor.log.YYYY-MM-DD`) には appender が umask で書き
+    // 出すため、Unix で厳格に縛りたい場合は別途 umask を設定する想定。今回はベースファイル
+    // 位置のみ ACL を強制する (regression 回避)。
     {
         let _ = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
-            .open(&log_path);
+            .open(&base_log_path);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&log_path, std::fs::Permissions::from_mode(0o600));
+            let _ =
+                std::fs::set_permissions(&base_log_path, std::fs::Permissions::from_mode(0o600));
         }
     }
 
     // Issue #342 Phase 3 (3.11): `team_diagnostics` の `serverLogPath` 用に実パスを記録。
     // env var `VIBE_TEAM_LOG_PATH` で override 可能 (server_log_path_for_diagnostics 側で参照)。
-    team_hub::set_server_log_path(log_path);
+    team_hub::set_server_log_path(base_log_path);
 
-    let file_appender = tracing_appender::rolling::never(log_dir, "vibe-editor.log");
+    // Issue #643: 日次回転 + 古い世代を appender 自身が GC。
+    // ファイル名は `vibe-editor.log.YYYY-MM-DD` 形式 (tracing-appender 0.2 の標準形)。
+    // build() 失敗時は best-effort で `rolling::daily()` にフォールバック (max_log_files
+    // GC は失われるが、prune_old_log_files() の起動時 sweep が backstop として残る)。
+    let file_appender = RollingBuilder::new()
+        .rotation(Rotation::DAILY)
+        .filename_prefix("vibe-editor.log")
+        .max_log_files(LOG_KEEP_DAYS as usize)
+        .build(&log_dir)
+        .unwrap_or_else(|_| tracing_appender::rolling::daily(&log_dir, "vibe-editor.log"));
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
     // WorkerGuard はプロセス終了まで保持する必要があるため leak で 'static 化する。
     // 1 度だけの起動コストで、メモリリークも 1 件のみ (許容)。
@@ -65,6 +94,110 @@ fn init_logging() {
         .with(stderr_layer)
         .with(file_layer)
         .init();
+}
+
+/// Issue #643: 保持する日次ログ世代の上限。
+/// `tracing_appender::rolling::Builder::max_log_files()` と
+/// `prune_old_log_files()` の両方で参照する単一の SSOT。
+/// 14 日 = 2 週間分。長期稼働マシンでも 14 ファイル × 数十 MB 程度に収まる想定。
+const LOG_KEEP_DAYS: u32 = 14;
+
+/// Issue #643: ログディレクトリ内の `vibe-editor.log*` のうち、
+/// `keep_days` 日より前に最終更新されたものを best-effort で削除する。
+///
+/// 起動時に 1 度だけ呼ばれる。`max_log_files` だけだと拾えない以下のケースを backstop する:
+///   - アプリを 14 日以上起動しなかった結果として残っている古い世代
+///   - Issue #326 時代の無回転 `vibe-editor.log` 単体ファイル (新形式に移行済み環境用)
+///
+/// 削除対象は `vibe-editor.log` で始まるファイルのみ。サブディレクトリ・別名ファイルは触らない。
+/// I/O エラーはすべて無視 (起動自体を失敗させない)。
+fn prune_old_log_files(log_dir: &std::path::Path, keep_days: u32) {
+    use std::time::{Duration, SystemTime};
+
+    let cutoff = SystemTime::now()
+        .checked_sub(Duration::from_secs(60 * 60 * 24 * keep_days as u64))
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+
+    let Ok(entries) = std::fs::read_dir(log_dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_file() {
+            continue;
+        }
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        // 我々が書いたログファイル以外は触らない (誤削除防止)。
+        if !name_str.starts_with("vibe-editor.log") {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
+        if modified < cutoff {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+#[cfg(test)]
+mod log_prune_tests {
+    use super::{prune_old_log_files, LOG_KEEP_DAYS};
+    use std::fs;
+    use std::time::{Duration, SystemTime};
+
+    /// Issue #643: 14 日より古い `vibe-editor.log*` は削除され、
+    /// 新しいファイルや無関係ファイルは残ることを確認する。
+    #[test]
+    fn prunes_only_old_vibe_editor_log_files() {
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        let old_dated = dir.path().join("vibe-editor.log.2020-01-01");
+        let old_legacy = dir.path().join("vibe-editor.log");
+        let recent_dated = dir.path().join("vibe-editor.log.2099-12-31");
+        let unrelated = dir.path().join("other.log");
+        let unrelated_old = dir.path().join("readme.txt");
+
+        for f in [
+            &old_dated,
+            &old_legacy,
+            &recent_dated,
+            &unrelated,
+            &unrelated_old,
+        ] {
+            fs::write(f, b"x").unwrap();
+        }
+
+        // 古い 2 ファイルと「無関係だが古い」ファイルの mtime を 30 日前に倒す。
+        let way_old = SystemTime::now() - Duration::from_secs(60 * 60 * 24 * 30);
+        for f in [&old_dated, &old_legacy, &unrelated_old] {
+            let file = fs::File::options().write(true).open(f).unwrap();
+            file.set_modified(way_old).unwrap();
+        }
+
+        prune_old_log_files(dir.path(), LOG_KEEP_DAYS);
+
+        assert!(!old_dated.exists(), "old dated log should be pruned");
+        assert!(!old_legacy.exists(), "legacy single log should be pruned");
+        assert!(recent_dated.exists(), "recent log must survive");
+        assert!(unrelated.exists(), "non-log file must survive");
+        assert!(
+            unrelated_old.exists(),
+            "files outside vibe-editor.log* prefix must not be touched"
+        );
+    }
+
+    /// 存在しないディレクトリを渡しても panic しない (起動を失敗させない契約)。
+    #[test]
+    fn prune_is_noop_on_missing_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing = dir.path().join("does-not-exist");
+        prune_old_log_files(&missing, LOG_KEEP_DAYS);
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
