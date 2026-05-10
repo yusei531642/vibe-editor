@@ -55,6 +55,9 @@ rand = "0.8"
 encoding_rs = "0.8"
 # Issue #119: open 時のコンテンツハッシュで「同サイズ・1秒以内」の外部変更を検出する用
 sha2 = "0.11"
+# Issue #592: ファイルツリー右クリック削除を OS のゴミ箱経由 (Windows: Recycle Bin /
+# macOS: Trash / Linux: XDG ゴミ箱) で行うため。完全削除は std::fs に倒す。
+trash = "5"
 
 # Issue #603 (Security): team-hub の handshake で peer credential (UID / SID) を検証する。
 # token 盗難 (env 経由で /proc/<pid>/environ から漏洩) を「同 user 内のローカルプロセス」
