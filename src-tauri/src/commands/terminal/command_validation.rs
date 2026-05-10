@@ -8,11 +8,11 @@ use std::collections::HashSet;
 /// Issue #285: renderer から渡される terminal id を検証。
 /// `terminal:data:{id}` 等のイベント名に乗るので、衝突や偽装防止のため
 /// `[A-Za-z0-9_-]{1,64}` のみ許可する (UUID v4 は 36 chars で収まる)。
+///
+/// Issue #624: validation 規約は `commands::validation::is_valid_id_segment` に集約済み。
+/// 本関数は既存 caller との互換維持のための薄い wrapper として残す (規約の二重定義を解消)。
 pub fn is_valid_terminal_id(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= 64
-        && s.chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    crate::commands::validation::is_valid_terminal_id(s)
 }
 
 /// Issue #607: Claude `--resume <id>` に渡す session id を検証する (defense-in-depth)。

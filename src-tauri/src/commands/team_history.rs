@@ -204,8 +204,31 @@ async fn hydrate_orchestration_summary(entry: &mut TeamHistoryEntry) {
     }
 }
 
+/// Issue #624 (Security): 単一 entry の serialized size 上限。1 MiB を超える entry は
+/// `team_history_save` / `team_history_save_batch` で reject し、renderer から悪意ある巨大
+/// JSON で disk full まで埋める DoS 経路を塞ぐ。`team-history.json` 全体ではなく entry 単位で
+/// 弾くことで、merge_entry 後の per-project cap (`#46`) と二段防御になる。
+fn validate_entry_size(entry: &TeamHistoryEntry) -> Result<(), String> {
+    let bytes = match serde_json::to_vec(entry) {
+        Ok(b) => b,
+        Err(e) => return Err(format!("entry not serializable: {e}")),
+    };
+    crate::commands::validation::assert_max_size(
+        bytes.len(),
+        crate::commands::validation::MAX_PERSIST_PAYLOAD,
+    )
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn team_history_save(mut entry: TeamHistoryEntry) -> MutationResult {
+    // Issue #624: DoS 防御 — 1 MiB 超の entry は merge 前に reject する。
+    if let Err(e) = validate_entry_size(&entry) {
+        return MutationResult {
+            ok: false,
+            error: Some(e),
+        };
+    }
     hydrate_orchestration_summary(&mut entry).await;
     let _g = LOCK.lock().await;
     let mut cache = CACHE.lock().await;
@@ -236,6 +259,15 @@ pub async fn team_history_save_batch(entries: Vec<TeamHistoryEntry>) -> Mutation
             ok: true,
             error: None,
         };
+    }
+    // Issue #624: 各 entry を merge 前に validate (1 件でも巨大なら全体 reject)。
+    for entry in &entries {
+        if let Err(e) = validate_entry_size(entry) {
+            return MutationResult {
+                ok: false,
+                error: Some(e),
+            };
+        }
     }
     let _g = LOCK.lock().await;
     let mut cache = CACHE.lock().await;
