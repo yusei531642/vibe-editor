@@ -108,9 +108,15 @@ export function useTerminalTabsPersistence(
         restoringRef.current = true;
         const numericByPersistedId = new Map<string, number>();
         for (const p of slot.tabs) {
-          const newId = addTerminalTab({
+          // Issue #702: Rust 側 `terminal_tabs_load` が jsonl 不在を検知すると
+          // sessionId を null に倒して返す。null をそのまま `resumeSessionId` に
+          // 渡すと `addTerminalTab` 内で `freshSessionId = false` となり、
+          // `--resume null` / 新規 jsonl 未作成 経路で claude が起動して
+          // `No conversation found with session ID:` で exitCode=1 になる。
+          // null のときは `resumeSessionId` プロパティそのものを省略して、
+          // 新規タブ作成と同じ「UUID 再採番 → `--session-id <new-uuid>`」経路に倒す。
+          const addOpts: AddTerminalTabOptions = {
             agent: p.kind,
-            resumeSessionId: p.sessionId,
             role: p.role ?? null,
             teamId: p.teamId ?? null,
             agentId: p.agentId ?? undefined,
@@ -122,7 +128,11 @@ export function useTerminalTabsPersistence(
             // 立ち上がる事故を防ぐ)。
             initialCols: isValidPtyDim(p.cols) ? p.cols : null,
             initialRows: isValidPtyDim(p.rows) ? p.rows : null
-          });
+          };
+          if (p.sessionId !== null) {
+            addOpts.resumeSessionId = p.sessionId;
+          }
+          const newId = addTerminalTab(addOpts);
           if (newId !== null) {
             numericByPersistedId.set(p.tabId, newId);
             sizeMapRef.current.set(newId, { cols: p.cols, rows: p.rows });
