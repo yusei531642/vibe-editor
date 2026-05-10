@@ -145,6 +145,11 @@ fn filter_resume_args_in_place(args: Vec<String>) -> Vec<String> {
 ///   3. 各チャンクを順に書き込み、最後に \r で確定送信。
 ///
 /// チームメッセージの inject() と違って banner は付けない (Codex に対する初手のユーザー指示として届く)。
+///
+/// Issue #620: `SessionHandle::write` は内部で `std::sync::Mutex::lock` + 同期 `write_all`/`flush`
+/// なので、tokio multi-thread runtime の async task 内から直接呼ぶと ConPTY back-pressure 時に
+/// worker thread を 1 本占有してしまう。`team_hub::inject::inject_once` と同じく
+/// `tokio::task::spawn_blocking` で blocking pool に逃がし、async runtime を解放する。
 async fn inject_codex_prompt_to_pty(
     registry: Arc<crate::pty::SessionRegistry>,
     term_id: String,
@@ -155,37 +160,74 @@ async fn inject_codex_prompt_to_pty(
     let Some(session) = registry.get(&term_id) else {
         return;
     };
-    // Issue #153: 注入中はユーザーの xterm 入力 (terminal_write) を抑止する。
+    // Issue #153 / #619: 注入中はユーザーの xterm 入力 (terminal_write) を抑止する。
+    // RAII guard (`begin_injecting`) を使うことで、関数を抜けるあらゆる経路 (early return /
+    // panic / `?` 伝播 / 正常終了) で `injecting` フラグが必ず false に戻る。
     // build_chunks は banner 込みで分割するが、Codex 注入では banner 不要なので空文字を渡す。
-    session.set_injecting(true);
-    // 関数を抜けるあらゆる経路で必ず injecting を下ろすため、内部処理を closure で wrap せず
-    // 早期 return ごとに明示 false に戻す。
+    let _inject_guard = session.begin_injecting();
     let chunks = build_chunks("", &instructions);
     if chunks.is_empty() {
-        session.set_injecting(false);
         return;
     }
     let mut iter = chunks.into_iter();
     if let Some(first) = iter.next() {
-        if session.write(&first).is_err() {
-            session.set_injecting(false);
-            return;
+        // Issue #620: spawn_blocking で同期 write を blocking pool に逃がす。
+        // Issue #619: 早期 return しても `_inject_guard` の Drop で injecting=false に戻る。
+        let s = session.clone();
+        match tokio::task::spawn_blocking(move || s.write(&first)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    "[terminal] codex prompt write(first) failed for {term_id}: {e}"
+                );
+                return;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[terminal] codex prompt spawn_blocking(first) failed for {term_id}: {e}"
+                );
+                return;
+            }
         }
     }
     for chunk in iter {
         sleep(Duration::from_millis(15)).await;
         if registry.get(&term_id).is_none() {
-            session.set_injecting(false);
             return;
         }
-        if session.write(&chunk).is_err() {
-            session.set_injecting(false);
-            return;
+        // Issue #620: 各チャンクの write も spawn_blocking 経由。
+        // Issue #619: 早期 return / panic でも guard Drop が injecting=false に戻す。
+        let s = session.clone();
+        match tokio::task::spawn_blocking(move || s.write(&chunk)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    "[terminal] codex prompt write(chunk) failed for {term_id}: {e}"
+                );
+                return;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[terminal] codex prompt spawn_blocking(chunk) failed for {term_id}: {e}"
+                );
+                return;
+            }
         }
     }
     sleep(Duration::from_millis(15)).await;
-    let _ = session.write(b"\r");
-    session.set_injecting(false);
+    // Issue #620: 末尾の確定 `\r` も spawn_blocking 経由で送る。
+    let s = session.clone();
+    match tokio::task::spawn_blocking(move || s.write(b"\r")).await {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            tracing::warn!("[terminal] codex prompt write(\\r) failed for {term_id}: {e}");
+        }
+        Err(e) => {
+            tracing::warn!(
+                "[terminal] codex prompt spawn_blocking(\\r) failed for {term_id}: {e}"
+            );
+        }
+    }
     tracing::info!(
         "[terminal] codex prompt injected into pty {term_id} ({} bytes)",
         instructions.len()
@@ -457,7 +499,9 @@ pub async fn terminal_create(
             if let Some(instr) = codex_instructions_for_inject {
                 let registry = state.pty_registry.clone();
                 let term_id = id.clone();
-                tauri::async_runtime::spawn(async move {
+                // Issue #630: tracker.spawn() で計上することで、CloseRequested handler が
+                // wait_idle(3s) で in-flight 完了を待ってから kill_all() できるようにする。
+                state.pty_inflight.spawn(async move {
                     inject_codex_prompt_to_pty(registry, term_id, instr).await;
                 });
             }

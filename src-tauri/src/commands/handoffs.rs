@@ -280,21 +280,39 @@ async fn write_handoff(
 }
 
 #[tauri::command]
-pub async fn handoffs_create(req: HandoffCreateRequest) -> HandoffCreateResult {
+pub async fn handoffs_create(
+    state: tauri::State<'_, crate::state::AppState>,
+    req: HandoffCreateRequest,
+) -> Result<HandoffCreateResult, String> {
     if req.project_root.trim().is_empty() {
-        return HandoffCreateResult {
+        return Ok(HandoffCreateResult {
             ok: false,
             error: Some("projectRoot is required".into()),
             handoff: None,
-        };
+        });
     }
-    let dir = handoff_dir(&req.project_root, req.team_id.as_deref());
-    if let Err(e) = ensure_private_handoff_dir(&dir).await {
-        return HandoffCreateResult {
+    // Issue #606 (Security): renderer 由来の project_root が active project_root と一致するか検証。
+    // 不一致なら handoff body (= 引き継ぎ context / 機微テキスト) の cross-project write を阻止。
+    // 既存 caller の signature を壊さないため、Authz reject は `Ok(error 入り result)` で返す
+    // (Tauri 2 の `tauri::State<'_>` async command は戻り値が `Result<T, E>` であることを要求するため
+    //  外側を `Result<HandoffCreateResult, String>` に格上げするが、reject 経路は内部 error フィールド)。
+    if let Err(e) =
+        crate::commands::authz::assert_active_project_root(&state.project_root, &req.project_root)
+            .await
+    {
+        return Ok(HandoffCreateResult {
             ok: false,
             error: Some(e.to_string()),
             handoff: None,
-        };
+        });
+    }
+    let dir = handoff_dir(&req.project_root, req.team_id.as_deref());
+    if let Err(e) = ensure_private_handoff_dir(&dir).await {
+        return Ok(HandoffCreateResult {
+            ok: false,
+            error: Some(e.to_string()),
+            handoff: None,
+        });
     }
     let now = Utc::now().to_rfc3339();
     let short_uuid = Uuid::new_v4().to_string()[..8].to_string();
@@ -323,7 +341,7 @@ pub async fn handoffs_create(req: HandoffCreateRequest) -> HandoffCreateResult {
         markdown_path: markdown_path.to_string_lossy().into_owned(),
         content: req.content,
     };
-    match write_handoff(&handoff, &json_path, &markdown_path).await {
+    Ok(match write_handoff(&handoff, &json_path, &markdown_path).await {
         Ok(()) => HandoffCreateResult {
             ok: true,
             handoff: Some(handoff),
@@ -334,18 +352,28 @@ pub async fn handoffs_create(req: HandoffCreateRequest) -> HandoffCreateResult {
             error: Some(e.to_string()),
             handoff: None,
         },
-    }
+    })
 }
 
 #[tauri::command]
 pub async fn handoffs_list(
+    state: tauri::State<'_, crate::state::AppState>,
     project_root: String,
     team_id: Option<String>,
-) -> Vec<HandoffCheckpoint> {
+) -> Result<Vec<HandoffCheckpoint>, String> {
+    // Issue #606 (Security): cross-project read を阻止するため active project_root 一致を検証。
+    // reject 時は空 Vec を `Ok` で返し既存 caller (renderer) の挙動を維持する
+    // (Tauri 2 の async command + ref input は戻り値 `Result<T, E>` 必須のため外側を Result 化)。
+    if crate::commands::authz::assert_active_project_root(&state.project_root, &project_root)
+        .await
+        .is_err()
+    {
+        return Ok(Vec::new());
+    }
     let dir = handoff_dir(&project_root, team_id.as_deref());
     let mut out = Vec::new();
     let Ok(mut rd) = fs::read_dir(&dir).await else {
-        return out;
+        return Ok(out);
     };
     while let Ok(Some(entry)) = rd.next_entry().await {
         let path = entry.path();
@@ -361,30 +389,55 @@ pub async fn handoffs_list(
         out.push(handoff);
     }
     out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    out
+    Ok(out)
 }
 
 #[tauri::command]
 pub async fn handoffs_read(
+    state: tauri::State<'_, crate::state::AppState>,
     project_root: String,
     team_id: Option<String>,
     handoff_id: String,
-) -> Option<HandoffCheckpoint> {
+) -> Result<Option<HandoffCheckpoint>, String> {
+    // Issue #606 (Security): cross-project read を阻止。reject 時は `Ok(None)` で返し
+    // 既存の「該当なし」挙動を維持する (Tauri 2 の async command 制約のため Result 外殻化)。
+    if crate::commands::authz::assert_active_project_root(&state.project_root, &project_root)
+        .await
+        .is_err()
+    {
+        return Ok(None);
+    }
     let id = safe_segment(&handoff_id);
     let path = handoff_dir(&project_root, team_id.as_deref()).join(format!("{id}.json"));
-    let bytes = fs::read(&path).await.ok()?;
-    serde_json::from_slice::<HandoffCheckpoint>(&bytes).ok()
+    let Ok(bytes) = fs::read(&path).await else {
+        return Ok(None);
+    };
+    Ok(serde_json::from_slice::<HandoffCheckpoint>(&bytes).ok())
 }
 
 #[tauri::command]
 pub async fn handoffs_update_status(
+    state: tauri::State<'_, crate::state::AppState>,
     project_root: String,
     team_id: Option<String>,
     handoff_id: String,
     status: String,
     to_agent_id: Option<String>,
-) -> HandoffMutationResult {
-    match update_handoff_status_file(
+) -> Result<HandoffMutationResult, String> {
+    // Issue #606 (Security): cross-project write を阻止。Authz reject は内部 error フィールド
+    // で表現し、外側の `Result` は Tauri 2 の async command 制約 (ref input → Result 必須) を満たす
+    // ためのもの。renderer 側は従来通り `result.ok` で分岐する。
+    if let Err(e) =
+        crate::commands::authz::assert_active_project_root(&state.project_root, &project_root)
+            .await
+    {
+        return Ok(HandoffMutationResult {
+            ok: false,
+            error: Some(e.to_string()),
+            handoff: None,
+        });
+    }
+    Ok(match update_handoff_status_file(
         &project_root,
         team_id.as_deref(),
         &handoff_id,
@@ -403,7 +456,7 @@ pub async fn handoffs_update_status(
             error: Some(e.to_string()),
             handoff: None,
         },
-    }
+    })
 }
 
 pub async fn update_handoff_status_file(

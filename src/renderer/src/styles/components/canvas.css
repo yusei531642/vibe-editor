@@ -1166,7 +1166,38 @@
  * Issue #521: HUD 左端の Canvas 全体サマリ (active / blocked / stale / completed)。
  * 既存 view ボタン群と並ぶピル型バッジ。0 件のときは render 側で非表示。
  * 視認性を保つため数値を強調、ラベルは muted 色で添える。
+ *
+ * Issue #586: AI エージェントのステータス表示は view 切替/zoom 等の操作系とは
+ * 役割が異なるため、独立した glass pill (`.tc__hud-status`) として `.tc__hud` の
+ * 上に縦積みで配置する。.tc__hud と同じ bottom-center anchor で揃える。
  * ---------- */
+.tc__hud-status {
+  position: absolute;
+  bottom: 70px; /* .tc__hud (bottom: 22px) + ボタン高 ~36px + 余白 12px */
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface-glass, rgba(20, 20, 19, 0.62));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 8px;
+  box-shadow: var(--shadow-md);
+  z-index: 20;
+  font-size: 11.5px;
+  max-width: calc(100vw - 32px);
+  overflow-x: auto;
+  scrollbar-width: thin;
+  pointer-events: auto;
+}
+.tc__hud-status > .tc__hud-summary-pill {
+  flex-shrink: 0;
+}
 .tc__hud-summary {
   display: flex;
   align-items: center;

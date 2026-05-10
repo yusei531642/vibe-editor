@@ -77,6 +77,17 @@ pub async fn team_dismiss(
             "[team_dismiss] released {released_lock_count} file lock(s) held by '{agent_id}'"
         );
     }
+    // Issue #637: dismiss された (team_id, agent_id) の role binding を取り除く。
+    // 残しておくと将来同 agent_id を別 role で再 recruit したい時に
+    // role mismatch で handshake が拒否される。team_id 次元で分離されているので
+    // 別 team の binding には影響しない。
+    if hub.remove_agent_role_binding(&ctx.team_id, &agent_id).await {
+        tracing::debug!(
+            "[team_dismiss] cleared role binding for team='{}' agent='{}'",
+            ctx.team_id,
+            agent_id
+        );
+    }
     let dismissed_at = Utc::now().to_rfc3339();
     Ok(json!({
         "success": true,

@@ -327,11 +327,15 @@ pub async fn team_report(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Resu
 
     // active leader の terminal に 1 行サマリを inject。失敗しても報告自体は state に保存済みなので
     // tool 全体は成功扱いにする (delivery 失敗は `inject_failed` 配列で caller に返す)。
+    // Issue #630: window CloseRequested handler が in-flight inject の自然完了を待てるよう
+    // tracker.track_async() で計上する。
     let terminal_summary = format_terminal_summary(&snapshot);
     let mut delivered_to: Vec<String> = Vec::new();
     let mut inject_failed: Vec<Value> = Vec::new();
     for leader_aid in &leader_agent_ids {
-        match inject::inject(hub.registry.clone(), leader_aid, &ctx.role, &terminal_summary).await {
+        let inject_fut =
+            inject::inject(hub.registry.clone(), leader_aid, &ctx.role, &terminal_summary);
+        match hub.inflight.track_async(inject_fut).await {
             Ok(()) => delivered_to.push(leader_aid.clone()),
             Err(e) => {
                 tracing::warn!(

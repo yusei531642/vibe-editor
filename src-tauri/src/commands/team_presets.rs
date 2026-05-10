@@ -173,6 +173,29 @@ pub async fn team_presets_save(mut preset: TeamPreset) -> PresetMutationResult {
             error: Some("invalid preset id".to_string()),
         };
     }
+    // Issue #624 (Security): 1 MiB 超の preset 全体は disk full / DoS 経路として reject。
+    // role 数や instructions サイズの組み合わせで肥大化したケースを serialize 直前で塞ぐ。
+    match serde_json::to_vec(&preset) {
+        Ok(bytes) => {
+            if let Err(e) = crate::commands::validation::assert_max_size(
+                bytes.len(),
+                crate::commands::validation::MAX_PERSIST_PAYLOAD,
+            ) {
+                return PresetMutationResult {
+                    ok: false,
+                    preset: None,
+                    error: Some(e.to_string()),
+                };
+            }
+        }
+        Err(e) => {
+            return PresetMutationResult {
+                ok: false,
+                preset: None,
+                error: Some(format!("preset not serializable: {e}")),
+            };
+        }
+    }
     if preset.name.trim().is_empty() {
         return PresetMutationResult {
             ok: false,

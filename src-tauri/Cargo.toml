@@ -59,6 +59,22 @@ sha2 = "0.11"
 # macOS: Trash / Linux: XDG ゴミ箱) で行うため。完全削除は std::fs に倒す。
 trash = "5"
 
+# Issue #603 (Security): team-hub の handshake で peer credential (UID / SID) を検証する。
+# token 盗難 (env 経由で /proc/<pid>/environ から漏洩) を「同 user 内のローカルプロセス」
+# 越境に閉じ込めるため、Unix では SO_PEERCRED / getpeereid、Windows では
+# GetNamedPipeClientProcessId + OpenProcessToken + GetTokenInformation で peer SID を比較する。
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["socket", "user"] }
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_Pipes",
+    "Win32_System_Threading",
+    "Win32_Security",
+] }
+
 [dev-dependencies]
 # Issue #494: integration test 用に tempfile を導入。fixture 用の tempdir を作成し、
 # `~/.vibe-editor/settings.json` / `~/.claude/projects/<encoded>/*.jsonl` /

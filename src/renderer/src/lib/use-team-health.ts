@@ -10,8 +10,12 @@
  *     活性 poll を持ち、追加 caller は同じ Map に subscribe するだけのレジストリパターン。
  *   - Tab が非フォーカスの間は poll を一時停止する (CPU / IPC コスト削減)。
  *   - teamId が null の間は何もしない。
+ *
+ * Issue #615: dual preset (`dual-claude-claude` 等) で 2 つの team が同時に active な場合、
+ * HUD / TeamDashboard は両方の team を集約する必要がある。`useTeamHealthMulti` は
+ * 任意の teamId 配列を購読し、merged な byAgentId と per-team byTeamId を返す。
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { TeamDiagnosticsMemberRow } from '../../../types/shared';
 
 /** poll 間隔。CPU 負荷と "agent が止まったとき何秒以内に気づくか" のバランス。 */
@@ -138,4 +142,118 @@ export function useTeamHealth(
     byAgentId: snapshot?.byAgentId ?? {},
     fetchedAt: snapshot?.fetchedAt ?? null
   };
+}
+
+/**
+ * 複数 teamId の diagnostics を同時購読する。Issue #615。
+ *
+ * dual / multi preset を canvas に展開した際、HUD は **全 active team の dead/stale**
+ * を 1 個の数字に集約する必要がある。本 hook は `useTeamHealth` のレジストリ機構を
+ * 各 teamId ごとに再利用し、merged な `byAgentId` と per-team `byTeamId` を返す。
+ *
+ * - `byAgentId`: agentId はチームを跨いで衝突しない (Hub 側で uuid 採番) ため、
+ *   全 team を 1 つの map にマージしても安全。HUD の dead 数集計のように
+ *   「agent 単位で 1 回だけ評価したい」用途で使う。
+ * - `byTeamId`: TeamDashboard など team ごとに分けて表示したい用途のために、
+ *   teamId → byAgentId の per-team snapshot も保持する。
+ *
+ * teamIds が空配列なら hook は no-op (空 map を返す)。teamIds の順序が異なっても
+ * 同一の集合なら同じ snapshot を返すよう、内部では Set で重複除去する。
+ */
+export function useTeamHealthMulti(teamIds: readonly string[]): {
+  byAgentId: Record<string, TeamDiagnosticsMemberRow>;
+  byTeamId: Record<string, Record<string, TeamDiagnosticsMemberRow>>;
+  fetchedAt: number | null;
+} {
+  // teamIds 配列の参照ゆれで useEffect が頻繁に再起動しないよう、ソート済みの
+  // 安定リストを派生させ、その JSON 表現を effect 依存キーに使う (順序非依存・重複除去)。
+  const stableTeamIds = useMemo<string[]>(() => {
+    const uniq = Array.from(new Set(teamIds.filter((id) => typeof id === 'string' && id.length > 0)));
+    uniq.sort();
+    return uniq;
+  }, [teamIds]);
+  const stableKey = useMemo(() => JSON.stringify(stableTeamIds), [stableTeamIds]);
+
+  const [snapshots, setSnapshots] = useState<Record<string, Snapshot | null>>({});
+
+  useEffect(() => {
+    if (stableTeamIds.length === 0) {
+      setSnapshots({});
+      return;
+    }
+    // 各 teamId ごとに registry に subscribe する。1 effect 内で複数 entry を持つ。
+    const cleanups: Array<() => void> = [];
+    for (const teamId of stableTeamIds) {
+      let entry = registry.get(teamId);
+      if (!entry) {
+        entry = {
+          refCount: 0,
+          snapshot: null,
+          listeners: new Set(),
+          timer: null,
+          inflight: false
+        };
+        registry.set(teamId, entry);
+      }
+      entry.refCount += 1;
+      const listener = (snap: Snapshot | null) => {
+        setSnapshots((prev) => {
+          if (prev[teamId] === snap) return prev;
+          return { ...prev, [teamId]: snap };
+        });
+      };
+      entry.listeners.add(listener);
+      // 既存スナップショットがあれば即座に反映 (poll を待たない)。
+      setSnapshots((prev) => ({ ...prev, [teamId]: entry?.snapshot ?? null }));
+      ensurePoll(teamId, entry);
+
+      const onVisibility = () => {
+        const e = registry.get(teamId);
+        if (!e) return;
+        if (document.hidden) {
+          stopPoll(e);
+        } else if (e.refCount > 0) {
+          ensurePoll(teamId, e);
+        }
+      };
+      document.addEventListener('visibilitychange', onVisibility);
+
+      cleanups.push(() => {
+        document.removeEventListener('visibilitychange', onVisibility);
+        const e = registry.get(teamId);
+        if (!e) return;
+        e.listeners.delete(listener);
+        e.refCount -= 1;
+        if (e.refCount <= 0) {
+          stopPoll(e);
+          registry.delete(teamId);
+        }
+      });
+    }
+    return () => {
+      for (const fn of cleanups) fn();
+    };
+    // stableKey は stableTeamIds と完全に対応する派生値。eslint への意思表示として両方積む。
+  }, [stableKey, stableTeamIds]);
+
+  return useMemo(() => {
+    const byAgentId: Record<string, TeamDiagnosticsMemberRow> = {};
+    const byTeamId: Record<string, Record<string, TeamDiagnosticsMemberRow>> = {};
+    let latestFetchedAt: number | null = null;
+    for (const teamId of stableTeamIds) {
+      const snap = snapshots[teamId];
+      if (!snap) {
+        byTeamId[teamId] = {};
+        continue;
+      }
+      byTeamId[teamId] = snap.byAgentId;
+      for (const [agentId, row] of Object.entries(snap.byAgentId)) {
+        byAgentId[agentId] = row;
+      }
+      if (latestFetchedAt === null || snap.fetchedAt > latestFetchedAt) {
+        latestFetchedAt = snap.fetchedAt;
+      }
+    }
+    return { byAgentId, byTeamId, fetchedAt: latestFetchedAt };
+  }, [snapshots, stableTeamIds]);
 }

@@ -41,7 +41,12 @@ pub(crate) struct HubState {
     pub(crate) pending_recruits: HashMap<String, PendingRecruit>,
     /// Issue #183: agent_id を初回 handshake で確定した role に bind する。
     /// 別プロセスが同 agent_id で接続してきても異なる role を主張できなくする。
-    pub(crate) agent_role_bindings: HashMap<String, String>,
+    ///
+    /// Issue #637: key を `(team_id, agent_id)` の tuple に拡張。同一 `agent_id` が
+    /// 別 team で再 handshake された場合に古い team の binding を上書きしないよう、
+    /// team 次元を持たせる (cross-team で role 上書きの race を遮断)。
+    /// in-memory only (Hub 再起動で全 clear)、永続化レイヤーは無いので migration 不要。
+    pub(crate) agent_role_bindings: HashMap<(String, String), String>,
     /// renderer から同期された role profile 一覧 (team_list_role_profiles で返す)
     pub(crate) role_profile_summary: Vec<RoleProfileSummary>,
     /// Leader が team_create_role / team_recruit(role_definition=...) で動的に生成した
@@ -67,6 +72,11 @@ pub(crate) struct HubState {
     /// permit 数は `VIBE_TEAM_RECRUIT_CONCURRENCY` 環境変数で `1..=RECRUIT_MAX_CONCURRENCY` の
     /// 範囲に tunable (既定 `RECRUIT_DEFAULT_CONCURRENCY`)。team 単位で lazy 初期化される。
     pub(crate) recruit_semaphores: HashMap<String, Arc<Semaphore>>,
+    /// Issue #634: `team_status` の rate limit 用、agent_id → 最終呼び出し Instant。
+    /// `MIN_STATUS_INTERVAL` 以内の連続呼び出しは silent reject し、
+    /// `last_status_at` / `last_seen_at` も更新しない (autoStale 偽装防止)。
+    /// in-memory only (Hub 再起動で clear)。
+    pub(crate) last_status_call_at: HashMap<String, std::time::Instant>,
 }
 
 /// Issue #342 Phase 3 (3.1): `team_diagnostics` で返す診断 timestamp / counter。
@@ -588,6 +598,15 @@ pub struct CallContext {
 
 impl TeamHub {
     pub fn new(registry: Arc<SessionRegistry>) -> Self {
+        Self::with_inflight(registry, crate::pty::InFlightTracker::new())
+    }
+
+    /// Issue #630: AppState 側で生成した in-flight tracker を共有する用。
+    /// `AppState::new()` から呼ばれる。
+    pub fn with_inflight(
+        registry: Arc<SessionRegistry>,
+        inflight: Arc<crate::pty::InFlightTracker>,
+    ) -> Self {
         Self {
             registry,
             state: Arc::new(Mutex::new(HubState {
@@ -603,8 +622,10 @@ impl TeamHub {
                 member_diagnostics: HashMap::new(),
                 file_locks: HashMap::new(),
                 recruit_semaphores: HashMap::new(),
+                last_status_call_at: HashMap::new(),
             })),
             app_handle: Arc::new(Mutex::new(None)),
+            inflight,
         }
     }
 
@@ -648,6 +669,17 @@ impl TeamHub {
     pub async fn release_all_file_locks_for_agent(&self, team_id: &str, agent_id: &str) -> u32 {
         let mut s = self.state.lock().await;
         crate::team_hub::file_locks::release_all_for_agent(&mut s.file_locks, team_id, agent_id)
+    }
+
+    /// Issue #637: dismiss された (team_id, agent_id) の role binding を取り除く。
+    /// 取り除かないと「dismiss 済 worker の role 文字列」がメモリに残り続け、
+    /// 同 agent_id を別 role で再 recruit したい時に role mismatch で接続拒否される。
+    /// 別 team の binding は team_id 次元で分離されているので影響しない。
+    pub async fn remove_agent_role_binding(&self, team_id: &str, agent_id: &str) -> bool {
+        let mut s = self.state.lock().await;
+        s.agent_role_bindings
+            .remove(&(team_id.to_string(), agent_id.to_string()))
+            .is_some()
     }
 
     /// `paths` の現在の lock 保持者一覧 (assign_task の競合検知用、agent_id_filter で自分宛除外可)。
@@ -826,8 +858,11 @@ impl TeamHub {
     ///
     /// Issue #342 Phase 2: `team_id` も照合対象に追加。pending の `team_id` と
     /// handshake で送られてきた `team_id` が一致しない場合は false を返して接続を切る
-    /// (cross-team 偽 handshake / 旧 context 残骸の混線を防ぐ)。`agent_role_bindings`
-    /// の構造拡張は行わない (registry が `(agent_id, team_id)` の SSOT のため)。
+    /// (cross-team 偽 handshake / 旧 context 残骸の混線を防ぐ)。
+    ///
+    /// Issue #637: `agent_role_bindings` の key を `(team_id, agent_id)` tuple に拡張。
+    /// 同 agent_id が別 team で handshake してきても old team の binding を上書きしない
+    /// (cross-team race の遮断)。lookup / insert は team_id ペアで行う。
     pub async fn resolve_pending_recruit(
         &self,
         agent_id: &str,
@@ -860,11 +895,15 @@ impl TeamHub {
                 role_profile_id: role_profile_id.to_string(),
             });
         }
-        // 既に bind 済みの agent_id なら role 一致を強制
-        if let Some(bound) = s.agent_role_bindings.get(agent_id) {
+        // 既に bind 済みの (team_id, agent_id) なら role 一致を強制。
+        // Issue #637: team_id 次元で分離しているので、別 team の同 agent_id binding は
+        // この lookup に引っかからず、上書きで old team の role が消えることもない。
+        let binding_key = (team_id.to_string(), agent_id.to_string());
+        if let Some(bound) = s.agent_role_bindings.get(&binding_key) {
             if bound != role_profile_id {
                 tracing::warn!(
-                    "[teamhub] role mismatch on handshake (rebind) agent={} bound={} got={}",
+                    "[teamhub] role mismatch on handshake (rebind) team={} agent={} bound={} got={}",
+                    team_id,
                     agent_id,
                     bound,
                     role_profile_id
@@ -874,7 +913,7 @@ impl TeamHub {
         } else {
             // 初回 handshake で bind
             s.agent_role_bindings
-                .insert(agent_id.to_string(), role_profile_id.to_string());
+                .insert(binding_key, role_profile_id.to_string());
         }
         // Issue #342 Phase 3 (3.3): 初回 handshake / 再接続 handshake いずれも last_handshake_at と
         // last_seen_at を更新する。recruit 経路を通らずに直接 handshake してきた場合 (= 旧 context
@@ -1199,6 +1238,15 @@ impl TeamHub {
                             continue;
                         }
                     };
+                    // Issue #603 (Security): peer UID 検証 — token 一致だけでは認可しない。
+                    // 同 user の任意プロセスからの token 盗み見 + 接続を別 user 越境からは塞ぐ。
+                    if let Err(e) = crate::team_hub::check_peer_is_self_unix(&sock) {
+                        tracing::warn!(
+                            "[teamhub] peer credential check failed, dropping connection: {e:#}"
+                        );
+                        drop(sock);
+                        continue;
+                    }
                     let permit = match sem.clone().try_acquire_owned() {
                         Ok(p) => p,
                         Err(_) => {
@@ -1249,6 +1297,15 @@ impl TeamHub {
                             break;
                         }
                     };
+                    // Issue #603 (Security): peer SID 検証 — token 一致だけでは認可しない。
+                    // 同 user の任意プロセスからの token 盗み見 + 接続を別 user 越境からは塞ぐ。
+                    if let Err(e) = crate::team_hub::check_peer_is_self_windows(&connected) {
+                        tracing::warn!(
+                            "[teamhub] peer credential check failed, dropping connection: {e:#}"
+                        );
+                        drop(connected);
+                        continue;
+                    }
                     let Ok(permit) = sem.clone().try_acquire_owned() else {
                         tracing::warn!(
                             "[teamhub] rejecting connection: client limit ({}) reached",
@@ -1609,6 +1666,111 @@ async fn load_persisted_dynamic_for_team(
         }
     }
     out
+}
+
+/// Issue #637: `agent_role_bindings` の `(team_id, agent_id)` 複合キー化を検証する単体テスト。
+/// cross-team で同 agent_id が違う role で bind しても old team の binding が保持されること、
+/// dismiss で当該 (team_id, agent_id) のみ消えて other team の binding が残ることを検証する。
+#[cfg(test)]
+mod role_binding_team_id_tests {
+    use super::TeamHub;
+    use crate::pty::SessionRegistry;
+    use std::sync::Arc;
+
+    fn make_hub() -> TeamHub {
+        TeamHub::new(Arc::new(SessionRegistry::new()))
+    }
+
+    /// 同じ `agent_id` を 2 つの team でそれぞれ違う role として handshake させても、
+    /// 各 team の binding は独立に保持される (= cross-team での role 上書きが起きない)。
+    #[tokio::test]
+    async fn cross_team_same_agent_id_does_not_overwrite_role_binding() {
+        let hub = make_hub();
+        // team-a で programmer として handshake
+        assert!(
+            hub.resolve_pending_recruit("agent-1", "team-a", "programmer")
+                .await,
+            "first handshake on team-a should succeed"
+        );
+        // team-b で同 agent_id を reviewer として handshake
+        assert!(
+            hub.resolve_pending_recruit("agent-1", "team-b", "reviewer")
+                .await,
+            "handshake of same agent_id on a different team should succeed (different binding key)"
+        );
+        let s = hub.state.lock().await;
+        assert_eq!(
+            s.agent_role_bindings
+                .get(&("team-a".to_string(), "agent-1".to_string())),
+            Some(&"programmer".to_string()),
+            "team-a binding should keep its original role even after team-b handshake"
+        );
+        assert_eq!(
+            s.agent_role_bindings
+                .get(&("team-b".to_string(), "agent-1".to_string())),
+            Some(&"reviewer".to_string()),
+            "team-b binding should hold the role asserted on team-b handshake"
+        );
+    }
+
+    /// 同じ team で同 agent_id が違う role で再 handshake してきた場合は
+    /// (issue #183 の挙動どおり) false で拒否される。
+    #[tokio::test]
+    async fn same_team_role_mismatch_on_rehandshake_is_rejected() {
+        let hub = make_hub();
+        assert!(
+            hub.resolve_pending_recruit("agent-1", "team-a", "programmer")
+                .await
+        );
+        assert!(
+            !hub.resolve_pending_recruit("agent-1", "team-a", "reviewer")
+                .await,
+            "rehandshake on same team with conflicting role must be rejected"
+        );
+    }
+
+    /// `remove_agent_role_binding` は当該 `(team_id, agent_id)` のみ消し、
+    /// 別 team の同 agent_id の binding は残す。
+    #[tokio::test]
+    async fn remove_agent_role_binding_only_targets_specified_team_scope() {
+        let hub = make_hub();
+        assert!(
+            hub.resolve_pending_recruit("agent-1", "team-a", "programmer")
+                .await
+        );
+        assert!(
+            hub.resolve_pending_recruit("agent-1", "team-b", "reviewer")
+                .await
+        );
+        let removed = hub.remove_agent_role_binding("team-a", "agent-1").await;
+        assert!(removed, "remove should report true when entry existed");
+
+        let s = hub.state.lock().await;
+        assert!(
+            !s.agent_role_bindings
+                .contains_key(&("team-a".to_string(), "agent-1".to_string())),
+            "team-a binding should be removed"
+        );
+        assert_eq!(
+            s.agent_role_bindings
+                .get(&("team-b".to_string(), "agent-1".to_string())),
+            Some(&"reviewer".to_string()),
+            "team-b binding for the same agent_id must remain intact"
+        );
+    }
+
+    /// 存在しない `(team_id, agent_id)` の remove は false を返す (idempotent)。
+    #[tokio::test]
+    async fn remove_agent_role_binding_returns_false_when_absent() {
+        let hub = make_hub();
+        let removed = hub
+            .remove_agent_role_binding("nonexistent-team", "ghost-agent")
+            .await;
+        assert!(
+            !removed,
+            "removing a nonexistent binding should report false without panicking"
+        );
+    }
 }
 
 /// Issue #577: timeout 後 grace 期間中の recruit ack rescue の単体テスト。

@@ -33,6 +33,24 @@ const SAVE_DEBOUNCE_MS = 500;
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
 
+/**
+ * Issue #662: 永続化ファイルから読んだ cols/rows 値が「PTY 起動 seed として安全か」を判定する。
+ * portable-pty は cols/rows に u16 の正の整数を要求し、0 や巨大値で起動すると Windows ConPTY
+ * 側で `E_INVALIDARG` になる。Linux/macOS でも cols=0 はカーネルが拒否する。再起動時に
+ * ファイルが手編集 / 旧 schema 残骸 / 0 値で書かれていてもアプリが死なないよう、以下を満たす
+ * 場合のみ seed として採用する:
+ *   - 整数 (NaN / 小数を弾く)
+ *   - 1..=10000 の範囲 (実用上の最大は ~999、安全マージンで 10000 上限)
+ */
+function isValidPtyDim(value: unknown): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= 10000
+  );
+}
+
 export interface UseTerminalTabsPersistenceOptions {
   projectRoot: string;
   terminalTabs: TerminalTab[];
@@ -97,7 +115,13 @@ export function useTerminalTabsPersistence(
             teamId: p.teamId ?? null,
             agentId: p.agentId ?? undefined,
             customLabel: p.label ?? null,
-            cwd: p.cwd
+            cwd: p.cwd,
+            // Issue #662: 永続化された PTY size を初回 spawn の seed として渡す。
+            // 値が壊れていても 0 / 負値 / NaN は use-xterm-bind 側で sanitize されるが、
+            // ここでも防御的に妥当範囲だけを seed する (壊れた値で xterm が cells=0 で
+            // 立ち上がる事故を防ぐ)。
+            initialCols: isValidPtyDim(p.cols) ? p.cols : null,
+            initialRows: isValidPtyDim(p.rows) ? p.rows : null
           });
           if (newId !== null) {
             numericByPersistedId.set(p.tabId, newId);
