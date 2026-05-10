@@ -420,6 +420,7 @@ pub async fn team_history_save(mut entry: TeamHistoryEntry) -> MutationResult {
         return MutationResult {
             ok: false,
             error: Some(e),
+            external_change_merged: false,
         };
     }
     hydrate_orchestration_summary(&mut entry).await;
@@ -476,6 +477,7 @@ pub async fn team_history_save_batch(entries: Vec<TeamHistoryEntry>) -> Mutation
             return MutationResult {
                 ok: false,
                 error: Some(e),
+                external_change_merged: false,
             };
         }
     }

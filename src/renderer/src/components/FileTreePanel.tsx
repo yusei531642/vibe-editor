@@ -292,14 +292,21 @@ export function FileTreePanel({
     });
   }, []);
 
-  /** Issue #592: inline input の確定処理。失敗時は error toast を出して input は閉じない。 */
+  /**
+   * Issue #592: inline input の確定処理。失敗時は error toast を出して input は閉じない。
+   *
+   * **PR #695 review (Correctness)**: 戻り値で確定の成否を呼び出し側に通知する。
+   * `true` = 入力行を閉じてよい / `false` = 失敗したので入力行を残し再入力を受け付ける。
+   * これがないと、ok=false で早期 return した後に `FileTreeInlineRow.submittedRef` が
+   * `true` のままになり、再度 Enter / Esc / blur しても何も動かず UI が固まる。
+   */
   const submitInlineInput = useCallback(
-    async (raw: string) => {
-      if (!inlineInput) return;
+    async (raw: string): Promise<boolean> => {
+      if (!inlineInput) return true;
       const trimmed = raw.trim();
       if (!trimmed) {
         setInlineInput(null);
-        return;
+        return true;
       }
       const { rootPath, parentRel, mode, originalRelPath } = inlineInput;
       try {
@@ -307,7 +314,7 @@ export function FileTreePanel({
           const res = await api.files.create(rootPath, parentRel, trimmed, false);
           if (!res.ok) {
             showOpError(res.error);
-            return;
+            return false;
           }
           showToast(t('toast.fileCreated', { name: trimmed }), { tone: 'success' });
           refreshDir(rootPath, parentRel);
@@ -317,14 +324,14 @@ export function FileTreePanel({
           const res = await api.files.createDir(rootPath, parentRel, trimmed);
           if (!res.ok) {
             showOpError(res.error);
-            return;
+            return false;
           }
           showToast(t('toast.folderCreated', { name: trimmed }), { tone: 'success' });
           refreshDir(rootPath, parentRel);
         } else if (mode === 'rename' && originalRelPath !== undefined) {
           if (basenameOfRel(originalRelPath) === trimmed) {
             setInlineInput(null);
-            return;
+            return true;
           }
           const res = await api.files.rename(
             rootPath,
@@ -335,7 +342,7 @@ export function FileTreePanel({
           );
           if (!res.ok) {
             showOpError(res.error);
-            return;
+            return false;
           }
           showToast(
             t('toast.fileRenamed', {
@@ -347,8 +354,10 @@ export function FileTreePanel({
           refreshDir(rootPath, parentRel);
         }
         setInlineInput(null);
+        return true;
       } catch (e) {
         showOpError(String(e));
+        return false;
       }
     },
     [inlineInput, onOpenFile, refreshDir, showOpError, showToast, t]
@@ -647,7 +656,7 @@ export function FileTreePanel({
                 : 'filetree.prompt.newFileName'
             )}
             initialValue=""
-            onSubmit={(val) => void submitInlineInput(val)}
+            onSubmit={submitInlineInput}
             onCancel={() => setInlineInput(null)}
           />
         )}
@@ -675,7 +684,7 @@ export function FileTreePanel({
                 kind={node.isDir ? 'folder' : 'file'}
                 placeholder={t('filetree.prompt.renameTo')}
                 initialValue={node.name}
-                onSubmit={(val) => void submitInlineInput(val)}
+                onSubmit={submitInlineInput}
                 onCancel={() => setInlineInput(null)}
               />
             );
@@ -950,13 +959,18 @@ const FileTreeNode = memo(FileTreeNodeImpl, (prev, next) => {
 /**
  * Issue #592: ファイルツリーのインライン入力行 (新規ファイル / 新規フォルダ / リネーム)。
  * Enter で確定 / Esc でキャンセル。blur でも確定する (VS Code と同じ挙動)。
+ *
+ * **PR #695 review (Correctness)**: `onSubmit` は確定が成功したかを `Promise<boolean>` で返す。
+ * 失敗 (`false`) の場合は `submittedRef` を巻き戻し、再度 Enter / Esc / blur を受け付けるよう
+ * フォールバックする。これがないと、初回 submit 失敗で UI が固まる。
  */
 interface FileTreeInlineRowProps {
   depth: number;
   kind: 'file' | 'folder';
   placeholder: string;
   initialValue: string;
-  onSubmit: (value: string) => void;
+  /** 確定処理。`true` = 確定成功 (この行は閉じてよい) / `false` = 失敗で行を残す。 */
+  onSubmit: (value: string) => Promise<boolean>;
   onCancel: () => void;
 }
 
@@ -969,7 +983,9 @@ function FileTreeInlineRow({
   onCancel
 }: FileTreeInlineRowProps): JSX.Element {
   const inputRef = useRef<HTMLInputElement>(null);
-  const submittedRef = useRef(false);
+  // 多重 submit を防ぐ guard。submit が in-flight な間 true、決着したら結果に応じて
+  // 確定 (= 行ごと unmount) or 失敗で false に巻き戻して再 submit を許可する。
+  const submittingRef = useRef(false);
   const [value, setValue] = useState(initialValue);
 
   // Mount 直後に input にフォーカスし、リネーム時は拡張子を除いた stem 部分を選択する。
@@ -988,14 +1004,22 @@ function FileTreeInlineRow({
   }, [initialValue]);
 
   const submit = (): void => {
-    if (submittedRef.current) return;
-    submittedRef.current = true;
-    onSubmit(value);
+    if (submittingRef.current) return;
+    submittingRef.current = true;
+    // 失敗時は guard を巻き戻して再 submit を受け付ける。成功時は親が unmount するので
+    // ここでは何もしない (unmount 後の setState 抑止のため、ok=true でも巻き戻さない)。
+    void Promise.resolve(onSubmit(value))
+      .then((ok) => {
+        if (!ok) submittingRef.current = false;
+      })
+      .catch(() => {
+        submittingRef.current = false;
+      });
   };
 
   const cancel = (): void => {
-    if (submittedRef.current) return;
-    submittedRef.current = true;
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     onCancel();
   };
 

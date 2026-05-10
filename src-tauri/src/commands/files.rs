@@ -711,7 +711,13 @@ pub async fn files_copy(
     }
 }
 
-/// ディレクトリを再帰コピーする。symlink は follow せず、target は通常ファイルとしてコピーする。
+/// ディレクトリを再帰コピーする。
+///
+/// **Security (PR #695 review)**: symlink は **follow しない**。
+/// `entry.metadata()` は symlink target を follow するため、planted symlink を仕込んだ repo が
+/// `~/.ssh` 等のプロジェクトルート外を読み出して project 配下にコピーされる脆弱性につながる。
+/// 同時に symlink cycle で無限ループする副作用もある。
+/// ここでは `entry.file_type()` (symlink を follow しない) で判定し、symlink entry は skip する。
 async fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     if let Err(e) = tokio::fs::create_dir_all(dst).await {
         return Err(e.to_string());
@@ -728,16 +734,32 @@ async fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
                 None => continue,
             };
             let to_child = to.join(&name);
-            let meta = entry.metadata().await.map_err(|e| e.to_string())?;
-            if meta.is_dir() {
+            // file_type() は symlink を follow しないので、ここで symlink を検出して skip する。
+            let file_type = entry.file_type().await.map_err(|e| e.to_string())?;
+            if file_type.is_symlink() {
+                // Security: planted symlink を経由したプロジェクト外読み出しを防ぐため、
+                // copy 対象から除外する。symlink cycle による無限ループも同時に防止する。
+                eprintln!(
+                    "[files_copy] skipping symlink entry: {}",
+                    from_child.display()
+                );
+                continue;
+            }
+            if file_type.is_dir() {
                 if let Err(e) = tokio::fs::create_dir_all(&to_child).await {
                     return Err(e.to_string());
                 }
                 stack.push((from_child, to_child));
-            } else {
+            } else if file_type.is_file() {
                 tokio::fs::copy(&from_child, &to_child)
                     .await
                     .map_err(|e| e.to_string())?;
+            } else {
+                // 通常ファイル / ディレクトリ / symlink 以外 (FIFO 等) は skip する。
+                eprintln!(
+                    "[files_copy] skipping non-regular entry: {}",
+                    from_child.display()
+                );
             }
         }
     }
@@ -888,6 +910,57 @@ mod issue_592_tests {
         files_create_dir(root.clone(), "".into(), "a".into()).await;
         let res = files_copy(root.clone(), "a".into(), "a".into(), "inside".into(), None).await;
         assert!(!res.ok);
+    }
+
+    /// PR #695 review (Security): planted symlink を含む directory を copy した時に
+    /// symlink を follow せず、symlink target (= プロジェクト外ファイル) が dst 配下に
+    /// 複製されないことを保証する。Unix のみ (Windows の symlink 作成は admin 権限が必要)。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn files_copy_does_not_follow_symlink_to_external_file() {
+        use std::os::unix::fs::symlink;
+        let td = tempdir().unwrap();
+        let root = root_str(&td);
+        // プロジェクト外に「機密ファイル」を用意する。
+        let outside = tempdir().unwrap();
+        let secret = outside.path().join("secret.txt");
+        std::fs::write(&secret, b"TOP-SECRET").unwrap();
+        // src/ ディレクトリに secret への symlink を仕込む (planted symlink 攻撃の再現)。
+        files_create_dir(root.clone(), "".into(), "src".into()).await;
+        std::fs::write(td.path().join("src").join("normal.txt"), b"ok").unwrap();
+        symlink(&secret, td.path().join("src").join("link-to-secret")).unwrap();
+        // copy 実行
+        let res = files_copy(root.clone(), "src".into(), "".into(), "dst".into(), None).await;
+        assert!(res.ok, "{:?}", res.error);
+        // 通常ファイルはコピーされる
+        assert_eq!(std::fs::read(td.path().join("dst").join("normal.txt")).unwrap(), b"ok");
+        // symlink 経由の機密ファイルは dst 配下に複製されてはならない
+        assert!(!td.path().join("dst").join("link-to-secret").exists(),
+                "symlink (or its target) must NOT be copied into the project");
+    }
+
+    /// PR #695 review (Correctness): symlink cycle (a -> b, b -> a) を含む directory を
+    /// copy しても無限ループに入らず、有限時間で完了することを保証する。Unix のみ。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn files_copy_does_not_loop_on_symlink_cycle() {
+        use std::os::unix::fs::symlink;
+        let td = tempdir().unwrap();
+        let root = root_str(&td);
+        files_create_dir(root.clone(), "".into(), "src".into()).await;
+        let src = td.path().join("src");
+        // a -> b, b -> a の symlink cycle を仕込む。
+        symlink(src.join("b"), src.join("a")).unwrap();
+        symlink(src.join("a"), src.join("b")).unwrap();
+        // 無限ループにならず copy 完了することを timeout 付きで検証する。
+        let copy_fut = files_copy(root.clone(), "src".into(), "".into(), "dst".into(), None);
+        let res = tokio::time::timeout(std::time::Duration::from_secs(5), copy_fut)
+            .await
+            .expect("copy_dir_recursive must terminate even with symlink cycle");
+        assert!(res.ok, "{:?}", res.error);
+        // cycle 側の entry は skip されているはず。
+        assert!(!td.path().join("dst").join("a").exists());
+        assert!(!td.path().join("dst").join("b").exists());
     }
 
     #[tokio::test]
