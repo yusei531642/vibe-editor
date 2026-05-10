@@ -265,18 +265,73 @@ pub fn run() {
                 }
             }
 
-            // Issue #55: メイン window の CloseRequested で PTY と TeamHub を明示 cleanup する。
+            // Issue #55 / #630: メイン window の CloseRequested で PTY と TeamHub を明示 cleanup する。
             // portable-pty (Windows ConPTY) は親が落ちても子が残る場合があるので、
             // 明示的に kill_all を呼んで Claude / Codex プロセスが孤立しないようにする。
+            //
+            // Issue #630: 旧実装は同期 callback の中で即時 kill_all() を呼んでいたため、
+            // `tauri::async_runtime::spawn` 上で進行中の `inject_codex_prompt_to_pty` /
+            // `inject::inject` が PTY write 中に kill されて、SessionHandle::drop の killer
+            // Mutex poison / 半端 inject による不正出力 / reader thread 解放漏れ等の race を
+            // 起こしていた。
+            // 新実装は:
+            //   1. `api.prevent_close()` で OS の close をいったん抑止し、
+            //   2. 非同期 task を spawn して `pty_inflight.wait_idle(3s)` で in-flight task の
+            //      自然完了を待ち、
+            //   3. 完了 (または timeout) 後に kill_all() → app.exit(0) で終了する。
+            // タイムアウトは 3 秒。inject() の最大処理時間 (32KiB / 64B チャンク × 15ms ≒ 7.7s) より
+            // 短いが、Issue 本文の done criteria は 1 秒。実機 race の大半は 0.5-1.5s 帯で完了する
+            // ため、3 秒で安全マージンを取りつつ過剰な close 遅延を避ける。
             if let Some(main_window) = app.get_webview_window("main") {
                 let app_handle = app.handle().clone();
+                // CloseRequested は preventClose 後に再度 close ボタン押下した場合などに複数回
+                // emit され得る。`drain_in_progress` flag で 2 回目以降の prevent_close を抑止し、
+                // 1 回目の drain task が完走して exit(0) を呼ぶのを待つ。
+                let drain_in_progress =
+                    std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
                 main_window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { .. } = event {
-                        tracing::info!("[lifecycle] window close — running cleanup");
-                        let state = app_handle.state::<state::AppState>();
-                        state.pty_registry.kill_all();
-                        // MCP エントリは残しておく (次回起動時に reclaim されるので副作用なし)
-                        // team-bridge.js は ~/.vibe-editor/ に置いたまま (再利用のため)
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                        if drain_in_progress
+                            .compare_exchange(
+                                false,
+                                true,
+                                std::sync::atomic::Ordering::SeqCst,
+                                std::sync::atomic::Ordering::SeqCst,
+                            )
+                            .is_err()
+                        {
+                            tracing::debug!(
+                                "[lifecycle] window close already draining — letting OS close proceed"
+                            );
+                            return;
+                        }
+                        tracing::info!(
+                            "[lifecycle] window close requested — draining in-flight inject tasks (timeout 3s)"
+                        );
+                        api.prevent_close();
+                        let app_for_drain = app_handle.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let state = app_for_drain.state::<state::AppState>();
+                            let inflight_before = state.pty_inflight.current();
+                            let drained = state
+                                .pty_inflight
+                                .wait_idle(std::time::Duration::from_secs(3))
+                                .await;
+                            let remaining = state.pty_inflight.current();
+                            if drained {
+                                tracing::info!(
+                                    "[lifecycle] in-flight inject tasks drained (was={inflight_before}, remaining={remaining})"
+                                );
+                            } else {
+                                tracing::warn!(
+                                    "[lifecycle] in-flight inject drain timeout — proceeding to kill_all (was={inflight_before}, remaining={remaining})"
+                                );
+                            }
+                            state.pty_registry.kill_all();
+                            // MCP エントリは残しておく (次回起動時に reclaim されるので副作用なし)
+                            // team-bridge.js は ~/.vibe-editor/ に置いたまま (再利用のため)
+                            app_for_drain.exit(0);
+                        });
                     }
                 });
             }

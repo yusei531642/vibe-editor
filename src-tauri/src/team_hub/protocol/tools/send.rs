@@ -490,6 +490,11 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         );
     }
 
+    // Issue #630: 各 inject() 呼び出しを `pty_inflight` tracker に計上する。これにより
+    // window CloseRequested handler の wait_idle(3s) が、PTY write 中の inject task の
+    // 自然完了を待ってから kill_all() を呼べるようになる (= SessionHandle Mutex poison /
+    // 半端 inject の race を防止)。
+    let inflight = hub.inflight.clone();
     let mut join_set = tokio::task::JoinSet::new();
     for (target_aid, target_role) in &targets {
         let reg = registry.clone();
@@ -497,8 +502,11 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         let from_role = message_kind.inject_from_label(&ctx.role);
         let msg = effective_message.to_string();
         let role_clone = target_role.clone();
+        let tracker = inflight.clone();
         join_set.spawn(async move {
-            let result = inject::inject(reg, &aid, &from_role, &msg).await;
+            let result = tracker
+                .track_async(inject::inject(reg, &aid, &from_role, &msg))
+                .await;
             (aid, role_clone, result)
         });
     }

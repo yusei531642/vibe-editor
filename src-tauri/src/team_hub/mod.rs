@@ -129,6 +129,10 @@ pub struct TeamHub {
     /// 任意で AppHandle を保持。`set_app_handle` で setup 後に注入する。
     /// Phase 3: protocol::team_send が `team:handoff` event を emit するために使う。
     pub(crate) app_handle: Arc<Mutex<Option<tauri::AppHandle>>>,
+    /// Issue #630: in-flight な PTY inject task の tracker (AppState と共有)。
+    /// CloseRequested handler が `wait_idle(timeout)` で完了を待ってから kill_all() する経路で参照。
+    /// `team_send` 経路の各 `inject::inject` を tracker.track_async() で計上する。
+    pub(crate) inflight: Arc<crate::pty::InFlightTracker>,
 }
 
 fn hex_encode(bytes: &[u8]) -> String {

@@ -457,7 +457,9 @@ pub async fn terminal_create(
             if let Some(instr) = codex_instructions_for_inject {
                 let registry = state.pty_registry.clone();
                 let term_id = id.clone();
-                tauri::async_runtime::spawn(async move {
+                // Issue #630: tracker.spawn() で計上することで、CloseRequested handler が
+                // wait_idle(3s) で in-flight 完了を待ってから kill_all() できるようにする。
+                state.pty_inflight.spawn(async move {
                     inject_codex_prompt_to_pty(registry, term_id, instr).await;
                 });
             }

@@ -588,6 +588,15 @@ pub struct CallContext {
 
 impl TeamHub {
     pub fn new(registry: Arc<SessionRegistry>) -> Self {
+        Self::with_inflight(registry, crate::pty::InFlightTracker::new())
+    }
+
+    /// Issue #630: AppState 側で生成した in-flight tracker を共有する用。
+    /// `AppState::new()` から呼ばれる。
+    pub fn with_inflight(
+        registry: Arc<SessionRegistry>,
+        inflight: Arc<crate::pty::InFlightTracker>,
+    ) -> Self {
         Self {
             registry,
             state: Arc::new(Mutex::new(HubState {
@@ -605,6 +614,7 @@ impl TeamHub {
                 recruit_semaphores: HashMap::new(),
             })),
             app_handle: Arc::new(Mutex::new(None)),
+            inflight,
         }
     }
 
