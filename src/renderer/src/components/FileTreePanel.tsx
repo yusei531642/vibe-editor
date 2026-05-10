@@ -961,7 +961,7 @@ const FileTreeNode = memo(FileTreeNodeImpl, (prev, next) => {
  * Enter で確定 / Esc でキャンセル。blur でも確定する (VS Code と同じ挙動)。
  *
  * **PR #695 review (Correctness)**: `onSubmit` は確定が成功したかを `Promise<boolean>` で返す。
- * 失敗 (`false`) の場合は `submittedRef` を巻き戻し、再度 Enter / Esc / blur を受け付けるよう
+ * 失敗 (`false`) の場合は `submittingRef` を巻き戻し、再度 Enter / Esc / blur を受け付けるよう
  * フォールバックする。これがないと、初回 submit 失敗で UI が固まる。
  */
 interface FileTreeInlineRowProps {
