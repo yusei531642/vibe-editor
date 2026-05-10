@@ -227,77 +227,82 @@ export function StageHud(): JSX.Element {
   const dashboardProjectRoot = settings.lastOpenedRoot || null;
 
   return (
-    <div className="tc__hud glass-surface" role="toolbar" aria-label="Canvas view">
+    <>
+      {/*
+       * Issue #586: AI エージェントの状態サマリ (active / blocked / stale / dead / completed) は
+       * 「読み取り専用の状態表示」であり、view 切替や zoom などの「ユーザー操作」とは役割が
+       * 異なるため、別枠の glass pill (`.tc__hud-status`) として分離する。HUD と同じ
+       * bottom-center 縦積みで視覚的にもグルーピングする。0 件のときは render しない。
+       */}
       {showTeamSummary ? (
-        <>
-          <div
-            className="tc__hud-summary"
-            role="group"
-            aria-label={t('canvas.hud.summary.label')}
+        <div
+          className="tc__hud-status glass-surface"
+          role="status"
+          aria-live="polite"
+          aria-label={t('canvas.hud.summary.label')}
+        >
+          <span
+            className="tc__hud-summary-pill tc__hud-summary-pill--active"
+            title={t('canvas.hud.summary.active.tooltip')}
           >
-            <span
-              className="tc__hud-summary-pill tc__hud-summary-pill--active"
-              title={t('canvas.hud.summary.active.tooltip')}
-            >
-              <CircleDot size={11} strokeWidth={2.2} aria-hidden="true" />
-              <span className="tc__hud-summary-num">{teamSummary.active}</span>
-              <span className="tc__hud-summary-text">
-                {t('canvas.hud.summary.active')}
-              </span>
+            <CircleDot size={11} strokeWidth={2.2} aria-hidden="true" />
+            <span className="tc__hud-summary-num">{teamSummary.active}</span>
+            <span className="tc__hud-summary-text">
+              {t('canvas.hud.summary.active')}
             </span>
-            <span
-              className={
-                'tc__hud-summary-pill tc__hud-summary-pill--blocked' +
-                (teamSummary.blocked > 0 ? ' is-on' : '')
-              }
-              title={t('canvas.hud.summary.blocked.tooltip')}
-            >
-              <AlertTriangle size={11} strokeWidth={2.2} aria-hidden="true" />
-              <span className="tc__hud-summary-num">{teamSummary.blocked}</span>
-              <span className="tc__hud-summary-text">
-                {t('canvas.hud.summary.blocked')}
-              </span>
+          </span>
+          <span
+            className={
+              'tc__hud-summary-pill tc__hud-summary-pill--blocked' +
+              (teamSummary.blocked > 0 ? ' is-on' : '')
+            }
+            title={t('canvas.hud.summary.blocked.tooltip')}
+          >
+            <AlertTriangle size={11} strokeWidth={2.2} aria-hidden="true" />
+            <span className="tc__hud-summary-num">{teamSummary.blocked}</span>
+            <span className="tc__hud-summary-text">
+              {t('canvas.hud.summary.blocked')}
             </span>
-            <span
-              className={
-                'tc__hud-summary-pill tc__hud-summary-pill--stale' +
-                (teamSummary.stale > 0 ? ' is-on' : '')
-              }
-              title={t('canvas.hud.summary.stale.tooltip')}
-            >
-              <Hourglass size={11} strokeWidth={2.2} aria-hidden="true" />
-              <span className="tc__hud-summary-num">{teamSummary.stale}</span>
-              <span className="tc__hud-summary-text">
-                {t('canvas.hud.summary.stale')}
-              </span>
+          </span>
+          <span
+            className={
+              'tc__hud-summary-pill tc__hud-summary-pill--stale' +
+              (teamSummary.stale > 0 ? ' is-on' : '')
+            }
+            title={t('canvas.hud.summary.stale.tooltip')}
+          >
+            <Hourglass size={11} strokeWidth={2.2} aria-hidden="true" />
+            <span className="tc__hud-summary-num">{teamSummary.stale}</span>
+            <span className="tc__hud-summary-text">
+              {t('canvas.hud.summary.stale')}
             </span>
-            <span
-              className={
-                'tc__hud-summary-pill tc__hud-summary-pill--dead' +
-                (deadCount > 0 ? ' is-on' : '')
-              }
-              title={t('canvas.hud.summary.dead.tooltip')}
-            >
-              <Skull size={11} strokeWidth={2.2} aria-hidden="true" />
-              <span className="tc__hud-summary-num">{deadCount}</span>
-              <span className="tc__hud-summary-text">
-                {t('canvas.hud.summary.dead')}
-              </span>
+          </span>
+          <span
+            className={
+              'tc__hud-summary-pill tc__hud-summary-pill--dead' +
+              (deadCount > 0 ? ' is-on' : '')
+            }
+            title={t('canvas.hud.summary.dead.tooltip')}
+          >
+            <Skull size={11} strokeWidth={2.2} aria-hidden="true" />
+            <span className="tc__hud-summary-num">{deadCount}</span>
+            <span className="tc__hud-summary-text">
+              {t('canvas.hud.summary.dead')}
             </span>
-            <span
-              className="tc__hud-summary-pill tc__hud-summary-pill--completed"
-              title={t('canvas.hud.summary.completed.tooltip')}
-            >
-              <CheckCircle2 size={11} strokeWidth={2.2} aria-hidden="true" />
-              <span className="tc__hud-summary-num">{teamSummary.completed}</span>
-              <span className="tc__hud-summary-text">
-                {t('canvas.hud.summary.completed')}
-              </span>
+          </span>
+          <span
+            className="tc__hud-summary-pill tc__hud-summary-pill--completed"
+            title={t('canvas.hud.summary.completed.tooltip')}
+          >
+            <CheckCircle2 size={11} strokeWidth={2.2} aria-hidden="true" />
+            <span className="tc__hud-summary-num">{teamSummary.completed}</span>
+            <span className="tc__hud-summary-text">
+              {t('canvas.hud.summary.completed')}
             </span>
-          </div>
-          <span className="tc__hud-sep" aria-hidden="true" />
-        </>
+          </span>
+        </div>
       ) : null}
+      <div className="tc__hud glass-surface" role="toolbar" aria-label="Canvas view">
       {views.map((v) => (
         <button
           key={v.id}
@@ -434,6 +439,7 @@ export function StageHud(): JSX.Element {
           </div>
         ) : null}
       </div>
-    </div>
+      </div>
+    </>
   );
 }
