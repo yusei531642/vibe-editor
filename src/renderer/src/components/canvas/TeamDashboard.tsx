@@ -23,6 +23,17 @@ import {
   type TeamDashboardSection
 } from '../../lib/use-team-dashboard';
 
+/**
+ * TeamDashboard の props。
+ *
+ * Issue #615 で props インターフェースは `teamId: string | null` から
+ * `teamIds: readonly string[]` に切り替わっている (breaking change)。
+ * 現時点で外部 caller は `StageHud.tsx` のみで、そこで dedupe + leader-first
+ * sort 済みの配列を渡している。新規 caller を追加する際は:
+ *   - 空配列を渡してよい (= "team 未確定" としてプレースホルダ表示)
+ *   - 重複 / 空文字混入は内部 hook (`useTeamDashboardMulti`) 側で正規化されるため
+ *     caller 側で気にしなくてよいが、表示順は caller 側の配列順が保たれる。
+ */
 interface TeamDashboardProps {
   /** Canvas 上で active な全 teamId。空配列なら "team 未確定" 扱い。 */
   teamIds: readonly string[];
@@ -157,7 +168,14 @@ function TeamSection({ section, now }: { section: TeamDashboardSection; now: num
 
 export function TeamDashboard({ teamIds, projectRoot, onClose }: TeamDashboardProps): JSX.Element {
   const t = useT();
-  const { sections, total, empty } = useTeamDashboardMulti({ teamIds, projectRoot });
+  // Issue #615: caller (= StageHud) は readonly string[] を渡す契約だが、
+  // 将来 any 経由で undefined / null が混入しても crash しないように defensive に
+  // 空配列へフォールバックする。dedupe / 空文字フィルタは hook 側で実施。
+  const safeTeamIds = Array.isArray(teamIds) ? teamIds : [];
+  const { sections, total, empty } = useTeamDashboardMulti({
+    teamIds: safeTeamIds,
+    projectRoot
+  });
   // 表示用の "now" は描画タイミングで固定。15 秒間隔の親 StageHud 再 render に乗る想定で
   // ここではフレーム単位の固定値とし、相対時間がチラつかないようにする。
   // sections の updatedAt 合計を依存に入れ、IPC 更新で now が前進するようにする。
@@ -195,7 +213,7 @@ export function TeamDashboard({ teamIds, projectRoot, onClose }: TeamDashboardPr
 
       {empty ? (
         <div className="tc__dashboard-empty">
-          {teamIds.length > 0
+          {safeTeamIds.length > 0
             ? t('dashboard.empty.noMembers')
             : t('dashboard.empty.noTeam')}
         </div>

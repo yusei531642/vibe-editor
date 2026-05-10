@@ -400,7 +400,7 @@ const ja: Dict = {
     'このチームにはまだメンバーがいません。Leader から `team_recruit` でメンバーを招集してください',
   'dashboard.banner.humanGate': 'Human gate が blocked: Leader の判断待ちです',
   // Issue #615: dual / multi preset 対応の team section heading
-  'dashboard.team.label': 'Team {index}',
+  'dashboard.team.label': 'チーム {index}',
 
   // ---------- Sessions ----------
   'sessions.resume': 'セッション {id} に戻る',
