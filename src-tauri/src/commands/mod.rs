@@ -23,6 +23,8 @@ pub mod team_presets;
 pub mod team_state;
 pub mod terminal;
 pub mod terminal_tabs;
+// Issue #624 (Security): IPC 入力検証 (id segment / size cap / log sanitize) の共通 helper。
+pub mod validation;
 pub mod vibe_team_skill;
 
 /// Issue #494: `commands/*.rs` の integration test を集約する test-only module。

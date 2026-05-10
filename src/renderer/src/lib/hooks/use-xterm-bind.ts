@@ -441,6 +441,49 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           }
         };
 
+        // Issue #633: attach 経路の listener コールバック群を `terminal.create` 呼び出し
+        // **前** に宣言する。旧設計では create の戻り値受領後に attach listener を張って
+        // いたため、Rust 側 `scrollback_snapshot()` 取得 〜 renderer 側 listener 登録の
+        // 数 ms 〜 数十 ms の窓に PTY が emit したバイトが「snapshot にも入らず listener
+        // にも届かない」状態で消えていた (Codex banner / Claude welcome の欠落)。
+        //
+        // 修正: cachedPtyId を pre-subscribe ターゲットにして create 前から queue モードで
+        // 受信し始める。create が返ってきた後 replay を term.write → queue を flush する
+        // 順序で「snapshot まで = replay / snapshot 以降 = listener queue」を成立させる。
+        // snapshot 末尾と queue 先頭の重複は xterm の re-render が吸収するので機能影響なし。
+        let attachQueue: string[] = [];
+        let attachQueueFlushed = false;
+        const attachWriteOrQueue = (data: string): void => {
+          if (!isCurrentGeneration()) return;
+          if (!attachQueueFlushed) {
+            attachQueue.push(data);
+            return;
+          }
+          term.write(data);
+          if (data.includes('\n') || data.includes('\r') || data.length >= 4096) {
+            scheduleRenderRepair();
+          }
+          callbacksRef.current.onActivity?.();
+        };
+        const attachExitCb = (info: TerminalExitInfo): void => {
+          if (!isCurrentGeneration()) return;
+          term.writeln(
+            `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m`
+          );
+          callbacksRef.current.onStatus?.(`終了 (exitCode=${info.exitCode})`);
+          ptyIdRef.current = null;
+          cacheDelete(skey);
+          callbacksRef.current.onExit?.();
+        };
+        const attachSessionIdCb = (sessionId: string): void => {
+          if (!isCurrentGeneration()) return;
+          try {
+            callbacksRef.current.onSessionId?.(sessionId);
+          } catch {
+            /* noop */
+          }
+        };
+
         // client-generated id: Rust 側で文字種検証 + 既存衝突チェックを通る。
         // crypto.randomUUID は Tauri 2 の WebView (Edge WebView2 / WKWebView) では
         // 必ず使えるが、安全側で文字列フォールバックを残す。
@@ -451,12 +494,20 @@ export function useXtermBind(options: UseXtermBindOptions): void {
               ? crypto.randomUUID()
               : `term-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
-        if (requestedId) {
+        // Issue #633: attach 経路では cachedPtyId を pre-subscribe ターゲットにする。
+        // Rust 側 `find_attach_target` は session_key / agent_id / team_id 一致で同じ id
+        // を返すため、HMR remount の通常ケースでは res.id === cachedPtyId が成り立つ。
+        // 万一不一致 (cache 失効で find_attach_target が miss → 新規 spawn フォールバック等)
+        // の場合は create 後の mismatch 再 subscribe で復旧する。
+        const preSubscribeTargetId: string | null =
+          requestedId ?? (wantAttach && cachedPtyId ? cachedPtyId : null);
+
+        if (preSubscribeTargetId) {
           const ok = await attemptPreSubscribe(
-            requestedId,
-            newSpawnDataCb,
-            newSpawnExitCb,
-            newSpawnSessionIdCb
+            preSubscribeTargetId,
+            wantAttach ? attachWriteOrQueue : newSpawnDataCb,
+            wantAttach ? attachExitCb : newSpawnExitCb,
+            wantAttach ? attachSessionIdCb : newSpawnSessionIdCb
           );
           if (!ok) return;
         }
@@ -539,67 +590,42 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         }
         const attached = res.attached === true;
 
-        // Issue #285 follow-up: attach 経路の race と表示順序を両立させる設計。
+        // Issue #285 follow-up + Issue #633: attach 経路の race と表示順序を両立させる設計。
         //
-        // 問題 1 (Codex Lane 0): snapshot 取得 〜 renderer 側 listener ready の間に届いた新着が lost
-        // 問題 2 (Codex Lane 3): listener ready 〜 term.write(replay) の間の新着が replay より先に描画 → 順序逆転
+        // 旧設計の問題点 (#285 follow-up までの状態):
+        //   問題 1 (Codex Lane 0): snapshot 取得 〜 renderer 側 listener ready の間に届いた新着が lost
+        //   問題 2 (Codex Lane 3): listener ready 〜 term.write(replay) の間の新着が replay より先に描画 → 順序逆転
         //
-        // 解決:
-        //   (a) listener を *Ready で張ることで「create return 後の新着は必ず受信される」を保証
-        //   (b) listener callback は最初の payload を「buffering 用 queue」に溜め、term.write はしない
+        // Issue #633 で問題 1 が「listener を create 後に張っていた」ことに起因して残っていた
+        // ことが判明し、本実装では attach listener を `terminal.create` 呼び出し**前**に
+        // pre-subscribe (cachedPtyId 経由) するよう変更した。これにより:
+        //   (a) create 前から queue モードで受信開始 → create-return 後の新着は確実に受信
+        //   (b) listener callback は queue モード中は term.write せず buffer に溜める
         //   (c) replay snapshot を term.write してから queue を順次 flush する
         //   (d) flush 完了後 callback の挙動を「直接 term.write」に切替える
         //
         // この順序で:
         //   - replay (snapshot 時点までの過去出力) が先に画面に書かれる
-        //   - その後 queue に溜まっていた「snapshot 後 〜 buffering 切替後」の新着が順序通り flush される
+        //   - その後 queue に溜まっていた「snapshot 取得時点 〜 buffering 切替時点」の新着が
+        //     順序通り flush される (snapshot の前後で欠落なし)
         //   - 以降の通常 listener が直接 term.write する
         //
         // 注: snapshot 末尾と queue 先頭が一部 byte レベルで重複する可能性はあるが、
         // それは「終端 prompt の再描画」程度で機能性には影響しない (xterm の re-render で吸収される)。
         if (attached) {
-          unsubscribePtyListeners();
-
-          // (b) attach 経路 listener: 最初は queue に溜める、flush 後は直接 write。
-          let attachQueue: string[] = [];
-          let attachQueueFlushed = false;
-          const writeOrQueue = (data: string): void => {
-            if (!isCurrentGeneration()) return;
-            if (!attachQueueFlushed) {
-              attachQueue.push(data);
-              return;
-            }
-            term.write(data);
-            if (data.includes('\n') || data.includes('\r') || data.length >= 4096) {
-              scheduleRenderRepair();
-            }
-            callbacksRef.current.onActivity?.();
-          };
-
-          // (a) *Ready で listener 登録を await。create return 後の payload は確実に受信される。
-          const ok = await attemptPreSubscribe(
-            res.id,
-            writeOrQueue,
-            (info) => {
-              if (!isCurrentGeneration()) return;
-              term.writeln(
-                `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m`
-              );
-              callbacksRef.current.onStatus?.(`終了 (exitCode=${info.exitCode})`);
-              ptyIdRef.current = null;
-              cacheDelete(skey);
-              callbacksRef.current.onExit?.();
-            },
-            (sessionId) => {
-              if (!isCurrentGeneration()) return;
-              try {
-                callbacksRef.current.onSessionId?.(sessionId);
-              } catch {
-                /* noop */
-              }
-            }
-          );
-          if (!ok) return;
+          // Issue #633: pre-subscribe したターゲット id (= cachedPtyId) と Rust が返した
+          // res.id が不一致の場合のみ、orphan listener を解除して res.id で再 subscribe する。
+          // 通常の HMR remount ケースでは一致するので no-op。
+          if (preSubscribeTargetId !== res.id) {
+            unsubscribePtyListeners();
+            const ok = await attemptPreSubscribe(
+              res.id,
+              attachWriteOrQueue,
+              attachExitCb,
+              attachSessionIdCb
+            );
+            if (!ok) return;
+          }
 
           // (c) listener が queue モードで動いている状態で replay を term.write。
           if (res.replay && res.replay.length > 0) {
@@ -632,6 +658,24 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           // 新規 spawn 経路: pre-subscribe 済みの listener はそのまま使う。
           // setupPostSubscribe は新規 spawn では if (!offData) ガードで no-op になるが、
           // 互換性と将来の post-subscribe 経路フォールバック用に呼んでおく。
+          //
+          // Issue #633: wantAttach=true で create したのに res.attached=false が返る経路
+          // (cache stale で find_attach_target が miss → 新規 spawn にフォールバック) も
+          // ここに来る。pre-subscribe は cachedPtyId に張られていて res.id とは別物の
+          // 死 channel なので、ここで unsubscribe + 新規 spawn 用 callback で再 subscribe する。
+          if (wantAttach && preSubscribeTargetId !== null && preSubscribeTargetId !== res.id) {
+            unsubscribePtyListeners();
+            const ok = await attemptPreSubscribe(
+              res.id,
+              newSpawnDataCb,
+              newSpawnExitCb,
+              newSpawnSessionIdCb
+            );
+            if (!ok) {
+              void window.api.terminal.kill(res.id);
+              return;
+            }
+          }
           callbacksRef.current.onStatus?.(`実行中: ${res.command ?? command}`);
           setupPostSubscribe(res.id, attached);
         }

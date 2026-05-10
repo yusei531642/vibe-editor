@@ -699,10 +699,11 @@ mod tests {
 
         // header はそのまま
         assert!(msg.starts_with("[Task #99]\n--- data (untrusted"));
-        // 偽 marker は本物の `--- end data ---` (Hub 由来) より前に出現するが、内部 markdown
-        // code fence で escape されているため worker からは markdown コードブロックの一部として見える。
-        // Standard response protocol セクションは必ず本物の `--- end data ---` の **後** にある。
-        let real_end = msg.rfind("--- end data ---").unwrap();
+        // 偽 marker は本物の `--- end data [<nonce>] ---` (Hub 由来、Issue #602 で nonce 化) より
+        // 前に出現するが、内部 markdown code fence で escape されているため worker からは markdown
+        // コードブロックの一部として見える。Standard response protocol セクションは必ず本物の
+        // `--- end data [<nonce>] ---` の **後** にある。
+        let real_end = msg.rfind("--- end data [").unwrap();
         let protocol_pos = msg.find("Standard response protocol").unwrap();
         assert!(
             protocol_pos > real_end,
