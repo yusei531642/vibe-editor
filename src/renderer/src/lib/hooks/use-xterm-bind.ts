@@ -109,6 +109,16 @@ export interface UseXtermBindOptions {
    * useFitToContainer の visible-effect refit が IPC を二重発火させずに済む。
    */
   lastScheduledRef?: MutableRefObject<{ cols: number; rows: number } | null>;
+  /**
+   * Issue #662: 永続化復元時の PTY 初回 spawn cols/rows seed。
+   * 指定があると `fit.fit()` / `computeUnscaledGrid` より先に `term.resize(seed)` を
+   * 一度適用し、その値を `terminal.create({ cols, rows })` に渡す。font ready 後の
+   * `useFitToContainer.refit` が走るので、persist 値が現在の container 寸法と
+   * 微妙に違っていても自然に補正される。
+   * 未指定なら従来挙動 (fit 経路で seed) に倒す。
+   */
+  initialCols?: number;
+  initialRows?: number;
 }
 
 export function useXtermBind(options: UseXtermBindOptions): void {
@@ -128,7 +138,9 @@ export function useXtermBind(options: UseXtermBindOptions): void {
     unscaledFit = false,
     getCellSize,
     containerRef,
-    lastScheduledRef
+    lastScheduledRef,
+    initialCols: persistedInitialCols,
+    initialRows: persistedInitialRows
   } = options;
   // sessionKey は HMR cleanup / preflight 判定のために effect 内で参照したいので
   // ref に退避しておく (deps から外しても stale にならないため)。
@@ -205,6 +217,39 @@ export function useXtermBind(options: UseXtermBindOptions): void {
     let initialCols = 80;
     let initialRows = 24;
 
+    // Issue #662: 永続化復元由来の seed を持っていればここで一度 term.resize() を当てる。
+    // この時点で xterm の cols/rows が「前回の最終 PTY size」になり、後続の fit 経路が
+    // 失敗 (= container がまだ 0px) しても terminal.create({cols, rows}) に妥当値が渡る。
+    // fit が成功した場合は後段で initialCols/Rows を fit 結果で上書きするので、現在の
+    // container 寸法と一致した PTY が立ち、persist 値が古ければ font ready 後の refit
+    // が補正する。範囲チェックは use-terminal-tabs-persistence で済んでいる前提だが、
+    // 防御的に再チェックする。`seedLastScheduledSize` は本関数より後ろで定義されるが、
+    // この closure を呼び出すのは loadInitialMetrics (async IIFE) 内なので、その時点では
+    // 既に定義済み (closure resolution は呼び出し時)。
+    const seedFromPersistence = (cols?: number, rows?: number): boolean => {
+      if (
+        typeof cols !== 'number' ||
+        typeof rows !== 'number' ||
+        !Number.isInteger(cols) ||
+        !Number.isInteger(rows) ||
+        cols < 1 ||
+        rows < 1 ||
+        cols > 10000 ||
+        rows > 10000
+      ) {
+        return false;
+      }
+      try {
+        term.resize(cols, rows);
+        initialCols = cols;
+        initialRows = rows;
+        seedLastScheduledSize(cols, rows);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
     let offData: (() => void) | null = null;
     let offExit: (() => void) | null = null;
     let offSessionId: (() => void) | null = null;
@@ -276,6 +321,14 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         }
         if (localDisposed || disposedRef.current) return;
       }
+
+      // Issue #662: 永続化復元由来の seed があれば fit より先に baseline として当てる。
+      // これで万一 fit/computeUnscaledGrid が container 未レイアウトで失敗しても
+      // 「前回終了時の最終 PTY size」で terminal.create({cols, rows}) が呼ばれる。
+      // fit が成功した場合は後段で initialCols/Rows を fit 結果で上書きするので
+      // 現在の container 寸法に合った PTY が立ち、persist 値が古ければ font ready 後の
+      // refit が補正する (issue 本文「persist 値は粗くても問題ない」)。
+      seedFromPersistence(persistedInitialCols, persistedInitialRows);
 
       // 初期サイズ算出。Canvas モード (unscaledFit=true) では `transform: scale(zoom)` 下で
       // FitAddon.fit() が getBoundingClientRect 経由で scale 後の視覚矩形を読んでしまうため、

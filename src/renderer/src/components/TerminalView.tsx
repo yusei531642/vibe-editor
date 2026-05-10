@@ -71,6 +71,16 @@ interface TerminalViewProps {
    * 全ての size 変化を 1 か所で捕まえる。
    */
   onResize?: (cols: number, rows: number) => void;
+  /**
+   * Issue #662: 永続化復元時の PTY 初回 spawn cols/rows seed。
+   * 指定があると `loadInitialMetrics` の `fit.fit()` より先に `term.resize(seed)` を一度
+   * 適用し、その値を `terminal.create({ cols, rows })` に渡す。font ready 後の
+   * `useFitToContainer.refit` が走るので、persist 値が現在の container 寸法と微妙に
+   * 違っていても自然に補正される (issue 本文で「persist 値は粗くても問題ない」と明記)。
+   * 未指定なら従来通り fit.fit() / computeUnscaledGrid 経路で seed する (regression なし)。
+   */
+  initialCols?: number;
+  initialRows?: number;
   /** ユーザーが xterm 上で入力したキーストロークの sniff (タイトル auto-summary 等の用途) */
   onUserInput?: (data: string) => void;
   /**
@@ -137,6 +147,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       onExit,
       onSessionId,
       onResize,
+      initialCols,
+      initialRows,
       onUserInput,
       onSpawnError,
       disableWebgl,
@@ -254,7 +266,10 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       unscaledFit,
       getCellSize,
       containerRef,
-      lastScheduledRef
+      lastScheduledRef,
+      // Issue #662: 永続化復元時の初回 spawn size seed (未指定なら fit 経路に倒す)
+      initialCols,
+      initialRows
     });
 
     // --- Ctrl+C / Ctrl+V / 画像ペースト (不変式 #4) ---

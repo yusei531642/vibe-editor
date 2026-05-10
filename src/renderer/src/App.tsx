@@ -1147,6 +1147,8 @@ export function App(): JSX.Element {
                       markSessionPersisted(tab.id);
                     }}
                     onResize={(cols, rows) => reportTerminalSize(tab.id, cols, rows)}
+                    initialCols={tab.initialCols ?? undefined}
+                    initialRows={tab.initialRows ?? undefined}
                   />
                 ) : claudeCheck.state === 'checking' ? (
                   <div className="claude-not-found__body" style={{ padding: 40, textAlign: 'center' }}>

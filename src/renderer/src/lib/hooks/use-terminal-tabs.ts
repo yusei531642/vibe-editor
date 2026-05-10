@@ -34,6 +34,15 @@ export interface TerminalTab {
    * null なら App.tsx 側 fallback (`settings.claudeCwd ?? projectRoot`) を使う。
    */
   cwd: string | null;
+  /**
+   * Issue #662: 永続化復元時に PTY の初回 spawn cols/rows seed として使う値。
+   * fit.fit() より先に term.resize(initialCols, initialRows) を一度呼ぶことで、
+   * 復元直後の terminal.create() が「前回の最終 PTY size」で立ち上がり、
+   * font ready 後の useFitToContainer.refit が走るまでの間に出る再 fit 一瞬の
+   * 表示崩れを抑える。null なら通常の fit 経路 (= 既存挙動)。
+   */
+  initialCols: number | null;
+  initialRows: number | null;
   /** チーム履歴で使う member インデックス。未所属タブは null */
   teamHistoryMemberIdx: number | null;
   /** 自動生成されたデフォルトラベル（"Claude #1" / "Programmer A" など） */
@@ -68,6 +77,12 @@ export interface AddTerminalTabOptions {
    * 未指定なら App.tsx 側 fallback (`settings.claudeCwd ?? projectRoot`) を使う。
    */
   cwd?: string | null;
+  /**
+   * Issue #662: 永続化復元時に PTY の初回 spawn cols/rows seed として渡す値。
+   * 通常の addTerminalTab (新規タブ作成時) では未指定で OK。
+   */
+  initialCols?: number | null;
+  initialRows?: number | null;
 }
 
 type ToastFn = (
@@ -296,6 +311,8 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
           resumeSessionId,
           freshSessionId,
           cwd: addOpts?.cwd ?? null,
+          initialCols: addOpts?.initialCols ?? null,
+          initialRows: addOpts?.initialRows ?? null,
           teamHistoryMemberIdx: addOpts?.teamHistoryMemberIdx ?? null,
           label,
           customLabel: addOpts?.customLabel ?? null
