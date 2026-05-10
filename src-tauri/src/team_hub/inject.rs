@@ -335,6 +335,14 @@ async fn inject_once(
         tracing::warn!("[inject] no session for agent {agent_id} — registry has no by_agent entry");
         return Err(InjectError::NoSession);
     };
+    // Issue #619: bracketed-paste 注入中に renderer 側からの terminal_write (=ユーザー入力) が
+    // ConPTY に紛れ込むと worker prompt が破損する。`begin_injecting()` の戻り値を変数に
+    // 束縛しておくと、本関数を抜けるあらゆる経路 (Ok / Err / panic / `?` 伝播) で Drop が走り、
+    // `injecting` が確実に false に戻る (RAII guard)。
+    //
+    // `_inject_guard` を `let _ = ...` で受けると即座に Drop してしまうので、必ず named binding
+    // (`_inject_guard`) を使うこと。
+    let _inject_guard = session.begin_injecting();
     let banner = format!("[Team ← {from_role}] ");
     let chunks = build_chunks(&banner, text);
     if chunks.is_empty() {
