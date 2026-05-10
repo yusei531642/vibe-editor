@@ -410,6 +410,41 @@ where
         return Ok(());
     }
 
+    // Issue #638: handshake 後の RPC 処理は inner async block に隔離し、どの early-return path
+    // (EOF / idle timeout / I/O error / write timeout) を通っても closing 後に必ず
+    // `release_all_file_locks_for_agent` が走るようにする。worker process が `kill -9` 等で
+    // 異常終了した場合、socket close → BufReader が EOF を返し serve_session が落ちるので、
+    // dismiss MCP が呼ばれずとも advisory lock が解放される (= stale lock の自動掃除)。
+    let _ = serve_session(&hub, &ctx, &mut reader, &mut wr).await;
+
+    // Issue #638: peer 切断 hook — 当該 agent の advisory file lock を一括解放。
+    // dismiss MCP 経由 (`super::protocol::tools::dismiss`) と同じ helper を呼ぶことで DRY を保つ。
+    let released_lock_count = hub
+        .release_all_file_locks_for_agent(&ctx.team_id, &ctx.agent_id)
+        .await;
+    if released_lock_count > 0 {
+        tracing::info!(
+            "[teamhub] released {released_lock_count} advisory file lock(s) on disconnect (team={} agent={})",
+            ctx.team_id,
+            ctx.agent_id
+        );
+    }
+
+    Ok(())
+}
+
+/// Issue #638: handshake 後の RPC ループ本体。caller 側 (`handle_client`) で disconnect 後の
+/// cleanup を一括で行えるよう、loop 内の return path を全て `Ok(())` で外側に返す。
+async fn serve_session<R, W>(
+    hub: &TeamHub,
+    ctx: &CallContext,
+    reader: &mut BufReader<R>,
+    wr: &mut W,
+) -> Result<()>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
     // Issue #107 + #133: BufReader::lines() は行サイズに上限が無く DoS になる。
     // 旧実装は 1 byte ずつ read_exact を呼んでいたため、長文 message 1 行 (10 KB) で
     // 10000 回の future poll が走り tokio worker を飽和させていた。
@@ -425,7 +460,7 @@ where
         let mut overflowed = false;
         // tokio の BufReader::read_until は max 制限が無いので、自前で take してから読む。
         // ただし client が \n を送ってこないと無限読みになるため、LIMIT+1 で take。
-        let mut limited = (&mut reader).take((RPC_LINE_LIMIT as u64) + 1);
+        let mut limited = (&mut *reader).take((RPC_LINE_LIMIT as u64) + 1);
         // Issue #168: idle timeout 付きで読み込む。一定時間無音なら接続を切って
         // permit を解放し、wedged client の occupation DoS を防ぐ。
         match tokio::time::timeout(IDLE_TIMEOUT, limited.read_until(b'\n', &mut buf)).await {
@@ -444,7 +479,7 @@ where
             // \n を見つけるまで読み捨てる (LIMIT バイトずつ繰り返し)
             loop {
                 let mut drop_buf: Vec<u8> = Vec::with_capacity(4096);
-                let mut drop_limited = (&mut reader).take((RPC_LINE_LIMIT as u64) + 1);
+                let mut drop_limited = (&mut *reader).take((RPC_LINE_LIMIT as u64) + 1);
                 match drop_limited.read_until(b'\n', &mut drop_buf).await {
                     Ok(0) => return Ok(()),
                     Ok(_) => {}
@@ -488,7 +523,7 @@ where
                 continue;
             }
         };
-        if let Some(resp) = protocol::handle(&hub, &ctx, &req).await {
+        if let Some(resp) = protocol::handle(hub, ctx, &req).await {
             // Issue #168: 書き込みも WRITE_TIMEOUT 付き。peer 側が TCP recv buffer を
             // 読まずに詰まらせるケースで write_all が永遠に await するのを防ぐ。
             let body = resp.to_string();
@@ -511,5 +546,164 @@ where
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod disconnect_release_tests {
+    //! Issue #638: socket / pipe 切断 hook で advisory file lock が解放されることを保証する。
+    //!
+    //! `handle_client` を `tokio::io::duplex` 上で動かし、handshake 直後に client 側を drop する
+    //! (= worker process が `kill -9` 等で消えた状況のシミュレーション)。client 側 EOF を受けて
+    //! `serve_session` が抜けたあと、cleanup hook が `release_all_file_locks_for_agent` を呼んで
+    //! 当該 agent の lock を残らず解放しているかを map から検証する。
+    //!
+    //! `team_dismiss` MCP 経路は protocol::tools::dismiss 側でカバーされており、本 test は
+    //! 「dismiss が呼ばれない異常切断」=「socket EOF だけが手掛かり」なケースを担保する。
+    use super::*;
+    use crate::pty::SessionRegistry;
+    use crate::team_hub::file_locks;
+    use serde_json::json;
+    use std::sync::Arc;
+    use tokio::io::AsyncWriteExt;
+    use tokio::time::{timeout, Duration};
+
+    /// 最小限の HubState セットアップ。`register_team` は project_root の永続化 I/O を踏むので、
+    /// test 中は active_teams を直接挿入し、token も既知値を直書きする。
+    async fn setup_hub_for_test(team_id: &str, token: &str) -> TeamHub {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        {
+            let mut s = hub.state.lock().await;
+            s.active_teams.insert(team_id.to_string());
+            s.token = token.to_string();
+        }
+        hub
+    }
+
+    /// agent 用の lock を直接 map に push しておく。
+    async fn pre_acquire_lock(hub: &TeamHub, team_id: &str, agent_id: &str, role: &str, path: &str) {
+        let mut s = hub.state.lock().await;
+        let result = file_locks::try_acquire(
+            &mut s.file_locks,
+            team_id,
+            agent_id,
+            role,
+            &[path.to_string()],
+        );
+        assert!(!result.has_conflicts(), "pre-condition: lock must be acquirable");
+        assert_eq!(result.locked.len(), 1);
+    }
+
+    async fn count_team_locks(hub: &TeamHub, team_id: &str) -> usize {
+        let s = hub.state.lock().await;
+        s.file_locks
+            .iter()
+            .filter(|((tid, _), _)| tid == team_id)
+            .count()
+    }
+
+    /// kill -9 シミュレーション: handshake 完了直後に client 側を drop し、socket EOF だけで
+    /// agent の advisory lock が解放されることを assert する。
+    #[tokio::test]
+    async fn handle_client_releases_locks_on_abrupt_disconnect() {
+        let team_id = "team-638";
+        let agent_id = "vc-worker-638";
+        let role = "programmer";
+        let token = "deadbeef-test-token";
+        let hub = setup_hub_for_test(team_id, token).await;
+        pre_acquire_lock(&hub, team_id, agent_id, role, "src/foo.rs").await;
+        assert_eq!(count_team_locks(&hub, team_id).await, 1);
+
+        // server <-> client 仮想 socket を duplex で繋ぐ。
+        let (server_side, mut client_side) = tokio::io::duplex(8 * 1024);
+
+        // handshake JSON を流し込む。
+        let hello = json!({
+            "token": token,
+            "teamId": team_id,
+            "role": role,
+            "agentId": agent_id,
+        });
+        let mut hello_line = serde_json::to_vec(&hello).unwrap();
+        hello_line.push(b'\n');
+        client_side.write_all(&hello_line).await.unwrap();
+        client_side.flush().await.unwrap();
+
+        // server task を起動 (handle_client は serve_session 経由で disconnect cleanup まで実行)。
+        let hub_clone = hub.clone();
+        let server_handle = tokio::spawn(async move {
+            handle_client(hub_clone, server_side, token.to_string()).await
+        });
+
+        // client 側を即時 drop = worker process が `kill -9` で死んだのと同じ状況を作る。
+        drop(client_side);
+
+        // serve_session は EOF を読んで Ok(()) を返し、cleanup hook が走る。
+        // ハンドシェイクの読み込みは HANDSHAKE_TIMEOUT (5s) 以内に解決する想定なので、test 側は 10s 上限。
+        timeout(Duration::from_secs(10), server_handle)
+            .await
+            .expect("handle_client should finish promptly after client EOF")
+            .expect("server task should not panic")
+            .expect("handle_client should return Ok(())");
+
+        // 解放 hook で lock 表が空になっているはず。
+        assert_eq!(
+            count_team_locks(&hub, team_id).await,
+            0,
+            "advisory lock for disconnected agent must be released"
+        );
+    }
+
+    /// 同一 agent_id で再 spawn したケースを模擬: 再接続時に handshake → 即 drop しても、
+    /// 「前回の lock が掃除済み」状態なら新しい接続で取り直せる (gridlock しない)。
+    #[tokio::test]
+    async fn re_spawned_agent_can_acquire_after_previous_disconnect() {
+        let team_id = "team-638b";
+        let agent_id = "vc-worker-638b";
+        let role = "programmer";
+        let token = "deadbeef-test-token-b";
+        let hub = setup_hub_for_test(team_id, token).await;
+
+        // 1 回目: lock を取って disconnect。
+        pre_acquire_lock(&hub, team_id, agent_id, role, "src/bar.rs").await;
+        let (s1, mut c1) = tokio::io::duplex(8 * 1024);
+        let hello = json!({
+            "token": token,
+            "teamId": team_id,
+            "role": role,
+            "agentId": agent_id,
+        });
+        let mut line = serde_json::to_vec(&hello).unwrap();
+        line.push(b'\n');
+        c1.write_all(&line).await.unwrap();
+        c1.flush().await.unwrap();
+        let h1 = {
+            let hub = hub.clone();
+            tokio::spawn(async move { handle_client(hub, s1, token.to_string()).await })
+        };
+        drop(c1);
+        timeout(Duration::from_secs(10), h1)
+            .await
+            .expect("first session should finish")
+            .expect("no panic")
+            .expect("ok");
+
+        assert_eq!(
+            count_team_locks(&hub, team_id).await,
+            0,
+            "previous lock must be cleared for the redspawn flow"
+        );
+
+        // 2 回目: 同じ path を再取得できる (= gridlock 解消の証明)。
+        let mut s = hub.state.lock().await;
+        let result = file_locks::try_acquire(
+            &mut s.file_locks,
+            team_id,
+            agent_id,
+            role,
+            &["src/bar.rs".to_string()],
+        );
+        assert!(!result.has_conflicts());
+        assert_eq!(result.locked, vec!["src/bar.rs".to_string()]);
     }
 }
