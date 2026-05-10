@@ -161,6 +161,60 @@ async fn unknown_fields_are_silently_dropped() {
     assert!(back.get("anotherUnknown").is_none());
 }
 
+/// Issue #641: 旧 build が新スキーマの settings.json に書き戻すと新フィールドが silent 損失する
+/// ため、`settings_save` は disk の `schemaVersion > APP_SETTINGS_SCHEMA_VERSION` のとき reject する。
+/// この round-trip では `Settings` シリアライズ (旧 build 相当の incoming) が新スキーマ disk に
+/// 上書きできず、既存 json が温存されることを確認する。
+#[tokio::test]
+async fn newer_disk_schema_blocks_save_via_compat_check() {
+    use crate::commands::settings::check_schema_compat;
+    use serde_json::Value;
+
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("settings.json");
+    let future = APP_SETTINGS_SCHEMA_VERSION + 1;
+    // 「新 build が書いた settings.json」を擬似的に置く (未知の future field 込み)。
+    let new_disk = json!({
+        "schemaVersion": future,
+        "language": "ja",
+        "theme": "claude-dark",
+        "uiFontFamily": "Arial",
+        "uiFontSize": 14,
+        "editorFontFamily": "Consolas",
+        "editorFontSize": 13,
+        "terminalFontSize": 13,
+        "density": "normal",
+        "claudeCommand": "claude",
+        "claudeArgs": "",
+        "claudeCwd": "",
+        "lastOpenedRoot": "",
+        "recentProjects": [],
+        "workspaceFolders": [],
+        "claudeCodePanelWidth": 460,
+        "sidebarWidth": 272,
+        "codexCommand": "codex",
+        "codexArgs": "",
+        "notepad": "",
+        "terminalForceUtf8": true,
+        "newFutureField": { "added": "in v12" }
+    });
+    let bytes = serde_json::to_vec_pretty(&new_disk).unwrap();
+    atomic_write(&path, &bytes).await.unwrap();
+
+    // 旧 build (= 現行 const = APP_SETTINGS_SCHEMA_VERSION) が disk を読む → schema_version が
+    // 既知の最大より大きいので check_schema_compat が reject。`settings_save` 本体は
+    // `~/.vibe-editor/settings.json` 固定パスを使うので、ここでは check 関数を直接叩いて
+    // ガードが期待通り発火することを確認する。
+    let res = check_schema_compat(Some(future), Some(APP_SETTINGS_SCHEMA_VERSION));
+    assert!(res.is_err(), "newer disk must block older save");
+
+    // disk 上の json は変更されていない (= future field が温存されている) ことを確認。
+    let disk_after = tokio::fs::read(&path).await.unwrap();
+    let v: Value = serde_json::from_slice(&disk_after).unwrap();
+    assert_eq!(v["schemaVersion"], json!(future));
+    assert_eq!(v["newFutureField"]["added"], json!("in v12"));
+}
+
 /// 並列に多数 atomic_write → 最終 read で valid JSON で読める (atomic 性の sanity check)。
 /// `commands/atomic_write.rs::tests` で個別カバー済みだが、Settings shape との組み合わせを
 /// integration として一回回しておく。

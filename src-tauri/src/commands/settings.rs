@@ -269,10 +269,78 @@ pub async fn settings_load() -> Settings {
     }
 }
 
+/// Issue #641: settings_save に schema_version 互換性ガードを実装する内部関数。
+///
+/// 設計:
+/// - `disk_schema_version` (= 既存 settings.json から読んだ `schema_version`) と
+///   `incoming_schema_version` (= renderer から渡された `Settings.schema_version`) を比較し、
+///   以下の 2 ケースで save を reject する:
+///   1. **disk が新しいバージョン**: `disk_schema_version > APP_SETTINGS_SCHEMA_VERSION`。
+///      旧 build が起動して新スキーマの settings.json を上書きしようとしたケース。
+///      旧 build の serde は新フィールドを `unknown_fields` として silent drop しているため、
+///      そのまま書き戻すと新フィールドが永続的に消える。
+///   2. **incoming が未来バージョン**: `incoming > APP_SETTINGS_SCHEMA_VERSION`。
+///      renderer が migration で意図しない future version を渡してきたケース (通常は発生しない
+///      が、複数 vibe-editor インスタンス間の race / 改竄 settings.json を読んだ等で起こり得る)。
+/// - reject は `CommandError::Validation` で renderer 側に返し、Toast で「新しい vibe-editor が
+///   この設定を作成しました。最新版に更新してから保存してください。」と表示する経路。
+/// - **下回るバージョン (incoming < current) は accept する**: renderer 側 `migrateSettings` が
+///   現行 schema へ前進させた後に save するので、通常 incoming は current と一致する。仮に
+///   incoming のほうが古くても、disk のほうも同等以下であれば情報損失リスクは無い (= 同一バイナリ
+///   の前進 migration として扱える)。
+pub(crate) fn check_schema_compat(
+    disk_schema_version: Option<u32>,
+    incoming_schema_version: Option<u32>,
+) -> Result<(), CommandError> {
+    // case 1: 旧 build が新スキーマの disk を上書きしようとしている
+    if let Some(disk_v) = disk_schema_version {
+        if disk_v > APP_SETTINGS_SCHEMA_VERSION {
+            tracing::warn!(
+                disk_schema_version = disk_v,
+                current_schema_version = APP_SETTINGS_SCHEMA_VERSION,
+                "[settings_save] rejected: disk has newer schema than this build",
+            );
+            return Err(CommandError::validation(format!(
+                "settings.json was created by a newer vibe-editor (schema v{disk_v}, this build supports v{APP_SETTINGS_SCHEMA_VERSION}). \
+                 Update vibe-editor before saving settings to avoid losing newer fields."
+            )));
+        }
+    }
+    // case 2: renderer から未来バージョンが渡された
+    if let Some(incoming_v) = incoming_schema_version {
+        if incoming_v > APP_SETTINGS_SCHEMA_VERSION {
+            tracing::warn!(
+                incoming_schema_version = incoming_v,
+                current_schema_version = APP_SETTINGS_SCHEMA_VERSION,
+                "[settings_save] rejected: incoming settings declare future schema",
+            );
+            return Err(CommandError::validation(format!(
+                "Incoming settings declare a future schema (v{incoming_v}, this build supports v{APP_SETTINGS_SCHEMA_VERSION}). \
+                 Refusing to overwrite to avoid silent field loss."
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// disk から既存 settings.json の `schema_version` だけを軽量に読み取る。
+/// ファイル不在 / parse 失敗 / フィールド欠落はすべて `None` を返し、check_schema_compat 側で
+/// 「ガード対象外」として扱う (= 旧データ / 初回保存 / 破損ファイルは save を許容する)。
+async fn read_disk_schema_version(path: &std::path::Path) -> Option<u32> {
+    let bytes = fs::read(path).await.ok()?;
+    let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    v.get("schemaVersion").and_then(|n| n.as_u64()).map(|n| n as u32)
+}
+
 #[tauri::command]
 pub async fn settings_save(settings: Settings) -> CommandResult<()> {
     let _g = SAVE_LOCK.lock().await;
     let path = crate::util::config_paths::settings_path();
+    // Issue #641: 古い build が新スキーマの settings.json を silent に上書きするのを防ぐ。
+    // disk の `schemaVersion` が現行 const より大きい場合、新フィールドが silent drop される
+    // ため reject する (renderer 側でユーザーに「最新版に更新してください」を表示する経路)。
+    let disk_v = read_disk_schema_version(&path).await;
+    check_schema_compat(disk_v, settings.schema_version)?;
     let json = serde_json::to_vec_pretty(&settings)?;
     // Issue #37: 書き込み中の crash で settings.json が半端 JSON にならないよう atomic
     atomic_write(&path, &json)
@@ -410,5 +478,97 @@ mod tests {
         // future-value は drop される (deny_unknown_fields は使っていない)
         let back = serde_json::to_value(&s).unwrap();
         assert!(back.get("futureField").is_none());
+    }
+
+    // -------- Issue #641: schema_version 互換性ガードの単体テスト --------
+
+    /// 同一スキーマ (= 通常運用) は accept される。
+    #[test]
+    fn check_schema_compat_accepts_equal_versions() {
+        let r = check_schema_compat(
+            Some(APP_SETTINGS_SCHEMA_VERSION),
+            Some(APP_SETTINGS_SCHEMA_VERSION),
+        );
+        assert!(r.is_ok());
+    }
+
+    /// 旧スキーマからの save (= renderer migration が前進中 / 古い settings.json の初回 save) は
+    /// accept する。renderer 側 `migrateSettings` が前進させる前提なので、Rust 側で reject すると
+    /// 既存ユーザーが起動できなくなる。
+    #[test]
+    fn check_schema_compat_accepts_older_versions() {
+        let r = check_schema_compat(Some(2), Some(2));
+        assert!(r.is_ok(), "older equal schemas must be saveable");
+        let r2 = check_schema_compat(Some(5), Some(APP_SETTINGS_SCHEMA_VERSION));
+        assert!(r2.is_ok(), "advancing from older disk must be allowed");
+    }
+
+    /// disk が無い / `schemaVersion` フィールド欠落のときはガード対象外として accept。
+    /// (初回起動 / 旧 v0 データ)
+    #[test]
+    fn check_schema_compat_accepts_missing_disk_version() {
+        let r = check_schema_compat(None, Some(APP_SETTINGS_SCHEMA_VERSION));
+        assert!(r.is_ok());
+        let r2 = check_schema_compat(None, None);
+        assert!(r2.is_ok());
+    }
+
+    /// disk が新スキーマで、incoming が現行 build (= 旧) のとき reject される。
+    /// 旧 build が新スキーマを silent に上書きするケースを防ぐ。
+    #[test]
+    fn check_schema_compat_rejects_when_disk_has_newer_schema() {
+        let future = APP_SETTINGS_SCHEMA_VERSION + 1;
+        let r = check_schema_compat(Some(future), Some(APP_SETTINGS_SCHEMA_VERSION));
+        assert!(r.is_err(), "disk newer than current build must reject");
+        let msg = format!("{}", r.unwrap_err());
+        assert!(
+            msg.contains("newer vibe-editor"),
+            "error message must hint at update: got {msg}"
+        );
+    }
+
+    /// renderer から未来バージョンが渡された場合は reject。settings.json 改竄 / migration バグの保険。
+    #[test]
+    fn check_schema_compat_rejects_when_incoming_is_future_version() {
+        let future = APP_SETTINGS_SCHEMA_VERSION + 1;
+        let r = check_schema_compat(None, Some(future));
+        assert!(r.is_err(), "incoming future schema must reject");
+        let msg = format!("{}", r.unwrap_err());
+        assert!(
+            msg.contains("future schema"),
+            "error message must mention future schema: got {msg}"
+        );
+    }
+
+    /// `read_disk_schema_version` の挙動 sanity: 通常 JSON から正しく読める。
+    #[tokio::test]
+    async fn read_disk_schema_version_extracts_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        let raw = json!({
+            "schemaVersion": 42,
+            "language": "ja"
+        });
+        tokio::fs::write(&path, serde_json::to_vec(&raw).unwrap())
+            .await
+            .unwrap();
+        let v = read_disk_schema_version(&path).await;
+        assert_eq!(v, Some(42));
+    }
+
+    /// 不在ファイル / parse 失敗 / フィールド欠落はすべて `None` を返す。
+    #[tokio::test]
+    async fn read_disk_schema_version_returns_none_for_missing_or_invalid() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("nope.json");
+        assert_eq!(read_disk_schema_version(&missing).await, None);
+
+        let invalid = dir.path().join("invalid.json");
+        tokio::fs::write(&invalid, b"not-json").await.unwrap();
+        assert_eq!(read_disk_schema_version(&invalid).await, None);
+
+        let no_field = dir.path().join("no-field.json");
+        tokio::fs::write(&no_field, br#"{"language":"ja"}"#).await.unwrap();
+        assert_eq!(read_disk_schema_version(&no_field).await, None);
     }
 }
