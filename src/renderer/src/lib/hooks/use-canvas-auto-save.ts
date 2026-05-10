@@ -144,10 +144,28 @@ export function useCanvasAutoSave(opts: UseCanvasAutoSaveOptions): void {
       }
       // Issue #132: チームごとに save IPC を撃つと N チーム分 N 回 atomic_write が走る。
       // saveBatch で 1 IPC + 1 disk write にまとめる。
+      // Issue #642: Rust 側が disk の外部変更を検知して merge した場合は
+      // `externalChangeMerged: true` が返るので、最新 disk 状態を反映するため list を再取得して
+      // setRecent を refresh する (= 手編集された他 entry を UI に映す)。
       if (nextEntries.length > 0) {
-        void window.api.teamHistory.saveBatch(nextEntries).catch((err) => {
-          console.warn('[recent] saveBatch failed:', err);
-        });
+        void window.api.teamHistory
+          .saveBatch(nextEntries)
+          .then((res) => {
+            if (res?.externalChangeMerged === true) {
+              console.info(
+                '[team-history] external change merged on saveBatch; refreshing recent list'
+              );
+              window.api.teamHistory
+                .list(projectRoot)
+                .then(setRecent)
+                .catch((err) => {
+                  console.warn('[team-history] refresh after external merge failed:', err);
+                });
+            }
+          })
+          .catch((err) => {
+            console.warn('[recent] saveBatch failed:', err);
+          });
       }
       if (nextEntries.length > 0) {
         setRecent((prev) => {
