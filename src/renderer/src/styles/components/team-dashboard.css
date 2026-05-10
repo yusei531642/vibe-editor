@@ -277,3 +277,50 @@
 [data-density='compact'] .tc__dashboard-task-meta {
   display: none;
 }
+
+/* ----------
+ * Issue #615: multi-team section
+ *
+ * dual preset 等で 2 team 以上が active のとき、各 team を section ごとに表示する。
+ * section の上に小さな heading を出して team を識別できるようにする。
+ * ---------- */
+.tc__dashboard-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.tc__dashboard-section + .tc__dashboard-section,
+.tc__dashboard-team-heading + .tc__dashboard-section {
+  margin-top: 8px;
+}
+.tc__dashboard-team-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 4px 2px;
+  font-size: var(--text-xs, 11px);
+  color: var(--fg-subtle);
+  border-top: 1px dashed color-mix(in srgb, var(--border) 70%, transparent);
+  margin-top: 6px;
+}
+.tc__dashboard-team-heading:first-of-type {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
+}
+.tc__dashboard-team-label {
+  font-weight: 600;
+  color: var(--fg);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.tc__dashboard-team-id {
+  font-family: var(--font-mono, ui-monospace);
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
+.tc__dashboard-team-count {
+  margin-left: auto;
+  color: var(--fg-subtle);
+  font-variant-numeric: tabular-nums;
+}
