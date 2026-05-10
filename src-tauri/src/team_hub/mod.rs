@@ -126,8 +126,14 @@ fn create_pipe_server(endpoint: &str, first_instance: bool) -> Result<NamedPipeS
 pub(crate) fn check_peer_is_self_unix(
     stream: &tokio::net::UnixStream,
 ) -> Result<()> {
+    use std::os::fd::BorrowedFd;
     use std::os::unix::io::AsRawFd;
-    let fd = stream.as_raw_fd();
+    // nix 0.29 の `getsockopt::<F: AsFd, _>` は raw fd (i32) を直接受け取らないため、
+    // tokio UnixStream の as_raw_fd() を `BorrowedFd::borrow_raw` で wrap する。
+    // BorrowedFd の lifetime は本関数内に閉じ、stream 引数より長くは生きないので
+    // close-after-borrow の race は発生しない。
+    let raw_fd = stream.as_raw_fd();
+    let fd = unsafe { BorrowedFd::borrow_raw(raw_fd) };
     let cred = nix::sys::socket::getsockopt(&fd, nix::sys::socket::sockopt::PeerCredentials)
         .map_err(|e| anyhow!("getsockopt(SO_PEERCRED) failed: {e}"))?;
     let own_uid = nix::unistd::getuid().as_raw();
