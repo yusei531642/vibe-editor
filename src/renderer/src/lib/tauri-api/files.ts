@@ -3,6 +3,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   FileListResult,
+  FileMutationResult,
   FileReadResult,
   FileWriteResult
 } from '../../../../types/shared';
@@ -37,5 +38,54 @@ export const files = {
       expectedSizeBytes,
       encoding,
       expectedContentHash
-    })
+    }),
+  /**
+   * Issue #592: 親ディレクトリ relPath 配下に空ファイル `name` を作成する。
+   * `relPath = ""` でルート直下。`overwrite` 既定 false で既存ファイルがあれば失敗。
+   */
+  create: (
+    projectRoot: string,
+    relPath: string,
+    name: string,
+    overwrite?: boolean
+  ): Promise<FileMutationResult> =>
+    invoke('files_create', { projectRoot, relPath, name, overwrite }),
+  /** Issue #592: 親ディレクトリ relPath 配下に新規ディレクトリ `name` を作る。 */
+  createDir: (projectRoot: string, relPath: string, name: string): Promise<FileMutationResult> =>
+    invoke('files_create_dir', { projectRoot, relPath, name }),
+  /**
+   * Issue #592: ファイル/ディレクトリを rename もしくは同一ルート内移動する。
+   * `fromRel` は既存パス、`toParentRel` は移動先親ディレクトリ、`newName` は新しい basename。
+   * `overwrite` を true にすると既存パスを上書きする (cut & paste の上書き経路)。
+   */
+  rename: (
+    projectRoot: string,
+    fromRel: string,
+    toParentRel: string,
+    newName: string,
+    overwrite?: boolean
+  ): Promise<FileMutationResult> =>
+    invoke('files_rename', { projectRoot, fromRel, toParentRel, newName, overwrite }),
+  /**
+   * Issue #592: ファイル/ディレクトリを削除する。
+   * `permanent=false` (default) なら OS のゴミ箱、`true` なら完全削除。
+   */
+  delete: (
+    projectRoot: string,
+    relPath: string,
+    permanent?: boolean
+  ): Promise<FileMutationResult> =>
+    invoke('files_delete', { projectRoot, relPath, permanent }),
+  /**
+   * Issue #592: ファイル/ディレクトリを再帰コピー。Cut/Copy & Paste の Copy 経路。
+   * cut の場合は呼び出し側で `rename` を使う。
+   */
+  copy: (
+    projectRoot: string,
+    fromRel: string,
+    toParentRel: string,
+    newName: string,
+    overwrite?: boolean
+  ): Promise<FileMutationResult> =>
+    invoke('files_copy', { projectRoot, fromRel, toParentRel, newName, overwrite })
 };

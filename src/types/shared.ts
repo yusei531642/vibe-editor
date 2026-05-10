@@ -885,6 +885,19 @@ export interface FileWriteResult {
   conflict?: boolean;
 }
 
+/**
+ * Issue #592: ファイルツリー右クリックメニュー (VS Code 互換) で叩く
+ * `files_create` / `files_create_dir` / `files_rename` / `files_delete` / `files_copy`
+ * の共通レスポンス。`path` には操作後の対象パスを返す (作成・rename・copy なら新パス、
+ * 削除なら削除した元パス)。
+ */
+export interface FileMutationResult {
+  ok: boolean;
+  error?: string;
+  /** 操作対象の最終的な相対パス (POSIX 区切り) */
+  path: string;
+}
+
 // ---------- ターミナル ----------
 
 export interface TerminalCreateOptions {

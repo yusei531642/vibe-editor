@@ -122,6 +122,12 @@ pub fn run() {
             commands::files::files_list,
             commands::files::files_read,
             commands::files::files_write,
+            // Issue #592: VS Code 互換のファイルツリー右クリック操作
+            commands::files::files_create,
+            commands::files::files_create_dir,
+            commands::files::files_rename,
+            commands::files::files_delete,
+            commands::files::files_copy,
             // ---- sessions ----
             commands::sessions::sessions_list,
             // ---- team_history ----

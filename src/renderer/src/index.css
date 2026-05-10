@@ -3491,6 +3491,27 @@ body.is-resizing * {
   min-width: 0;
 }
 
+/* Issue #592: VS Code 互換のインライン入力行 (新規ファイル / 新規フォルダ / リネーム)。
+   `.filetree__row` の見た目を継承しつつ、入力欄をフラットに表示する。 */
+.filetree__inline-input {
+  cursor: text;
+  background: var(--bg-active, rgba(127, 127, 127, 0.08));
+}
+.filetree__inline-input-field {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: var(--bg, transparent);
+  color: var(--text);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  font: inherit;
+  outline: none;
+}
+.filetree__inline-input-field:focus {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
 /* Issue #480: 最近開いたファイルの名前色ハイライト (黄緑/黄色系)。
    active (is-active) は常に最優先: row 自体の色指定が勝つので
    is-recent は active でないファイルにのみ付与される (TSX 側で制御)。
