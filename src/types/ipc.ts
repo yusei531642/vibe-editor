@@ -124,6 +124,14 @@ export interface SavePastedImageResult {
 export interface MutationResult {
   ok: boolean;
   error?: string;
+  /**
+   * Issue #642 (team_history のみ): Rust 側が disk 上の永続ファイルを保存直前に
+   * stat → fingerprint 不一致で外部変更を検知し、disk 側の独自 entry を取り込んで
+   * merge してから書き戻したことを示すフラグ。Rust 側で false のときは serialize
+   * されないので undefined。`team_history_save` / `team_history_save_batch` /
+   * `team_history_delete` が立てる。renderer は `=== true` で判定すること。
+   */
+  externalChangeMerged?: boolean;
 }
 
 export interface TeamMcpMember {

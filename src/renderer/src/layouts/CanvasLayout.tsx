@@ -274,9 +274,28 @@ export function CanvasLayout(): JSX.Element {
         b.lastUsedAt.localeCompare(a.lastUsedAt)
       )
     );
-    void window.api.teamHistory.save(updatedEntry).catch((err) => {
-      console.warn('[restore] team_history_save failed:', err);
-    });
+    // Issue #642: save が外部変更を検知して merge した場合は team-history list を再取得して
+    // setRecent を最新 disk 状態に同期する (= setRecent で push した updatedEntry は保持しつつ、
+    // 他 entry の手編集を UI 上にも反映)。renderer の他の auto-save 経路 (saveBatch 等) を
+    // 持つ caller も同様に `externalChangeMerged === true` を観測したら list 再取得すべき。
+    void window.api.teamHistory
+      .save(updatedEntry)
+      .then((res) => {
+        if (res?.externalChangeMerged === true) {
+          console.info(
+            '[team-history] external change merged on save; refreshing recent list'
+          );
+          window.api.teamHistory
+            .list(projectRoot)
+            .then(setRecent)
+            .catch((err) => {
+              console.warn('[team-history] refresh after external merge failed:', err);
+            });
+        }
+      })
+      .catch((err) => {
+        console.warn('[restore] team_history_save failed:', err);
+      });
     setSpawnOpen(false);
   };
 
