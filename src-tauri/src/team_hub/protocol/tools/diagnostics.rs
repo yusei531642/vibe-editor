@@ -144,7 +144,15 @@ pub async fn team_diagnostics(hub: &TeamHub, ctx: &CallContext) -> Result<Value,
     let messages_snapshot: Vec<TeamMessage>;
     {
         let state = hub.state.lock().await;
-        bindings_snapshot = state.agent_role_bindings.clone();
+        // Issue #637: `agent_role_bindings` は `(team_id, agent_id)` 複合キー。
+        // diagnostics は呼び出し元 team の inconsistent 判定にしか使わないので、
+        // 当該 team_id のスコープを抽出した `agent_id -> role` マップに reduce する。
+        bindings_snapshot = state
+            .agent_role_bindings
+            .iter()
+            .filter(|((team_id, _), _)| team_id == &ctx.team_id)
+            .map(|((_, agent_id), role)| (agent_id.clone(), role.clone()))
+            .collect();
         diag_snapshot = state.member_diagnostics.clone();
         messages_snapshot = state
             .teams

@@ -3,7 +3,9 @@
 // 通常の fs 操作。tokio::fs を使い、エラーを ok=false で返す既存契約を維持。
 
 mod encoding;
-mod hash;
+// Issue #642: `commands::team_history` から fingerprint 計算 (mtime + sha256) で再利用するため
+// crate 内に公開する。`sha256_hex` / `mtime_ms_of` の 2 関数だけが対象。
+pub(crate) mod hash;
 mod path_safety;
 
 use serde::Serialize;

@@ -129,6 +129,26 @@ impl SessionHandle {
             .store(on, std::sync::atomic::Ordering::Release);
     }
 
+    /// Issue #619: `injecting` フラグの現在値。テスト・診断用。
+    /// 現状は `#[cfg(test)]` 配下からのみ使われるが、将来 diagnostics / tracing で参照する想定で
+    /// `pub` のまま残す (`dead_code` 警告を抑止)。
+    #[allow(dead_code)]
+    pub fn is_injecting(&self) -> bool {
+        self.injecting.load(std::sync::atomic::Ordering::Acquire)
+    }
+
+    /// Issue #619: RAII guard で `injecting` フラグを必ず `true` → `false` で対にする。
+    ///
+    /// 旧経路 (`team_hub::inject::inject_once` / `commands::terminal::inject_codex_prompt_to_pty`) は
+    /// 早期 return / panic / `?` 経由で `set_injecting(false)` を呼び忘れる risk があり、
+    /// bracketed paste の途中で worker terminal にユーザー入力が紛れ込む事故 (#619) を起こしていた。
+    ///
+    /// `begin_injecting()` の戻り値 (`InjectingGuard`) を変数に束縛しておけば、関数を抜ける
+    /// あらゆる経路 (Ok 戻り / Err 戻り / panic) で Drop が走り、`injecting` が確実に false に戻る。
+    pub fn begin_injecting(self: &Arc<Self>) -> InjectingGuard {
+        InjectingGuard::new(self.clone())
+    }
+
     /// Issue #285 follow-up: attach 経路で renderer へ replay する用の現時点 snapshot。
     /// 末尾が multi-byte 文字途中なら切り詰め、UTF-8 安全な文字列に変換する。
     /// 空の場合は None を返す (renderer 側は空文字を区別しない用に短絡できる)。
@@ -196,6 +216,38 @@ impl Drop for SessionHandle {
         if let Err(e) = k.kill() {
             tracing::warn!(?e, "[pty] SessionHandle child kill failed during drop");
         }
+    }
+}
+
+/// Issue #619: `SessionHandle::injecting` を「true → false」で必ずペアで操作するための RAII guard。
+///
+/// `SessionHandle::begin_injecting()` が返す。戻り値を変数に束縛している間 `injecting == true`
+/// が維持され、変数のスコープを抜けた時点 (early return / panic / `?` 伝播 / 正常終了) で
+/// `Drop` が走って `injecting == false` に必ず戻る。
+///
+/// 旧実装 (set_injecting(true) / set_injecting(false) を手動でペアで書く) は、
+/// `inject_once` のように途中で多数の `?` / 早期 return / panic 経路があるコードでは
+/// 1 箇所でも `set_injecting(false)` が抜けると `injecting` が `true` に貼り付き、
+/// 以後その PTY のユーザー入力 (terminal_write 経路) が完全に無効化されたままになる
+/// 可能性があった (#619 の根本原因の対称ケース)。
+///
+/// `Arc<SessionHandle>` を保持するのは `inject_once` の async 経路で session が drop されるより前に
+/// guard 側で確実に reset したいため (Drop の時点で session が生きていることを保証する)。
+pub struct InjectingGuard {
+    session: Arc<SessionHandle>,
+}
+
+impl InjectingGuard {
+    fn new(session: Arc<SessionHandle>) -> Self {
+        session.set_injecting(true);
+        Self { session }
+    }
+}
+
+impl Drop for InjectingGuard {
+    fn drop(&mut self) {
+        // panic 経路 / 早期 return 経路 / 正常終了経路すべてで injecting=false に戻す。
+        self.session.set_injecting(false);
     }
 }
 
@@ -303,6 +355,85 @@ mod drop_tests {
         let kills = Arc::new(AtomicUsize::new(0));
         drop(test_handle(kills.clone()));
         assert_eq!(kills.load(Ordering::SeqCst), 1);
+    }
+
+    /// Issue #619: `begin_injecting()` の戻り値が drop されると `injecting` が必ず false に戻る。
+    #[test]
+    fn injecting_guard_resets_on_normal_drop() {
+        let kills = Arc::new(AtomicUsize::new(0));
+        let session = Arc::new(test_handle(kills));
+        assert!(!session.is_injecting(), "initial state should be false");
+
+        {
+            let _guard = session.begin_injecting();
+            assert!(session.is_injecting(), "guard should set injecting=true");
+        } // _guard drops here
+
+        assert!(
+            !session.is_injecting(),
+            "injecting must be reset to false after guard drop"
+        );
+    }
+
+    /// Issue #619: 早期 return / `?` 伝播経路でも guard の Drop が走り false に戻る。
+    /// クロージャを `?` で抜ける関数で wrap し、early return しても reset されることを確認。
+    #[test]
+    fn injecting_guard_resets_on_early_return() {
+        let kills = Arc::new(AtomicUsize::new(0));
+        let session = Arc::new(test_handle(kills));
+
+        fn body(s: &Arc<SessionHandle>) -> std::result::Result<(), &'static str> {
+            let _guard = s.begin_injecting();
+            // 中で early return (Err) するパス
+            Err("simulated early return")
+        }
+
+        let res = body(&session);
+        assert!(res.is_err());
+        assert!(
+            !session.is_injecting(),
+            "injecting must be false after early return path"
+        );
+    }
+
+    /// Issue #619: panic 経路でも guard の Drop が走り false に戻る (RAII の本質)。
+    #[test]
+    fn injecting_guard_resets_on_panic() {
+        let kills = Arc::new(AtomicUsize::new(0));
+        let session = Arc::new(test_handle(kills));
+
+        let s_for_panic = session.clone();
+        let _ = catch_unwind(AssertUnwindSafe(move || {
+            let _guard = s_for_panic.begin_injecting();
+            assert!(s_for_panic.is_injecting());
+            panic!("simulated panic during inject");
+        }));
+
+        assert!(
+            !session.is_injecting(),
+            "injecting must be false after panic unwind"
+        );
+    }
+
+    /// Issue #619: ネストして begin_injecting を取った場合、外側 guard の生存中は内側 drop でも
+    /// `set_injecting(false)` が無条件に走るため `false` になる。これは「inject_once は
+    /// 同一 PTY で同時実行されない」前提のための設計 (現在 inject 経路は serialize されている)。
+    /// テストはこの仕様を pin で固定する。
+    #[test]
+    fn injecting_guard_inner_drop_sets_false_even_when_outer_alive() {
+        let kills = Arc::new(AtomicUsize::new(0));
+        let session = Arc::new(test_handle(kills));
+
+        let outer = session.begin_injecting();
+        assert!(session.is_injecting());
+        {
+            let _inner = session.begin_injecting();
+            assert!(session.is_injecting());
+        }
+        // 仕様: 内側 guard drop で injecting は false に戻る (= 同時 inject 想定外)
+        assert!(!session.is_injecting());
+        drop(outer);
+        assert!(!session.is_injecting());
     }
 }
 

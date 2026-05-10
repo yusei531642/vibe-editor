@@ -16,6 +16,7 @@
 
 use crate::commands::atomic_write::atomic_write;
 use crate::commands::error::{CommandError, CommandResult};
+use crate::util::backup::write_timestamped_backup;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -247,13 +248,22 @@ pub async fn settings_load() -> Settings {
             // ユーザー設定が完全消失する事故が起きていた。.bak に元ファイルを退避してから
             // default を返すことで、ユーザーが手動で復元できるようにする。
             // Issue #493: strong-typing 後も `.bak` 退避は同じ流儀で維持する。
+            // Issue #644: 旧実装は単一 `.bak` を都度上書きしていたため、連続破損保存で
+            // 健全な原本が 1 ステップで失われていた。タイムスタンプ付き backup +
+            // 世代回転 (5 世代) に変更し、過去 5 ステップ分の原本に戻れるようにする。
             tracing::error!(
-                "[settings] parse failed ({}), backing up to settings.json.bak",
-                e
+                "[settings] parse failed ({}), backing up to {}.bak.<ts>",
+                e,
+                path.display()
             );
-            let bak = path.with_extension("json.bak");
             // best-effort: バックアップが取れなくても続行
-            let _ = atomic_write(&bak, &bytes).await;
+            match write_timestamped_backup(&path, &bytes, None).await {
+                Ok(bak) => tracing::info!(
+                    "[settings] wrote timestamped backup: {}",
+                    bak.display()
+                ),
+                Err(berr) => tracing::warn!("[settings] backup write failed: {berr}"),
+            }
             Settings::default()
         }
     }

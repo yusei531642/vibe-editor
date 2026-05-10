@@ -142,10 +142,12 @@ pub async fn terminal_tabs_save(file: PersistedTerminalTabsFile) -> MutationResu
         Ok(()) => MutationResult {
             ok: true,
             error: None,
+            ..Default::default()
         },
         Err(e) => MutationResult {
             ok: false,
             error: Some(e),
+            ..Default::default()
         },
     }
 }
@@ -162,14 +164,17 @@ pub async fn terminal_tabs_clear() -> MutationResult {
         Ok(()) => MutationResult {
             ok: true,
             error: None,
+            ..Default::default()
         },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => MutationResult {
             ok: true,
             error: None,
+            ..Default::default()
         },
         Err(e) => MutationResult {
             ok: false,
             error: Some(e.to_string()),
+            ..Default::default()
         },
     }
 }
