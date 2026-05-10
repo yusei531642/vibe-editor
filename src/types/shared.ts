@@ -167,6 +167,21 @@ export interface AppUserInfo {
   webviewVersion: string;
 }
 
+/**
+ * Issue #609 (Security): updater の minisign 署名検証失敗を「24h に 1 度だけ」
+ * ユーザーに通知するための cooldown 判定結果。
+ *
+ * `app_updater_should_warn_signature` IPC の戻り値。Rust 側は
+ * `~/.vibe-editor/updater-warned.json` の `lastSignatureWarningAt` (ISO 8601 UTC)
+ * を読み、24h 以上経過していれば `shouldWarn=true` を返す。
+ */
+export interface UpdaterShouldWarnResult {
+  /** true のときだけ renderer 側で署名失敗 toast を表示する */
+  shouldWarn: boolean;
+  /** 直近に表示した警告 timestamp (ISO 8601 UTC, ms 精度)。未通知時は undefined */
+  lastWarningAt?: string;
+}
+
 export const DEFAULT_SETTINGS: AppSettings = {
   schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
   language: 'ja',

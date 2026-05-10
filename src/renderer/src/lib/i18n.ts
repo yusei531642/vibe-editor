@@ -614,6 +614,9 @@ const ja: Dict = {
   'updater.checkNow': '更新を確認',
   'updater.button.label': '更新 v{version}',
   'updater.button.title': '新しいバージョン v{version} が利用可能です。クリックでインストール',
+  // Issue #609: minisign 署名検証失敗の警告 (24h に 1 度だけ表示)
+  'updater.signatureFailed':
+    '更新ファイルの署名検証に失敗しました。改竄や中継経路の異常の可能性があります。次回更新までしばらくお待ちください。',
 
   // ---------- Toast tone ラベル (Issue #80) ----------
   'toast.tone.info': '情報',
@@ -1276,6 +1279,9 @@ const en: Dict = {
   'updater.checkNow': 'Check for updates',
   'updater.button.label': 'Update v{version}',
   'updater.button.title': 'A new version v{version} is available. Click to install',
+  // Issue #609: minisign signature failure warning (shown at most once per 24h)
+  'updater.signatureFailed':
+    'Update signature verification failed. The download may have been tampered with or routed through a faulty mirror. Please wait for the next update.',
 
   // ---------- Toast tone labels (Issue #80) ----------
   'toast.tone.info': 'Info',

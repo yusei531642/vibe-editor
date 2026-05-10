@@ -115,6 +115,9 @@ pub fn run() {
             commands::app::app_get_user_info,
             commands::app::window::app_open_external,
             commands::app::window::app_reveal_in_file_manager,
+            // ---- updater signature warning cooldown (Issue #609) ----
+            commands::app::updater::app_updater_should_warn_signature,
+            commands::app::updater::app_updater_record_signature_warning,
             // ---- git ----
             commands::git::git_status,
             commands::git::git_diff,
