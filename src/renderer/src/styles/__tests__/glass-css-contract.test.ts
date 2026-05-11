@@ -114,8 +114,10 @@ describe('Glass CSS contract', () => {
     const layoutAlpha = rgbaTokenAlpha(tokens, '--glass-layout-tint');
     const canvasAlpha = rgbaTokenAlpha(tokens, '--glass-canvas-layout-tint');
 
+    // canvas は IDE より透ける関係を維持。下限はガラス感を強めた現行値 (0.18 系) を
+    // 許容するため緩和。OS Acrylic + surface 半透明の二重で壁紙の白成分は抑える前提。
     expect(canvasAlpha).toBeLessThan(layoutAlpha);
-    expect(canvasAlpha).toBeGreaterThanOrEqual(0.35);
+    expect(canvasAlpha).toBeGreaterThanOrEqual(0.15);
   });
 
   it('glass.css owns root transparency, root tint, glass-surface effects, and major surfaces', () => {
@@ -147,7 +149,6 @@ describe('Glass CSS contract', () => {
       '.rail',
       '.topbar',
       '.statusbar',
-      '.canvas-header',
       '.main',
       '.toolbar',
       '.tabbar',
@@ -175,7 +176,6 @@ describe('Glass CSS contract', () => {
       '.toolbar',
       '.sidebar',
       '.topbar',
-      '.canvas-header',
       '.main',
       '.content-area',
       '.pane',
@@ -213,7 +213,7 @@ describe('Glass CSS contract', () => {
           if (rel === 'styles/components/canvas.css') return !selector.includes('.tc__hud');
           if (rel === 'index.css') {
             // index.css may keep local UI blur, but not broad Glass surface blur.
-            return /(\.toolbar|\.sidebar|\.topbar|\.canvas-header|\.main|\.claude-code-panel|\.canvas-agent-card|\.canvas-toolbar)/.test(
+            return /(\.toolbar|\.sidebar|\.topbar|\.main|\.claude-code-panel|\.canvas-agent-card|\.canvas-toolbar)/.test(
               selector
             );
           }

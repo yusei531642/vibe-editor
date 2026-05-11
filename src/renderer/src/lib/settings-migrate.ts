@@ -183,7 +183,7 @@ export function migrateSettings(raw: unknown): AppSettings {
   }
 
   // --- Version 8 → 9: ステータスバー mascot の選択設定を追加 (Issue #422) ---
-  const validMascots: StatusMascotVariant[] = ['vibe', 'spark', 'mono'];
+  const validMascots: StatusMascotVariant[] = ['vibe', 'spark', 'mono', 'coder'];
   if (
     version < 9 ||
     !validMascots.includes(data.statusMascotVariant as StatusMascotVariant)

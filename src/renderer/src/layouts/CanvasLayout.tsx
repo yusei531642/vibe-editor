@@ -10,20 +10,16 @@
  *   - Preset 起動時に teamHistory に自動保存 (canvasState 込み)
  *   - "Recent Teams" タブで過去チームを再開 (Card 配置完全復元)
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Node } from '@xyflow/react';
 import {
   ArrowDownToLine,
   ChevronDown,
-  Command as CommandIcon,
-  ExternalLink,
   FilePlus,
   FolderTree,
   GitBranch,
   Layout,
-  MonitorSmartphone,
   Plus,
-  Settings as SettingsIcon,
   Sparkles,
   History
 } from 'lucide-react';
@@ -39,7 +35,7 @@ import { Canvas, type CanvasActions } from '../components/canvas/Canvas';
 import { CanvasSidebar } from '../components/canvas/CanvasSidebar';
 import { Rail } from '../components/shell/Rail';
 import { Topbar } from '../components/shell/Topbar';
-import { MenuBar, MenuDivider, MenuItem } from '../components/shell/MenuBar';
+import { AppMenuBar } from '../components/shell/AppMenuBar';
 import type { SidebarView } from '../components/Sidebar';
 import { SettingsModal } from '../components/SettingsModal';
 import { useT } from '../lib/i18n';
@@ -60,7 +56,6 @@ import { useSettings } from '../lib/settings-context';
 import { useToast } from '../lib/toast-context';
 import {
   localeOf,
-  formatCardCount,
   formatOrganizationAgentCount
 } from '../lib/canvas-layout-helpers';
 import { useCanvasTeamRestore } from '../lib/hooks/use-canvas-team-restore';
@@ -112,6 +107,7 @@ export function CanvasLayout(): JSX.Element {
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
+  const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const availableUpdate = useUiStore((s) => s.availableUpdate);
   const status = useUiStore((s) => s.status);
   const { showToast, dismissToast } = useToast();
@@ -377,6 +373,72 @@ export function CanvasLayout(): JSX.Element {
     );
   };
 
+  // ---- AppMenuBar 用ハンドラ群。IDE / Canvas で同一メニューを出すため Canvas 側も実装する。
+  //      workspace 系は settings.update で完結 (recentProjects / workspaceFolders / lastOpenedRoot)。
+  //      handleOpenFile だけ Canvas 固有: Editor カードを addCard で配置する。
+  const pushRecent = useCallback(
+    async (path: string): Promise<void> => {
+      const next = [path, ...(settings.recentProjects ?? []).filter((p) => p !== path)].slice(0, 12);
+      await updateSettings({ recentProjects: next, lastOpenedRoot: path });
+    },
+    [settings.recentProjects, updateSettings]
+  );
+
+  const handleNewProject = useCallback(async () => {
+    const picked = await window.api.dialog.openFolder(t('appMenu.newDialogTitle'));
+    if (picked) await pushRecent(picked);
+  }, [pushRecent, t]);
+
+  const handleOpenFolder = useCallback(async () => {
+    const picked = await window.api.dialog.openFolder(t('appMenu.openFolderDialogTitle'));
+    if (picked) await pushRecent(picked);
+  }, [pushRecent, t]);
+
+  const handleOpenFile = useCallback(async () => {
+    const picked = await window.api.dialog.openFile(t('appMenu.openFileDialogTitle'));
+    if (!picked) return;
+    const dir = picked.replace(/[\\/][^\\/]+$/, '');
+    const name = picked.slice(dir.length + 1);
+    useCanvasStore.getState().addCard({
+      type: 'editor',
+      title: name,
+      payload: { projectRoot: dir, relPath: name }
+    });
+  }, [t]);
+
+  const handleAddWorkspaceFolder = useCallback(async () => {
+    const picked = await window.api.dialog.openFolder(t('appMenu.addWorkspaceDialogTitle'));
+    if (!picked) return;
+    const current = settings.workspaceFolders ?? [];
+    if (current.includes(picked)) return;
+    await updateSettings({ workspaceFolders: [...current, picked] });
+  }, [settings.workspaceFolders, updateSettings, t]);
+
+  const handleOpenRecent = useCallback(
+    (path: string): void => {
+      void pushRecent(path);
+    },
+    [pushRecent]
+  );
+
+  const handleCheckUpdate = useCallback((): void => {
+    void import('../lib/updater-check').then((m) =>
+      m.checkForUpdates({
+        language: settings.language,
+        showToast,
+        dismissToast,
+        manual: true,
+        // Canvas モードでは IDE の terminalTabs を持たない (タブは Canvas カード側で管理)。
+        // updater 側は "0" でも問題なく動く (running task 警告が出ないだけ)。
+        runningTaskCount: 0
+      })
+    );
+  }, [settings.language, showToast, dismissToast]);
+
+  const handleOpenGithub = useCallback((): void => {
+    void window.api.app.openExternal('https://github.com/yusei531642/vibe-editor');
+  }, []);
+
   const clearCanvas = (): void => {
     const dirty = getDirtyEditorCardSnapshots();
     if (dirty.length === 0) {
@@ -422,96 +484,48 @@ export function CanvasLayout(): JSX.Element {
         availableUpdate={availableUpdate}
         onClickUpdate={handleClickUpdate}
         menuBar={
-          <MenuBar
-            items={[
-              {
-                label: t('menubar.file'),
-                children: (
-                  <>
-                    <MenuItem
-                      icon={<Layout size={14} strokeWidth={1.8} />}
-                      label={t('canvas.switchToIde.tooltip')}
-                      shortcut="Ctrl+Shift+M"
-                      onClick={() => setViewMode('ide')}
-                    />
-                    <MenuDivider />
-                    <MenuItem
-                      icon={<ExternalLink size={14} strokeWidth={1.8} />}
-                      label={t('menubar.openGithub')}
-                      onClick={() => {
-                        void window.api.app.openExternal('https://github.com/yusei531642/vibe-editor');
-                      }}
-                    />
-                  </>
-                )
-              },
-              {
-                label: t('menubar.view'),
-                children: (
-                  <>
-                    <MenuItem
-                      icon={<CommandIcon size={14} strokeWidth={1.8} />}
-                      label={t('menubar.openPalette')}
-                      shortcut="Ctrl+Shift+P"
-                      onClick={() => setPaletteOpen(true)}
-                    />
-                    <MenuItem
-                      icon={<Layout size={14} strokeWidth={1.8} />}
-                      label={t('menubar.toggleCanvas')}
-                      shortcut="Ctrl+Shift+M"
-                      onClick={() => setViewMode('ide')}
-                    />
-                  </>
-                )
-              },
-              {
-                label: t('menubar.help'),
-                children: (
-                  <>
-                    <MenuItem
-                      icon={<SettingsIcon size={14} strokeWidth={1.8} />}
-                      label={t('menubar.openSettings')}
-                      shortcut="Ctrl+,"
-                      onClick={() => setSettingsOpen(true)}
-                    />
-                  </>
-                )
-              }
-            ]}
+          <AppMenuBar
+            recentProjects={settings.recentProjects ?? []}
+            onNewProject={() => void handleNewProject()}
+            onOpenFolder={() => void handleOpenFolder()}
+            onOpenFile={() => void handleOpenFile()}
+            onAddWorkspaceFolder={() => void handleAddWorkspaceFolder()}
+            onOpenRecent={handleOpenRecent}
+            onRestart={() => void handleRestart()}
+            onCheckUpdate={handleCheckUpdate}
+            onOpenGithub={handleOpenGithub}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenPalette={() => setPaletteOpen(true)}
+            onToggleSidebar={() => toggleSidebar()}
+            onToggleCanvas={() => setViewMode(viewMode === 'canvas' ? 'ide' : 'canvas')}
           />
         }
+        extraActions={
+          <>
+            {cardCount > 0 && (
+              <button
+                type="button"
+                className="canvas-btn canvas-btn--ghost"
+                onClick={clearCanvas}
+                title={t('canvas.clear.tooltip')}
+                aria-label={t('canvas.clear.tooltip')}
+              >
+                {t('canvas.clear')}
+              </button>
+            )}
+            <button
+              type="button"
+              className="canvas-btn"
+              onClick={() => setViewMode('ide')}
+              title={t('canvas.switchToIde.tooltip')}
+              aria-label={t('canvas.switchToIde.tooltip')}
+            >
+              <Layout size={13} strokeWidth={1.8} />
+              IDE
+            </button>
+          </>
+        }
       />
-      <header className="canvas-header" data-tauri-drag-region>
-        <span className="canvas-header__brand" data-tauri-drag-region>
-          <MonitorSmartphone size={14} strokeWidth={1.75} data-tauri-drag-region />
-        </span>
-        {cardCount > 0 && (
-          <span className="canvas-header__count" data-tauri-drag-region>{formatCardCount(cardCount, settings.language)}</span>
-        )}
-        <div className="canvas-header__spacer" data-tauri-drag-region />
-
-        {cardCount > 0 && (
-          <button
-            type="button"
-            className="canvas-btn canvas-btn--ghost"
-            onClick={clearCanvas}
-            title={t('canvas.clear.tooltip')}
-            aria-label={t('canvas.clear.tooltip')}
-          >
-            {t('canvas.clear')}
-          </button>
-        )}
-        <button
-          type="button"
-          className="canvas-btn"
-          onClick={() => setViewMode('ide')}
-          title={t('canvas.switchToIde.tooltip')}
-          aria-label={t('canvas.switchToIde.tooltip')}
-        >
-          <Layout size={13} strokeWidth={1.8} />
-          IDE
-        </button>
-      </header>
       <div className="canvas-layout__body">
         <Rail
           sidebarView={sidebarView}

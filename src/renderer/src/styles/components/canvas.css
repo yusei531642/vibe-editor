@@ -125,45 +125,6 @@
   image-rendering: -webkit-optimize-contrast;
 }
 
-/* ---------- top header ---------- */
-/* Drag/no-drag hit testing is centralized in drag-region.css. */
-.canvas-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  height: 48px;
-  padding: 0 14px;
-  background: var(--bg-toolbar, var(--bg-panel));
-  border-bottom: 1px solid var(--border);
-  position: relative;
-  z-index: 5;
-}
-
-.canvas-header__brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  font-size: 13px;
-  letter-spacing: 0.2px;
-}
-
-/* #318: MonitorSmartphone SVG が pointer target を奪うのを CSS 側でも閉じる。
-   data-tauri-drag-region の直接付与と二重化し、Windows WebView2 の hit-testing 差を吸収する。 */
-.canvas-header__brand svg {
-  pointer-events: none;
-}
-
-.canvas-header__count {
-  font-size: 11px;
-  color: var(--fg-subtle);
-  font-variant-numeric: tabular-nums;
-}
-
-.canvas-header__spacer {
-  flex: 1;
-}
-
 /* ---------- buttons ---------- */
 .canvas-btn {
   display: inline-flex;

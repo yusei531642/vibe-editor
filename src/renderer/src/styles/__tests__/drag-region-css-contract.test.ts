@@ -118,11 +118,4 @@ describe('Drag-region CSS contract', () => {
     expect(rootTag).toContain('data-tauri-drag-region');
   });
 
-  it('Canvas header brand icon keeps pointer-events disabled for stable drag hit testing', () => {
-    const canvasCss = stripCssComments(readComponentCss('canvas.css'));
-
-    expect(canvasCss).toMatch(
-      /\.canvas-header__brand\s+svg\s*\{[\s\S]*pointer-events:\s*none\s*;/
-    );
-  });
 });

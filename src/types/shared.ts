@@ -12,7 +12,7 @@ export type Density = 'compact' | 'normal' | 'comfortable';
 
 export type Language = 'ja' | 'en';
 
-export type StatusMascotVariant = 'vibe' | 'spark' | 'mono';
+export type StatusMascotVariant = 'vibe' | 'spark' | 'mono' | 'coder';
 
 /**
  * Issue #75: AppSettings の現在スキーマ。

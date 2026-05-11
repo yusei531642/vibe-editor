@@ -23,6 +23,12 @@ interface TopbarProps {
   availableUpdate?: AvailableUpdateInfo | null;
   /** 「更新」ボタンが押されたとき。runUpdateInstall を呼び出す想定 */
   onClickUpdate?: () => void;
+  /**
+   * status の右側、icons の左側に追加で表示するアクション群。
+   * Canvas モードの IDE 切替 / Clear ボタンをここに差し込むことで、
+   * canvas モード専用の 2 段目ヘッダー (旧 .canvas-header) を撤廃する。
+   */
+  extraActions?: ReactNode;
 }
 
 /**
@@ -38,7 +44,8 @@ export function Topbar({
   onOpenPalette,
   menuBar,
   availableUpdate,
-  onClickUpdate
+  onClickUpdate,
+  extraActions
 }: TopbarProps): JSX.Element {
   const t = useT();
   const segments = projectRoot.split(/[\\/]/).filter(Boolean);
@@ -102,6 +109,8 @@ export function Topbar({
           <span className="topbar__status-text">{status}</span>
         </span>
       ) : null}
+
+      {extraActions ? <div className="topbar__extra">{extraActions}</div> : null}
 
       <div className="topbar__icons">
         {availableUpdate && onClickUpdate ? (

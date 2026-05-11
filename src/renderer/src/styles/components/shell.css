@@ -51,8 +51,12 @@
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  min-width: 240px;
-  max-width: 360px;
+  /* 240px だと「IDE / Canvas を切替」+「Ctrl+Shift+M」が icon/gap/padding を含めて
+     収まらず ellipsis 化していた (#: メニューラベル切れ)。
+     ラベル最長: 14文字 ≈ 175px / shortcut: 80px / icon+gap+padding: 約 60px → 計 ~315px。
+     min-width を 300px、max-width を 420px まで広げて全文表示を保証する。 */
+  min-width: 300px;
+  max-width: 420px;
   padding: 6px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -308,6 +312,15 @@
   /* 2px は Fitts's law 的に押しミスが増える。6px まで広げて "ゆとり" を演出 */
   gap: 6px;
   padding: 0 4px;
+}
+
+/* Canvas モードで Topbar に統合される追加アクション (IDE 切替 / Clear) を並べる小さなクラスタ。
+   旧 .canvas-header (48px の 2 段目バー) を Topbar 行に同居させることで上部の隙間を撤廃。 */
+.topbar__extra {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
 }
 .topbar__iconbtn {
   width: 30px;
@@ -586,6 +599,10 @@
   --mascot-paper-line: var(--text-mute);
   --mascot-review: var(--claude-accent-blue, #3886e5);
   --mascot-alert: var(--danger, #e06c75);
+  --mascot-screen: color-mix(in srgb, var(--claude-accent-blue, #3886e5) 68%, var(--bg-panel));
+  --mascot-screen-glow: color-mix(in srgb, var(--claude-accent-blue, #3886e5) 36%, white);
+  --mascot-keyboard: color-mix(in srgb, var(--text-dim) 78%, var(--bg-panel));
+  --mascot-key: color-mix(in srgb, var(--bg-sidebar) 70%, var(--text));
   width: var(--mascot-size);
   height: var(--mascot-size);
   display: inline-flex;
@@ -614,6 +631,16 @@
   --mascot-shine: color-mix(in srgb, var(--accent) 72%, var(--text));
   --mascot-tool: var(--claude-accent-blue, #3886e5);
 }
+.status-mascot--variant-coder {
+  --mascot-body: color-mix(in srgb, var(--accent) 84%, var(--warning));
+  --mascot-body-shade: color-mix(in srgb, var(--accent) 62%, var(--bg-sidebar));
+  --mascot-eye: color-mix(in srgb, var(--bg-sidebar) 88%, black);
+  --mascot-shine: color-mix(in srgb, var(--text) 68%, var(--accent));
+  --mascot-screen: color-mix(in srgb, var(--claude-accent-blue, #3886e5) 62%, var(--bg-panel));
+  --mascot-screen-glow: color-mix(in srgb, var(--claude-accent-blue, #3886e5) 42%, white);
+  --mascot-keyboard: color-mix(in srgb, var(--text-dim) 76%, var(--bg-panel));
+  --mascot-key: color-mix(in srgb, var(--bg-sidebar) 64%, var(--text));
+}
 .status-mascot--idle {
   --mascot-offset: 0px;
 }
@@ -636,6 +663,15 @@
 .status-mascot--blocked {
   --mascot-offset: -160px;
 }
+.status-mascot--variant-coder.status-mascot--editing,
+.status-mascot--variant-coder.status-mascot--dirty,
+.status-mascot--variant-coder.status-mascot--running,
+.status-mascot--variant-coder.status-mascot--reviewing {
+  animation: statusMascotDeskFocus 1500ms steps(2, end) infinite;
+}
+.status-mascot--variant-coder.status-mascot--blocked {
+  animation: none;
+}
 .status-mascot__motion {
   width: var(--mascot-size);
   height: var(--mascot-size);
@@ -649,6 +685,15 @@
   animation: statusMascotHop 420ms steps(2, end) infinite;
 }
 .status-mascot--blocked .status-mascot__motion {
+  animation: statusMascotAlert 900ms steps(2, end) infinite;
+}
+.status-mascot--variant-coder .status-mascot__motion {
+  animation: statusMascotTyping 900ms steps(2, end) infinite;
+}
+.status-mascot--variant-coder.status-mascot--running .status-mascot__motion {
+  animation-duration: 420ms;
+}
+.status-mascot--variant-coder.status-mascot--blocked .status-mascot__motion {
   animation: statusMascotAlert 900ms steps(2, end) infinite;
 }
 .status-mascot__viewport {
@@ -709,6 +754,32 @@
 }
 .status-mascot__alert {
   fill: var(--mascot-alert);
+}
+.status-mascot__screen {
+  fill: var(--mascot-screen);
+}
+.status-mascot__screen-glow {
+  fill: var(--mascot-screen-glow);
+}
+.status-mascot__screen-line {
+  fill: color-mix(in srgb, var(--bg-sidebar) 64%, var(--text));
+}
+.status-mascot__keyboard {
+  fill: var(--mascot-keyboard);
+}
+.status-mascot__key {
+  fill: var(--mascot-key);
+}
+.status-mascot__hand {
+  fill: var(--mascot-body);
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.status-mascot--variant-coder .status-mascot__hand--left {
+  animation: statusMascotKeyLeft 620ms steps(2, end) infinite;
+}
+.status-mascot--variant-coder .status-mascot__hand--right {
+  animation: statusMascotKeyRight 620ms steps(2, end) infinite;
 }
 @keyframes statusMascotBreathe {
   0%,
@@ -787,11 +858,50 @@
     transform: translateX(1px);
   }
 }
+@keyframes statusMascotDeskFocus {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  50% {
+    transform: translateX(2px);
+  }
+}
+@keyframes statusMascotTyping {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-1px);
+  }
+}
+@keyframes statusMascotKeyLeft {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(1px);
+  }
+}
+@keyframes statusMascotKeyRight {
+  0%,
+  100% {
+    transform: translateY(1px);
+  }
+  50% {
+    transform: translateY(0);
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .status-mascot {
     animation: none;
   }
   .status-mascot__motion {
+    animation: none;
+  }
+  .status-mascot__hand {
     animation: none;
   }
   .status-mascot__sheet {

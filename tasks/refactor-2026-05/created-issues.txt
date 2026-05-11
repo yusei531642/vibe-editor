@@ -1,0 +1,56 @@
+# created-issues log (TSV: <id>\t<number>\t<url>)
+S-1	594	https://github.com/yusei531642/vibe-editor/issues/594
+=== wave1 Sat May  9 17:08:41     2026 ===
+S-2	595	https://github.com/yusei531642/vibe-editor/issues/595
+S-3	596	https://github.com/yusei531642/vibe-editor/issues/596
+S-4	597	https://github.com/yusei531642/vibe-editor/issues/597
+S-5	598	https://github.com/yusei531642/vibe-editor/issues/598
+A-1	599	https://github.com/yusei531642/vibe-editor/issues/599
+A-2	600	https://github.com/yusei531642/vibe-editor/issues/600
+A-3	601	https://github.com/yusei531642/vibe-editor/issues/601
+A-4	602	https://github.com/yusei531642/vibe-editor/issues/602
+A-5	603	https://github.com/yusei531642/vibe-editor/issues/603
+A-6	604	https://github.com/yusei531642/vibe-editor/issues/604
+A-7	605	https://github.com/yusei531642/vibe-editor/issues/605
+A-8	606	https://github.com/yusei531642/vibe-editor/issues/606
+A-9	607	https://github.com/yusei531642/vibe-editor/issues/607
+A-10	608	https://github.com/yusei531642/vibe-editor/issues/608
+A-11	609	https://github.com/yusei531642/vibe-editor/issues/609
+=== wave2 Sat May  9 17:09:31     2026 ===
+B-1	610	https://github.com/yusei531642/vibe-editor/issues/610
+B-2	611	https://github.com/yusei531642/vibe-editor/issues/611
+B-3	612	https://github.com/yusei531642/vibe-editor/issues/612
+B-4	613	https://github.com/yusei531642/vibe-editor/issues/613
+B-5	614	https://github.com/yusei531642/vibe-editor/issues/614
+B-6	615	https://github.com/yusei531642/vibe-editor/issues/615
+B-7	616	https://github.com/yusei531642/vibe-editor/issues/616
+B-8	617	https://github.com/yusei531642/vibe-editor/issues/617
+B-9	618	https://github.com/yusei531642/vibe-editor/issues/618
+B-10	619	https://github.com/yusei531642/vibe-editor/issues/619
+B-11	620	https://github.com/yusei531642/vibe-editor/issues/620
+B-12	621	https://github.com/yusei531642/vibe-editor/issues/621
+B-13	622	https://github.com/yusei531642/vibe-editor/issues/622
+B-14	623	https://github.com/yusei531642/vibe-editor/issues/623
+B-15	624	https://github.com/yusei531642/vibe-editor/issues/624
+=== wave3 Sat May  9 17:10:21     2026 ===
+C-1	625	https://github.com/yusei531642/vibe-editor/issues/625
+C-2	626	https://github.com/yusei531642/vibe-editor/issues/626
+C-3	627	https://github.com/yusei531642/vibe-editor/issues/627
+C-4	628	https://github.com/yusei531642/vibe-editor/issues/628
+C-5	629	https://github.com/yusei531642/vibe-editor/issues/629
+C-6	630	https://github.com/yusei531642/vibe-editor/issues/630
+C-7	631	https://github.com/yusei531642/vibe-editor/issues/631
+C-8	632	https://github.com/yusei531642/vibe-editor/issues/632
+C-9	633	https://github.com/yusei531642/vibe-editor/issues/633
+C-10	634	https://github.com/yusei531642/vibe-editor/issues/634
+C-11	635	https://github.com/yusei531642/vibe-editor/issues/635
+C-12	636	https://github.com/yusei531642/vibe-editor/issues/636
+C-13	637	https://github.com/yusei531642/vibe-editor/issues/637
+C-14	638	https://github.com/yusei531642/vibe-editor/issues/638
+C-15	639	https://github.com/yusei531642/vibe-editor/issues/639
+C-16	640	https://github.com/yusei531642/vibe-editor/issues/640
+C-17	641	https://github.com/yusei531642/vibe-editor/issues/641
+C-18	642	https://github.com/yusei531642/vibe-editor/issues/642
+C-19	643	https://github.com/yusei531642/vibe-editor/issues/643
+C-20	644	https://github.com/yusei531642/vibe-editor/issues/644
+D-roadmap	645	https://github.com/yusei531642/vibe-editor/issues/645
