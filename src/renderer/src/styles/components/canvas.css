@@ -56,10 +56,28 @@
   max-width: var(--shell-sidebar-w);
 }
 
+/* Canvas モードは flex レイアウトなので、grid 側 (--shell-sidebar-handle) と違って
+   resize-handle 自体に幅を持たせる必要がある。--shell-sidebar-w を共有しているので
+   ハンドルを置くだけで IDE 側と同じ useLayoutResize のハンドラから sidebar 幅が動く。 */
+.canvas-layout__body > .resize-handle--sidebar {
+  flex: 0 0 var(--shell-sidebar-handle);
+  width: var(--shell-sidebar-handle);
+}
+
 .canvas-layout__stage {
   flex: 1;
   position: relative;
   min-width: 0;
+}
+
+/* Canvas 右上の固定 FAB (チーム起動 split button)。canvas-header 撤廃 (#709) で
+   チーム起動の trigger が無くなったため、Canvas ステージ右上に absolute で固定する。
+   stage 自体が position:relative なので、絶対座標は stage を基準にする。 */
+.canvas-spawn-fab {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 10;
 }
 
 /* ---------- React Flow zoom 時の文字ぼやけ対策 ----------

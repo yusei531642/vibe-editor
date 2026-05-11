@@ -1,4 +1,4 @@
-import { GitBranch, RefreshCw } from 'lucide-react';
+import { CheckCircle2, GitBranch, RefreshCw } from 'lucide-react';
 import type { GitStatus, GitFileChange } from '../../../types/shared';
 import { useT } from '../lib/i18n';
 
@@ -31,6 +31,13 @@ function shortLabel(file: GitFileChange): string {
   return file.label[0] ?? '?';
 }
 
+/** `src/foo/bar.tsx` → { dir: 'src/foo', name: 'bar.tsx' }. ルート直下は dir 空文字。 */
+function splitPath(path: string): { dir: string; name: string } {
+  const idx = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+  if (idx < 0) return { dir: '', name: path };
+  return { dir: path.slice(0, idx), name: path.slice(idx + 1) };
+}
+
 export function ChangesPanel({
   status,
   loading,
@@ -41,24 +48,24 @@ export function ChangesPanel({
 }: ChangesPanelProps): JSX.Element {
   const t = useT();
   return (
-    <div className="sidebar-view">
-      <header className="sidebar-view__header">
-        <div className="sidebar-view__meta">
+    <div className="sidebar-view changes-panel">
+      <header className="changes-panel__header">
+        <div className="changes-panel__meta">
           {status && status.ok && status.branch && (
-            <span className="git-branch">
-              <GitBranch size={11} strokeWidth={2} />
-              {status.branch}
+            <span className="changes-panel__branch" title={status.branch}>
+              <GitBranch size={11} strokeWidth={2.2} />
+              <span className="changes-panel__branch-name">{status.branch}</span>
             </span>
           )}
-          {status && status.ok && (
-            <span className="git-count">
-              {t('sidebar.filesChanged', { count: status.files.length })}
+          {status && status.ok && status.files.length > 0 && (
+            <span className="changes-panel__count" aria-label={t('sidebar.filesChanged', { count: status.files.length })}>
+              {status.files.length}
             </span>
           )}
         </div>
         <button
           type="button"
-          className="sidebar__section-btn"
+          className="changes-panel__refresh"
           onClick={onRefresh}
           title={t('sidebar.refresh')}
           aria-label={t('sidebar.refresh')}
@@ -87,13 +94,17 @@ export function ChangesPanel({
       )}
 
       {!loading && status && status.ok && status.files.length === 0 && (
-        <p className="sidebar__note sidebar__note--dim">{t('sidebar.noChanges')}</p>
+        <div className="changes-panel__empty">
+          <CheckCircle2 size={26} strokeWidth={1.5} className="changes-panel__empty-icon" />
+          <p className="changes-panel__empty-text">{t('sidebar.noChanges')}</p>
+        </div>
       )}
 
       {!loading && status && status.ok && status.files.length > 0 && (
         <ul className="gitfiles">
           {status.files.map((f) => {
             const isActive = activeDiffPath === f.path;
+            const { dir, name } = splitPath(f.path);
             return (
               <li key={f.path}>
                 <button
@@ -102,11 +113,15 @@ export function ChangesPanel({
                   onClick={() => onOpenDiff(f)}
                   onContextMenu={(e) => onFileContextMenu(e, f)}
                   title={`${f.label}: ${f.path}`}
+                  data-status={statusBadgeClass(f).replace('gitfile__badge--', '')}
                 >
                   <span className={`gitfile__badge ${statusBadgeClass(f)}`}>
                     {shortLabel(f)}
                   </span>
-                  <span className="gitfile__path">{f.path}</span>
+                  <span className="gitfile__path">
+                    <span className="gitfile__name">{name}</span>
+                    {dir && <span className="gitfile__dir">{dir}</span>}
+                  </span>
                 </button>
               </li>
             );

@@ -60,6 +60,7 @@ import {
 } from '../lib/canvas-layout-helpers';
 import { useCanvasTeamRestore } from '../lib/hooks/use-canvas-team-restore';
 import { useCanvasAutoSave } from '../lib/hooks/use-canvas-auto-save';
+import { useLayoutResize } from '../lib/hooks/use-layout-resize';
 import { getDirtyEditorCardSnapshots } from '../lib/editor-card-dirty-registry';
 import {
   spawnTeam,
@@ -188,6 +189,10 @@ export function CanvasLayout(): JSX.Element {
 
   // Phase 4-3: Canvas state を team-history へ自動保存する hook (Issue #167 / #132 / #124)
   useCanvasAutoSave({ projectRoot, nodes, viewport, recent, setRecent });
+
+  // Canvas でも IDE 側と同じ sidebar 幅ハンドラを使う。
+  // `--shell-sidebar-w` を共有しているので、ハンドルだけ Canvas にも生やせばリサイズが効く。
+  const { onSidebarResizeStart, onSidebarResizeDouble } = useLayoutResize();
 
   const applyPreset = async (preset: WorkspacePreset): Promise<void> => {
     const cwd = projectRoot;
@@ -541,8 +546,95 @@ export function CanvasLayout(): JSX.Element {
             onGitOk={setRailHasGitRepo}
           />
         )}
+        {!sidebarCollapsed && (
+          <div
+            className="resize-handle resize-handle--sidebar"
+            onMouseDown={onSidebarResizeStart}
+            onDoubleClick={onSidebarResizeDouble}
+            title="ドラッグでサイドバー幅を調整 / ダブルクリックでリセット"
+            role="separator"
+            aria-orientation="vertical"
+          />
+        )}
         <div className="canvas-layout__stage">
           <Canvas actions={canvasActions} />
+          {/* Canvas 右上に固定で配置するチーム起動 FAB。split button: 本体クリックで
+              既定プリセットを 1-click 起動、caret でプリセット/最近使ったチームの
+              popover を開く。canvas-header 撤廃 (#709) で消えていたのを復活。 */}
+          <div className="canvas-spawn-fab" ref={spawnPopoverRef}>
+            <div className="canvas-btn-split">
+              <button
+                type="button"
+                className="canvas-btn canvas-btn--primary canvas-btn-split__main"
+                onClick={() => void applyPreset(DEFAULT_SPAWN_PRESET)}
+                aria-label={t('canvas.spawnTeam.tooltip')}
+                title={t('canvas.spawnTeam.tooltip')}
+              >
+                <Sparkles size={13} strokeWidth={1.8} />
+                {t('canvas.spawnTeam')}
+              </button>
+              <button
+                type="button"
+                className="canvas-btn canvas-btn--primary canvas-btn-split__caret"
+                onClick={() => setSpawnOpen((v) => !v)}
+                aria-label={t('canvas.spawnTeamMore.tooltip')}
+                title={t('canvas.spawnTeamMore.tooltip')}
+                aria-expanded={spawnOpen}
+              >
+                <ChevronDown size={12} strokeWidth={2} />
+              </button>
+            </div>
+            {spawnOpen && (
+              <div className="canvas-popover canvas-popover--wide">
+                <div className="canvas-popover__tabs">
+                  <TabBtn active={tab === 'preset'} onClick={() => setTab('preset')}>
+                    <Sparkles size={11} /> {t('canvas.preset')}
+                  </TabBtn>
+                  <TabBtn active={tab === 'recent'} onClick={() => setTab('recent')}>
+                    <History size={11} /> {t('canvas.recent')}
+                    {closeRecent.length > 0 && (
+                      <span className="canvas-popover__tab-badge">{closeRecent.length}</span>
+                    )}
+                  </TabBtn>
+                </div>
+                {tab === 'preset' &&
+                  BUILTIN_PRESETS.map((preset) => (
+                    <BuiltinPresetItem
+                      key={preset.id}
+                      preset={preset}
+                      label={t(preset.i18nKey)}
+                      agentCountLabel={formatOrganizationAgentCount(
+                        presetOrganizationCount(preset),
+                        presetMemberCount(preset),
+                        settings.language
+                      )}
+                      onClick={() => void applyPreset(preset)}
+                    />
+                  ))}
+                {tab === 'recent' && (
+                  <>
+                    {closeRecent.length === 0 && (
+                      <div className="canvas-popover__empty">{t('canvas.noRecentTeams')}</div>
+                    )}
+                    {closeRecent.map((entry) => (
+                      <RecentItem
+                        key={entry.id}
+                        entry={entry}
+                        fallbackName={entry.name || entry.id.slice(0, 8)}
+                        agentCountLabel={formatOrganizationAgentCount(
+                          entry.organization ? 1 : 0,
+                          entry.members.length,
+                          settings.language
+                        )}
+                        lastUsedLabel={dateTimeFormatter.format(new Date(entry.lastUsedAt))}
+                        onClick={() => void restoreRecent(entry)}
+                      />
+                    ))}
+                  </>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
