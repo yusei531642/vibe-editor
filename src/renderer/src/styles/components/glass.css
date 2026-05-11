@@ -96,3 +96,22 @@
     0 12px 32px rgba(0, 0, 0, 0.42),
     inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
+
+/*
+ * Native <select> popup は OS-native widget で CSS でフル制御できない。Glass テーマでは
+ *  - --bg-panel が alpha 0.22 の低不透明 → option の地として伝わると Chromium がデフォルトの
+ *    白 popup chrome に fallback して、白背景 × 白文字で読めなくなる。
+ *  - :root の color-scheme: dark は select 直下まで継承されないケースがある (WebView2 で再現)。
+ *
+ * 対策:
+ *  1. <select> 自身に color-scheme: dark を明示し、Chromium に dark popup chrome を強制。
+ *  2. <option> に opaque な dark 地と text 色を直接指定する。alpha 付き色は Chromium が
+ *     一部混色しきれず白っぽく見えることがあるので、ここは完全不透明値を使う。
+ */
+:root[data-theme='glass'] select {
+  color-scheme: dark;
+}
+:root[data-theme='glass'] select option {
+  background-color: #161a26;
+  color: var(--text);
+}

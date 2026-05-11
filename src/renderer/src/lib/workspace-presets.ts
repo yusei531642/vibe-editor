@@ -7,7 +7,6 @@
  * 固定ワーカーロール撤廃後は Leader が team_recruit で動的にメンバーを増やすため、
  * builtin プリセットは「起動構成」だけを定義する:
  *   - Leader 1 体 (claude / codex)
- *   - Leader + HR (claude / codex)
  */
 import type { TeamOrganizationMeta, TeamRole, TerminalAgent } from '../../../types/shared';
 import { NODE_H, NODE_W } from '../stores/canvas';
@@ -41,8 +40,6 @@ export interface PresetOrganization {
 
 const CLAUDE_ORG_COLOR = '#d97757';
 const CODEX_ORG_COLOR = '#10b981';
-const CLAUDE_ORG_ALT_COLOR = '#8b7cf6';
-const CODEX_ORG_ALT_COLOR = '#2f80ed';
 
 function defaultOrganizationColor(members: PresetMember[]): string {
   return members[0]?.agent === 'codex' ? CODEX_ORG_COLOR : CLAUDE_ORG_COLOR;
@@ -57,115 +54,11 @@ export const BUILTIN_PRESETS: WorkspacePreset[] = [
     members: [{ role: 'leader', agent: 'claude', col: 0, row: 0 }]
   },
   {
-    id: 'leader-hr-claude',
-    i18nKey: 'canvas.preset.leaderHrClaude',
-    description: 'Leader + HR (Claude Code) で起動。HR が大量採用を補助。',
-    category: 'team',
-    members: [
-      { role: 'leader', agent: 'claude', col: 0, row: 0 },
-      { role: 'hr', agent: 'claude', col: 1, row: 0 }
-    ]
-  },
-  {
     id: 'leader-codex',
     i18nKey: 'canvas.preset.leaderCodex',
     description: 'Leader (Codex) のみで起動。必要なメンバーは Leader が動的に呼び出す。',
     category: 'team',
     members: [{ role: 'leader', agent: 'codex', col: 0, row: 0 }]
-  },
-  {
-    id: 'leader-hr-codex',
-    i18nKey: 'canvas.preset.leaderHrCodex',
-    description: 'Leader + HR (Codex) で起動。HR が大量採用を補助。',
-    category: 'team',
-    members: [
-      { role: 'leader', agent: 'codex', col: 0, row: 0 },
-      { role: 'hr', agent: 'codex', col: 1, row: 0 }
-    ]
-  },
-  {
-    id: 'dual-claude-claude',
-    i18nKey: 'canvas.preset.dualClaudeClaude',
-    description: 'Claude Code の Leader 組織を 2 つ、独立した teamId で同時起動。',
-    category: 'team',
-    members: [],
-    organizations: [
-      {
-        id: 'claude-a',
-        i18nKey: 'canvas.organization.claudeA',
-        color: CLAUDE_ORG_COLOR,
-        members: [{ role: 'leader', agent: 'claude', col: 0, row: 0 }]
-      },
-      {
-        id: 'claude-b',
-        i18nKey: 'canvas.organization.claudeB',
-        color: CLAUDE_ORG_ALT_COLOR,
-        members: [{ role: 'leader', agent: 'claude', col: 1, row: 0 }]
-      }
-    ]
-  },
-  {
-    id: 'dual-claude-codex',
-    i18nKey: 'canvas.preset.dualClaudeCodex',
-    description: 'Claude Code Leader 組織と Codex Leader 組織を別 teamId で同時起動。',
-    category: 'team',
-    members: [],
-    organizations: [
-      {
-        id: 'claude',
-        i18nKey: 'canvas.organization.claude',
-        color: CLAUDE_ORG_COLOR,
-        members: [{ role: 'leader', agent: 'claude', col: 0, row: 0 }]
-      },
-      {
-        id: 'codex',
-        i18nKey: 'canvas.organization.codex',
-        color: CODEX_ORG_COLOR,
-        members: [{ role: 'leader', agent: 'codex', col: 1, row: 0 }]
-      }
-    ]
-  },
-  {
-    id: 'dual-codex-codex',
-    i18nKey: 'canvas.preset.dualCodexCodex',
-    description: 'Codex の Leader 組織を 2 つ、独立した teamId で同時起動。',
-    category: 'team',
-    members: [],
-    organizations: [
-      {
-        id: 'codex-a',
-        i18nKey: 'canvas.organization.codexA',
-        color: CODEX_ORG_COLOR,
-        members: [{ role: 'leader', agent: 'codex', col: 0, row: 0 }]
-      },
-      {
-        id: 'codex-b',
-        i18nKey: 'canvas.organization.codexB',
-        color: CODEX_ORG_ALT_COLOR,
-        members: [{ role: 'leader', agent: 'codex', col: 1, row: 0 }]
-      }
-    ]
-  },
-  {
-    id: 'dual-codex-claude',
-    i18nKey: 'canvas.preset.dualCodexClaude',
-    description: 'Codex Leader 組織と Claude Code Leader 組織を別 teamId で同時起動。',
-    category: 'team',
-    members: [],
-    organizations: [
-      {
-        id: 'codex',
-        i18nKey: 'canvas.organization.codex',
-        color: CODEX_ORG_COLOR,
-        members: [{ role: 'leader', agent: 'codex', col: 0, row: 0 }]
-      },
-      {
-        id: 'claude',
-        i18nKey: 'canvas.organization.claude',
-        color: CLAUDE_ORG_COLOR,
-        members: [{ role: 'leader', agent: 'claude', col: 1, row: 0 }]
-      }
-    ]
   }
 ];
 

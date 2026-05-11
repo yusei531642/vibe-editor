@@ -281,7 +281,6 @@ body.is-resizing * {
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  padding: 8px 0 20px;
 }
 
 /* サイドバー切替: アンダーラインスタイルタブ */
@@ -401,6 +400,8 @@ body.is-resizing * {
 .sidebar-view {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  min-height: 0;
   padding: 8px 0 14px;
 }
 
@@ -1085,64 +1086,190 @@ body.is-resizing * {
 
 /* ---------- Git パネル ---------- */
 
-.git-branch {
-  display: inline-flex;
+/* ---------- ChangesPanel: 差分パネル ---------- */
+/* sidebar-view__header / __meta の汎用スタイルだとブランチ名と件数が
+   斜体 italic で表示されてコード臭が薄かったので、Changes 専用クラスで
+   モノスペース + pill 形式の count badge に置き換える。 */
+.changes-panel__header {
+  display: flex;
   align-items: center;
-  gap: 4px;
-  color: var(--accent);
-  font-weight: 500;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px 10px;
 }
 
-.git-count {
+.changes-panel__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.changes-panel__branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px 3px 7px;
+  font-family: var(--mono-font);
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-radius: 999px;
+  letter-spacing: 0.01em;
+  min-width: 0;
+}
+
+.changes-panel__branch > svg {
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+
+.changes-panel__branch-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.changes-panel__count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 18px;
+  padding: 0 6px;
+  font-family: var(--mono-font);
+  font-size: 10.5px;
+  font-weight: 600;
   color: var(--text-mute);
+  background: var(--bg-hover);
+  border-radius: 999px;
+  letter-spacing: 0.04em;
+}
+
+.changes-panel__refresh {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  color: var(--text-mute);
+  border: 0;
+  border-radius: var(--radius-sm, 8px);
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out),
+    transform var(--dur-base) var(--ease-out);
+  flex-shrink: 0;
+}
+
+.changes-panel__refresh:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.changes-panel__refresh:active {
+  transform: rotate(180deg);
+}
+
+/* 空状態: 「変更なし」を控えめなアイコン + メッセージで示す。
+   従来は italic の note 一行だけで「git が動いていない」のか「クリーン」なのか
+   判別しづらかった。CheckCircle で「クリーン」を視覚化する。 */
+.changes-panel__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 28px 16px;
+  color: var(--text-mute);
+  text-align: center;
+}
+
+.changes-panel__empty-icon {
+  color: color-mix(in srgb, var(--accent) 60%, var(--text-mute));
+  opacity: 0.7;
+}
+
+.changes-panel__empty-text {
+  margin: 0;
+  font-size: 12px;
+  font-family: var(--heading-font);
+  letter-spacing: 0.01em;
 }
 
 .gitfiles {
   list-style: none;
   margin: 0;
-  padding: 0;
+  padding: 2px 0;
 }
 
 .gitfile {
+  position: relative;
   display: flex;
   align-items: center;
   width: calc(100% - 16px);
   gap: 10px;
   margin: 1px 8px;
-  padding: 7px 12px;
-  min-height: 32px;
+  padding: 7px 12px 7px 11px;
+  min-height: 34px;
   background: transparent;
   border: none;
   color: var(--text-dim);
   font-family: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   cursor: pointer;
   text-align: left;
   border-radius: var(--radius-sm);
-  transition: background 0.12s, color 0.12s;
+  transition:
+    background var(--dur-fast) var(--ease-out),
+    color var(--dur-fast) var(--ease-out);
 }
 
+/* hover: 全幅の bg-hover。translateX は文字が滲むので使わない。 */
 .gitfile:hover {
-  background: linear-gradient(90deg, var(--bg-hover) 0%, transparent 100%);
+  background: var(--bg-hover);
   color: var(--text);
-  transform: translateX(2px);
 }
 
+/* active: 左端に status 色の細い accent bar + 全幅 bg-active。
+   ::before の background は data-status 別の override で塗り分ける。 */
 .gitfile.is-active {
   background: var(--bg-active);
   color: var(--text);
   font-weight: 500;
 }
 
+.gitfile.is-active::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+.gitfile.is-active[data-status='added']::before { background: var(--claude-success, #578a00); }
+.gitfile.is-active[data-status='modified']::before { background: var(--claude-warning, #a86b00); }
+.gitfile.is-active[data-status='deleted']::before { background: var(--claude-danger, #cf3a3a); }
+.gitfile.is-active[data-status='renamed']::before { background: var(--claude-accent-blue, #3886e5); }
+.gitfile.is-active[data-status='conflict']::before { background: var(--claude-accent-violet, #7261e0); }
+
 .gitfile__badge {
-  display: inline-block;
-  width: 16px;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
   text-align: center;
   font-size: 10px;
   font-weight: 700;
-  padding: 1px 0;
-  border-radius: 3px;
+  border-radius: 5px;
   flex-shrink: 0;
+  letter-spacing: 0;
+  /* badge 自体に subtle border を入れて低 alpha bg でも輪郭を保つ */
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 22%, transparent);
 }
 
 /*
@@ -1180,11 +1307,33 @@ body.is-resizing * {
 }
 
 .gitfile__path {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+  min-width: 0;
+  flex: 1;
+}
+
+/* ファイル名は通常の text 色 + 通常太さで、active 時は font-weight: 500 (親で当たる)。 */
+.gitfile__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
+  min-width: 0;
+}
+
+/* ディレクトリは dim color + 小さめ。flex-shrink を大きく取ってまずディレクトリから縮む。 */
+.gitfile__dir {
+  font-size: 11px;
+  color: var(--text-mute);
+  opacity: 0.85;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
-  flex: 1;
+  flex-shrink: 100;
 }
 
 /* ---------- セッション履歴 ---------- */
