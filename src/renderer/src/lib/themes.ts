@@ -153,7 +153,7 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
      *   1. surface 色相は #141823 系 (低彩度ダークブルーグレー)。Cyber Neon の
      *      ほぼ黒から青に少し振り、Acrylic 越しでも milky 化を防ぐ。
      *   2. alpha は 0.22〜0.30 と低めに保つ。Glass の本質は「背景が透ける」こと
-     *      なので、白側 (rgba(255,255,255,0.2 超) は明示的に禁止する。
+     *      なので、白側 (rgba(255,255,255,0.2) 超) は明示的に禁止する。
      *   3. accent は落ち着いたスカイブルー (#7AB8FF)。ネオン蛍光ではなく
      *      研磨ガラスのハイライト的な使い方。
      *   4. border / highlight は低 alpha の白系で控えめに。
