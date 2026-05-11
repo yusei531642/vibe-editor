@@ -504,30 +504,36 @@ samp,
 :root[data-theme='glass'],
 [data-theme='glass'] {
   /*
-   * Issue #16 / #367 / #440: アクリル風テーマ (Cyber Neon ベース)。
-   * Windows Terminal "Cyber Neon" と同じ世界観 — ダーク (#0A0A1A) ベース +
-   * ネオンシアン (#00FFFF) アクセント — に揃え、OS Acrylic の light tint で
-   * 白濁する問題を「surface 自体を暗化 + 高 opacity で確保」して解決する。
+   * 暗めで高級感のある透明ガラス。
+   *
+   * 設計方針:
+   *   - surface 色相は #141823 系 (低彩度のダークブルーグレー)。Cyber Neon の黒寄り
+   *     から少し青に振り、Acrylic 越しでも milky 化しない。
+   *   - alpha は 0.22〜0.34 と低く保ち、壁紙 / 背後コンテンツが透けて「ガラス」
+   *     らしさが出るようにする。完全な白背景は使わない (rgba(255,255,255,0.2) 以上禁止)。
+   *   - border / highlight は白系を低 alpha (0.10〜0.16) で。ネオン蛍光線ではなく
+   *     研磨ガラス縁の控えめな反射として機能させる。
+   *   - shadow は暗めに (rgba(0,0,0,0.18)) してパネルの浮きを足し腰高な印象に。
    */
   --bg: rgba(0, 0, 0, 0);
-  --bg-panel: rgba(10, 10, 26, 0.82);
-  --bg-sidebar: rgba(8, 8, 20, 0.80);
-  --bg-toolbar: rgba(6, 6, 18, 0.78);
-  --bg-elev: rgba(20, 20, 40, 0.85);
-  --bg-hover: rgba(0, 255, 255, 0.06);
-  --bg-active: rgba(0, 255, 255, 0.14);
-  --border: rgba(0, 255, 255, 0.08);
-  --border-strong: rgba(0, 255, 255, 0.15);
-  --accent: #00FFFF;
-  --accent-hover: #33FFFF;
-  --accent-soft: #00CCCC;
-  --accent-tint: rgba(0, 255, 255, 0.14);
-  --accent-foreground: #050714;
-  --warning: #FFD700;
-  --warning-hover: #FFE033;
-  --text: #E0E0FF;
-  --text-dim: #B0B8E0;
-  --text-mute: #6070A0;
+  --bg-panel: rgba(20, 24, 35, 0.22);
+  --bg-sidebar: rgba(18, 22, 32, 0.28);
+  --bg-toolbar: rgba(16, 20, 28, 0.30);
+  --bg-elev: rgba(28, 32, 44, 0.30);
+  --bg-hover: rgba(255, 255, 255, 0.06);
+  --bg-active: rgba(255, 255, 255, 0.10);
+  --border: rgba(255, 255, 255, 0.10);
+  --border-strong: rgba(255, 255, 255, 0.16);
+  --accent: #7AB8FF;
+  --accent-hover: #9ECBFF;
+  --accent-soft: #5A98E0;
+  --accent-tint: rgba(122, 184, 255, 0.14);
+  --accent-foreground: #0B0F1A;
+  --warning: #F5C76A;
+  --warning-hover: #F8D38A;
+  --text: #E6EAF5;
+  --text-dim: #A8B2C7;
+  --text-mute: #6B7587;
   --text-strong: var(--text);
   --text-secondary: var(--text-dim);
   --text-subtle: var(--text-mute);
@@ -541,33 +547,28 @@ samp,
   --surface-elev: var(--bg-elev);
   --surface-hover: var(--bg-hover);
   --surface-active: var(--bg-active);
-  --surface-glass: rgba(10, 10, 26, 0.68);
-  /* Issue #610: 半透明白 dot で acrylic 上でも視認可、Cyber Neon の世界観を壊さない。 */
-  --canvas-grid: rgba(255, 255, 255, 0.18);
-  --focus-ring: 0 0 0 2px rgba(0, 255, 255, 0.40);
+  --surface-glass: rgba(20, 24, 35, 0.22);
+  /* 半透明白 dot で acrylic 上でも視認可、暗めガラスでも視覚的に潰れない。 */
+  --canvas-grid: rgba(255, 255, 255, 0.14);
+  --focus-ring: 0 0 0 2px rgba(122, 184, 255, 0.40);
   color-scheme: dark;
 }
 
 /*
- * Glass テーマ専用オーバーライド (上の color cascade に加えて、glass 効果用の
- * `--glass-*` 系トークンと、layout 透過 tint を別途上書きする)。
- * - saturate(180%) は backdrop の明色画素を増幅して "milky" 化させるため 120% に下げる。
- * - glass-border / glass-highlight も白の主張を抑える (テーマ palette 側の border と
- *   合わせて全体の白浮きを断ち切る)。
- * - blur は OS Acrylic 主導なのでアプリ側は控えめ (12px) で十分。重ね過ぎると milky になる。
- * - Issue #440: brightness(0.7) で背後の明るい壁紙を暗化し、Cyber Neon ベースの
- *   「黒いすりガラス」質感を作る。非 Glass テーマでは fallback の 1 が効くため no-op。
- * - Issue #475: Canvas root の tint は IDE root より薄くし、背景の白濁を減らしつつ
- *   card / sidebar / HUD の surface opacity は維持する。
+ * Glass テーマ専用オーバーライド。
+ * - blur 12px / saturate 130% / brightness 0.9 で、過度なぼかしと壁紙の白成分増幅を避ける。
+ * - glass-border / glass-highlight は白系の控えめ反射に統一 (旧シアン蛍光線を廃止)。
+ * - layout tint も低 alpha のダークブルーグレーに揃え、card 等の半透明と二重で
+ *   壁紙を暗化することで milky 化を防ぐ。
  */
 :root[data-theme='glass'] {
-  --glass-layout-tint: rgba(10, 10, 26, 0.55);
-  --glass-canvas-layout-tint: rgba(10, 10, 26, 0.40);
+  --glass-layout-tint: rgba(20, 24, 35, 0.32);
+  --glass-canvas-layout-tint: rgba(20, 24, 35, 0.22);
   --glass-blur: 12px;
-  --glass-saturate: 120%;
-  --glass-brightness: 0.7;
-  --glass-border: rgba(0, 255, 255, 0.10);
-  --glass-highlight: inset 0 1px 0 rgba(0, 255, 255, 0.05);
+  --glass-saturate: 130%;
+  --glass-brightness: 0.9;
+  --glass-border: rgba(255, 255, 255, 0.10);
+  --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 /*

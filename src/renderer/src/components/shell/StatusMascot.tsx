@@ -32,12 +32,19 @@ export const StatusMascot = memo(function StatusMascot({
             focusable="false"
             shapeRendering="crispEdges"
           >
-            <MascotFrame x={0} variant={variant} />
-            <MascotFrame x={16} variant={variant} tool="pencil" arm="up" />
-            <MascotFrame x={32} variant={variant} tool="paper" sparkle />
-            <MascotFrame x={48} variant={variant} arm="run" legs="run" sparkle />
-            <MascotFrame x={64} variant={variant} tool="lens" arm="up" />
-            <MascotFrame x={80} variant={variant} alert legs="flat" />
+            <MascotFrame x={0} variant={variant} typing="left" />
+            <MascotFrame x={16} variant={variant} tool="pencil" arm="up" typing="right" />
+            <MascotFrame x={32} variant={variant} tool="paper" sparkle typing="both" />
+            <MascotFrame
+              x={48}
+              variant={variant}
+              arm="run"
+              legs="run"
+              sparkle
+              typing="right"
+            />
+            <MascotFrame x={64} variant={variant} tool="lens" arm="up" typing="left" />
+            <MascotFrame x={80} variant={variant} alert legs="flat" typing="both" />
           </svg>
         </span>
       </span>
@@ -53,6 +60,7 @@ interface MascotFrameProps {
   tool?: Tool;
   arm?: 'up' | 'run';
   legs?: 'run' | 'flat';
+  typing?: 'left' | 'right' | 'both';
   sparkle?: boolean;
   alert?: boolean;
 }
@@ -63,12 +71,26 @@ function MascotFrame({
   tool,
   arm,
   legs,
+  typing,
   sparkle,
   alert
 }: MascotFrameProps): JSX.Element {
   const bodyClass = alert
     ? 'status-mascot__body status-mascot__body--alert'
     : 'status-mascot__body';
+
+  if (variant === 'coder') {
+    return (
+      <CoderMascotFrame
+        x={x}
+        bodyClass={bodyClass}
+        typing={typing}
+        sparkle={sparkle}
+        alert={alert}
+        reviewing={tool === 'lens'}
+      />
+    );
+  }
 
   return (
     <g transform={`translate(${x} 0)`}>
@@ -187,6 +209,90 @@ function MascotFrame({
           <rect className="status-mascot__alert" x="13" y="8" width="1" height="1" />
         </>
       ) : null}
+    </g>
+  );
+}
+
+interface CoderMascotFrameProps {
+  x: number;
+  bodyClass: string;
+  typing?: 'left' | 'right' | 'both';
+  sparkle?: boolean;
+  alert?: boolean;
+  reviewing?: boolean;
+}
+
+function CoderMascotFrame({
+  x,
+  bodyClass,
+  typing,
+  sparkle,
+  alert,
+  reviewing
+}: CoderMascotFrameProps): JSX.Element {
+  const leftHandY = typing === 'left' || typing === 'both' ? 10 : 9;
+  const rightHandY = typing === 'right' || typing === 'both' ? 10 : 9;
+
+  return (
+    <g transform={`translate(${x} 0)`}>
+      <rect className="status-mascot__shadow" x="2" y="14" width="12" height="1" />
+      {sparkle ? (
+        <>
+          <rect className="status-mascot__spark" x="14" y="2" width="1" height="1" />
+          <rect className="status-mascot__spark" x="13" y="3" width="1" height="1" />
+          <rect className="status-mascot__spark" x="15" y="3" width="1" height="1" />
+        </>
+      ) : null}
+
+      <rect className="status-mascot__screen" x="1" y="4" width="7" height="5" />
+      <rect className="status-mascot__screen-glow" x="2" y="5" width="5" height="3" />
+      {reviewing ? (
+        <>
+          <rect className="status-mascot__review" x="3" y="6" width="1" height="1" />
+          <rect className="status-mascot__review" x="5" y="6" width="1" height="1" />
+        </>
+      ) : (
+        <>
+          <rect className="status-mascot__screen-line" x="3" y="5" width="3" height="1" />
+          <rect className="status-mascot__screen-line" x="2" y="7" width="4" height="1" />
+        </>
+      )}
+      <rect className="status-mascot__keyboard" x="1" y="10" width="8" height="2" />
+      <rect className="status-mascot__key" x="2" y="10" width="1" height="1" />
+      <rect className="status-mascot__key" x="4" y="10" width="1" height="1" />
+      <rect className="status-mascot__key" x="6" y="10" width="1" height="1" />
+
+      <rect className={bodyClass} x="9" y="4" width="5" height="6" />
+      <rect className={bodyClass} x="8" y="6" width="1" height="2" />
+      <rect className={bodyClass} x="14" y="6" width="1" height="2" />
+      <rect className="status-mascot__body-shade" x="10" y="9" width="4" height="1" />
+      <rect className="status-mascot__eye" x="10" y="6" width="1" height="1" />
+      <rect className="status-mascot__eye" x="13" y="6" width="1" height="1" />
+      {alert ? (
+        <>
+          <rect className="status-mascot__alert" x="15" y="4" width="1" height="4" />
+          <rect className="status-mascot__alert" x="15" y="9" width="1" height="1" />
+        </>
+      ) : (
+        <rect className="status-mascot__shine" x="11" y="8" width="2" height="1" />
+      )}
+
+      <rect
+        className="status-mascot__hand status-mascot__hand--left"
+        x="8"
+        y={leftHandY}
+        width="1"
+        height="1"
+      />
+      <rect
+        className="status-mascot__hand status-mascot__hand--right"
+        x="12"
+        y={rightHandY}
+        width="1"
+        height="1"
+      />
+      <rect className={bodyClass} x="10" y="10" width="1" height="2" />
+      <rect className={bodyClass} x="13" y="10" width="1" height="2" />
     </g>
   );
 }

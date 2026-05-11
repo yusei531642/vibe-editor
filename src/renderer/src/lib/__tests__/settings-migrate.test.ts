@@ -19,10 +19,10 @@ describe('migrateSettings', () => {
       schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
       language: 'ja',
       theme: 'claude-dark',
-      statusMascotVariant: 'mono'
+      statusMascotVariant: 'coder'
     });
 
-    expect(migrated.statusMascotVariant).toBe('mono');
+    expect(migrated.statusMascotVariant).toBe('coder');
   });
 
   it('replaces an invalid status mascot variant with the default', () => {

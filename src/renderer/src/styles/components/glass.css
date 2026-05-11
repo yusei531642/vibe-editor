@@ -31,7 +31,6 @@
 :root[data-theme='glass'] .rail,
 :root[data-theme='glass'] .topbar,
 :root[data-theme='glass'] .statusbar,
-:root[data-theme='glass'] .canvas-header,
 :root[data-theme='glass'] .main,
 :root[data-theme='glass'] .toolbar,
 :root[data-theme='glass'] .tabbar,
@@ -57,10 +56,15 @@
 }
 
 :root[data-theme='glass'] .glass-surface {
-  /* Issue #440: subtle neon edge to keep Cyber Neon glass from looking milky. */
+  /*
+   * 暗めガラスの縁・落影。ネオン蛍光は使わず、外側に深い暗影で「腰高」を作り、
+   * 内側に微かな白ハイライトで研磨ガラスの縁反射を表現する。
+   *   - 外側 shadow: 0 8px 24px rgba(0,0,0,0.18) (低高さ・暗め・広め)
+   *   - 内側 highlight: inset 0 1px 0 rgba(255,255,255,0.06) (頂点エッジ)
+   */
   box-shadow:
-    0 0 1px rgba(0, 255, 255, 0.20),
-    inset 0 0 1px rgba(0, 255, 255, 0.08);
+    0 8px 24px rgba(0, 0, 0, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
 
 /* Overlay/backdrop surfaces keep their component CSS behavior. This rule only
@@ -68,4 +72,27 @@
 :where(:root[data-theme='glass']) .modal-backdrop,
 :where(:root[data-theme='glass']) .cmdp-backdrop {
   background: rgba(0, 0, 0, 0.18);
+}
+
+/*
+ * Glass テーマでも UI overlay 系 (menubar dropdown / app-menu dropdown / context menu) は
+ * 読みやすさを優先して bg を高めに保つ。tokens.css の `--bg-panel` (alpha 0.22) のままだと
+ * 背後の壁紙が透けてラベルが読めない。
+ *   - 不透明度 0.92 の濃いブルーグレーで「読み物として成立する」濃度に。
+ *   - backdrop-filter は当てて、テーマの一体感は維持。
+ *   - border / shadow も glass 系トークンに揃えて浮かせる。
+ */
+:root[data-theme='glass'] .menubar__dropdown,
+:root[data-theme='glass'] .app-menu__dropdown,
+:root[data-theme='glass'] .user-menu__dropdown,
+:root[data-theme='glass'] .context-menu {
+  background: rgba(15, 18, 28, 0.92);
+  border-color: var(--glass-border, rgba(255, 255, 255, 0.10));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
+    brightness(var(--glass-brightness, 1));
+  box-shadow:
+    0 12px 32px rgba(0, 0, 0, 0.42),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }

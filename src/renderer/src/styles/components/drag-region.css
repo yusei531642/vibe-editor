@@ -9,8 +9,7 @@
 .topbar,
 .sidebar__header,
 .toolbar,
-.claude-code-panel__header,
-.canvas-header {
+.claude-code-panel__header {
   app-region: drag;
   -webkit-app-region: drag;
 }

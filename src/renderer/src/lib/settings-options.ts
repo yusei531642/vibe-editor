@@ -40,6 +40,12 @@ export const STATUS_MASCOT_OPTIONS: {
     label: 'Mono',
     descJa: '端末になじむ角ばった見た目',
     descEn: 'A terminal-friendly angular look'
+  },
+  {
+    value: 'coder',
+    label: 'Coder',
+    descJa: 'PCでカタカタ作業する相棒',
+    descEn: 'A tiny companion typing at a computer'
   }
 ];
 

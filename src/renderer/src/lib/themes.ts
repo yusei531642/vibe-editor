@@ -147,45 +147,40 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
   },
   glass: {
     /*
-     * Issue #16 / #367 / #440: アクリル風テーマ (Cyber Neon ベース)。
-     *
-     * Windows Terminal "Cyber Neon" と同じ世界観 — ダーク (#0A0A1A) ベース +
-     * ネオンシアン (#00FFFF) アクセント — に揃え、OS Acrylic の light tint で
-     * 白濁する問題を「surface 自体を暗化 + 高 opacity で確保」して解決する。
+     * 暗めで高級感のある透明ガラス。
      *
      * 設計原則:
-     *   1. surface 色相は #0A0A1A 系 (ほぼ黒に微かなブルーバイオレット)。
-     *      backdrop-filter: brightness(0.7) と組み合わせて壁紙の白成分を抑える。
-     *   2. opacity は 0.78〜0.85 まで引き上げる。Glass の本質はパネル透過よりも
-     *      OS Acrylic 越しの「動く背景」感なので、surface 自体が薄すぎると逆に
-     *      壁紙が白く透けて milky 化する (#367 / #440)。
-     *   3. accent / border にはネオンシアンを採用。Cyber Neon の "蛍光差し色"
-     *      がないと全体が単調になり、dark surface でもくすんで見えた (#440)。
-     *   4. text は #E0E0FF (ラベンダー白) で「黒下地の上で光る」雰囲気を作る。
+     *   1. surface 色相は #141823 系 (低彩度ダークブルーグレー)。Cyber Neon の
+     *      ほぼ黒から青に少し振り、Acrylic 越しでも milky 化を防ぐ。
+     *   2. alpha は 0.22〜0.30 と低めに保つ。Glass の本質は「背景が透ける」こと
+     *      なので、白側 (rgba(255,255,255,0.2) 超) は明示的に禁止する。
+     *   3. accent は落ち着いたスカイブルー (#7AB8FF)。ネオン蛍光ではなく
+     *      研磨ガラスのハイライト的な使い方。
+     *   4. border / highlight は低 alpha の白系で控えめに。
      *   5. blur / saturate / brightness は tokens.css の `[data-theme='glass']`
-     *      で一元管理 (12px / 120% / 0.7)。
+     *      で一元管理 (12px / 130% / 0.9)。
      */
     bg: 'rgba(0, 0, 0, 0)',
-    bgPanel: 'rgba(10, 10, 26, 0.82)',
-    bgSidebar: 'rgba(8, 8, 20, 0.80)',
-    bgToolbar: 'rgba(6, 6, 18, 0.78)',
-    bgElev: 'rgba(20, 20, 40, 0.85)',
-    border: 'rgba(0, 255, 255, 0.08)',
-    borderStrong: 'rgba(0, 255, 255, 0.15)',
-    bgHover: 'rgba(0, 255, 255, 0.06)',
-    bgActive: 'rgba(0, 255, 255, 0.14)',
-    accent: '#00FFFF',
-    accentHover: '#33FFFF',
-    accentSoft: '#00CCCC',
-    accentTint: 'rgba(0, 255, 255, 0.14)',
-    accentForeground: '#050714',
-    warning: '#FFD700',
-    warningHover: '#FFE033',
-    text: '#E0E0FF',
-    textDim: '#B0B8E0',
-    textMute: '#6070A0',
-    surfaceGlass: 'rgba(10, 10, 26, 0.68)',
-    focusRing: '0 0 0 2px rgba(0, 255, 255, 0.40)',
+    bgPanel: 'rgba(20, 24, 35, 0.22)',
+    bgSidebar: 'rgba(18, 22, 32, 0.28)',
+    bgToolbar: 'rgba(16, 20, 28, 0.30)',
+    bgElev: 'rgba(28, 32, 44, 0.30)',
+    border: 'rgba(255, 255, 255, 0.10)',
+    borderStrong: 'rgba(255, 255, 255, 0.16)',
+    bgHover: 'rgba(255, 255, 255, 0.06)',
+    bgActive: 'rgba(255, 255, 255, 0.10)',
+    accent: '#7AB8FF',
+    accentHover: '#9ECBFF',
+    accentSoft: '#5A98E0',
+    accentTint: 'rgba(122, 184, 255, 0.14)',
+    accentForeground: '#0B0F1A',
+    warning: '#F5C76A',
+    warningHover: '#F8D38A',
+    text: '#E6EAF5',
+    textDim: '#A8B2C7',
+    textMute: '#6B7587',
+    surfaceGlass: 'rgba(20, 24, 35, 0.22)',
+    focusRing: '0 0 0 2px rgba(122, 184, 255, 0.40)',
     monacoTheme: 'vs-dark'
   },
   light: {

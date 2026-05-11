@@ -54,7 +54,6 @@ export function CommandPalette({
   }, [selected]);
 
   const { mounted, dataState, motion } = useSpringMount(open, 160);
-  if (!mounted) return null;
 
   const runSelected = useCallback((): void => {
     const cmd = filtered[selected];
@@ -96,6 +95,15 @@ export function CommandPalette({
     },
     [onClose]
   );
+
+  // Hook を全て呼び出した後で早期 return する (rules-of-hooks)。
+  // 旧コードは useSpringMount 直後に `if (!mounted) return null` を置いて
+  // 後続の useCallback を条件付き呼び出しにしていたため、open 切替で
+  // "Rendered more hooks than during the previous render" が発生していた。
+  // mounted=false の間は portal を出さないが、useState / useEffect / useCallback
+  // は全て呼び終わってから return することで hook 数を render 間で一定に保つ。
+  if (!mounted) return null;
+
   return createPortal(
     <div
       className="cmdp-backdrop"

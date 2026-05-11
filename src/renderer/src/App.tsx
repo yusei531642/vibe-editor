@@ -1,17 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import {
-  Clock,
   Command as CommandIcon,
   Crown,
-  ExternalLink,
-  File as FileIcon,
-  Folder as FolderIcon,
-  FolderPlus,
-  LayoutGrid,
   Plus,
-  PanelLeft,
-  RefreshCw,
   RotateCw,
   Settings as SettingsIcon
 } from 'lucide-react';
@@ -37,7 +29,7 @@ import { CommandPalette } from './components/CommandPalette';
 import { WelcomePane } from './components/WelcomePane';
 import { OnboardingWizard } from './components/OnboardingWizard';
 import { ContextMenu, type ContextMenuItem } from './components/ContextMenu';
-import { MenuBar, MenuItem, MenuDivider, MenuSection } from './components/shell/MenuBar';
+import { AppMenuBar } from './components/shell/AppMenuBar';
 import { useRecruitListener } from './lib/use-recruit-listener';
 import { useCanvasVisibility } from './lib/use-canvas-visibility';
 import { useWindowFrameInsets } from './lib/use-window-frame-insets';
@@ -686,118 +678,32 @@ export function App(): JSX.Element {
         availableUpdate={availableUpdate}
         onClickUpdate={handleClickUpdate}
         menuBar={
-          <MenuBar
-            items={[
-              {
-                label: t('menubar.file'),
-                children: (
-                  <>
-                    <MenuItem
-                      icon={<FolderPlus size={14} strokeWidth={1.8} />}
-                      label={t('appMenu.new')}
-                      onClick={() => void handleNewProject()}
-                    />
-                    <MenuItem
-                      icon={<FolderIcon size={14} strokeWidth={1.8} />}
-                      label={t('appMenu.openFolder')}
-                      onClick={() => void handleOpenFolder()}
-                    />
-                    <MenuItem
-                      icon={<FileIcon size={14} strokeWidth={1.8} />}
-                      label={t('appMenu.openFile')}
-                      onClick={() => void handleOpenFile()}
-                    />
-                    <MenuItem
-                      icon={<FolderPlus size={14} strokeWidth={1.8} />}
-                      label={t('appMenu.addToWorkspace')}
-                      onClick={() => void handleAddWorkspaceFolder()}
-                    />
-                    {(settings.recentProjects ?? []).length > 0 && (
-                      <>
-                        <MenuDivider />
-                        <MenuSection label={t('appMenu.recent')} />
-                        {(settings.recentProjects ?? []).slice(0, 6).map((p) => (
-                          <MenuItem
-                            key={p}
-                            icon={<Clock size={13} strokeWidth={1.8} />}
-                            label={p.split(/[\\/]/).filter(Boolean).pop() ?? p}
-                            onClick={() => handleOpenRecent(p)}
-                          />
-                        ))}
-                      </>
-                    )}
-                    <MenuDivider />
-                    <MenuItem
-                      icon={<RotateCw size={14} strokeWidth={1.8} />}
-                      label={t('menubar.restart')}
-                      onClick={() => void handleRestart()}
-                    />
-                  </>
-                )
-              },
-              {
-                label: t('menubar.view'),
-                children: (
-                  <>
-                    <MenuItem
-                      icon={<PanelLeft size={14} strokeWidth={1.8} />}
-                      label={t('menubar.toggleSidebar')}
-                      shortcut="Ctrl+B"
-                      onClick={() => toggleSidebar()}
-                    />
-                    <MenuItem
-                      icon={<LayoutGrid size={14} strokeWidth={1.8} />}
-                      label={t('menubar.toggleCanvas')}
-                      shortcut="Ctrl+Shift+M"
-                      onClick={() => useUiStore.getState().toggleViewMode()}
-                    />
-                    <MenuDivider />
-                    <MenuItem
-                      icon={<CommandIcon size={14} strokeWidth={1.8} />}
-                      label={t('menubar.openPalette')}
-                      shortcut="Ctrl+Shift+P"
-                      onClick={() => setPaletteOpen(true)}
-                    />
-                  </>
-                )
-              },
-              {
-                label: t('menubar.help'),
-                children: (
-                  <>
-                    <MenuItem
-                      icon={<RefreshCw size={14} strokeWidth={1.8} />}
-                      label={t('updater.checkNow')}
-                      onClick={() => {
-                        void import('./lib/updater-check').then((m) =>
-                          m.checkForUpdates({
-                            language: settings.language,
-                            showToast,
-                            dismissToast,
-                            manual: true,
-                            runningTaskCount: terminalTabs.length
-                          })
-                        );
-                      }}
-                    />
-                    <MenuItem
-                      icon={<ExternalLink size={14} strokeWidth={1.8} />}
-                      label={t('menubar.openGithub')}
-                      onClick={() => {
-                        void window.api.app.openExternal('https://github.com/yusei531642/vibe-editor');
-                      }}
-                    />
-                    <MenuDivider />
-                    <MenuItem
-                      icon={<SettingsIcon size={14} strokeWidth={1.8} />}
-                      label={t('menubar.openSettings')}
-                      shortcut="Ctrl+,"
-                      onClick={() => setSettingsOpen(true)}
-                    />
-                  </>
-                )
-              }
-            ]}
+          <AppMenuBar
+            recentProjects={settings.recentProjects ?? []}
+            onNewProject={() => void handleNewProject()}
+            onOpenFolder={() => void handleOpenFolder()}
+            onOpenFile={() => void handleOpenFile()}
+            onAddWorkspaceFolder={() => void handleAddWorkspaceFolder()}
+            onOpenRecent={(p) => handleOpenRecent(p)}
+            onRestart={() => void handleRestart()}
+            onCheckUpdate={() => {
+              void import('./lib/updater-check').then((m) =>
+                m.checkForUpdates({
+                  language: settings.language,
+                  showToast,
+                  dismissToast,
+                  manual: true,
+                  runningTaskCount: terminalTabs.length
+                })
+              );
+            }}
+            onOpenGithub={() => {
+              void window.api.app.openExternal('https://github.com/yusei531642/vibe-editor');
+            }}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenPalette={() => setPaletteOpen(true)}
+            onToggleSidebar={() => toggleSidebar()}
+            onToggleCanvas={() => useUiStore.getState().toggleViewMode()}
           />
         }
       />
