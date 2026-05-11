@@ -32,6 +32,10 @@ Thumbs.db
 # (作業中の進捗追跡で生成され、merge 後は雑音になる)
 tasks/*-state.json
 tasks/fortress-implement-state.json
+# Issue 作業メモ / refactor 計画 (skill / agent が生成する plan.md 等)。
+# 攻撃手法を含む security 関連の plan も含まれるため、公開リポジトリに含めない。
+tasks/issue-*/
+tasks/refactor-*/
 # 実験用 POC / スクラッチ (ADR 本体は tasks/ に置いてある)
 experiments/
 # Tauri のビルド中間生成物
