@@ -80,14 +80,13 @@
 
   /* ---------- Redesign Shell Layout (2026-04)
    * Claude Design バンドル "vibe-editor Redesign" 準拠。
-   * 6 領域: topbar(44) / rail(56) / dock(320) / stage / activity(300) / status(26)
+   * 5 領域: topbar(44) / rail(56) / dock(320) / stage / status(26)
    */
   --shell-rail: 56px;
   --shell-header: 44px;
   --shell-dock: 320px;
-  --shell-activity: 300px;
-  /* status bar: 26/30 だとマスコットが小さく崩れるので 40 に揃える。grid-template-rows と
-   * activity panel の bottom: var(--shell-status) 配置がトークン参照なので副作用は無い。 */
+  /* status bar: 26/30 だとマスコットが小さく崩れるので 40 に揃える。
+   * grid-template-rows がトークン参照なので副作用は無い。 */
   --shell-status: 40px;
 
   /* ---------- Role Colors (team canvas) ----------

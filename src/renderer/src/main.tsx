@@ -43,7 +43,6 @@ import './styles/components/claude-patterns.css';
 import './styles/components/shell.css';
 import './styles/components/glass.css';
 import './styles/components/drag-region.css';
-import './styles/components/tweaks.css';
 import './styles/components/image-preview.css';
 
 const rootEl = document.getElementById('root');

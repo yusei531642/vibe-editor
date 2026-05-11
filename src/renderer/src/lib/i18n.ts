@@ -42,28 +42,6 @@ const ja: Dict = {
   'status.mascot.reviewing': '確認中',
   'status.mascot.blocked': '対応が必要',
 
-  // ---------- Activity feed ----------
-  'activity.title': 'アクティビティ',
-  'activity.live': 'ライブ',
-  'activity.filter.all': 'すべて',
-  'activity.filter.handoff': 'ハンドオフ',
-  'activity.filter.tool': 'ツール',
-  'activity.filter.error': 'エラー',
-  'activity.empty': 'まだアクティビティはありません',
-  'activity.groupNow': 'たった今',
-  'activity.groupMinute': '数分前',
-  'activity.groupHour': '本日',
-  'activity.groupEarlier': 'それ以前',
-
-  // ---------- Tweaks panel ----------
-  'tweaks.title': 'Tweaks',
-  'tweaks.theme': 'テーマ',
-  'tweaks.accent': 'アクセント',
-  'tweaks.density': '密度',
-  'tweaks.language': '言語',
-  'tweaks.open': 'クイック調整',
-  'tweaks.close': '閉じる',
-
   // ---------- Canvas HUD ----------
   'canvas.hud.stage': 'ステージ',
   'canvas.hud.list': 'リスト',
@@ -476,7 +454,7 @@ const ja: Dict = {
   'settings.apply': '適用して保存',
   'settings.custom': '（カスタム）',
 
-  // ---------- Theme labels (UserMenu / TweaksPanel / OnboardingWizard 共有) ----------
+  // ---------- Theme labels (UserMenu / OnboardingWizard 共有) ----------
   'theme.label.claude-dark': 'Claude Dark',
   'theme.label.claude-light': 'Claude Light',
   'theme.label.dark': 'ダーク',
@@ -484,7 +462,7 @@ const ja: Dict = {
   'theme.label.midnight': 'ミッドナイト',
   'theme.label.glass': 'グラス',
 
-  // ---------- Language labels (UserMenu / TweaksPanel / LanguageSection 共有) ----------
+  // ---------- Language labels (UserMenu / LanguageSection 共有) ----------
   'lang.label.ja': '日本語',
   'lang.label.ja.sub': 'Japanese',
   'lang.label.en': 'English',
@@ -724,28 +702,6 @@ const en: Dict = {
   'status.mascot.running': 'Agent active',
   'status.mascot.reviewing': 'Reviewing',
   'status.mascot.blocked': 'Needs attention',
-
-  // ---------- Activity feed ----------
-  'activity.title': 'Activity',
-  'activity.live': 'Live',
-  'activity.filter.all': 'All',
-  'activity.filter.handoff': 'Handoffs',
-  'activity.filter.tool': 'Tools',
-  'activity.filter.error': 'Errors',
-  'activity.empty': 'No activity yet',
-  'activity.groupNow': 'Just now',
-  'activity.groupMinute': 'Minutes ago',
-  'activity.groupHour': 'Earlier today',
-  'activity.groupEarlier': 'Earlier',
-
-  // ---------- Tweaks panel ----------
-  'tweaks.title': 'Tweaks',
-  'tweaks.theme': 'Theme',
-  'tweaks.accent': 'Accent',
-  'tweaks.density': 'Density',
-  'tweaks.language': 'Language',
-  'tweaks.open': 'Quick tweaks',
-  'tweaks.close': 'Close',
 
   // ---------- Canvas HUD ----------
   'canvas.hud.stage': 'Stage',
@@ -1162,7 +1118,7 @@ const en: Dict = {
   'settings.apply': 'Apply & save',
   'settings.custom': '(custom)',
 
-  // ---------- Theme labels (UserMenu / TweaksPanel / OnboardingWizard) ----------
+  // ---------- Theme labels (UserMenu / OnboardingWizard) ----------
   'theme.label.claude-dark': 'Claude Dark',
   'theme.label.claude-light': 'Claude Light',
   'theme.label.dark': 'Dark',
@@ -1170,7 +1126,7 @@ const en: Dict = {
   'theme.label.midnight': 'Midnight',
   'theme.label.glass': 'Glass',
 
-  // ---------- Language labels (UserMenu / TweaksPanel / LanguageSection) ----------
+  // ---------- Language labels (UserMenu / LanguageSection) ----------
   'lang.label.ja': '日本語',
   'lang.label.ja.sub': 'Japanese',
   'lang.label.en': 'English',

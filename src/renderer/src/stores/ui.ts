@@ -22,14 +22,6 @@ interface UiState {
   paletteOpen: boolean;
   setPaletteOpen: (open: boolean) => void;
   togglePalette: () => void;
-  /** Redesign: 右ドロワーの Activity (handoff feed) 表示フラグ */
-  activityOpen: boolean;
-  setActivityOpen: (open: boolean) => void;
-  toggleActivity: () => void;
-  /** Redesign: Tweaks 軽量パネル (テーマ/アクセント等) 表示フラグ */
-  tweaksOpen: boolean;
-  setTweaksOpen: (open: boolean) => void;
-  toggleTweaks: () => void;
   /** Sidebar (rail の右にある幅広パネル) を畳むフラグ。
    *  Rail のアクティブ tab 再クリック / Ctrl+B で toggle。 */
   sidebarCollapsed: boolean;
@@ -57,12 +49,6 @@ export const useUiStore = create<UiState>()(
       paletteOpen: false,
       setPaletteOpen: (open) => set({ paletteOpen: open }),
       togglePalette: () => set({ paletteOpen: !get().paletteOpen }),
-      activityOpen: false,
-      setActivityOpen: (open) => set({ activityOpen: open }),
-      toggleActivity: () => set({ activityOpen: !get().activityOpen }),
-      tweaksOpen: false,
-      setTweaksOpen: (open) => set({ tweaksOpen: open }),
-      toggleTweaks: () => set({ tweaksOpen: !get().tweaksOpen }),
       sidebarCollapsed: false,
       setSidebarCollapsed: (collapsed) => set({ sidebarCollapsed: collapsed }),
       toggleSidebar: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
@@ -75,7 +61,6 @@ export const useUiStore = create<UiState>()(
       name: 'vibe-editor:ui',
       partialize: (s) => ({
         viewMode: s.viewMode,
-        activityOpen: s.activityOpen,
         sidebarCollapsed: s.sidebarCollapsed
       })
     }

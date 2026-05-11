@@ -18,9 +18,6 @@ import { TabBar, type TabItem } from './components/TabBar';
 import { Topbar } from './components/shell/Topbar';
 import { Rail } from './components/shell/Rail';
 import { StatusBar } from './components/shell/StatusBar';
-import { ActivityPanel } from './components/shell/ActivityPanel';
-import { useActivityFeed } from './lib/use-activity-feed';
-import { TweaksPanel } from './components/overlays/TweaksPanel';
 import { DiffView } from './components/DiffView';
 import { EditorView } from './components/EditorView';
 import { TerminalView, type TerminalViewHandle } from './components/TerminalView';
@@ -623,14 +620,11 @@ export function App(): JSX.Element {
       setSidebarView('files');
     }
   }, [hasGitRepo, sidebarView]);
-  const activityFeed = useActivityFeed();
   // Issue #578: Canvas (Tauri webview) の可視状態を観測する singleton listener を mount。
   // useRecruitListener が hidden 中の recruit を集計するために使う。
   useCanvasVisibility();
   // Phase 6: vibe-canvas:recruit/dismiss イベントを listen して canvas store に反映
   useRecruitListener();
-  const activityOpen = useUiStore((s) => s.activityOpen);
-  const setActivityOpen = useUiStore((s) => s.setActivityOpen);
   const sidebarCollapsed = useUiStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const availableUpdate = useUiStore((s) => s.availableUpdate);
@@ -673,7 +667,6 @@ export function App(): JSX.Element {
       <Topbar
         projectRoot={projectRoot}
         status={status}
-        onRestart={handleRestart}
         onOpenPalette={() => setPaletteOpen(true)}
         availableUpdate={availableUpdate}
         onClickUpdate={handleClickUpdate}
@@ -1128,16 +1121,6 @@ export function App(): JSX.Element {
         terminalCount={terminalTabs.length}
         mascotState={mascotState}
       />
-
-      {activityOpen ? (
-        <ActivityPanel
-          className="activity--drawer"
-          events={activityFeed.events}
-          onClose={() => setActivityOpen(false)}
-        />
-      ) : null}
-
-      <TweaksPanel />
 
       {!settingsLoading && !settings.hasCompletedOnboarding && (
         <OnboardingWizard

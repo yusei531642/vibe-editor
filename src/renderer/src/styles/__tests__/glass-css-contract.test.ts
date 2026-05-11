@@ -70,13 +70,13 @@ function cssDeclarationsForProperty(
 }
 
 describe('Glass CSS contract', () => {
-  it('main.tsx imports glass.css after component CSS and before final tweak/image CSS', () => {
+  it('main.tsx imports glass.css after component CSS and before final image-preview CSS', () => {
     const imports = importedCssPaths(readRendererFile('main.tsx'));
 
     const glassIndex = imports.indexOf('styles/components/glass.css');
     expect(glassIndex).toBeGreaterThanOrEqual(0);
 
-    // Glass effects must win over component base CSS, but tweaks/image-preview remain final overrides.
+    // Glass effects must win over component base CSS, but image-preview remains final override.
     for (const componentCss of [
       'styles/components/canvas.css',
       'styles/components/claude-patterns.css',
@@ -84,7 +84,6 @@ describe('Glass CSS contract', () => {
     ]) {
       expect(glassIndex).toBeGreaterThan(imports.indexOf(componentCss));
     }
-    expect(glassIndex).toBeLessThan(imports.indexOf('styles/components/tweaks.css'));
     expect(glassIndex).toBeLessThan(imports.indexOf('styles/components/image-preview.css'));
   });
 
