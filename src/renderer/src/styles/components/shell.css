@@ -51,8 +51,8 @@
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
-  /* 240px だと「IDE / Canvas を切替」+「Ctrl+Shift+M」が icon/gap/padding を含めて
-     収まらず ellipsis 化していた (#: メニューラベル切れ)。
+  /* 240px だと「IDE / Canvas を切替」+「Ctrl+Shift+M」が icon/gap/padding を
+     含めて収まらず、メニューラベル末尾が ellipsis で省略されていた。
      ラベル最長: 14文字 ≈ 175px / shortcut: 80px / icon+gap+padding: 約 60px → 計 ~315px。
      min-width を 300px、max-width を 420px まで広げて全文表示を保証する。 */
   min-width: 300px;
