@@ -100,6 +100,8 @@ export function CommandPalette({
   // 旧コードは useSpringMount 直後に `if (!mounted) return null` を置いて
   // 後続の useCallback を条件付き呼び出しにしていたため、open 切替で
   // "Rendered more hooks than during the previous render" が発生していた。
+  // mounted=false の間は portal を出さないが、useState / useEffect / useCallback
+  // は全て呼び終わってから return することで hook 数を render 間で一定に保つ。
   if (!mounted) return null;
 
   return createPortal(
