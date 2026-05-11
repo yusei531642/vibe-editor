@@ -1,21 +1,12 @@
 import { type ReactNode } from 'react';
-import {
-  Activity as ActivityIcon,
-  ArrowDownToLine,
-  Command as CommandIcon,
-  RotateCw,
-  Search,
-  Sliders as SlidersIcon
-} from 'lucide-react';
+import { ArrowDownToLine, Search } from 'lucide-react';
 import { useT } from '../../lib/i18n';
-import { useUiStore } from '../../stores/ui';
 import type { AvailableUpdateInfo } from '../../lib/updater-check';
 import { WindowControls } from './WindowControls';
 
 interface TopbarProps {
   projectRoot: string;
   status: string;
-  onRestart: () => void;
   onOpenPalette: () => void;
   /** 左側に置く自作メニューバー (File / View / Help…) */
   menuBar?: ReactNode;
@@ -35,12 +26,11 @@ interface TopbarProps {
  * Redesign shell の上端バー (44px)。
  * Claude Design バンドル "vibe-editor Redesign" の .topbar セクションを
  * Tauri アプリ向けに移植。ブランドドット + プロジェクトクラム + モードピル
- * + ⌘K 検索トリガ + アイコンの 5 パート構成。
+ * + ⌘K 検索トリガで構成。
  */
 export function Topbar({
   projectRoot,
   status,
-  onRestart,
   onOpenPalette,
   menuBar,
   availableUpdate,
@@ -112,8 +102,8 @@ export function Topbar({
 
       {extraActions ? <div className="topbar__extra">{extraActions}</div> : null}
 
-      <div className="topbar__icons">
-        {availableUpdate && onClickUpdate ? (
+      {availableUpdate && onClickUpdate ? (
+        <div className="topbar__icons">
           <button
             type="button"
             className="topbar__update"
@@ -126,67 +116,11 @@ export function Topbar({
               {t('updater.button.label', { version: availableUpdate.version })}
             </span>
           </button>
-        ) : null}
-        <TopbarActivityToggle />
-        <TopbarTweaksToggle />
-        <button
-          type="button"
-          className="topbar__iconbtn"
-          onClick={onRestart}
-          title={t('toolbar.restart.title')}
-          aria-label={t('toolbar.restart.title')}
-        >
-          <RotateCw size={14} strokeWidth={1.9} />
-        </button>
-        <button
-          type="button"
-          className="topbar__iconbtn"
-          onClick={onOpenPalette}
-          title={t('toolbar.palette.title')}
-          aria-label={t('toolbar.palette.title')}
-        >
-          <CommandIcon size={14} strokeWidth={1.9} />
-        </button>
-      </div>
+        </div>
+      ) : null}
 
       {/* Issue #260 PR-2: カスタムタイトルバーのウィンドウ制御 (decorations: false の代替) */}
       <WindowControls />
     </div>
-  );
-}
-
-function TopbarActivityToggle(): JSX.Element {
-  const activityOpen = useUiStore((s) => s.activityOpen);
-  const toggleActivity = useUiStore((s) => s.toggleActivity);
-  const t = useT();
-  return (
-    <button
-      type="button"
-      className={`topbar__iconbtn${activityOpen ? ' is-active' : ''}`}
-      onClick={toggleActivity}
-      title={t('activity.title')}
-      aria-label={t('activity.title')}
-      aria-pressed={activityOpen}
-    >
-      <ActivityIcon size={14} strokeWidth={1.9} />
-    </button>
-  );
-}
-
-function TopbarTweaksToggle(): JSX.Element {
-  const tweaksOpen = useUiStore((s) => s.tweaksOpen);
-  const toggleTweaks = useUiStore((s) => s.toggleTweaks);
-  const t = useT();
-  return (
-    <button
-      type="button"
-      className={`topbar__iconbtn${tweaksOpen ? ' is-active' : ''}`}
-      onClick={toggleTweaks}
-      title={t('tweaks.open')}
-      aria-label={t('tweaks.open')}
-      aria-pressed={tweaksOpen}
-    >
-      <SlidersIcon size={14} strokeWidth={1.9} />
-    </button>
   );
 }
