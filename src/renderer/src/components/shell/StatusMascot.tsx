@@ -88,7 +88,7 @@ export const StatusMascot = memo(function StatusMascot({
 /**
  * 状態ごとに mascot の周囲に出す装飾 SVG (Issue #717)。
  *  - sleep: ZZZ
- *  - thinking: 三点リーダー ・・・
+ *  - thinking: ... ドットが点滅
  *  - done: ✓ チェック
  *  - error: ! 警告
  *  - excited: ✨ スパーク
