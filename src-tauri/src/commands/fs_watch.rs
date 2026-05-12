@@ -3,7 +3,7 @@
 //
 // 設計:
 //   - app_set_project_root で project_root が変わるたびに watcher を再起動
-//   - notify crate の RecommendedWatcher で project_root/ を recursive 監視
+//   - notify crate の RecommendedWatcher で project_root/ 配下を手動で非再帰監視
 //   - イベントは 300ms trailing debounce: 最後のイベント着信から 300ms 経ってから emit
 //     (Issue #105: 旧実装は leading debounce で最初のイベントしか拾えず、保存処理の
 //      最後の状態 (rename 後など) を取り逃すバグがあった)
@@ -11,23 +11,85 @@
 
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use once_cell::sync::Lazy;
+use std::ffi::OsStr;
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::channel;
+use std::sync::mpsc::sync_channel;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 /// 監視除外ディレクトリ名 (basename 一致)
 const IGNORED_DIRS: &[&str] = &[".git", "node_modules", "target", "dist", ".next", "out"];
+const WATCH_EVENT_CHANNEL_CAPACITY: usize = 1024;
+
+fn file_name_is_ignored(name: &OsStr) -> bool {
+    IGNORED_DIRS
+        .iter()
+        .any(|ignored| name == OsStr::new(ignored))
+}
 
 fn path_is_ignored(path: &Path, root: &Path) -> bool {
     let Ok(rel) = path.strip_prefix(root) else {
         return false;
     };
-    rel.components().any(|c| {
-        let comp = c.as_os_str().to_string_lossy();
-        IGNORED_DIRS.contains(&comp.as_ref())
-    })
+    rel.components()
+        .any(|c| file_name_is_ignored(c.as_os_str()))
+}
+
+fn watch_dir_tree(watcher: &mut RecommendedWatcher, root: &Path) -> notify::Result<usize> {
+    let mut watched = 0usize;
+    let mut stack = vec![root.to_path_buf()];
+
+    while let Some(dir) = stack.pop() {
+        if dir != root && path_is_ignored(&dir, root) {
+            continue;
+        }
+
+        watcher.watch(&dir, RecursiveMode::NonRecursive)?;
+        watched += 1;
+
+        let Ok(entries) = fs::read_dir(&dir) else {
+            tracing::debug!("[fs_watch] cannot read dir while registering watch: {dir:?}");
+            continue;
+        };
+
+        for entry in entries.flatten() {
+            if file_name_is_ignored(&entry.file_name()) {
+                continue;
+            }
+            let Ok(file_type) = entry.file_type() else {
+                continue;
+            };
+            if file_type.is_dir() {
+                stack.push(entry.path());
+            }
+        }
+    }
+
+    Ok(watched)
+}
+
+fn watch_created_dirs(watcher: &mut RecommendedWatcher, event: &Event, root: &Path) {
+    if !matches!(event.kind, EventKind::Create(_)) {
+        return;
+    }
+
+    for path in &event.paths {
+        if path_is_ignored(path, root) {
+            continue;
+        }
+        let Ok(file_type) = fs::symlink_metadata(path).map(|m| m.file_type()) else {
+            continue;
+        };
+        if !file_type.is_dir() || file_type.is_symlink() {
+            continue;
+        }
+        match watch_dir_tree(watcher, path) {
+            Ok(count) => tracing::debug!("[fs_watch] added {count} watches for new dir: {path:?}"),
+            Err(e) => tracing::warn!("[fs_watch] failed to watch new dir {path:?}: {e}"),
+        }
+    }
 }
 
 /// Issue #204:
@@ -142,10 +204,10 @@ pub fn start_for_root(app: AppHandle, root: String) {
             return;
         }
 
-        let (tx, rx) = channel::<notify::Result<Event>>();
+        let (tx, rx) = sync_channel::<notify::Result<Event>>(WATCH_EVENT_CHANNEL_CAPACITY);
         let mut watcher: RecommendedWatcher = match Watcher::new(
             move |res| {
-                let _ = tx.send(res);
+                let _ = tx.try_send(res);
             },
             notify::Config::default().with_poll_interval(Duration::from_secs(2)),
         ) {
@@ -155,11 +217,13 @@ pub fn start_for_root(app: AppHandle, root: String) {
                 return;
             }
         };
-        if let Err(e) = watcher.watch(&root_path, RecursiveMode::Recursive) {
-            tracing::warn!("[fs_watch] watch failed: {e}");
-            return;
+        match watch_dir_tree(&mut watcher, &root_path) {
+            Ok(count) => tracing::info!("[fs_watch] started for {my_root} ({count} dirs watched)"),
+            Err(e) => {
+                tracing::warn!("[fs_watch] watch failed: {e}");
+                return;
+            }
         }
-        tracing::info!("[fs_watch] started for {my_root}");
 
         const DEBOUNCE: Duration = Duration::from_millis(300);
         // Issue #105: trailing debounce 用の pending state。
@@ -194,6 +258,7 @@ pub fn start_for_root(app: AppHandle, root: String) {
                     ) {
                         // pending を維持して次ループへ
                     } else {
+                        watch_created_dirs(&mut watcher, &event, &root_path);
                         // 除外ディレクトリのみのイベントはスキップ
                         let all_ignored =
                             event.paths.iter().all(|p| path_is_ignored(p, &root_path));
@@ -230,4 +295,33 @@ pub fn start_for_root(app: AppHandle, root: String) {
         }
         // Watcher は drop で notify の OS 側 watch を unregister する。
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{file_name_is_ignored, path_is_ignored};
+    use std::ffi::OsStr;
+    use std::path::Path;
+
+    #[test]
+    fn ignores_configured_heavy_directories() {
+        assert!(file_name_is_ignored(OsStr::new(".git")));
+        assert!(file_name_is_ignored(OsStr::new("node_modules")));
+        assert!(file_name_is_ignored(OsStr::new("target")));
+        assert!(!file_name_is_ignored(OsStr::new("src")));
+    }
+
+    #[test]
+    fn detects_ignored_components_without_string_allocation() {
+        let root = Path::new("project");
+        assert!(path_is_ignored(
+            Path::new("project/node_modules/pkg/index.js"),
+            root
+        ));
+        assert!(path_is_ignored(
+            Path::new("project/src-tauri/target/debug/app"),
+            root
+        ));
+        assert!(!path_is_ignored(Path::new("project/src/main.rs"), root));
+    }
 }
