@@ -24,6 +24,11 @@ interface TopbarProps {
   extraActions?: ReactNode;
   /** Topbar 上を自由に歩き回るマスコット (旧 StatusBar 左端から移植) */
   mascotState?: StatusMascotState;
+  /**
+   * マスコット本体がクリックされたとき。`useMascotOrchestrator` 経由で
+   * `excited` 状態を 1.2s だけ発火する想定。
+   */
+  onMascotClick?: () => void;
 }
 
 const MASCOT_WIDTH = 32;
@@ -43,7 +48,8 @@ export function Topbar({
   availableUpdate,
   onClickUpdate,
   extraActions,
-  mascotState
+  mascotState,
+  onMascotClick
 }: TopbarProps): JSX.Element {
   const t = useT();
   const { settings } = useSettings();
@@ -154,13 +160,13 @@ export function Topbar({
           ref={mascotRef}
           data-ready={mascotX !== null ? 'true' : 'false'}
           style={mascotX !== null ? { transform: `translate3d(${mascotX}px, -50%, 0)` } : undefined}
-          aria-hidden="true"
         >
           <StatusMascot
             state={mascotState}
             label={t(`status.mascot.${mascotState}`)}
             variant={settings.statusMascotVariant ?? 'vibe'}
             customPath={settings.statusMascotCustomPath}
+            onClick={onMascotClick}
           />
         </span>
       ) : null}

@@ -32,6 +32,7 @@ import { useCanvasVisibility } from './lib/use-canvas-visibility';
 import { useWindowFrameInsets } from './lib/use-window-frame-insets';
 import { ClaudeNotFound } from './components/ClaudeNotFound';
 import { getStatusMascotState } from './lib/status-mascot';
+import { useMascotOrchestrator } from './lib/hooks/use-mascot-orchestrator';
 import { useT } from './lib/i18n';
 import {
   useSettingsActions,
@@ -580,7 +581,7 @@ export function App(): JSX.Element {
   const activeDiffPath = activeDiffTab?.relPath ?? null;
   const activeFilePath = activeEditorTab?.relPath ?? null;
   const hasActiveContent = activeDiffTab !== null || activeEditorTab !== null;
-  const mascotState = useMemo(
+  const baseMascotState = useMemo(
     () =>
       getStatusMascotState({
         viewMode,
@@ -606,6 +607,7 @@ export function App(): JSX.Element {
       viewMode
     ]
   );
+  const { state: mascotState, onMascotClick } = useMascotOrchestrator(baseMascotState);
 
   const projectName = projectRoot.split(/[\\/]/).pop() || 'no project';
   const activeTab = terminalTabs.find((t) => t.id === activeTerminalTabId) ?? null;
@@ -670,6 +672,7 @@ export function App(): JSX.Element {
         availableUpdate={availableUpdate}
         onClickUpdate={handleClickUpdate}
         mascotState={mascotState}
+        onMascotClick={onMascotClick}
         menuBar={
           <AppMenuBar
             recentProjects={settings.recentProjects ?? []}

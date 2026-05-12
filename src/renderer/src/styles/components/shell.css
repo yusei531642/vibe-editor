@@ -622,60 +622,75 @@
   --mascot-keyboard: color-mix(in srgb, var(--text-dim) 76%, var(--bg-panel));
   --mascot-key: color-mix(in srgb, var(--bg-sidebar) 64%, var(--text));
 }
-.status-mascot--idle {
+/* === Issue #717: state ごとに mascot の表情 (SVG sheet frame の offset) と
+   motion アニメ (transform) を割り当てる ===
+   roaming コンテナ (.topbar__mascot) が水平移動を担うので、ここでは
+   sheet 内のフレーム切替 + その場での breathe/hop/shake/jump 等の
+   小さな transform にだけ集中する。 */
+.status-mascot--idle,
+.status-mascot--done,
+.status-mascot--excited {
   --mascot-offset: 0px;
 }
-.status-mascot--editing {
-  --mascot-offset: -32px;
-  animation: statusMascotPace 2400ms ease-in-out infinite;
+.status-mascot--sleep {
+  --mascot-offset: 0px;
 }
-.status-mascot--dirty {
+.status-mascot--thinking {
   --mascot-offset: -64px;
-  animation: statusMascotScout 3000ms ease-in-out infinite;
 }
-.status-mascot--running {
+.status-mascot--working {
   --mascot-offset: -96px;
-  animation: statusMascotRunTrack 2600ms linear infinite;
 }
-.status-mascot--reviewing {
-  --mascot-offset: -128px;
-  animation: statusMascotReviewScan 3400ms ease-in-out infinite;
-}
-.status-mascot--blocked {
+.status-mascot--error {
   --mascot-offset: -160px;
 }
-.status-mascot--variant-coder.status-mascot--editing,
-.status-mascot--variant-coder.status-mascot--dirty,
-.status-mascot--variant-coder.status-mascot--running,
-.status-mascot--variant-coder.status-mascot--reviewing {
-  animation: statusMascotDeskFocus 1500ms steps(2, end) infinite;
+
+.status-mascot[role='button'] {
+  cursor: pointer;
+  pointer-events: auto;
 }
-.status-mascot--variant-coder.status-mascot--blocked {
-  animation: none;
-}
+
 .status-mascot__motion {
   width: var(--mascot-size);
   height: var(--mascot-size);
   display: block;
-  transform-origin: 50% 80%;
+  transform-origin: 50% 90%;
 }
 .status-mascot--idle .status-mascot__motion {
-  animation: statusMascotBreathe 1800ms steps(2, end) infinite;
+  animation: statusMascotFloat 3200ms ease-in-out infinite;
 }
-.status-mascot--running .status-mascot__motion {
+.status-mascot--sleep .status-mascot__motion {
+  animation: statusMascotSleepBreath 2400ms ease-in-out infinite;
+  transform: rotate(14deg);
+}
+.status-mascot--working .status-mascot__motion {
   animation: statusMascotHop 420ms steps(2, end) infinite;
 }
-.status-mascot--blocked .status-mascot__motion {
-  animation: statusMascotAlert 900ms steps(2, end) infinite;
+.status-mascot--thinking .status-mascot__motion {
+  animation: statusMascotBreathe 1800ms steps(2, end) infinite;
 }
-.status-mascot--variant-coder .status-mascot__motion {
+.status-mascot--done .status-mascot__motion {
+  animation: statusMascotJump 800ms cubic-bezier(0.4, 0, 0.2, 1) 1;
+}
+.status-mascot--error .status-mascot__motion {
+  animation:
+    statusMascotShake 360ms ease-in-out infinite,
+    statusMascotErrorBlink 800ms ease-in-out infinite;
+}
+.status-mascot--excited .status-mascot__motion {
+  animation: statusMascotBounce 600ms cubic-bezier(0.4, 0, 0.2, 1) 1;
+}
+.status-mascot--variant-coder.status-mascot--working .status-mascot__motion,
+.status-mascot--variant-coder.status-mascot--thinking .status-mascot__motion {
   animation: statusMascotTyping 900ms steps(2, end) infinite;
 }
-.status-mascot--variant-coder.status-mascot--running .status-mascot__motion {
+.status-mascot--variant-coder.status-mascot--working .status-mascot__motion {
   animation-duration: 420ms;
 }
-.status-mascot--variant-coder.status-mascot--blocked .status-mascot__motion {
-  animation: statusMascotAlert 900ms steps(2, end) infinite;
+.status-mascot--variant-coder.status-mascot--error .status-mascot__motion {
+  animation:
+    statusMascotShake 360ms ease-in-out infinite,
+    statusMascotErrorBlink 800ms ease-in-out infinite;
 }
 .status-mascot__viewport {
   width: var(--mascot-size);
@@ -784,54 +799,22 @@
     transform: translateY(-1px);
   }
 }
-@keyframes statusMascotPace {
+@keyframes statusMascotFloat {
   0%,
   100% {
-    transform: translateX(0);
+    transform: translateY(0);
   }
-  45% {
-    transform: translateX(min(56px, var(--mascot-run-distance)));
-  }
-  55% {
-    transform: translateX(min(56px, var(--mascot-run-distance)));
+  50% {
+    transform: translateY(-2px);
   }
 }
-@keyframes statusMascotScout {
+@keyframes statusMascotSleepBreath {
   0%,
   100% {
-    transform: translateX(0);
+    transform: rotate(13deg) translateY(0);
   }
-  35% {
-    transform: translateX(min(92px, var(--mascot-run-distance)));
-  }
-  62% {
-    transform: translateX(min(40px, var(--mascot-run-distance)));
-  }
-}
-@keyframes statusMascotRunTrack {
-  0% {
-    transform: translateX(0);
-  }
-  48% {
-    transform: translateX(var(--mascot-run-distance));
-  }
-  52% {
-    transform: translateX(var(--mascot-run-distance));
-  }
-  100% {
-    transform: translateX(0);
-  }
-}
-@keyframes statusMascotReviewScan {
-  0%,
-  100% {
-    transform: translateX(0);
-  }
-  30% {
-    transform: translateX(min(120px, var(--mascot-run-distance)));
-  }
-  70% {
-    transform: translateX(min(72px, var(--mascot-run-distance)));
+  50% {
+    transform: rotate(15deg) translateY(-1px);
   }
 }
 @keyframes statusMascotHop {
@@ -843,22 +826,56 @@
     transform: translateY(-2px);
   }
 }
-@keyframes statusMascotAlert {
+@keyframes statusMascotShake {
   0%,
   100% {
     transform: translateX(0);
   }
-  50% {
-    transform: translateX(1px);
+  25% {
+    transform: translateX(-2px);
+  }
+  75% {
+    transform: translateX(2px);
   }
 }
-@keyframes statusMascotDeskFocus {
+@keyframes statusMascotErrorBlink {
   0%,
   100% {
-    transform: translateX(0);
+    filter: none;
   }
   50% {
-    transform: translateX(2px);
+    filter: hue-rotate(-30deg) saturate(1.4) brightness(1.1);
+  }
+}
+@keyframes statusMascotJump {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  30% {
+    transform: translateY(-8px) scale(1.06);
+  }
+  60% {
+    transform: translateY(0) scale(0.98);
+  }
+  80% {
+    transform: translateY(-2px) scale(1.02);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes statusMascotBounce {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  40% {
+    transform: translateY(-6px) scale(1.1);
+  }
+  70% {
+    transform: translateY(0) scale(0.96);
+  }
+  100% {
+    transform: translateY(0) scale(1);
   }
 }
 @keyframes statusMascotTyping {
@@ -888,6 +905,109 @@
     transform: translateY(0);
   }
 }
+
+/* === Issue #717: state ごとの overlay === */
+.status-mascot__overlay {
+  position: absolute;
+  width: var(--mascot-size);
+  height: calc(var(--mascot-size) * 0.6);
+  left: 0;
+  top: calc(var(--mascot-size) * -0.4);
+  pointer-events: none;
+  overflow: visible;
+}
+.status-mascot__overlay-text {
+  font-family: var(--mono-font, ui-monospace, monospace);
+  font-size: 6px;
+  font-weight: 800;
+  fill: var(--text);
+  animation: statusMascotSleepLetters 1600ms ease-in-out infinite;
+}
+.status-mascot__overlay-text--sm {
+  font-size: 4px;
+  animation-delay: 800ms;
+}
+.status-mascot__overlay-dot {
+  fill: var(--text-mute);
+}
+.status-mascot__overlay--thinking .status-mascot__overlay-dot--1 {
+  animation: statusMascotDotBlink 900ms ease-in-out infinite;
+}
+.status-mascot__overlay--thinking .status-mascot__overlay-dot--2 {
+  animation: statusMascotDotBlink 900ms ease-in-out 200ms infinite;
+}
+.status-mascot__overlay--thinking .status-mascot__overlay-dot--3 {
+  animation: statusMascotDotBlink 900ms ease-in-out 400ms infinite;
+}
+.status-mascot__overlay-check {
+  stroke: var(--success, #5cb85c);
+  animation: statusMascotCheckPop 600ms ease-out 1;
+}
+.status-mascot__overlay-bang {
+  fill: var(--danger, #e06c75);
+  animation: statusMascotShake 360ms ease-in-out infinite;
+}
+.status-mascot__overlay-spark {
+  fill: var(--accent);
+  animation: statusMascotSparkle 600ms ease-out 1;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.status-mascot__overlay-spark--alt {
+  fill: var(--warning, #f5a623);
+  animation-delay: 100ms;
+}
+
+@keyframes statusMascotSleepLetters {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  70% {
+    opacity: 1;
+    transform: translateY(-1px);
+  }
+}
+@keyframes statusMascotDotBlink {
+  0%,
+  60%,
+  100% {
+    opacity: 0.3;
+  }
+  30% {
+    opacity: 1;
+  }
+}
+@keyframes statusMascotCheckPop {
+  0% {
+    stroke-dasharray: 0 30;
+    opacity: 0;
+  }
+  100% {
+    stroke-dasharray: 30 0;
+    opacity: 1;
+  }
+}
+@keyframes statusMascotSparkle {
+  0% {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.2);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .status-mascot {
     animation: none;
@@ -900,6 +1020,10 @@
   }
   .status-mascot__sheet {
     transition: none;
+  }
+  .status-mascot__overlay,
+  .status-mascot__overlay * {
+    animation: none;
   }
 }
 
