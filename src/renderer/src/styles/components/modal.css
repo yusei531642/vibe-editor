@@ -757,6 +757,53 @@
   gap: 3px;
 }
 
+.modal--settings .mascot-custom {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.modal--settings .mascot-custom__row {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.modal--settings .mascot-custom__pick,
+.modal--settings .mascot-custom__clear {
+  font: inherit;
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text);
+  cursor: pointer;
+  transition:
+    background 120ms,
+    border-color 120ms;
+}
+.modal--settings .mascot-custom__pick:hover,
+.modal--settings .mascot-custom__clear:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-panel);
+}
+.modal--settings .mascot-custom__path {
+  margin: 0;
+  font-family: var(--mono-font);
+  font-size: 11.5px;
+  color: var(--text-mute);
+  word-break: break-all;
+  background: color-mix(in srgb, var(--bg-sidebar) 60%, transparent);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+}
+.modal--settings .mascot-custom__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-mute);
+  white-space: pre-line;
+}
+
 /* 「適用して保存」ボタン: 押下時の ✓ フィードバック幅をチラつかせない */
 .settings-shell__apply.toolbar__btn {
   min-width: 96px;

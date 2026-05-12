@@ -24,7 +24,6 @@ const ja: Dict = {
   'windowControls.close': '閉じる',
 
   // ---------- Topbar (redesign shell) ----------
-  'topbar.searchHint': 'コマンドを検索…',
   'topbar.mode.canvas': 'Canvas',
   'topbar.mode.ide': 'IDE',
   'topbar.mode.terminal': 'Terminal',
@@ -685,7 +684,6 @@ const en: Dict = {
   'windowControls.close': 'Close',
 
   // ---------- Topbar (redesign shell) ----------
-  'topbar.searchHint': 'Search commands…',
   'topbar.mode.canvas': 'Canvas',
   'topbar.mode.ide': 'IDE',
   'topbar.mode.terminal': 'Terminal',

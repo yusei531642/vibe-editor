@@ -46,6 +46,12 @@ export const STATUS_MASCOT_OPTIONS: {
     label: 'Coder',
     descJa: 'PCでカタカタ作業する相棒',
     descEn: 'A tiny companion typing at a computer'
+  },
+  {
+    value: 'custom',
+    label: 'Custom',
+    descJa: '自分で用意した画像 (PNG/GIF/SVG/WebP) を相棒として使う',
+    descEn: 'Use your own image (PNG/GIF/SVG/WebP) as the companion'
   }
 ];
 

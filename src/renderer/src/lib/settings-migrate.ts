@@ -183,12 +183,17 @@ export function migrateSettings(raw: unknown): AppSettings {
   }
 
   // --- Version 8 → 9: ステータスバー mascot の選択設定を追加 (Issue #422) ---
-  const validMascots: StatusMascotVariant[] = ['vibe', 'spark', 'mono', 'coder'];
+  // `custom` は v11 以降で導入された (ユーザー画像 mascot)。未知の値は default に戻す。
+  const validMascots: StatusMascotVariant[] = ['vibe', 'spark', 'mono', 'coder', 'custom'];
   if (
     version < 9 ||
     !validMascots.includes(data.statusMascotVariant as StatusMascotVariant)
   ) {
     data.statusMascotVariant = DEFAULT_SETTINGS.statusMascotVariant;
+  }
+  // statusMascotCustomPath は文字列のみ許可 (旧データから持ち込まれた他型は破棄)
+  if (typeof data.statusMascotCustomPath !== 'string') {
+    delete data.statusMascotCustomPath;
   }
 
   // --- Version 9 → 10: claudeArgs / codexArgs / customAgents[].args の Unicode dash 正規化 (Issue #449) ---

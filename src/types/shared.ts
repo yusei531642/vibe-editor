@@ -12,7 +12,7 @@ export type Density = 'compact' | 'normal' | 'comfortable';
 
 export type Language = 'ja' | 'en';
 
-export type StatusMascotVariant = 'vibe' | 'spark' | 'mono' | 'coder';
+export type StatusMascotVariant = 'vibe' | 'spark' | 'mono' | 'coder' | 'custom';
 
 /**
  * Issue #75: AppSettings の現在スキーマ。
@@ -59,6 +59,13 @@ export interface AppSettings {
   density: Density;
   /** ステータスバー左側に表示するキャラクターの見た目 */
   statusMascotVariant?: StatusMascotVariant;
+  /**
+   * variant === 'custom' のときに使う、ユーザー指定の画像ファイル絶対パス。
+   * PNG / GIF (animated 含む) / APNG / WebP / SVG を想定。renderer 側で
+   * convertFileSrc() を通して <img> に渡す。空文字 / undefined のときは
+   * variant が 'custom' でも組み込みプレースホルダを描く。
+   */
+  statusMascotCustomPath?: string;
   // ---------- Claude Code 起動オプション ----------
   claudeCommand: string;
   claudeArgs: string;
