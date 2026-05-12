@@ -13,22 +13,42 @@ interface StatusMascotProps {
    * convertFileSrc() で asset URL に変換して <img> で描画する。
    */
   customPath?: string;
+  /**
+   * クリック / Enter / Space で呼ばれる。`useMascotOrchestrator` 経由で
+   * `excited` 状態を 1.2s だけ発火する想定 (Issue #717)。
+   */
+  onClick?: () => void;
 }
 
 export const StatusMascot = memo(function StatusMascot({
   state,
   label,
   variant = 'vibe',
-  customPath
+  customPath,
+  onClick
 }: StatusMascotProps): JSX.Element {
+  const interactive = typeof onClick === 'function';
+
   return (
     <span
       className={`status-mascot status-mascot--${state} status-mascot--variant-${variant}`}
-      role="img"
+      role={interactive ? 'button' : 'img'}
+      tabIndex={interactive ? 0 : undefined}
       aria-label={label}
       title={label}
       data-state={state}
       data-variant={variant}
+      onClick={onClick}
+      onKeyDown={
+        interactive
+          ? (e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onClick?.();
+              }
+            }
+          : undefined
+      }
     >
       <span className="status-mascot__motion" aria-hidden="true">
         <span className="status-mascot__viewport">
@@ -59,10 +79,106 @@ export const StatusMascot = memo(function StatusMascot({
             </svg>
           )}
         </span>
+        <MascotStateOverlay state={state} />
       </span>
     </span>
   );
 });
+
+/**
+ * 状態ごとに mascot の周囲に出す装飾 SVG (Issue #717)。
+ *  - sleep: ZZZ
+ *  - thinking: ... ドットが点滅
+ *  - done: ✓ チェック
+ *  - error: ! 警告
+ *  - excited: ✨ スパーク
+ * idle / working は overlay 無し (本体のアニメーションだけで十分)。
+ */
+function MascotStateOverlay({ state }: { state: StatusMascotState }): JSX.Element | null {
+  if (state === 'sleep') {
+    return (
+      <svg
+        className="status-mascot__overlay status-mascot__overlay--sleep"
+        viewBox="0 0 16 16"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <text x="9" y="6" className="status-mascot__overlay-text">
+          Z
+        </text>
+        <text x="11.5" y="4" className="status-mascot__overlay-text status-mascot__overlay-text--sm">
+          Z
+        </text>
+      </svg>
+    );
+  }
+  if (state === 'thinking') {
+    return (
+      <svg
+        className="status-mascot__overlay status-mascot__overlay--thinking"
+        viewBox="0 0 16 16"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <circle className="status-mascot__overlay-dot status-mascot__overlay-dot--1" cx="5" cy="3" r="1" />
+        <circle className="status-mascot__overlay-dot status-mascot__overlay-dot--2" cx="8" cy="3" r="1" />
+        <circle className="status-mascot__overlay-dot status-mascot__overlay-dot--3" cx="11" cy="3" r="1" />
+      </svg>
+    );
+  }
+  if (state === 'done') {
+    return (
+      <svg
+        className="status-mascot__overlay status-mascot__overlay--done"
+        viewBox="0 0 16 16"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <path
+          className="status-mascot__overlay-check"
+          d="M4 8 L7 11 L12 4"
+          fill="none"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    );
+  }
+  if (state === 'error') {
+    return (
+      <svg
+        className="status-mascot__overlay status-mascot__overlay--error"
+        viewBox="0 0 16 16"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <rect className="status-mascot__overlay-bang" x="7" y="2" width="2" height="6" rx="1" />
+        <rect className="status-mascot__overlay-bang" x="7" y="10" width="2" height="2" rx="1" />
+      </svg>
+    );
+  }
+  if (state === 'excited') {
+    return (
+      <svg
+        className="status-mascot__overlay status-mascot__overlay--excited"
+        viewBox="0 0 16 16"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <path
+          className="status-mascot__overlay-spark"
+          d="M3 4 L4 2 L5 4 L7 5 L5 6 L4 8 L3 6 L1 5 Z"
+        />
+        <path
+          className="status-mascot__overlay-spark status-mascot__overlay-spark--alt"
+          d="M11 10 L12 8 L13 10 L15 11 L13 12 L12 14 L11 12 L9 11 Z"
+        />
+      </svg>
+    );
+  }
+  return null;
+}
 
 interface CustomMascotImageProps {
   customPath?: string;
