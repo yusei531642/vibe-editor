@@ -11,6 +11,19 @@ interface Props {
 export function MascotSection({ draft, update }: Props): JSX.Element {
   const isJa = draft.language === 'ja';
   const selected = draft.statusMascotVariant ?? DEFAULT_SETTINGS.statusMascotVariant;
+  const customPath = draft.statusMascotCustomPath ?? '';
+
+  const pickCustomImage = async (): Promise<void> => {
+    const title = isJa ? '相棒にする画像を選択' : 'Pick a mascot image';
+    const picked = await window.api.dialog.openFile(title);
+    if (!picked) return;
+    update('statusMascotCustomPath', picked);
+    if (selected !== 'custom') update('statusMascotVariant', 'custom');
+  };
+
+  const clearCustomImage = (): void => {
+    update('statusMascotCustomPath', '');
+  };
 
   return (
     <section className="modal__section">
@@ -29,7 +42,12 @@ export function MascotSection({ draft, update }: Props): JSX.Element {
               onChange={() => update('statusMascotVariant', opt.value)}
             />
             <span className="mascot-card__preview" aria-hidden="true">
-              <StatusMascot state="idle" label={opt.label} variant={opt.value} />
+              <StatusMascot
+                state="idle"
+                label={opt.label}
+                variant={opt.value}
+                customPath={opt.value === 'custom' ? customPath : undefined}
+              />
             </span>
             <span className="mascot-card__meta">
               <strong>{opt.label}</strong>
@@ -38,6 +56,40 @@ export function MascotSection({ draft, update }: Props): JSX.Element {
           </label>
         ))}
       </div>
+
+      {selected === 'custom' && (
+        <div className="mascot-custom">
+          <div className="mascot-custom__row">
+            <button
+              type="button"
+              className="mascot-custom__pick"
+              onClick={() => void pickCustomImage()}
+            >
+              {isJa ? '画像を選ぶ…' : 'Choose image…'}
+            </button>
+            {customPath ? (
+              <button
+                type="button"
+                className="mascot-custom__clear"
+                onClick={clearCustomImage}
+              >
+                {isJa ? 'クリア' : 'Clear'}
+              </button>
+            ) : null}
+          </div>
+          {customPath ? (
+            <p className="mascot-custom__path" title={customPath}>
+              {customPath}
+            </p>
+          ) : (
+            <p className="mascot-custom__hint">
+              {isJa
+                ? 'PNG / GIF (アニメ可) / APNG / WebP / SVG を選べます。\n小さめ (32〜128px) の正方形が綺麗に出ます。'
+                : 'PNG / GIF (animated) / APNG / WebP / SVG. A small square (32–128 px) renders best.'}
+            </p>
+          )}
+        </div>
+      )}
     </section>
   );
 }

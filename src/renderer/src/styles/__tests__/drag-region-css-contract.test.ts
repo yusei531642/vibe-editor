@@ -80,7 +80,6 @@ describe('Drag-region CSS contract', () => {
       '.user-menu__dropdown',
       '.context-menu',
       '.topbar__project',
-      '.topbar__search',
       '.topbar__icons',
       '.window-controls',
       '.window-controls__btn',

@@ -667,9 +667,9 @@ export function App(): JSX.Element {
       <Topbar
         projectRoot={projectRoot}
         status={status}
-        onOpenPalette={() => setPaletteOpen(true)}
         availableUpdate={availableUpdate}
         onClickUpdate={handleClickUpdate}
+        mascotState={mascotState}
         menuBar={
           <AppMenuBar
             recentProjects={settings.recentProjects ?? []}
@@ -1119,7 +1119,6 @@ export function App(): JSX.Element {
         gitStatus={gitStatus}
         activeFilePath={activeFilePath}
         terminalCount={terminalTabs.length}
-        mascotState={mascotState}
       />
 
       {!settingsLoading && !settings.hasCompletedOnboarding && (

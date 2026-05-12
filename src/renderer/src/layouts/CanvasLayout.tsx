@@ -484,7 +484,6 @@ export function CanvasLayout(): JSX.Element {
       <Topbar
         projectRoot={projectRoot}
         status={status}
-        onOpenPalette={() => setPaletteOpen(true)}
         availableUpdate={availableUpdate}
         onClickUpdate={handleClickUpdate}
         menuBar={

@@ -30,6 +30,7 @@ export type AppShellSettings = Pick<
   | 'theme'
   | 'density'
   | 'statusMascotVariant'
+  | 'statusMascotCustomPath'
   | 'hasCompletedOnboarding'
   | 'mcpAutoSetup'
 >;
@@ -50,6 +51,7 @@ export function useAppShellState(): AppShellSettings {
     theme: useSettingsValue('theme'),
     density: useSettingsValue('density'),
     statusMascotVariant: useSettingsValue('statusMascotVariant'),
+    statusMascotCustomPath: useSettingsValue('statusMascotCustomPath'),
     hasCompletedOnboarding: useSettingsValue('hasCompletedOnboarding'),
     mcpAutoSetup: useSettingsValue('mcpAutoSetup')
   };

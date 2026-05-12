@@ -64,6 +64,8 @@ pub struct Settings {
     pub density: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status_mascot_variant: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status_mascot_custom_path: Option<String>,
 
     // ---------- Claude Code 起動オプション ----------
     #[serde(default = "default_claude_command")]
@@ -140,6 +142,7 @@ impl Default for Settings {
             terminal_font_size: default_terminal_font_size(),
             density: default_density(),
             status_mascot_variant: Some("vibe".to_string()),
+            status_mascot_custom_path: None,
             claude_command: default_claude_command(),
             claude_args: String::new(),
             claude_cwd: String::new(),

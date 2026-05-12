@@ -1,17 +1,25 @@
-import { memo } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
+import { convertFileSrc } from '@tauri-apps/api/core';
 import type { StatusMascotVariant } from '../../../../types/shared';
 import type { StatusMascotState } from '../../lib/status-mascot';
+import { isTauri } from '../../lib/tauri-api';
 
 interface StatusMascotProps {
   state: StatusMascotState;
   label: string;
   variant?: StatusMascotVariant;
+  /**
+   * variant === 'custom' のとき表示するユーザー画像の絶対パス。
+   * convertFileSrc() で asset URL に変換して <img> で描画する。
+   */
+  customPath?: string;
 }
 
 export const StatusMascot = memo(function StatusMascot({
   state,
   label,
-  variant = 'vibe'
+  variant = 'vibe',
+  customPath
 }: StatusMascotProps): JSX.Element {
   return (
     <span
@@ -24,33 +32,95 @@ export const StatusMascot = memo(function StatusMascot({
     >
       <span className="status-mascot__motion" aria-hidden="true">
         <span className="status-mascot__viewport">
-          <svg
-            className="status-mascot__sheet"
-            viewBox="0 0 96 16"
-            width="96"
-            height="16"
-            focusable="false"
-            shapeRendering="crispEdges"
-          >
-            <MascotFrame x={0} variant={variant} typing="left" />
-            <MascotFrame x={16} variant={variant} tool="pencil" arm="up" typing="right" />
-            <MascotFrame x={32} variant={variant} tool="paper" sparkle typing="both" />
-            <MascotFrame
-              x={48}
-              variant={variant}
-              arm="run"
-              legs="run"
-              sparkle
-              typing="right"
-            />
-            <MascotFrame x={64} variant={variant} tool="lens" arm="up" typing="left" />
-            <MascotFrame x={80} variant={variant} alert legs="flat" typing="both" />
-          </svg>
+          {variant === 'custom' ? (
+            <CustomMascotImage customPath={customPath} label={label} />
+          ) : (
+            <svg
+              className="status-mascot__sheet"
+              viewBox="0 0 96 16"
+              width="96"
+              height="16"
+              focusable="false"
+              shapeRendering="crispEdges"
+            >
+              <MascotFrame x={0} variant={variant} typing="left" />
+              <MascotFrame x={16} variant={variant} tool="pencil" arm="up" typing="right" />
+              <MascotFrame x={32} variant={variant} tool="paper" sparkle typing="both" />
+              <MascotFrame
+                x={48}
+                variant={variant}
+                arm="run"
+                legs="run"
+                sparkle
+                typing="right"
+              />
+              <MascotFrame x={64} variant={variant} tool="lens" arm="up" typing="left" />
+              <MascotFrame x={80} variant={variant} alert legs="flat" typing="both" />
+            </svg>
+          )}
         </span>
       </span>
     </span>
   );
 });
+
+interface CustomMascotImageProps {
+  customPath?: string;
+  label: string;
+}
+
+/**
+ * ユーザー画像 (variant='custom') を `asset://` 経由で <img> 描画する。
+ * 失敗時 / dev:vite 時 / 未指定時は組み込み SVG のプレースホルダにフォールバック。
+ */
+function CustomMascotImage({ customPath, label }: CustomMascotImageProps): JSX.Element {
+  const tauri = isTauri();
+  const [errored, setErrored] = useState(false);
+  const src = useMemo(() => {
+    if (!tauri || !customPath) return '';
+    try {
+      return convertFileSrc(customPath);
+    } catch {
+      return '';
+    }
+  }, [tauri, customPath]);
+  // 壊れた画像で onError 後に customPath を別画像へ差し替えても、errored=true のままだと
+  // <img> がマウントされず placeholder にロックされる。path 切替時にリセットする。
+  useEffect(() => {
+    setErrored(false);
+  }, [customPath]);
+
+  if (!src || errored) {
+    return <CustomMascotPlaceholder />;
+  }
+
+  return (
+    <img
+      className="status-mascot__custom-img"
+      src={src}
+      alt={label}
+      draggable={false}
+      onError={() => setErrored(true)}
+    />
+  );
+}
+
+function CustomMascotPlaceholder(): JSX.Element {
+  return (
+    <svg
+      className="status-mascot__sheet status-mascot__sheet--placeholder"
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      focusable="false"
+      shapeRendering="crispEdges"
+    >
+      <rect className="status-mascot__body" x="4" y="4" width="8" height="8" />
+      <rect className="status-mascot__eye" x="6" y="7" width="1" height="1" />
+      <rect className="status-mascot__eye" x="9" y="7" width="1" height="1" />
+    </svg>
+  );
+}
 
 type Tool = 'pencil' | 'paper' | 'lens';
 
