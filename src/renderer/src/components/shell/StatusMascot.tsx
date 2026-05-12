@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { StatusMascotVariant } from '../../../../types/shared';
 import type { StatusMascotState } from '../../lib/status-mascot';
@@ -84,6 +84,11 @@ function CustomMascotImage({ customPath, label }: CustomMascotImageProps): JSX.E
       return '';
     }
   }, [tauri, customPath]);
+  // 壊れた画像で onError 後に customPath を別画像へ差し替えても、errored=true のままだと
+  // <img> がマウントされず placeholder にロックされる。path 切替時にリセットする。
+  useEffect(() => {
+    setErrored(false);
+  }, [customPath]);
 
   if (!src || errored) {
     return <CustomMascotPlaceholder />;
