@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
-use tokio::time::interval;
+use tokio::time::{interval, MissedTickBehavior};
 
 /// Issue #524: PTY から実際に出力 byte が flush されたタイミングを呼び出し側に通知する callback。
 /// `spawn_session` が agent_id を持っているとき、ここで TeamHub の `member_diagnostics`
@@ -55,28 +55,72 @@ pub fn spawn_batcher(
         tokio::time::sleep(Duration::from_millis(STARTUP_DELAY_MS)).await;
 
         let mut buf = BytesMut::with_capacity(FLUSH_BYTES * 2);
-        let mut tick = interval(Duration::from_millis(FLUSH_INTERVAL_MS));
         loop {
-            tokio::select! {
-                maybe = rx.recv() => {
-                    match maybe {
-                        Some(chunk) => {
-                            buf.extend_from_slice(&chunk);
-                            // Issue #494: 閾値判定はテストと共有する pure 関数経由。
-                            if should_flush_after_recv(buf.len()) {
-                                flush(&app, &data_event_name, &mut buf, &scrollback, on_output.as_ref());
-                            }
-                        }
-                        None => {
-                            // reader thread が exit。最後にまとめて flush。
-                            flush(&app, &data_event_name, &mut buf, &scrollback, on_output.as_ref());
-                            break;
+            if buf.is_empty() || safe_utf8_boundary(&buf) == 0 {
+                match rx.recv().await {
+                    Some(chunk) => {
+                        buf.extend_from_slice(&chunk);
+                        // Issue #494: 閾値判定はテストと共有する pure 関数経由。
+                        if should_flush_after_recv(buf.len()) {
+                            flush(
+                                &app,
+                                &data_event_name,
+                                &mut buf,
+                                &scrollback,
+                                on_output.as_ref(),
+                            );
                         }
                     }
+                    None => break,
                 }
-                _ = tick.tick() => {
-                    if should_flush_on_tick(buf.len()) {
-                        flush(&app, &data_event_name, &mut buf, &scrollback, on_output.as_ref());
+                if buf.is_empty() || safe_utf8_boundary(&buf) == 0 {
+                    continue;
+                }
+            }
+
+            let mut tick = interval(Duration::from_millis(FLUSH_INTERVAL_MS));
+            tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+            tick.tick().await;
+
+            while !buf.is_empty() && safe_utf8_boundary(&buf) > 0 {
+                tokio::select! {
+                    maybe = rx.recv() => {
+                        match maybe {
+                            Some(chunk) => {
+                                buf.extend_from_slice(&chunk);
+                                if should_flush_after_recv(buf.len()) {
+                                    flush(
+                                        &app,
+                                        &data_event_name,
+                                        &mut buf,
+                                        &scrollback,
+                                        on_output.as_ref(),
+                                    );
+                                }
+                            }
+                            None => {
+                                // reader thread が exit。最後にまとめて flush。
+                                flush(
+                                    &app,
+                                    &data_event_name,
+                                    &mut buf,
+                                    &scrollback,
+                                    on_output.as_ref(),
+                                );
+                                return;
+                            }
+                        }
+                    }
+                    _ = tick.tick() => {
+                        if should_flush_on_tick(buf.len()) {
+                            flush(
+                                &app,
+                                &data_event_name,
+                                &mut buf,
+                                &scrollback,
+                                on_output.as_ref(),
+                            );
+                        }
                     }
                 }
             }
