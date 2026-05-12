@@ -86,17 +86,9 @@ export const StatusMascot = memo(function StatusMascot({
 });
 
 /**
-/**
  * 状態ごとに mascot の周囲に出す装飾 SVG (Issue #717)。
  *  - sleep: ZZZ
  *  - thinking: 三点リーダー ・・・
- *  - done: ✓ チェック
- *  - error: ! 警告
- *  - excited: ✨ スパーク
- * idle / working は overlay 無し (本体のアニメーションだけで十分)。
- */
-   *  - thinking: 三点リーダー ・・・
- *  - thinking: 三点リーダ ・・・
  *  - done: ✓ チェック
  *  - error: ! 警告
  *  - excited: ✨ スパーク
