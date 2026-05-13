@@ -33,10 +33,11 @@
  *   ) -> Result<(), String>
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import type { RecruitAckPhase } from '../../../types/shared';
+import { api } from './tauri-api';
 
 /**
- * ack の失敗理由を表す phase。
+ * ack の失敗理由を表す phase。型定義は `src/types/shared.ts` に集約済み (Issue #728)。
  * - `requester_not_found`: `team:recruit-request` の `requesterAgentId` に一致するカードが
  *   canvas store に無く、200ms grace + leader/hr fallback でも見つからなかった。
  * - `spawn`: `terminal.create` IPC が失敗した (PTY allocation failure 等の汎用エラー)。
@@ -44,11 +45,7 @@ import { invoke } from '@tauri-apps/api/core';
  *   見つからない sub-case (renderer 側で error string ヒューリスティックで分類)。
  * - `instructions_load`: customInstructions 読込が失敗した (将来拡張用、現状未発火)。
  */
-export type RecruitAckPhase =
-  | 'requester_not_found'
-  | 'spawn'
-  | 'engine_binary_missing'
-  | 'instructions_load';
+export type { RecruitAckPhase };
 
 export interface RecruitAckOutcome {
   ok: boolean;
@@ -71,11 +68,11 @@ export async function ackRecruit(
   teamId: string,
   outcome: RecruitAckOutcome
 ): Promise<void> {
-  await invoke('app_recruit_ack', {
+  await api.app.recruitAck({
     newAgentId,
     teamId,
     ok: outcome.ok,
-    reason: outcome.reason ?? null,
-    phase: outcome.phase ?? null
+    reason: outcome.reason,
+    phase: outcome.phase
   });
 }

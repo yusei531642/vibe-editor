@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type {
   AppUserInfo,
   ClaudeCheckResult,
+  RecruitAckArgs,
   SetWindowEffectsResult,
   ThemeName,
   UpdaterShouldWarnResult
@@ -93,6 +94,18 @@ export const app = {
   /** recruit を手動キャンセル (timeout 待ち中にユーザーがカードを × で閉じた等) */
   cancelRecruit: (agentId: string): Promise<void> =>
     invoke('app_cancel_recruit', { agentId }),
+  /**
+   * Issue #342 Phase 1 / #728: recruit-request の受領 / 失敗を Hub に通知する。
+   * 引数 5 個 (newAgentId / teamId / ok / reason / phase) を flat camelCase で渡す。
+   */
+  recruitAck: (args: RecruitAckArgs): Promise<void> =>
+    invoke('app_recruit_ack', {
+      newAgentId: args.newAgentId,
+      teamId: args.teamId,
+      ok: args.ok,
+      reason: args.reason ?? null,
+      phase: args.phase ?? null
+    }),
   /**
    * `<projectRoot>/.claude/skills/vibe-team/SKILL.md` を書き出す。
    * setupTeamMcp でも best-effort で実行されるが、Onboarding / 設定 UI から手動で
