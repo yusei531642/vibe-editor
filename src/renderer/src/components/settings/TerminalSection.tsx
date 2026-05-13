@@ -8,9 +8,14 @@ interface Props {
   update: UpdateSetting;
 }
 
+// Issue #726 / #618: terminalForceUtf8 は Windows + cmd.exe / PowerShell でのみ機能する。
+// 他 OS では Rust 側が no-op なので、UI もグレーアウトして「触っても何も起きない」ことを示す。
+const IS_WINDOWS = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent);
+
 export function TerminalSection({ draft, update }: Props): JSX.Element {
   const t = useT();
   const currentFamily = draft.terminalFontFamily || draft.editorFontFamily;
+  const forceUtf8 = draft.terminalForceUtf8 !== false;
   return (
     <section className="modal__section">
       <h3>{t('settings.terminal')}</h3>
@@ -50,6 +55,24 @@ export function TerminalSection({ draft, update }: Props): JSX.Element {
         </label>
       </div>
       <p className="modal__note">{t('settings.terminalNote')}</p>
+      <label
+        className="modal__toggle"
+        style={IS_WINDOWS ? undefined : { opacity: 0.55 }}
+        title={IS_WINDOWS ? undefined : t('settings.terminalForceUtf8.nonWindowsNote')}
+      >
+        <input
+          type="checkbox"
+          checked={forceUtf8}
+          disabled={!IS_WINDOWS}
+          onChange={(e) => update('terminalForceUtf8', e.target.checked)}
+        />
+        <span>{t('settings.terminalForceUtf8.label')}</span>
+      </label>
+      <p className="modal__note">
+        {IS_WINDOWS
+          ? t('settings.terminalForceUtf8.hint')
+          : t('settings.terminalForceUtf8.nonWindowsNote')}
+      </p>
     </section>
   );
 }

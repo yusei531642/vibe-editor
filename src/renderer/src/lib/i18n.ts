@@ -437,6 +437,11 @@ const ja: Dict = {
   'settings.terminalFontSize': 'フォントサイズ (px)',
   'settings.terminalNote':
     '既定は JetBrains Mono Nerd Font (本体同梱)。Powerline / Devicons / Material Icons の glyph を含み、Starship や oh-my-posh の icon が tofu になりません。★ は本体にバンドルされたフォントで、OS 未インストールでも常に同じルックで描画されます。',
+  'settings.terminalForceUtf8.label': 'UTF-8 を強制 (Windows のみ)',
+  'settings.terminalForceUtf8.hint':
+    'cmd.exe / PowerShell 起動時に chcp 65001 を inject し、CP932 化による漢字ファイル名や日本語出力の U+FFFD 化を防ぎます。OEM コードページ (chcp 932) のままにしたいときだけ off にしてください。',
+  'settings.terminalForceUtf8.nonWindowsNote':
+    'この設定は Windows + cmd.exe / PowerShell でのみ意味があります。他のシェル・OS では何もしません。',
   'settings.density': '情報密度',
   'settings.density.compact': 'Compact',
   'settings.density.compactDesc': '14"以下の画面向け、余白小',
@@ -1101,6 +1106,11 @@ const en: Dict = {
   'settings.terminalFontSize': 'Font size (px)',
   'settings.terminalNote':
     'Default is JetBrains Mono Nerd Font (bundled). Includes Powerline / Devicons / Material Icons glyphs so Starship and oh-my-posh icons no longer render as tofu. ★ marks bundled fonts that always render the same regardless of OS-installed fonts.',
+  'settings.terminalForceUtf8.label': 'Force UTF-8 (Windows only)',
+  'settings.terminalForceUtf8.hint':
+    'Injects chcp 65001 when launching cmd.exe / PowerShell so kanji filenames and non-ASCII output do not get garbled into U+FFFD on CP932 consoles. Turn off only if you want to keep the OEM code page (chcp 932).',
+  'settings.terminalForceUtf8.nonWindowsNote':
+    'This setting only takes effect on Windows + cmd.exe / PowerShell. It is a no-op on other shells and OSes.',
   'settings.density': 'Density',
   'settings.density.compact': 'Compact',
   'settings.density.compactDesc': 'For 14" or smaller screens',

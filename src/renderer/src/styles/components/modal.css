@@ -416,6 +416,31 @@
   accent-color: var(--accent);
 }
 
+/* ---------- 汎用 modal toggle (Issue #726) ---------- */
+.modal__toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  padding: 10px 12px;
+  background: var(--bg-active);
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: 10px;
+  font-size: 13.5px;
+  color: var(--text);
+  width: fit-content;
+  margin-top: 12px;
+}
+.modal__toggle input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.modal__toggle input[type='checkbox']:disabled {
+  cursor: not-allowed;
+}
+
 .mcp-steps {
   margin: 8px 0 16px;
   padding-left: 22px;
