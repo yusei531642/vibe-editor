@@ -12,7 +12,7 @@ import {
 } from 'react';
 import { DEFAULT_SETTINGS, type AppSettings } from '../../../types/shared';
 import { migrateSettings } from './settings-migrate';
-import { applyDensity, applyTheme, THEMES } from './themes';
+import { applyDensity, applyTheme, THEMES, type MonacoThemeName } from './themes';
 import { bridgedToast } from './toast-bridge';
 import { translate } from './i18n';
 
@@ -296,7 +296,11 @@ export function useSettings(): SettingsContextValue {
   );
 }
 
-export function useMonacoTheme(): 'vs-dark' | 'vs' | 'hc-black' | 'claude-dark' | 'claude-light' {
+export function useMonacoTheme(): MonacoThemeName {
   const theme = useSettingsValue('theme');
-  return THEMES[theme].monacoTheme;
+  // Issue #730: settings-migrate.ts は v1 未満のときしか theme 値を validate しないため、
+  // schemaVersion >= 1 の settings.json に未知 theme (旧バージョン名 / 改竄 / 削除済テーマ) が
+  // 残っていると `THEMES[theme]` が undefined になり TypeError で落ちる。Monaco の dark を
+  // 安全な fallback として常に有効な値を返す。
+  return THEMES[theme]?.monacoTheme ?? 'vs-dark';
 }
