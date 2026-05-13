@@ -35,8 +35,15 @@ export interface ThemeVars {
   textMute: string;
   surfaceGlass: string;
   focusRing: string;
-  monacoTheme: 'vs-dark' | 'vs' | 'hc-black' | 'claude-dark' | 'claude-light';
+  monacoTheme: MonacoThemeName;
 }
+
+/**
+ * Issue #730: 旧 union に残っていた `'hc-black'` は実 THEMES エントリで使われておらず
+ * consumer 側 switch で dead branch を強制していたため除外。将来 high-contrast を
+ * 戻すときは THEMES エントリ追加とセットで union を拡張する。
+ */
+export type MonacoThemeName = 'vs-dark' | 'vs' | 'claude-dark' | 'claude-light';
 
 export const THEMES: Record<ThemeName, ThemeVars> = {
   'claude-dark': {
