@@ -26,8 +26,57 @@ const MIN_STATUS_INTERVAL: Duration = Duration::from_secs(3);
 /// Issue #634: `current_status` 文字列の sanitize。
 /// 制御文字 (ESC / BEL / NUL / 改行 / DEL 等) を全削除し、log injection と
 /// terminal escape sequence 経由の表示崩しを防ぐ。
+///
+/// ESC (`\x1b`) を見ただけで filter してしまうと、続く `[2J` 等の CSI body は
+/// 通常 ASCII 文字なので `char::is_control()` を通過してしまい、`"\x1b[2J"` が
+/// `"[2J"` という見た目壊れ文字列として残ってしまう。これを防ぐため、ESC を
+/// 検出した時点で続く escape sequence 全体を skip する小さな state machine を
+/// 通してから残った個別 control char を filter する。
 fn sanitize_status_text(s: &str) -> String {
-    s.chars().filter(|c| !c.is_control()).collect()
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // ESC を見たら後続の escape sequence をまとめて読み飛ばす。
+            match chars.peek().copied() {
+                // CSI: `ESC [ <param-bytes>... <final-byte 0x40..=0x7E>`
+                Some('[') => {
+                    chars.next();
+                    while let Some(p) = chars.next() {
+                        if matches!(p, '@'..='~') {
+                            break;
+                        }
+                    }
+                }
+                // OSC: `ESC ] ... ( BEL | ESC \\ )`
+                Some(']') => {
+                    chars.next();
+                    while let Some(p) = chars.next() {
+                        if p == '\x07' {
+                            break;
+                        }
+                        if p == '\x1b' {
+                            if let Some('\\') = chars.peek() {
+                                chars.next();
+                            }
+                            break;
+                        }
+                    }
+                }
+                // それ以外 (ESC + 1 char の 2 文字 escape) は単純に 1 文字 skip。
+                Some(_) => {
+                    chars.next();
+                }
+                // ESC が末尾だった場合は ESC 自体を捨てるだけ。
+                None => {}
+            }
+            continue;
+        }
+        if !c.is_control() {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// Issue #409: `team_status(status)` を呼んだ agent の自己申告ステータスを Hub に記録する。
