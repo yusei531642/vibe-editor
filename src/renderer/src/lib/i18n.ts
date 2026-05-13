@@ -433,9 +433,10 @@ const ja: Dict = {
   'settings.editorFontSize': 'サイズ (px)',
   'settings.editorFontCustom': 'カスタム CSS font-family',
   'settings.terminal': 'ターミナル',
+  'settings.terminalFontFamily': 'フォント',
   'settings.terminalFontSize': 'フォントサイズ (px)',
   'settings.terminalNote':
-    'ターミナルフォントファミリはエディタフォントと同じものを使用します。',
+    '既定は JetBrains Mono Nerd Font (本体同梱)。Powerline / Devicons / Material Icons の glyph を含み、Starship や oh-my-posh の icon が tofu になりません。★ は本体にバンドルされたフォントで、OS 未インストールでも常に同じルックで描画されます。',
   'settings.density': '情報密度',
   'settings.density.compact': 'Compact',
   'settings.density.compactDesc': '14"以下の画面向け、余白小',
@@ -1096,9 +1097,10 @@ const en: Dict = {
   'settings.editorFontSize': 'Size (px)',
   'settings.editorFontCustom': 'Custom CSS font-family',
   'settings.terminal': 'Terminal',
+  'settings.terminalFontFamily': 'Font',
   'settings.terminalFontSize': 'Font size (px)',
   'settings.terminalNote':
-    'Terminal font family uses the same value as the editor font.',
+    'Default is JetBrains Mono Nerd Font (bundled). Includes Powerline / Devicons / Material Icons glyphs so Starship and oh-my-posh icons no longer render as tofu. ★ marks bundled fonts that always render the same regardless of OS-installed fonts.',
   'settings.density': 'Density',
   'settings.density.compact': 'Compact',
   'settings.density.compactDesc': 'For 14" or smaller screens',

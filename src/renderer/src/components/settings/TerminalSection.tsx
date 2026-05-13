@@ -1,4 +1,5 @@
 import type { AppSettings } from '../../../../types/shared';
+import { useT } from '../../lib/i18n';
 import { TERMINAL_FONT_PRESETS } from '../../lib/settings-options';
 import type { UpdateSetting } from './types';
 
@@ -8,13 +9,14 @@ interface Props {
 }
 
 export function TerminalSection({ draft, update }: Props): JSX.Element {
+  const t = useT();
   const currentFamily = draft.terminalFontFamily || draft.editorFontFamily;
   return (
     <section className="modal__section">
-      <h3>ターミナル</h3>
+      <h3>{t('settings.terminal')}</h3>
       <div className="modal__row">
         <label className="modal__label">
-          <span>フォント</span>
+          <span>{t('settings.terminalFontFamily')}</span>
           <select
             value={currentFamily}
             onChange={(e) => {
@@ -37,7 +39,7 @@ export function TerminalSection({ draft, update }: Props): JSX.Element {
           </select>
         </label>
         <label className="modal__label">
-          <span>フォントサイズ (px)</span>
+          <span>{t('settings.terminalFontSize')}</span>
           <input
             type="number"
             min={10}
@@ -47,11 +49,7 @@ export function TerminalSection({ draft, update }: Props): JSX.Element {
           />
         </label>
       </div>
-      <p className="modal__note">
-        既定は <strong>JetBrains Mono Nerd Font</strong> (本体同梱)。Powerline / Devicons /
-        Material Icons の glyph を含み、Starship や oh-my-posh の icon が tofu になりません。
-        ★ は本体にバンドルされたフォントで、OS 未インストールでも常に同じルックで描画されます。
-      </p>
+      <p className="modal__note">{t('settings.terminalNote')}</p>
     </section>
   );
 }
