@@ -17,9 +17,6 @@
     "core:window:allow-close",
     "core:app:default",
     "dialog:default",
-    "dialog:allow-confirm",
-    "dialog:allow-ask",
-    "dialog:allow-message",
     "process:default",
     "updater:default"
   ]
