@@ -1247,6 +1247,26 @@ export interface RecruitRescuedPayload {
   lateByMs: number;
 }
 
+/**
+ * Issue #342 Phase 1: `app_recruit_ack` IPC 引数。
+ * Rust 側 `app_recruit_ack(new_agent_id, team_id, ok, reason, phase)` と camelCase で対応。
+ */
+export type RecruitAckPhase =
+  | 'requester_not_found'
+  | 'spawn'
+  | 'engine_binary_missing'
+  | 'instructions_load';
+
+export interface RecruitAckArgs {
+  newAgentId: string;
+  teamId: string;
+  ok: boolean;
+  /** 失敗理由 (max 256 byte 程度の短文を推奨)。省略時は null を送る。 */
+  reason?: string | null;
+  /** 失敗 phase。Rust 側は enum で受けるため `RecruitAckPhase` の値のみを送る。 */
+  phase?: RecruitAckPhase | null;
+}
+
 // ---------- Window Effects (Issue #260) ----------
 
 /**
