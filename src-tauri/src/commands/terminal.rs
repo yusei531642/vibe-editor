@@ -256,7 +256,12 @@ pub async fn terminal_create(
             ..Default::default()
         });
     }
-    if let Some(reason) = command_validation::reject_danger_flags(&args) {
+    // Issue #743: AppSettings.allowDangerousFlags を読む。`--dangerously-*` フラグの bypass を
+    // 明示的に opt-in したユーザー (single-user で承認スキップ運用) のみ通過させる。
+    let allow_dangerous_flags = crate::commands::settings::settings_load()
+        .await
+        .allow_dangerous_flags;
+    if let Some(reason) = command_validation::reject_danger_flags(&args, allow_dangerous_flags) {
         return Ok(TerminalCreateResult {
             ok: false,
             error: Some(reason),
@@ -452,6 +457,8 @@ pub async fn terminal_create(
         session_key: opts.session_key,
         team_id: opts.team_id,
         role: opts.role,
+        // Issue #743: PTY 内部の二重チェック (prepare_spawn_command) でも同じ判断を使う。
+        allow_dangerous_flags,
     };
 
     // Issue #292: id 衝突時の retry 上限。実発生はほぼ皆無 (UUID v4 衝突は

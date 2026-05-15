@@ -441,6 +441,12 @@ const ja: Dict = {
   'settings.terminalForceUtf8.hint':
     'cmd.exe / PowerShell 起動時に chcp 65001 を inject して console output を UTF-8 化します。漢字ファイル名や日本語出力が U+FFFD 化するのを防ぎます。OEM コードページを意図的に使いたい場合のみ OFF にしてください。Windows 以外の OS では何もしません。',
   'settings.terminalForceUtf8.nonWindows': 'この設定は Windows でのみ有効です',
+  'settings.allowDangerousFlags.label':
+    '⚠️ Claude / Codex の承認スキップ・サンドボックス回避フラグを許可する',
+  'settings.allowDangerousFlags.hint':
+    'デフォルトでは `--dangerously-skip-permissions` (Claude) / `--dangerously-bypass-approvals-and-sandbox` (Codex) は spawn 段階で拒否されます。シングルユーザー運用で承認スキップを使っている場合のみ ON にしてください。',
+  'settings.allowDangerousFlags.warningOn':
+    '⚠️ 有効: Claude / Codex が承認・サンドボックス無しで起動できます。共有マシンや誤ったコミット / settings.json 改ざんで外部 CLI が無確認に実行されるリスクを承知の上で運用してください。',
   'settings.density': '情報密度',
   'settings.density.compact': 'Compact',
   'settings.density.compactDesc': '14"以下の画面向け、余白小',
@@ -1109,6 +1115,12 @@ const en: Dict = {
   'settings.terminalForceUtf8.hint':
     'Inject `chcp 65001` when launching cmd.exe / PowerShell so console output is UTF-8. Prevents Japanese / CJK filenames and output from rendering as U+FFFD. Turn this OFF only if you intentionally want to keep the OEM code page. No-op on non-Windows OSes.',
   'settings.terminalForceUtf8.nonWindows': 'This setting only applies on Windows',
+  'settings.allowDangerousFlags.label':
+    '⚠️ Allow Claude / Codex approval-skip and sandbox-bypass flags',
+  'settings.allowDangerousFlags.hint':
+    'By default `--dangerously-skip-permissions` (Claude) / `--dangerously-bypass-approvals-and-sandbox` (Codex) are rejected at spawn. Turn ON only if you run single-user with intentional approval skip.',
+  'settings.allowDangerousFlags.warningOn':
+    '⚠️ Enabled: Claude / Codex can launch without approval or sandbox. Accept the risk that a shared machine, accidental commit, or tampered settings.json can run external CLIs unattended.',
   'settings.density': 'Density',
   'settings.density.compact': 'Compact',
   'settings.density.compactDesc': 'For 14" or smaller screens',

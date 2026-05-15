@@ -45,6 +45,10 @@ pub struct SpawnOptions {
     pub session_key: Option<String>,
     pub team_id: Option<String>,
     pub role: Option<String>,
+    /// Issue #743: AppSettings.allowDangerousFlags の値。
+    /// true なら `--dangerously-*` フラグが spawn boundary で reject されない。
+    /// 呼び出し側 (commands/terminal.rs) で settings_load から取得して thread する。
+    pub allow_dangerous_flags: bool,
 }
 
 /// 1 セッションぶんの状態。kill / write / resize 用に master と writer を Mutex 保持。
@@ -602,7 +606,9 @@ fn prepare_spawn_command(opts: &SpawnOptions) -> Result<PreparedSpawnCommand> {
     if let Some(reason) = command_validation::reject_immediate_exec_args(&command, &args) {
         return Err(anyhow!("{reason}"));
     }
-    if let Some(reason) = command_validation::reject_danger_flags(&args) {
+    if let Some(reason) =
+        command_validation::reject_danger_flags(&args, opts.allow_dangerous_flags)
+    {
         return Err(anyhow!("{reason}"));
     }
     resolve_spawn_command(&command, args, &opts.env)
@@ -894,6 +900,7 @@ mod spawn_command_resolution_tests {
             session_key: None,
             team_id: None,
             role: None,
+            allow_dangerous_flags: false,
         }
     }
 

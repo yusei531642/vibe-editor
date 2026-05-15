@@ -16,6 +16,7 @@ export function TerminalSection({ draft, update }: Props): JSX.Element {
   const t = useT();
   const currentFamily = draft.terminalFontFamily || draft.editorFontFamily;
   const forceUtf8 = draft.terminalForceUtf8 !== false;
+  const allowDangerousFlags = draft.allowDangerousFlags === true;
   return (
     <section className="modal__section">
       <h3>{t('settings.terminal')}</h3>
@@ -68,6 +69,19 @@ export function TerminalSection({ draft, update }: Props): JSX.Element {
         {IS_WINDOWS
           ? t('settings.terminalForceUtf8.hint')
           : t('settings.terminalForceUtf8.nonWindows')}
+      </p>
+      <label className="mcp-toggle">
+        <input
+          type="checkbox"
+          checked={allowDangerousFlags}
+          onChange={(e) => update('allowDangerousFlags', e.target.checked)}
+        />
+        <span>{t('settings.allowDangerousFlags.label')}</span>
+      </label>
+      <p className="modal__note">
+        {allowDangerousFlags
+          ? t('settings.allowDangerousFlags.warningOn')
+          : t('settings.allowDangerousFlags.hint')}
       </p>
     </section>
   );

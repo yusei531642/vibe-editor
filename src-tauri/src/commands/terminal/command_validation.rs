@@ -205,12 +205,18 @@ pub fn is_allowed_terminal_command(command: &str) -> bool {
 /// 以下フラグが投入されると外部 CLI が承認・サンドボックス無しで起動できてしまい、
 /// vibe-editor が前提とする「人間レビューア」の制御を回避する経路になる。
 /// normalize 後の args をスキャンして、いずれかが含まれていれば error 文を返す。
+///
+/// `allow_dangerous` (AppSettings.allowDangerousFlags) が true のときは bypass する。
+/// シングルユーザー運用で承認スキップを使っているユーザーが、明示的に opt-in できる経路。
 const DENY_FLAGS: &[&str] = &[
     "--dangerously-skip-permissions",
     "--dangerously-bypass-approvals-and-sandbox",
 ];
 
-pub fn reject_danger_flags(args: &[String]) -> Option<String> {
+pub fn reject_danger_flags(args: &[String], allow_dangerous: bool) -> Option<String> {
+    if allow_dangerous {
+        return None;
+    }
     args.iter()
         .find(|a| DENY_FLAGS.contains(&a.trim()))
         .map(|flag| format!("dangerous flag is not allowed: {flag}"))
@@ -614,12 +620,12 @@ mod command_normalization_tests {
         );
     }
 
-    // Issue #743: --dangerously-* フラグの拒否
+    // Issue #743: --dangerously-* フラグの拒否 (allow=false = secure default)
     #[test]
     fn rejects_claude_skip_permissions_flag() {
         let args = vec!["--dangerously-skip-permissions".to_string()];
         assert_eq!(
-            reject_danger_flags(&args),
+            reject_danger_flags(&args, false),
             Some("dangerous flag is not allowed: --dangerously-skip-permissions".to_string())
         );
     }
@@ -628,7 +634,7 @@ mod command_normalization_tests {
     fn rejects_codex_bypass_approvals_and_sandbox_flag() {
         let args = vec!["--dangerously-bypass-approvals-and-sandbox".to_string()];
         assert_eq!(
-            reject_danger_flags(&args),
+            reject_danger_flags(&args, false),
             Some(
                 "dangerous flag is not allowed: --dangerously-bypass-approvals-and-sandbox"
                     .to_string()
@@ -645,7 +651,7 @@ mod command_normalization_tests {
             "--append-system-prompt".to_string(),
             "hi".to_string(),
         ];
-        assert!(reject_danger_flags(&args).is_some());
+        assert!(reject_danger_flags(&args, false).is_some());
     }
 
     #[test]
@@ -658,7 +664,7 @@ mod command_normalization_tests {
         );
 
         assert_eq!(command, "claude");
-        assert!(reject_danger_flags(&args).is_some());
+        assert!(reject_danger_flags(&args, false).is_some());
     }
 
     #[test]
@@ -674,7 +680,7 @@ mod command_normalization_tests {
         );
 
         assert_eq!(command, "codex");
-        assert!(reject_danger_flags(&args).is_some());
+        assert!(reject_danger_flags(&args, false).is_some());
     }
 
     #[test]
@@ -685,18 +691,41 @@ mod command_normalization_tests {
             "--append-system-prompt".to_string(),
             "hi".to_string(),
         ];
-        assert_eq!(reject_danger_flags(&args), None);
+        assert_eq!(reject_danger_flags(&args, false), None);
     }
 
     #[test]
     fn passes_empty_args() {
-        assert_eq!(reject_danger_flags(&[]), None);
+        assert_eq!(reject_danger_flags(&[], false), None);
     }
 
     #[test]
     fn does_not_match_substring_of_dangerous_flag() {
         // 例えば --dangerously-skip-permissions-x のような未来の擬似フラグは別物として扱う
         let args = vec!["--dangerously-skip-permissions-extra".to_string()];
-        assert_eq!(reject_danger_flags(&args), None);
+        assert_eq!(reject_danger_flags(&args, false), None);
+    }
+
+    // allow_dangerous=true 経路 (allowDangerousFlags opt-in 設定がオン)
+    #[test]
+    fn allow_flag_bypasses_skip_permissions() {
+        let args = vec!["--dangerously-skip-permissions".to_string()];
+        assert_eq!(reject_danger_flags(&args, true), None);
+    }
+
+    #[test]
+    fn allow_flag_bypasses_codex_bypass_sandbox() {
+        let args = vec!["--dangerously-bypass-approvals-and-sandbox".to_string()];
+        assert_eq!(reject_danger_flags(&args, true), None);
+    }
+
+    #[test]
+    fn allow_flag_bypasses_dangerous_args_in_mixed_input() {
+        let args = vec![
+            "--resume".to_string(),
+            "abc".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+        ];
+        assert_eq!(reject_danger_flags(&args, true), None);
     }
 }

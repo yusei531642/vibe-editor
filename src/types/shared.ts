@@ -151,6 +151,16 @@ export interface AppSettings {
    * 設定で false に opt-out できる。
    */
   terminalForceUtf8?: boolean;
+  /**
+   * Issue #743: Claude `--dangerously-skip-permissions` / Codex `--dangerously-bypass-approvals-and-sandbox`
+   * を spawn 段階で許可するか。default false (= reject)。
+   *
+   * これを true にすると、外部 CLI が承認・サンドボックス無しで起動できる経路を再度開く。
+   * 「人間レビューア」前提を理解した上で、自分の単機運用で承認スキップを使っているユーザー向けの
+   * opt-in 設定。共有マシン / 誤改ざんされた settings.json での意図しない起動を防ぐためにも、
+   * セキュアデフォルト (false) を維持し、UI トグル切替時には警告を表示する。
+   */
+  allowDangerousFlags?: boolean;
 }
 
 export interface ClaudeCheckResult {
@@ -227,7 +237,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   fileTreeCollapsedRoots: [],
   // Issue #618: Windows + cmd.exe / PowerShell で UTF-8 を強制する (CP932 化対策)。
   // 既存ユーザーも v11 migration で true 既定が入る。
-  terminalForceUtf8: true
+  terminalForceUtf8: true,
+  // Issue #743: --dangerously-* フラグはセキュアデフォルト (= reject)。
+  // 既存ユーザーで承認スキップを使っていた人は明示的に true へ切替が必要。
+  allowDangerousFlags: false
 };
 
 /** git status --porcelain のエントリ */

@@ -110,6 +110,11 @@ pub struct Settings {
     /// 既存ユーザーは renderer 側 v10→v11 migration で `true` が入る。
     #[serde(default = "default_terminal_force_utf8")]
     pub terminal_force_utf8: bool,
+    /// Issue #743: Claude/Codex の承認スキップ・サンドボックス回避フラグを spawn 段階で
+    /// 許可するか (default false = reject)。シングルユーザー運用で承認スキップを使う場合のみ
+    /// 明示的に true を設定する。
+    #[serde(default)]
+    pub allow_dangerous_flags: bool,
 }
 
 /// shared.ts `AgentConfig` を mirror。`cwd` / `color` は optional。
@@ -161,6 +166,7 @@ impl Default for Settings {
             file_tree_expanded: Some(HashMap::new()),
             file_tree_collapsed_roots: Some(Vec::new()),
             terminal_force_utf8: default_terminal_force_utf8(),
+            allow_dangerous_flags: false,
         }
     }
 }
@@ -406,6 +412,32 @@ mod tests {
         });
         let s: Settings = serde_json::from_value(raw).unwrap();
         assert!(!s.terminal_force_utf8);
+    }
+
+    /// Issue #743: 旧 settings.json (allowDangerousFlags フィールドなし) を load しても
+    /// `#[serde(default)]` で `false` (secure default) が入る。
+    #[test]
+    fn legacy_settings_without_allow_dangerous_flags_default_to_false() {
+        let raw = json!({
+            "schemaVersion": 11,
+            "language": "ja",
+            "theme": "claude-dark",
+        });
+        let s: Settings = serde_json::from_value(raw).unwrap();
+        assert!(!s.allow_dangerous_flags, "expected secure default false");
+    }
+
+    /// Issue #743: ユーザーが明示的に opt-in した true 値は load 時に保持される。
+    #[test]
+    fn explicit_true_allow_dangerous_flags_is_preserved() {
+        let raw = json!({
+            "schemaVersion": 11,
+            "language": "ja",
+            "theme": "claude-dark",
+            "allowDangerousFlags": true,
+        });
+        let s: Settings = serde_json::from_value(raw).unwrap();
+        assert!(s.allow_dangerous_flags);
     }
 
     /// Issue #170 互換: 部分的な JSON でも `serde(default)` で field 単位 fallback が効く。
