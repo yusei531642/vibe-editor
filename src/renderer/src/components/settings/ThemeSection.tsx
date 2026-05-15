@@ -34,8 +34,8 @@ export function ThemeSection({ draft, update }: Props): JSX.Element {
               </div>
             </div>
             <div className="theme-card__meta">
-              <strong>{opt.label}</strong>
-              <span>{opt.desc}</span>
+              <strong>{t(`theme.label.${opt.value}`)}</strong>
+              <span>{t(`theme.desc.${opt.value}`)}</span>
             </div>
           </label>
         ))}

@@ -1,20 +1,16 @@
 import type { Density, StatusMascotVariant, ThemeName } from '../../../types/shared';
 
-export const THEME_OPTIONS: { value: ThemeName; label: string; desc: string }[] = [
-  {
-    value: 'claude-dark',
-    label: 'Claude Dark',
-    desc: 'Anthropic公式カラー準拠。ウォームダークブラウン + コーラル #D97757（既定）'
-  },
-  {
-    value: 'claude-light',
-    label: 'Claude Light',
-    desc: 'claude.ai のクリーム背景と温かい差し色を再現'
-  },
-  { value: 'dark', label: 'Dark', desc: 'VS Code系のクラシックダーク' },
-  { value: 'midnight', label: 'Midnight', desc: '深い青紫ベース、紫アクセント' },
-  { value: 'glass', label: 'Glass', desc: 'すりガラス風 — 半透明パネル + ブラー' },
-  { value: 'light', label: 'Light', desc: '明るい背景、暗い文字' }
+// Issue #729: 旧 `desc` field は JP hardcode で EN ユーザーに JP 説明が出る不具合があり、
+// i18n.ts の `theme.desc.{value}` キーに移管した。ThemeSection は t() 経由で描画する。
+// label は UserMenu / OnboardingWizard 等で `theme.label.{value}` 経由で localize 済み。
+// ここの `label` (Latin 文字列) はテーマ ID と同義の固定ラベルとして残し、表示時は呼び出し側で t() する。
+export const THEME_OPTIONS: { value: ThemeName; label: string }[] = [
+  { value: 'claude-dark', label: 'Claude Dark' },
+  { value: 'claude-light', label: 'Claude Light' },
+  { value: 'dark', label: 'Dark' },
+  { value: 'midnight', label: 'Midnight' },
+  { value: 'glass', label: 'Glass' },
+  { value: 'light', label: 'Light' }
 ];
 
 export const STATUS_MASCOT_OPTIONS: {
