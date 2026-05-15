@@ -39,6 +39,20 @@ const ja: Dict = {
   'status.mascot.error': '対応が必要',
   'status.mascot.excited': 'やる気!',
 
+  // ---------- Mascot section (SettingsModal の「キャラクター」セクション) ----------
+  // Issue #729: MascotSection の isJa 三項 / settings-options.ts hardcode を i18n.ts に集約
+  'settings.mascot.title': 'キャラクター',
+  'settings.mascot.pickTitle': '相棒にする画像を選択',
+  'settings.mascot.choose': '画像を選ぶ…',
+  'settings.mascot.clear': 'クリア',
+  'settings.mascot.hint':
+    'PNG / GIF (アニメ可) / APNG / WebP / SVG を選べます。\n小さめ (32〜128px) の正方形が綺麗に出ます。',
+  'mascot.desc.vibe': '既定の小さな相棒',
+  'mascot.desc.spark': '明るめで軽い印象',
+  'mascot.desc.mono': '端末になじむ角ばった見た目',
+  'mascot.desc.coder': 'PCでカタカタ作業する相棒',
+  'mascot.desc.custom': '自分で用意した画像 (PNG/GIF/SVG/WebP) を相棒として使う',
+
   // ---------- Canvas HUD ----------
   'canvas.hud.stage': 'ステージ',
   'canvas.hud.list': 'リスト',
@@ -649,6 +663,20 @@ const en: Dict = {
   'status.mascot.done': 'Done!',
   'status.mascot.error': 'Needs attention',
   'status.mascot.excited': 'Yeah!',
+
+  // ---------- Mascot section (SettingsModal "Character" section) ----------
+  // Issue #729: MascotSection isJa ternaries / settings-options.ts hardcode -> centralised in i18n.ts
+  'settings.mascot.title': 'Character',
+  'settings.mascot.pickTitle': 'Pick a mascot image',
+  'settings.mascot.choose': 'Choose image…',
+  'settings.mascot.clear': 'Clear',
+  'settings.mascot.hint':
+    'PNG / GIF (animated) / APNG / WebP / SVG. A small square (32–128 px) renders best.',
+  'mascot.desc.vibe': 'Default tiny companion',
+  'mascot.desc.spark': 'Brighter and lighter',
+  'mascot.desc.mono': 'A terminal-friendly angular look',
+  'mascot.desc.coder': 'A tiny companion typing at a computer',
+  'mascot.desc.custom': 'Use your own image (PNG/GIF/SVG/WebP) as the companion',
 
   // ---------- Canvas HUD ----------
   'canvas.hud.stage': 'Stage',
