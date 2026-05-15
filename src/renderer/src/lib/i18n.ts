@@ -397,6 +397,26 @@ const ja: Dict = {
 
   // ---------- Settings ----------
   'settings.title': '設定',
+  // Issue #729: RoleProfilesSection の isJa 三項を i18n.ts に移管
+  'settings.roles.title': 'ロール定義',
+  'settings.roles.desc':
+    'vibe-team のメンバーロールを定義します。Leader が team_recruit で動的に呼ぶときの選択肢になります。',
+  'settings.roles.globalPreamble': '全エージェント共通の前置き',
+  'settings.roles.globalPreambleHint': '全 system prompt の先頭に挿入',
+  'settings.roles.confirmDelete': '"{id}" を削除しますか?',
+  'settings.roles.addCustom': 'カスタムロールを追加',
+  'settings.roles.newCustomDesc': '新しいカスタムロール。',
+  'settings.roles.builtin': '組み込み',
+  'settings.roles.custom': 'カスタム',
+  'settings.roles.color': '色',
+  'settings.roles.glyph': 'グリフ',
+  'settings.roles.defaultEngine': '既定エンジン',
+  'settings.roles.permissions': '権限',
+  'settings.roles.promptEn': 'システムプロンプト (EN)',
+  'settings.roles.promptJa': 'システムプロンプト (JA)',
+  'settings.roles.promptPlaceholders':
+    'placeholder: {teamName} {selfLabel} {selfDescription} {roster} {tools} {globalPreamble}',
+  'settings.roles.deleteRole': 'このロールを削除',
   // Issue #729: SettingsModal の inline isJa を i18n.ts に移管
   'settings.dialog.label': '設定',
   'settings.back': '戻る',
@@ -1053,6 +1073,26 @@ const en: Dict = {
 
   // ---------- Settings ----------
   'settings.title': 'Settings',
+  // Issue #729: RoleProfilesSection inline isJa moved into i18n.ts
+  'settings.roles.title': 'Role profiles',
+  'settings.roles.desc':
+    'Define vibe-team member roles. Leaders pick from these when calling team_recruit.',
+  'settings.roles.globalPreamble': 'Global preamble',
+  'settings.roles.globalPreambleHint': 'Prepended to all prompts',
+  'settings.roles.confirmDelete': 'Delete "{id}"?',
+  'settings.roles.addCustom': 'Add custom role',
+  'settings.roles.newCustomDesc': 'New custom role.',
+  'settings.roles.builtin': 'built-in',
+  'settings.roles.custom': 'custom',
+  'settings.roles.color': 'Color',
+  'settings.roles.glyph': 'Glyph',
+  'settings.roles.defaultEngine': 'Default engine',
+  'settings.roles.permissions': 'Permissions',
+  'settings.roles.promptEn': 'System prompt (EN)',
+  'settings.roles.promptJa': 'System prompt (JA)',
+  'settings.roles.promptPlaceholders':
+    'Available: {teamName} {selfLabel} {selfDescription} {roster} {tools} {globalPreamble}',
+  'settings.roles.deleteRole': 'Delete this role',
   // Issue #729: SettingsModal inline isJa moved into i18n.ts
   'settings.dialog.label': 'Settings',
   'settings.back': 'Back',

@@ -19,7 +19,6 @@ import { BUILTIN_BY_ID } from '../../lib/role-profiles-builtin';
 export function RoleProfilesSection(): JSX.Element {
   const t = useT();
   const { settings } = useSettings();
-  const isJa = settings.language === 'ja';
   const { ordered, file, upsertOverride, addCustom, removeCustom, saveFile } = useRoleProfiles();
   const [expanded, setExpanded] = useState<string | null>(null);
 
@@ -35,7 +34,7 @@ export function RoleProfilesSection(): JSX.Element {
       source: 'user',
       i18n: {
         en: { label: id, description: 'New custom role.' },
-        ja: { label: id, description: '新しいカスタムロール。' }
+        ja: { label: id, description: t('settings.roles.newCustomDesc') }
       },
       visual: { color: '#7a7afd', glyph: id.slice(0, 1).toUpperCase() },
       prompt: {
@@ -64,14 +63,8 @@ export function RoleProfilesSection(): JSX.Element {
 
   return (
     <div className="modal__section role-profiles">
-      <h3 className="modal__section-title">
-        {isJa ? 'ロール定義' : 'Role profiles'}
-      </h3>
-      <p className="modal__note">
-        {isJa
-          ? 'vibe-team のメンバーロールを定義します。Leader が team_recruit で動的に呼ぶときの選択肢になります。'
-          : 'Define vibe-team member roles. Leaders pick from these when calling team_recruit.'}
-      </p>
+      <h3 className="modal__section-title">{t('settings.roles.title')}</h3>
+      <p className="modal__note">{t('settings.roles.desc')}</p>
 
       {/* グローバル preamble */}
       <details className="role-profile" style={{ marginBottom: 16 }}>
@@ -79,11 +72,9 @@ export function RoleProfilesSection(): JSX.Element {
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <ChevronRight size={13} className="role-profile__chev role-profile__chev--closed" />
             <ChevronDown size={13} className="role-profile__chev role-profile__chev--open" />
-            <strong>{isJa ? '全エージェント共通の前置き' : 'Global preamble'}</strong>
+            <strong>{t('settings.roles.globalPreamble')}</strong>
           </span>
-          <span className="role-profile__hint">
-            {isJa ? '全 system prompt の先頭に挿入' : 'Prepended to all prompts'}
-          </span>
+          <span className="role-profile__hint">{t('settings.roles.globalPreambleHint')}</span>
         </summary>
         <div className="role-profile__body">
           <label className="settings-field">
@@ -135,12 +126,12 @@ export function RoleProfilesSection(): JSX.Element {
               BUILTIN_BY_ID[p.id]
                 ? undefined
                 : async () => {
-                    if (window.confirm(isJa ? `"${p.id}" を削除しますか?` : `Delete "${p.id}"?`)) {
+                    if (window.confirm(t('settings.roles.confirmDelete', { id: p.id }))) {
                       await removeCustom(p.id);
                     }
                   }
             }
-            isJa={isJa}
+            language={settings.language}
           />
         ))}
       </ul>
@@ -152,7 +143,7 @@ export function RoleProfilesSection(): JSX.Element {
         style={{ marginTop: 12 }}
       >
         <Plus size={14} />
-        {isJa ? 'カスタムロールを追加' : 'Add custom role'}
+        {t('settings.roles.addCustom')}
       </button>
     </div>
   );
@@ -164,7 +155,7 @@ interface RowProps {
   onToggle: () => void;
   onChange: (patch: Partial<Omit<RoleProfile, 'id' | 'source' | 'schemaVersion'>>) => Promise<void>;
   onRemove?: () => Promise<void>;
-  isJa: boolean;
+  language: 'ja' | 'en';
 }
 
 function RoleProfileRow({
@@ -173,9 +164,10 @@ function RoleProfileRow({
   onToggle,
   onChange,
   onRemove,
-  isJa
+  language
 }: RowProps): JSX.Element {
-  const lang = isJa ? profile.i18n.ja ?? profile.i18n.en : profile.i18n.en;
+  const t = useT();
+  const lang = language === 'ja' ? profile.i18n.ja ?? profile.i18n.en : profile.i18n.en;
   const isBuiltin = profile.source === 'builtin';
 
   const updateI18n = (which: 'en' | 'ja', field: 'label' | 'description', value: string): void => {
@@ -200,7 +192,7 @@ function RoleProfileRow({
           <span className="role-profile__hint">{profile.id}</span>
         </span>
         <span className="role-profile__source">
-          {isBuiltin ? (isJa ? '組み込み' : 'built-in') : (isJa ? 'カスタム' : 'custom')}
+          {isBuiltin ? t('settings.roles.builtin') : t('settings.roles.custom')}
         </span>
         {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
       </button>
@@ -228,7 +220,7 @@ function RoleProfileRow({
 
           <div className="role-profile__row">
             <label className="settings-field">
-              <span className="settings-field__label">{isJa ? '色' : 'Color'}</span>
+              <span className="settings-field__label">{t('settings.roles.color')}</span>
               <input
                 className="settings-field__input"
                 type="color"
@@ -240,7 +232,7 @@ function RoleProfileRow({
               />
             </label>
             <label className="settings-field">
-              <span className="settings-field__label">{isJa ? 'グリフ' : 'Glyph'}</span>
+              <span className="settings-field__label">{t('settings.roles.glyph')}</span>
               <input
                 className="settings-field__input"
                 value={profile.visual.glyph}
@@ -252,7 +244,7 @@ function RoleProfileRow({
               />
             </label>
             <label className="settings-field">
-              <span className="settings-field__label">{isJa ? '既定エンジン' : 'Default engine'}</span>
+              <span className="settings-field__label">{t('settings.roles.defaultEngine')}</span>
               <select
                 className="settings-field__input"
                 value={profile.defaultEngine}
@@ -267,7 +259,7 @@ function RoleProfileRow({
           </div>
 
           <fieldset className="role-profile__perms">
-            <legend>{isJa ? '権限' : 'Permissions'}</legend>
+            <legend>{t('settings.roles.permissions')}</legend>
             {(['canRecruit', 'canDismiss', 'canAssignTasks', 'canCreateRoleProfile'] as const).map(
               (perm) => (
                 <label key={perm} className="role-profile__perm">
@@ -295,9 +287,7 @@ function RoleProfileRow({
           </fieldset>
 
           <label className="settings-field">
-            <span className="settings-field__label">
-              {isJa ? 'システムプロンプト (EN)' : 'System prompt (EN)'}
-            </span>
+            <span className="settings-field__label">{t('settings.roles.promptEn')}</span>
             <textarea
               className="settings-field__textarea"
               rows={6}
@@ -307,17 +297,11 @@ function RoleProfileRow({
               }
               spellCheck={false}
             />
-            <span className="settings-field__hint">
-              {isJa
-                ? 'placeholder: {teamName} {selfLabel} {selfDescription} {roster} {tools} {globalPreamble}'
-                : 'Available: {teamName} {selfLabel} {selfDescription} {roster} {tools} {globalPreamble}'}
-            </span>
+            <span className="settings-field__hint">{t('settings.roles.promptPlaceholders')}</span>
           </label>
 
           <label className="settings-field">
-            <span className="settings-field__label">
-              {isJa ? 'システムプロンプト (JA)' : 'System prompt (JA)'}
-            </span>
+            <span className="settings-field__label">{t('settings.roles.promptJa')}</span>
             <textarea
               className="settings-field__textarea"
               rows={6}
@@ -337,7 +321,7 @@ function RoleProfileRow({
               style={{ marginTop: 8 }}
             >
               <Trash2 size={14} />
-              {isJa ? 'このロールを削除' : 'Delete this role'}
+              {t('settings.roles.deleteRole')}
             </button>
           )}
         </div>
