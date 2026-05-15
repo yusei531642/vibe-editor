@@ -25,15 +25,12 @@ const ja: Dict = {
 
   // ---------- Topbar (redesign shell) ----------
   'topbar.mode.canvas': 'Canvas',
-  'topbar.mode.ide': 'IDE',
-  'topbar.mode.terminal': 'Terminal',
 
   // ---------- Status bar ----------
   'status.branch': 'ブランチ',
   'status.changes': '変更',
   'status.lang': '言語',
   'status.theme': 'テーマ',
-  'status.ready': '準備完了',
   'status.mascot.idle': '待機中',
   'status.mascot.sleep': 'おやすみ中…',
   'status.mascot.working': 'エージェント実行中',
@@ -209,10 +206,6 @@ const ja: Dict = {
 
   // ---------- Claude Code panel ----------
   'claudePanel.title': 'IDEモード',
-  'claudePanel.starting': '起動待ち',
-  'claudePanel.running': '実行中',
-  'claudePanel.exited': '終了',
-  'claudePanel.restartTitle': 'ターミナルを再起動',
   'claudePanel.notFound.title': 'Claude Code が見つかりません',
   'claudePanel.notFound.body':
     '`claude` コマンドが PATH 上に見つかりませんでした。Claude Code をインストールするか、設定で起動コマンドのパスを指定してください。',
@@ -225,8 +218,6 @@ const ja: Dict = {
   'claudePanel.notFound.settings': '設定で指定',
   'claudePanel.checking': '確認中…',
   'claudePanel.newTab': '新しいターミナルタブ',
-  'claudePanel.closeTab': 'タブを閉じる',
-  'claudePanel.tabLimit': '上限に達しています（最大{max}）',
   'claudePanel.addClaude': 'Claude Code を追加',
   'claudePanel.addCodex': 'Codex を追加',
 
@@ -234,32 +225,16 @@ const ja: Dict = {
   'team.closeTeamConfirm': 'これはチームリーダーです。チーム全体を閉じますか？',
   'team.closeTeam': 'チームを閉じる',
   'team.closeLeaderOnly': 'リーダーのみ閉じる',
-  'team.defaultName': 'チーム',
 
   // ---------- Canvas ----------
-  'canvas.add': '追加',
-  'canvas.add.tooltip': '追加 — Claude / Codex / ファイルツリー / Git 変更などのカードを Canvas に置く',
   'canvas.spawnTeam': 'チーム起動',
   'canvas.spawnTeam.tooltip': 'チーム起動 — 既定プリセットでリーダー＋メンバーを一括起動',
   'canvas.spawnTeamMore': 'その他のチーム…',
   'canvas.spawnTeamMore.tooltip': 'プリセット選択 — 別の組み込みプリセットや最近使ったチームから選ぶ',
   'canvas.preset': 'プリセット',
   'canvas.preset.leaderClaude': 'Leader のみで起動 (Claude Code)',
-  'canvas.preset.leaderHrClaude': 'Leader + HR で起動 (Claude Code)',
   'canvas.preset.leaderCodex': 'Leader のみで起動 (Codex)',
-  'canvas.preset.leaderHrCodex': 'Leader + HR で起動 (Codex)',
-  'canvas.preset.dualClaudeClaude': 'Claude 組織 + Claude 組織',
-  'canvas.preset.dualClaudeCodex': 'Claude 組織 + Codex 組織',
-  'canvas.preset.dualCodexCodex': 'Codex 組織 + Codex 組織',
-  'canvas.preset.dualCodexClaude': 'Codex 組織 + Claude 組織',
-  'canvas.organization.claude': 'Claude 組織',
-  'canvas.organization.claudeA': 'Claude 組織 A',
-  'canvas.organization.claudeB': 'Claude 組織 B',
-  'canvas.organization.codex': 'Codex 組織',
-  'canvas.organization.codexA': 'Codex 組織 A',
-  'canvas.organization.codexB': 'Codex 組織 B',
   'canvas.recent': '最近使ったチーム',
-  'canvas.panels': 'パネル',
   'canvas.noRecentTeams': '最近使ったチームはありません。プリセットから起動してください。',
   'canvas.clear': 'クリア',
   'canvas.clear.tooltip': 'クリア — Canvas 上のカードをすべて削除',
@@ -270,13 +245,7 @@ const ja: Dict = {
   'canvas.switchToIde': 'IDE モードに戻る',
   'canvas.switchToIde.tooltip': 'IDE — エディタとターミナル中心の IDE モードへ切替',
   'canvas.modeToggle': 'Canvas モードに切り替え',
-  'canvas.add.claude': 'Claude Code',
-  'canvas.add.codex': 'Codex',
-  'canvas.add.fileTree': 'ファイルツリー',
-  'canvas.add.gitChanges': 'Git 変更',
-  'canvas.add.emptyEditor': 'エディタ（空）',
   'canvas.card.editor': 'エディタ',
-  'canvas.lastUsed': '最終使用: {value}',
 
   // ---------- Agent Card ----------
   'agentCard.close': 'カードを閉じる',
@@ -286,7 +255,6 @@ const ja: Dict = {
   'handoff.createTooltip':
     '引き継ぎ書を保存し、Leader 自身に MCP で新 Leader 採用 → 交代を依頼します',
   'handoff.created': '引き継ぎ書 {file} を保存し、Leader に MCP 手順を伝えました',
-  'handoff.acknowledged': '引き継ぎ ack を受信し、旧セッションを退役しました',
   'handoff.action.reveal': '保存先を開く',
   'handoff.error.noProject':
     'プロジェクトルートが未設定です。サイドバーからフォルダを開いてからもう一度押してください。',
@@ -412,11 +380,6 @@ const ja: Dict = {
   'fonts.customCss': 'カスタム CSS font-family',
 
   // ---------- Roles ----------
-  'role.leader': 'Leader',
-  'role.planner': 'Planner',
-  'role.programmer': 'Programmer',
-  'role.researcher': 'Researcher',
-  'role.reviewer': 'Reviewer',
 
   // ---------- Settings ----------
   'settings.title': '設定',
@@ -427,11 +390,9 @@ const ja: Dict = {
   'settings.uiFont': 'UI フォント',
   'settings.uiFontFamily': 'フォントファミリ',
   'settings.uiFontSize': 'サイズ (px)',
-  'settings.uiFontCustom': 'カスタム CSS font-family',
   'settings.editorFont': 'エディタフォント (Monaco)',
   'settings.editorFontFamily': 'フォントファミリ',
   'settings.editorFontSize': 'サイズ (px)',
-  'settings.editorFontCustom': 'カスタム CSS font-family',
   'settings.terminal': 'ターミナル',
   'settings.terminalFontFamily': 'フォント',
   'settings.terminalFontSize': 'フォントサイズ (px)',
@@ -442,18 +403,6 @@ const ja: Dict = {
     'cmd.exe / PowerShell 起動時に chcp 65001 を inject して console output を UTF-8 化します。漢字ファイル名や日本語出力が U+FFFD 化するのを防ぎます。OEM コードページを意図的に使いたい場合のみ OFF にしてください。Windows 以外の OS では何もしません。',
   'settings.terminalForceUtf8.nonWindows': 'この設定は Windows でのみ有効です',
   'settings.density': '情報密度',
-  'settings.density.compact': 'Compact',
-  'settings.density.compactDesc': '14"以下の画面向け、余白小',
-  'settings.density.normal': 'Normal',
-  'settings.density.normalDesc': '既定',
-  'settings.density.comfortable': 'Comfortable',
-  'settings.density.comfortableDesc': '大画面向け、ゆったり',
-  'settings.claudeLaunch': 'Claude Code 起動オプション',
-  'settings.claudeLaunch.command': 'コマンド',
-  'settings.claudeLaunch.args': '引数（空白区切り、ダブルクォートで空白を含む値）',
-  'settings.claudeLaunch.cwd': '作業ディレクトリ（空ならプロジェクトルート）',
-  'settings.claudeLaunch.note':
-    '変更後は右パネルの再起動ボタンでターミナルを再起動すると反映されます。',
   'settings.reset': 'デフォルトに戻す',
   'settings.cancel': 'キャンセル',
   'settings.apply': '適用して保存',
@@ -500,11 +449,6 @@ const ja: Dict = {
   'toast.fileMoved': '"{name}" を移動しました',
   'toast.fileOpFailed': 'ファイル操作に失敗しました: {error}',
   'toast.fileOpClipboardEmpty': 'クリップボードに対象がありません',
-  'toast.sessionResumed': 'セッションに復帰: {title}',
-  'toast.recentCleared': '最近のプロジェクト履歴をクリアしました',
-  'toast.newProject': '新規プロジェクトを作成',
-  'toast.notEmpty': 'フォルダが空ではありません。既存として開きます',
-  'toast.openedFile': '{file} の親フォルダをプロジェクトとして読み込みました',
   'toast.terminalNotReady': 'ターミナルが起動していません',
   'toast.settings.saveFailed': '設定の保存に失敗しました: {error}',
   'toast.settings.projectRootFailed': 'プロジェクトルートの反映に失敗しました: {error}',
@@ -586,7 +530,6 @@ const ja: Dict = {
     'Unicode ダッシュ (–, — など) が含まれています。実行時に ASCII の "--" に自動変換します。コピペや IME の自動変換が原因の可能性があります。',
 
   // ---------- Custom agents ----------
-  'settings.customAgents.title': 'カスタムエージェント',
   'settings.customAgents.add': '+ カスタムエージェントを追加',
   'settings.customAgents.name': '表示名',
   'settings.customAgents.remove': '削除',
@@ -633,15 +576,9 @@ const ja: Dict = {
   'toast.tone.error': 'エラー',
 
   // ---------- Status ----------
-  'status.loaded': '読み込み完了',
-  'status.loading': 'プロジェクト読み込み中…',
-  'status.templateInserted': 'テンプレートを挿入しました（まだ保存されていません）',
-  'status.initError': '初期化エラー: {err}',
-  'status.loadError': '読み込みエラー: {err}',
   'status.noProject': 'プロジェクトが選択されていません',
 
   // ---------- Onboarding ----------
-  'onboarding.step': '{current} / {total}',
   'onboarding.back': '戻る',
   'onboarding.next': '次へ',
   'onboarding.skip': 'あとでにする',
@@ -662,7 +599,6 @@ const ja: Dict = {
     'プロジェクトの場所を選ぶと、次回以降も自動で開きます。あとから追加してもかまいません。',
   'onboarding.workspace.choose': 'フォルダを選ぶ',
   'onboarding.workspace.change': '別のフォルダを選ぶ',
-  'onboarding.workspace.picked': '選択したフォルダ',
   'onboarding.done.eyebrow': 'Ready',
   'onboarding.done.title': '準備ができました',
   'onboarding.done.subtitle': '落ち着いた画面で、今日の一行を書きはじめましょう。',
@@ -691,15 +627,12 @@ const en: Dict = {
 
   // ---------- Topbar (redesign shell) ----------
   'topbar.mode.canvas': 'Canvas',
-  'topbar.mode.ide': 'IDE',
-  'topbar.mode.terminal': 'Terminal',
 
   // ---------- Status bar ----------
   'status.branch': 'branch',
   'status.changes': 'changes',
   'status.lang': 'lang',
   'status.theme': 'theme',
-  'status.ready': 'Ready',
   'status.mascot.idle': 'Idle',
   'status.mascot.sleep': 'Sleeping…',
   'status.mascot.working': 'Agent working',
@@ -875,10 +808,6 @@ const en: Dict = {
 
   // ---------- Claude Code panel ----------
   'claudePanel.title': 'IDE Mode',
-  'claudePanel.starting': 'Waiting',
-  'claudePanel.running': 'Running',
-  'claudePanel.exited': 'Exited',
-  'claudePanel.restartTitle': 'Restart terminal',
   'claudePanel.notFound.title': 'Claude Code not found',
   'claudePanel.notFound.body':
     'The `claude` command was not found on your PATH. Install Claude Code, or specify the launch command in Settings.',
@@ -891,8 +820,6 @@ const en: Dict = {
   'claudePanel.notFound.settings': 'Open settings',
   'claudePanel.checking': 'Checking…',
   'claudePanel.newTab': 'New terminal tab',
-  'claudePanel.closeTab': 'Close tab',
-  'claudePanel.tabLimit': 'Limit reached (max {max})',
   'claudePanel.addClaude': 'Add Claude Code',
   'claudePanel.addCodex': 'Add Codex',
 
@@ -900,32 +827,16 @@ const en: Dict = {
   'team.closeTeamConfirm': 'This is the team leader. Close entire team?',
   'team.closeTeam': 'Close Team',
   'team.closeLeaderOnly': 'Close Leader Only',
-  'team.defaultName': 'Team',
 
   // ---------- Canvas ----------
-  'canvas.add': 'Add',
-  'canvas.add.tooltip': 'Add — Place a Claude / Codex agent, file tree, git changes, or empty editor card',
   'canvas.spawnTeam': 'Spawn Team',
   'canvas.spawnTeam.tooltip': 'Spawn Team — Launch leader and members in one click using the default preset',
   'canvas.spawnTeamMore': 'More team options…',
   'canvas.spawnTeamMore.tooltip': 'Pick a preset — Choose another built-in preset or a recently used team',
   'canvas.preset': 'Preset',
   'canvas.preset.leaderClaude': 'Leader only (Claude Code)',
-  'canvas.preset.leaderHrClaude': 'Leader + HR (Claude Code)',
   'canvas.preset.leaderCodex': 'Leader only (Codex)',
-  'canvas.preset.leaderHrCodex': 'Leader + HR (Codex)',
-  'canvas.preset.dualClaudeClaude': 'Claude org + Claude org',
-  'canvas.preset.dualClaudeCodex': 'Claude org + Codex org',
-  'canvas.preset.dualCodexCodex': 'Codex org + Codex org',
-  'canvas.preset.dualCodexClaude': 'Codex org + Claude org',
-  'canvas.organization.claude': 'Claude org',
-  'canvas.organization.claudeA': 'Claude org A',
-  'canvas.organization.claudeB': 'Claude org B',
-  'canvas.organization.codex': 'Codex org',
-  'canvas.organization.codexA': 'Codex org A',
-  'canvas.organization.codexB': 'Codex org B',
   'canvas.recent': 'Recent',
-  'canvas.panels': 'Panels',
   'canvas.noRecentTeams': 'No recent teams. Start one from a preset.',
   'canvas.clear': 'Clear',
   'canvas.clear.tooltip': 'Clear — Remove every card from the canvas',
@@ -936,13 +847,7 @@ const en: Dict = {
   'canvas.switchToIde': 'Switch to IDE mode',
   'canvas.switchToIde.tooltip': 'IDE — Return to the editor + terminal IDE mode',
   'canvas.modeToggle': 'Switch to Canvas mode',
-  'canvas.add.claude': 'Claude Code',
-  'canvas.add.codex': 'Codex',
-  'canvas.add.fileTree': 'File Tree',
-  'canvas.add.gitChanges': 'Git Changes',
-  'canvas.add.emptyEditor': 'Editor (empty)',
   'canvas.card.editor': 'Editor',
-  'canvas.lastUsed': 'Last used: {value}',
 
   // ---------- Agent Card ----------
   'agentCard.close': 'Close card',
@@ -952,7 +857,6 @@ const en: Dict = {
   'handoff.createTooltip':
     'Save a handoff document and ask the leader to recruit a successor and switch over via MCP',
   'handoff.created': 'Handoff saved ({file}); MCP instructions sent to the leader PTY',
-  'handoff.acknowledged': 'Handoff acknowledged; retired the old session',
   'handoff.action.reveal': 'Reveal saved file',
   'handoff.error.noProject':
     'Project root is not set. Open a folder from the sidebar, then try again.',
@@ -1080,11 +984,6 @@ const en: Dict = {
   'fonts.customCss': 'Custom CSS font-family',
 
   // ---------- Roles ----------
-  'role.leader': 'Leader',
-  'role.planner': 'Planner',
-  'role.programmer': 'Programmer',
-  'role.researcher': 'Researcher',
-  'role.reviewer': 'Reviewer',
 
   // ---------- Settings ----------
   'settings.title': 'Settings',
@@ -1095,11 +994,9 @@ const en: Dict = {
   'settings.uiFont': 'UI font',
   'settings.uiFontFamily': 'Font family',
   'settings.uiFontSize': 'Size (px)',
-  'settings.uiFontCustom': 'Custom CSS font-family',
   'settings.editorFont': 'Editor font (Monaco)',
   'settings.editorFontFamily': 'Font family',
   'settings.editorFontSize': 'Size (px)',
-  'settings.editorFontCustom': 'Custom CSS font-family',
   'settings.terminal': 'Terminal',
   'settings.terminalFontFamily': 'Font',
   'settings.terminalFontSize': 'Font size (px)',
@@ -1110,19 +1007,6 @@ const en: Dict = {
     'Inject `chcp 65001` when launching cmd.exe / PowerShell so console output is UTF-8. Prevents Japanese / CJK filenames and output from rendering as U+FFFD. Turn this OFF only if you intentionally want to keep the OEM code page. No-op on non-Windows OSes.',
   'settings.terminalForceUtf8.nonWindows': 'This setting only applies on Windows',
   'settings.density': 'Density',
-  'settings.density.compact': 'Compact',
-  'settings.density.compactDesc': 'For 14" or smaller screens',
-  'settings.density.normal': 'Normal',
-  'settings.density.normalDesc': 'Default',
-  'settings.density.comfortable': 'Comfortable',
-  'settings.density.comfortableDesc': 'For large screens, roomy',
-  'settings.claudeLaunch': 'Claude Code launch options',
-  'settings.claudeLaunch.command': 'Command',
-  'settings.claudeLaunch.args':
-    'Arguments (space-separated, double-quote values with spaces)',
-  'settings.claudeLaunch.cwd': 'Working directory (empty = project root)',
-  'settings.claudeLaunch.note':
-    'Restart the terminal from the right panel to apply changes.',
   'settings.reset': 'Reset to defaults',
   'settings.cancel': 'Cancel',
   'settings.apply': 'Apply & save',
@@ -1169,11 +1053,6 @@ const en: Dict = {
   'toast.fileMoved': 'Moved "{name}"',
   'toast.fileOpFailed': 'File operation failed: {error}',
   'toast.fileOpClipboardEmpty': 'Nothing to paste',
-  'toast.sessionResumed': 'Resumed session: {title}',
-  'toast.recentCleared': 'Recent projects cleared',
-  'toast.newProject': 'New project created',
-  'toast.notEmpty': 'Folder is not empty. Opening as existing project',
-  'toast.openedFile': 'Loaded parent folder of {file} as project',
   'toast.terminalNotReady': 'Terminal is not ready',
   'toast.settings.saveFailed': 'Failed to save settings: {error}',
   'toast.settings.projectRootFailed': 'Failed to apply project root: {error}',
@@ -1257,7 +1136,6 @@ const en: Dict = {
     'Contains Unicode dashes (–, — etc.) — they will be normalized to ASCII "--" at runtime. Likely caused by paste or IME autocorrect.',
 
   // ---------- Custom agents ----------
-  'settings.customAgents.title': 'Custom agents',
   'settings.customAgents.add': '+ Add custom agent',
   'settings.customAgents.name': 'Display name',
   'settings.customAgents.remove': 'Remove',
@@ -1305,15 +1183,9 @@ const en: Dict = {
   'toast.tone.warning': 'Warning',
   'toast.tone.error': 'Error',
 
-  'status.loaded': 'Loaded',
-  'status.loading': 'Loading project…',
-  'status.templateInserted': 'Template inserted (not saved yet)',
-  'status.initError': 'Init error: {err}',
-  'status.loadError': 'Load error: {err}',
   'status.noProject': 'No project selected',
 
   // ---------- Onboarding ----------
-  'onboarding.step': '{current} / {total}',
   'onboarding.back': 'Back',
   'onboarding.next': 'Next',
   'onboarding.skip': 'Skip for now',
@@ -1335,7 +1207,6 @@ const en: Dict = {
     'Pick a project folder and we will reopen it next time. You can always add more later.',
   'onboarding.workspace.choose': 'Choose folder',
   'onboarding.workspace.change': 'Choose a different folder',
-  'onboarding.workspace.picked': 'Selected folder',
   'onboarding.done.eyebrow': 'Ready',
   'onboarding.done.title': 'You are all set',
   'onboarding.done.subtitle': 'A calm workspace for today’s first line.',
