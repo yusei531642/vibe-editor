@@ -397,6 +397,13 @@ const ja: Dict = {
 
   // ---------- Settings ----------
   'settings.title': '設定',
+  // Issue #729: WelcomePane の inline isJa を i18n.ts に移管
+  'welcome.title': '静かな集中で、すばやく進める。',
+  'welcome.recentProjects': '最近のプロジェクト',
+  'welcome.recentProjectsTitle': 'すぐに戻れる作業面',
+  'welcome.workspaceLabel': 'ワークスペース',
+  'welcome.quickStart': 'クイックスタート',
+  'welcome.quickStartTitle': 'よく使う操作',
   // Issue #729: RoleProfilesSection の isJa 三項を i18n.ts に移管
   'settings.roles.title': 'ロール定義',
   'settings.roles.desc':
@@ -1073,6 +1080,13 @@ const en: Dict = {
 
   // ---------- Settings ----------
   'settings.title': 'Settings',
+  // Issue #729: WelcomePane inline isJa moved into i18n.ts
+  'welcome.title': 'Build with calm momentum.',
+  'welcome.recentProjects': 'Recent projects',
+  'welcome.recentProjectsTitle': 'Jump back into your flow',
+  'welcome.workspaceLabel': 'Workspace',
+  'welcome.quickStart': 'Quick start',
+  'welcome.quickStartTitle': 'What you can do next',
   // Issue #729: RoleProfilesSection inline isJa moved into i18n.ts
   'settings.roles.title': 'Role profiles',
   'settings.roles.desc':

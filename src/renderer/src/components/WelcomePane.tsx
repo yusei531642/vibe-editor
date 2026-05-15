@@ -16,7 +16,6 @@ export function WelcomePane({ projectName }: WelcomePaneProps): JSX.Element {
         .slice(0, 4),
     [settings.recentProjects]
   );
-  const isJa = settings.language === 'ja';
   const hintCards = useMemo(
     () => [
       { key: 'hint-right', title: t('welcome.hint1Key'), text: t('welcome.hint1Text') },
@@ -37,9 +36,7 @@ export function WelcomePane({ projectName }: WelcomePaneProps): JSX.Element {
       <div className="welcome__inner">
         <div className="welcome__hero">
           <span className="welcome__eyebrow">vibe-editor</span>
-          <h1 className="welcome__title">
-            {isJa ? '静かな集中で、すばやく進める。' : 'Build with calm momentum.'}
-          </h1>
+          <h1 className="welcome__title">{t('welcome.title')}</h1>
           <p className="welcome__subtitle">{t('welcome.subtitle')}</p>
           <div className="welcome__project-pill">{projectName}</div>
         </div>
@@ -48,12 +45,8 @@ export function WelcomePane({ projectName }: WelcomePaneProps): JSX.Element {
           <section className="welcome__section">
             <div className="welcome__section-head">
               <div>
-                <p className="welcome__section-label">
-                  {isJa ? '最近のプロジェクト' : 'Recent projects'}
-                </p>
-                <h2 className="welcome__section-title">
-                  {isJa ? 'すぐに戻れる作業面' : 'Jump back into your flow'}
-                </h2>
+                <p className="welcome__section-label">{t('welcome.recentProjects')}</p>
+                <h2 className="welcome__section-title">{t('welcome.recentProjectsTitle')}</h2>
               </div>
               <span className="welcome__section-meta">
                 {Math.max(recentProjects.length, 1)}
@@ -62,9 +55,7 @@ export function WelcomePane({ projectName }: WelcomePaneProps): JSX.Element {
             <div className="welcome__cards">
               {(recentProjects.length > 0 ? recentProjects : [projectName]).map((path) => (
                 <article key={path} className="welcome__card">
-                  <span className="welcome__card-label">
-                    {isJa ? 'ワークスペース' : 'Workspace'}
-                  </span>
+                  <span className="welcome__card-label">{t('welcome.workspaceLabel')}</span>
                   <strong className="welcome__card-title">{shortName(path)}</strong>
                   <p className="welcome__card-subtitle">{path}</p>
                 </article>
@@ -75,12 +66,8 @@ export function WelcomePane({ projectName }: WelcomePaneProps): JSX.Element {
           <section className="welcome__section welcome__section--tips">
             <div className="welcome__section-head">
               <div>
-                <p className="welcome__section-label">
-                  {isJa ? 'クイックスタート' : 'Quick start'}
-                </p>
-                <h2 className="welcome__section-title">
-                  {isJa ? 'よく使う操作' : 'What you can do next'}
-                </h2>
+                <p className="welcome__section-label">{t('welcome.quickStart')}</p>
+                <h2 className="welcome__section-title">{t('welcome.quickStartTitle')}</h2>
               </div>
             </div>
             <div className="welcome__cards welcome__cards--tips">
