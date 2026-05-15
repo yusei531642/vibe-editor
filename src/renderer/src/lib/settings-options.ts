@@ -13,42 +13,17 @@ export const THEME_OPTIONS: { value: ThemeName; label: string }[] = [
   { value: 'light', label: 'Light' }
 ];
 
+// Issue #729: 旧 `descJa` / `descEn` field は i18n.ts の `mascot.desc.{value}` キーへ移管。
+// `label` は Latin 文字列 (vibe/spark/mono/coder/custom) で言語非依存なのでそのまま保持。
 export const STATUS_MASCOT_OPTIONS: {
   value: StatusMascotVariant;
   label: string;
-  descJa: string;
-  descEn: string;
 }[] = [
-  {
-    value: 'vibe',
-    label: 'Vibe',
-    descJa: '既定の小さな相棒',
-    descEn: 'Default tiny companion'
-  },
-  {
-    value: 'spark',
-    label: 'Spark',
-    descJa: '明るめで軽い印象',
-    descEn: 'Brighter and lighter'
-  },
-  {
-    value: 'mono',
-    label: 'Mono',
-    descJa: '端末になじむ角ばった見た目',
-    descEn: 'A terminal-friendly angular look'
-  },
-  {
-    value: 'coder',
-    label: 'Coder',
-    descJa: 'PCでカタカタ作業する相棒',
-    descEn: 'A tiny companion typing at a computer'
-  },
-  {
-    value: 'custom',
-    label: 'Custom',
-    descJa: '自分で用意した画像 (PNG/GIF/SVG/WebP) を相棒として使う',
-    descEn: 'Use your own image (PNG/GIF/SVG/WebP) as the companion'
-  }
+  { value: 'vibe', label: 'Vibe' },
+  { value: 'spark', label: 'Spark' },
+  { value: 'mono', label: 'Mono' },
+  { value: 'coder', label: 'Coder' },
+  { value: 'custom', label: 'Custom' }
 ];
 
 /* ★ = アプリに同梱 (variable webfont)。OS 未インストールでも常に同じルックで描画される。 */

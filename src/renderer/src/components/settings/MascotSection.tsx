@@ -1,4 +1,5 @@
 import { DEFAULT_SETTINGS, type AppSettings } from '../../../../types/shared';
+import { useT } from '../../lib/i18n';
 import { STATUS_MASCOT_OPTIONS } from '../../lib/settings-options';
 import { StatusMascot } from '../shell/StatusMascot';
 import type { UpdateSetting } from './types';
@@ -9,13 +10,12 @@ interface Props {
 }
 
 export function MascotSection({ draft, update }: Props): JSX.Element {
-  const isJa = draft.language === 'ja';
+  const t = useT();
   const selected = draft.statusMascotVariant ?? DEFAULT_SETTINGS.statusMascotVariant;
   const customPath = draft.statusMascotCustomPath ?? '';
 
   const pickCustomImage = async (): Promise<void> => {
-    const title = isJa ? '相棒にする画像を選択' : 'Pick a mascot image';
-    const picked = await window.api.dialog.openFile(title);
+    const picked = await window.api.dialog.openFile(t('settings.mascot.pickTitle'));
     if (!picked) return;
     update('statusMascotCustomPath', picked);
     if (selected !== 'custom') update('statusMascotVariant', 'custom');
@@ -27,7 +27,7 @@ export function MascotSection({ draft, update }: Props): JSX.Element {
 
   return (
     <section className="modal__section">
-      <h3>{isJa ? 'キャラクター' : 'Character'}</h3>
+      <h3>{t('settings.mascot.title')}</h3>
       <div className="mascot-grid">
         {STATUS_MASCOT_OPTIONS.map((opt) => (
           <label
@@ -51,7 +51,7 @@ export function MascotSection({ draft, update }: Props): JSX.Element {
             </span>
             <span className="mascot-card__meta">
               <strong>{opt.label}</strong>
-              <span>{isJa ? opt.descJa : opt.descEn}</span>
+              <span>{t(`mascot.desc.${opt.value}`)}</span>
             </span>
           </label>
         ))}
@@ -65,7 +65,7 @@ export function MascotSection({ draft, update }: Props): JSX.Element {
               className="mascot-custom__pick"
               onClick={() => void pickCustomImage()}
             >
-              {isJa ? '画像を選ぶ…' : 'Choose image…'}
+              {t('settings.mascot.choose')}
             </button>
             {customPath ? (
               <button
@@ -73,7 +73,7 @@ export function MascotSection({ draft, update }: Props): JSX.Element {
                 className="mascot-custom__clear"
                 onClick={clearCustomImage}
               >
-                {isJa ? 'クリア' : 'Clear'}
+                {t('settings.mascot.clear')}
               </button>
             ) : null}
           </div>
@@ -82,11 +82,7 @@ export function MascotSection({ draft, update }: Props): JSX.Element {
               {customPath}
             </p>
           ) : (
-            <p className="mascot-custom__hint">
-              {isJa
-                ? 'PNG / GIF (アニメ可) / APNG / WebP / SVG を選べます。\n小さめ (32〜128px) の正方形が綺麗に出ます。'
-                : 'PNG / GIF (animated) / APNG / WebP / SVG. A small square (32–128 px) renders best.'}
-            </p>
+            <p className="mascot-custom__hint">{t('settings.mascot.hint')}</p>
           )}
         </div>
       )}
