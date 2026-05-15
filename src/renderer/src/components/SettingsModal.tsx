@@ -134,13 +134,7 @@ export function SettingsModal({
     // unhandled rejection を起こさないよう Promise.resolve でラップしてから .catch する (レビュー指摘)。
     const reportFailure = (err: unknown): void => {
       console.error('[settings] apply failed:', err);
-      const isJaNow = draft.language === 'ja';
-      showToast(
-        isJaNow
-          ? '設定の保存に失敗しました。詳細は開発者ツールのコンソールを確認してください。'
-          : 'Failed to save settings. See the developer console for details.',
-        { tone: 'error', duration: 6000 }
-      );
+      showToast(t('settings.saveFailedSeeConsole'), { tone: 'error', duration: 6000 });
     };
     let result: unknown;
     try {
@@ -186,7 +180,7 @@ export function SettingsModal({
     const id = `ca_${Math.random().toString(36).slice(2, 10)}`;
     const agent: AgentConfig = {
       id,
-      name: isJa ? '新しいエージェント' : 'New agent',
+      name: t('settings.customAgents.newName'),
       command: '',
       args: '',
       cwd: ''
@@ -234,7 +228,7 @@ export function SettingsModal({
         return (
           <>
             <FontFamilySection
-              title={isJa ? 'UI フォント' : 'UI Font'}
+              title={t('settings.fonts.uiFontTitle')}
               familyKey="uiFontFamily"
               sizeKey="uiFontSize"
               presets={UI_FONT_PRESETS}
@@ -242,7 +236,7 @@ export function SettingsModal({
               update={update}
             />
             <FontFamilySection
-              title={isJa ? 'エディタフォント (Monaco)' : 'Editor Font (Monaco)'}
+              title={t('settings.fonts.editorFontTitle')}
               familyKey="editorFontFamily"
               sizeKey="editorFontSize"
               presets={EDITOR_FONT_PRESETS}
@@ -255,20 +249,16 @@ export function SettingsModal({
       case 'claude':
         return (
           <CommandOptionsSection
-            title={isJa ? '起動オプション' : 'Launch options'}
+            title={t('settings.launch.title')}
             commandKey="claudeCommand"
             commandPlaceholder="claude"
             argsKey="claudeArgs"
-            argsLabel={isJa ? '引数（空白区切り、ダブルクォートで空白を含む値）' : 'Arguments'}
+            argsLabel={t('settings.launch.argsLabel')}
             argsPlaceholder='--model opus --add-dir "D:/other project"'
             cwdKey="claudeCwd"
-            cwdLabel={isJa ? '作業ディレクトリ（空なら現在のプロジェクトルート）' : 'Working directory'}
-            cwdPlaceholder={isJa ? '（未設定）' : '(unset)'}
-            note={
-              isJa
-                ? '変更後は再起動でターミナルに反映されます。'
-                : 'Restart terminals to apply changes.'
-            }
+            cwdLabel={t('settings.launch.cwdLabel')}
+            cwdPlaceholder={t('settings.launch.cwdUnset')}
+            note={t('settings.launch.applyNote')}
             draft={draft}
             update={update}
           />
@@ -276,11 +266,11 @@ export function SettingsModal({
       case 'codex':
         return (
           <CommandOptionsSection
-            title={isJa ? '起動オプション' : 'Launch options'}
+            title={t('settings.launch.title')}
             commandKey="codexCommand"
             commandPlaceholder="codex"
             argsKey="codexArgs"
-            argsLabel={isJa ? '引数（空白区切り）' : 'Arguments'}
+            argsLabel={t('settings.launch.argsLabelSimple')}
             argsPlaceholder="--model o3"
             draft={draft}
             update={update}
@@ -319,7 +309,7 @@ export function SettingsModal({
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label={isJa ? '設定' : 'Settings'}
+        aria-label={t('settings.dialog.label')}
         // Issue #195: dialog root を programmatic focus ターゲットにするため tabindex=-1。
         // Escape を入力フィールドから受けたとき、まず root に focus を退避してから次の
         // Escape で閉じる UX (vscode / macOS native と同じ) を実現する。
@@ -332,8 +322,8 @@ export function SettingsModal({
               type="button"
               className="settings-back-btn"
               onClick={onClose}
-              aria-label={isJa ? '戻る' : 'Back'}
-              title={isJa ? '戻る' : 'Back'}
+              aria-label={t('settings.back')}
+              title={t('settings.back')}
             >
               <ArrowLeft size={16} strokeWidth={2} />
             </button>
@@ -348,17 +338,17 @@ export function SettingsModal({
               <input
                 type="text"
                 className="settings-shell__search-input"
-                placeholder={isJa ? '設定を検索…' : 'Search settings…'}
+                placeholder={t('settings.search.placeholder')}
                 value={navQuery}
                 onChange={(e) => setNavQuery(e.target.value)}
-                aria-label={isJa ? '設定を検索' : 'Search settings'}
+                aria-label={t('settings.search.ariaLabel')}
               />
               {navQuery && (
                 <button
                   type="button"
                   className="settings-shell__search-clear"
                   onClick={() => setNavQuery('')}
-                  aria-label={isJa ? 'クリア' : 'Clear'}
+                  aria-label={t('settings.search.clear')}
                 >
                   <X size={12} strokeWidth={2.2} />
                 </button>
@@ -367,7 +357,7 @@ export function SettingsModal({
             <div className="settings-shell__nav-list">
               {groups.length === 0 ? (
                 <div className="settings-shell__nav-empty">
-                  {isJa ? '一致する項目がありません' : 'No matches'}
+                  {t('settings.search.noMatches')}
                 </div>
               ) : (
                 groups.map((g, gi) => (
