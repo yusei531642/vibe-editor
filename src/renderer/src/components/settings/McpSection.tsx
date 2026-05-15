@@ -24,7 +24,6 @@ interface HubInfo {
  */
 export function McpSection({ draft, update }: Props): JSX.Element {
   const t = useT();
-  const isJa = draft.language === 'ja';
   const [hub, setHub] = useState<HubInfo | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -141,28 +140,13 @@ VIBE_TEAM_TOKEN = "${token}"`,
           <li>{t('settings.mcp.manualStep2')}</li>
           <li>{t('settings.mcp.manualStep3')}</li>
         </ol>
-        <p className="modal__note">
-          {isJa
-            ? '~/.claude.json のサンプル (既存の mcpServers と統合してください):'
-            : 'Sample for ~/.claude.json (merge with existing mcpServers):'}
-        </p>
+        <p className="modal__note">{t('settings.mcp.claudeJsonSample')}</p>
         <CodeBlock content={manualJson} lang="json" />
-        <p className="modal__note">
-          {isJa
-            ? '~/.codex/config.toml のサンプル:'
-            : 'Sample for ~/.codex/config.toml:'}
-        </p>
+        <p className="modal__note">{t('settings.mcp.codexTomlSample')}</p>
         <CodeBlock content={manualToml} lang="toml" />
         <p className="modal__note">
-          {isJa ? (
-            <>
-              <b>接続情報 (現在値):</b> socket = <code>{socket}</code> / token = <code>{token}</code> / bridge = <code>{bridgePath}</code>
-            </>
-          ) : (
-            <>
-              <b>Connection info:</b> socket = <code>{socket}</code> / token = <code>{token}</code> / bridge = <code>{bridgePath}</code>
-            </>
-          )}
+          <b>{t('settings.mcp.connectionInfo')}</b> socket = <code>{socket}</code> / token ={' '}
+          <code>{token}</code> / bridge = <code>{bridgePath}</code>
         </p>
       </section>
     </>

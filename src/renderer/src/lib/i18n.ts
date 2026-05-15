@@ -397,6 +397,10 @@ const ja: Dict = {
 
   // ---------- Settings ----------
   'settings.title': '設定',
+  // Issue #729: McpSection の inline isJa を i18n.ts に移管
+  'settings.mcp.claudeJsonSample': '~/.claude.json のサンプル (既存の mcpServers と統合してください):',
+  'settings.mcp.codexTomlSample': '~/.codex/config.toml のサンプル:',
+  'settings.mcp.connectionInfo': '接続情報 (現在値):',
   'settings.language': '言語',
   'settings.language.desc':
     'UI 表示言語を切り替え。Claude Code 自体の応答言語には影響しません。',
@@ -1036,6 +1040,10 @@ const en: Dict = {
 
   // ---------- Settings ----------
   'settings.title': 'Settings',
+  // Issue #729: McpSection inline isJa moved into i18n.ts
+  'settings.mcp.claudeJsonSample': 'Sample for ~/.claude.json (merge with existing mcpServers):',
+  'settings.mcp.codexTomlSample': 'Sample for ~/.codex/config.toml:',
+  'settings.mcp.connectionInfo': 'Connection info:',
   'settings.language': 'Language',
   'settings.language.desc':
     'Switch the UI language. Does not affect the language Claude Code responds in.',
