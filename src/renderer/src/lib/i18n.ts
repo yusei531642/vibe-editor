@@ -467,6 +467,15 @@ const ja: Dict = {
   'theme.label.midnight': 'ミッドナイト',
   'theme.label.glass': 'グラス',
 
+  // ---------- Theme descriptions (ThemeSection の theme card 用) ----------
+  // Issue #729: 旧 settings-options.ts の hardcoded JP `desc` を i18n.ts に移管。EN ユーザー向け表示を修正。
+  'theme.desc.claude-dark': 'Anthropic 公式カラー準拠。ウォームダークブラウン + コーラル #D97757（既定）',
+  'theme.desc.claude-light': 'claude.ai のクリーム背景と温かい差し色を再現',
+  'theme.desc.dark': 'VS Code 系のクラシックダーク',
+  'theme.desc.midnight': '深い青紫ベース、紫アクセント',
+  'theme.desc.glass': 'すりガラス風 — 半透明パネル + ブラー',
+  'theme.desc.light': '明るい背景、暗い文字',
+
   // ---------- Language labels (UserMenu / LanguageSection 共有) ----------
   'lang.label.ja': '日本語',
   'lang.label.ja.sub': 'Japanese',
@@ -1135,6 +1144,15 @@ const en: Dict = {
   'theme.label.light': 'Light',
   'theme.label.midnight': 'Midnight',
   'theme.label.glass': 'Glass',
+
+  // ---------- Theme descriptions (ThemeSection theme cards) ----------
+  // Issue #729: previously hardcoded JP in settings-options.ts. Now centralised so EN users see English.
+  'theme.desc.claude-dark': "Anthropic's official palette. Warm dark brown + coral #D97757 (default)",
+  'theme.desc.claude-light': 'Recreates the claude.ai cream background with warm accent colors',
+  'theme.desc.dark': 'Classic VS Code-style dark',
+  'theme.desc.midnight': 'Deep blue-purple base with purple accents',
+  'theme.desc.glass': 'Frosted-glass look — translucent panels + blur',
+  'theme.desc.light': 'Bright background, dark text',
 
   // ---------- Language labels (UserMenu / LanguageSection) ----------
   'lang.label.ja': '日本語',
