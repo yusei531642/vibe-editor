@@ -561,6 +561,14 @@ const ja: Dict = {
   'settings.customAgents.name': '表示名',
   'settings.customAgents.remove': '削除',
   'settings.customAgents.untitled': '（無名）',
+  // Issue #729: CustomAgentEditor の isJa 三項を i18n.ts に集約
+  'settings.customAgents.confirmDelete': 'カスタムエージェント "{name}" を削除しますか？',
+  'settings.customAgents.namePlaceholder': '例: Aider',
+  'settings.customAgents.argsLabel': '引数（空白区切り、ダブルクォートで空白を含む値）',
+  'settings.customAgents.cwdLabel': '作業ディレクトリ（空なら現在のプロジェクトルート）',
+  'settings.customAgents.cwdUnset': '（未設定）',
+  'settings.customAgents.accentColor': 'アクセントカラー（任意）',
+  'settings.customAgents.applyNote': '変更後、Canvas で該当エージェントのカードを作り直すと反映されます。',
 
   // ---------- MCP tab ----------
   'settings.mcp.autoTitle': '自動セットアップ',
@@ -1194,6 +1202,14 @@ const en: Dict = {
   'settings.customAgents.name': 'Display name',
   'settings.customAgents.remove': 'Remove',
   'settings.customAgents.untitled': '(untitled)',
+  // Issue #729: CustomAgentEditor isJa ternaries consolidated into i18n.ts
+  'settings.customAgents.confirmDelete': 'Delete custom agent "{name}"?',
+  'settings.customAgents.namePlaceholder': 'e.g. Aider',
+  'settings.customAgents.argsLabel': 'Arguments (space-separated; use quotes for spaces)',
+  'settings.customAgents.cwdLabel': 'Working directory (blank = current project root)',
+  'settings.customAgents.cwdUnset': '(unset)',
+  'settings.customAgents.accentColor': 'Accent color (optional)',
+  'settings.customAgents.applyNote': 'Recreate the agent card in Canvas to apply changes.',
 
   // ---------- MCP tab ----------
   'settings.mcp.autoTitle': 'Auto setup',

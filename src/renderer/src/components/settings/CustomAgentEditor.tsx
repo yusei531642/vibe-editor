@@ -16,7 +16,6 @@ interface Props {
  */
 export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element {
   const t = useT();
-  const isJa = draft.language === 'ja';
   const argsParse = parseShellArgsStrict(agent.args);
 
   const patchAgent = (patch: Partial<AgentConfig>): void => {
@@ -27,14 +26,7 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
   };
 
   const remove = (): void => {
-    if (
-      !window.confirm(
-        isJa
-          ? `カスタムエージェント "${agent.name}" を削除しますか？`
-          : `Delete custom agent "${agent.name}"?`
-      )
-    )
-      return;
+    if (!window.confirm(t('settings.customAgents.confirmDelete', { name: agent.name }))) return;
     update(
       'customAgents',
       (draft.customAgents ?? []).filter((a) => a.id !== agent.id)
@@ -56,7 +48,7 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
           type="text"
           value={agent.name}
           onChange={(e) => patchAgent({ name: e.target.value })}
-          placeholder={isJa ? '例: Aider' : 'e.g. Aider'}
+          placeholder={t('settings.customAgents.namePlaceholder')}
           spellCheck={false}
         />
       </label>
@@ -73,11 +65,7 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
       </label>
 
       <label className="modal__label modal__label--full">
-        <span>
-          {isJa
-            ? '引数（空白区切り、ダブルクォートで空白を含む値）'
-            : 'Arguments (space-separated; use quotes for spaces)'}
-        </span>
+        <span>{t('settings.customAgents.argsLabel')}</span>
         <input
           type="text"
           value={agent.args}
@@ -95,22 +83,18 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
       </label>
 
       <label className="modal__label modal__label--full">
-        <span>
-          {isJa
-            ? '作業ディレクトリ（空なら現在のプロジェクトルート）'
-            : 'Working directory (blank = current project root)'}
-        </span>
+        <span>{t('settings.customAgents.cwdLabel')}</span>
         <input
           type="text"
           value={agent.cwd ?? ''}
           onChange={(e) => patchAgent({ cwd: e.target.value })}
-          placeholder={isJa ? '（未設定）' : '(unset)'}
+          placeholder={t('settings.customAgents.cwdUnset')}
           spellCheck={false}
         />
       </label>
 
       <label className="modal__label modal__label--full">
-        <span>{isJa ? 'アクセントカラー（任意）' : 'Accent color (optional)'}</span>
+        <span>{t('settings.customAgents.accentColor')}</span>
         <input
           type="text"
           value={agent.color ?? ''}
@@ -120,11 +104,7 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
         />
       </label>
 
-      <p className="modal__note">
-        {isJa
-          ? '変更後、Canvas で該当エージェントのカードを作り直すと反映されます。'
-          : 'Recreate the agent card in Canvas to apply changes.'}
-      </p>
+      <p className="modal__note">{t('settings.customAgents.applyNote')}</p>
     </section>
   );
 }
