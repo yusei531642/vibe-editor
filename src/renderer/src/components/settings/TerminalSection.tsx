@@ -8,9 +8,14 @@ interface Props {
   update: UpdateSetting;
 }
 
+const IS_WINDOWS = /Win/i.test(
+  (typeof navigator !== 'undefined' && (navigator.platform || navigator.userAgent)) || ''
+);
+
 export function TerminalSection({ draft, update }: Props): JSX.Element {
   const t = useT();
   const currentFamily = draft.terminalFontFamily || draft.editorFontFamily;
+  const forceUtf8 = draft.terminalForceUtf8 !== false;
   return (
     <section className="modal__section">
       <h3>{t('settings.terminal')}</h3>
@@ -50,6 +55,20 @@ export function TerminalSection({ draft, update }: Props): JSX.Element {
         </label>
       </div>
       <p className="modal__note">{t('settings.terminalNote')}</p>
+      <label className="mcp-toggle" style={IS_WINDOWS ? undefined : { opacity: 0.5 }}>
+        <input
+          type="checkbox"
+          checked={forceUtf8}
+          disabled={!IS_WINDOWS}
+          onChange={(e) => update('terminalForceUtf8', e.target.checked)}
+        />
+        <span>{t('settings.terminalForceUtf8.label')}</span>
+      </label>
+      <p className="modal__note">
+        {IS_WINDOWS
+          ? t('settings.terminalForceUtf8.hint')
+          : t('settings.terminalForceUtf8.nonWindows')}
+      </p>
     </section>
   );
 }
