@@ -397,6 +397,23 @@ const ja: Dict = {
 
   // ---------- Settings ----------
   'settings.title': '設定',
+  // Issue #729: SettingsModal の inline isJa を i18n.ts に移管
+  'settings.dialog.label': '設定',
+  'settings.back': '戻る',
+  'settings.saveFailedSeeConsole': '設定の保存に失敗しました。詳細は開発者ツールのコンソールを確認してください。',
+  'settings.search.placeholder': '設定を検索…',
+  'settings.search.ariaLabel': '設定を検索',
+  'settings.search.clear': 'クリア',
+  'settings.search.noMatches': '一致する項目がありません',
+  'settings.fonts.uiFontTitle': 'UI フォント',
+  'settings.fonts.editorFontTitle': 'エディタフォント (Monaco)',
+  'settings.launch.title': '起動オプション',
+  'settings.launch.argsLabel': '引数（空白区切り、ダブルクォートで空白を含む値）',
+  'settings.launch.argsLabelSimple': '引数（空白区切り）',
+  'settings.launch.cwdLabel': '作業ディレクトリ（空なら現在のプロジェクトルート）',
+  'settings.launch.cwdUnset': '（未設定）',
+  'settings.launch.applyNote': '変更後は再起動でターミナルに反映されます。',
+  'settings.customAgents.newName': '新しいエージェント',
   'settings.language': '言語',
   'settings.language.desc':
     'UI 表示言語を切り替え。Claude Code 自体の応答言語には影響しません。',
@@ -1028,6 +1045,23 @@ const en: Dict = {
 
   // ---------- Settings ----------
   'settings.title': 'Settings',
+  // Issue #729: SettingsModal inline isJa moved into i18n.ts
+  'settings.dialog.label': 'Settings',
+  'settings.back': 'Back',
+  'settings.saveFailedSeeConsole': 'Failed to save settings. See the developer console for details.',
+  'settings.search.placeholder': 'Search settings…',
+  'settings.search.ariaLabel': 'Search settings',
+  'settings.search.clear': 'Clear',
+  'settings.search.noMatches': 'No matches',
+  'settings.fonts.uiFontTitle': 'UI Font',
+  'settings.fonts.editorFontTitle': 'Editor Font (Monaco)',
+  'settings.launch.title': 'Launch options',
+  'settings.launch.argsLabel': 'Arguments',
+  'settings.launch.argsLabelSimple': 'Arguments',
+  'settings.launch.cwdLabel': 'Working directory',
+  'settings.launch.cwdUnset': '(unset)',
+  'settings.launch.applyNote': 'Restart terminals to apply changes.',
+  'settings.customAgents.newName': 'New agent',
   'settings.language': 'Language',
   'settings.language.desc':
     'Switch the UI language. Does not affect the language Claude Code responds in.',
