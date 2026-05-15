@@ -44,3 +44,7 @@ src-tauri/gen/schemas/
 # リポジトリ直下のスクリーンショット — experiments/screenshots/ に退避するか破棄する
 /*.png
 /*.gif
+# Issue #741: vibe-team の spool ディレクトリ。32 KiB 超の payload (チームメッセージ /
+# タスク description 等) を `<project_root>/.vibe-team/tmp/` に書き出すため、誤って
+# `git add -A` で取り込まれて secrets / 内部やりとりが公開リポジトリに混入しないよう除外する。
+.vibe-team/

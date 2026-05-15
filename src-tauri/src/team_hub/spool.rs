@@ -100,6 +100,11 @@ pub async fn spool_long_payload(
     fs::create_dir_all(&dir)
         .await
         .with_context(|| format!("spool: failed to create dir {}", dir.display()))?;
+    // Issue #741 (security): spool ファイルはチームメッセージ / タスク description の生本文を
+    // 含むため、共有ホスト (Linux multi-user / network FS / Dropbox 経由共有プロジェクト) で
+    // 他ユーザーから読み取られないよう Unix 権限を 0o700 (dir) / 0o600 (file) に絞る。
+    // Windows は POSIX mode が無いので no-op (NTFS ACL は別途 OS の所有者既定に任せる)。
+    enforce_private_dir_mode(&dir).await;
     // UUID v4 の先頭 8 hex を short_id にして衝突を低くしつつ短い名前にする。
     // 依存追加無しで一意性を確保 (uuid は team_hub の他の場所で既に使用)。
     let short_id = {
@@ -109,7 +114,7 @@ pub async fn spool_long_payload(
     let safe_prefix = sanitize_prefix(prefix);
     let filename = format!("{safe_prefix}-{short_id}.md");
     let path = dir.join(filename);
-    fs::write(&path, content)
+    write_private_file(&path, content)
         .await
         .with_context(|| format!("spool: failed to write {}", path.display()))?;
     // Issue #636: dir が canonical_root 配下なので、path も既に canonical 系の絶対 path。
@@ -121,6 +126,60 @@ pub async fn spool_long_payload(
         spool_path: abs_path,
         replacement_message,
     })
+}
+
+/// Issue #741 (security): spool dir と親 `.vibe-team/` を Unix で 0o700 に強制する。
+/// 既存 dir (旧バージョンで作られた 0o755 など) も上書きで絞る。
+/// 失敗は warn ログのみで `Err` にしない (write 本体まで止めると Hub spool 機構全体が破綻するため、
+/// permission 強制は best-effort)。Windows / 非 Unix では no-op。
+async fn enforce_private_dir_mode(dir: &Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o700);
+        // 子: `<root>/.vibe-team/tmp/`
+        if let Err(e) = fs::set_permissions(dir, perms.clone()).await {
+            tracing::warn!(
+                "[spool] failed to chmod 0o700 on {}: {e} (continuing; spool dir may be world-readable)",
+                dir.display()
+            );
+        }
+        // 親: `<root>/.vibe-team/` も同様に絞る。canonical_root.join(SPOOL_DIR) で
+        // `SPOOL_DIR = ".vibe-team/tmp"` の場合 `dir.parent() = <root>/.vibe-team`。
+        if let Some(parent) = dir.parent() {
+            if let Err(e) = fs::set_permissions(parent, perms).await {
+                tracing::warn!(
+                    "[spool] failed to chmod 0o700 on {}: {e}",
+                    parent.display()
+                );
+            }
+        }
+    }
+    // 非 Unix では POSIX mode が無いので何もしない
+    #[cfg(not(unix))]
+    {
+        let _ = dir;
+    }
+}
+
+/// Issue #741 (security): spool ファイルを Unix で 0o600 (所有者のみ rw) で書き出す。
+/// Windows / 非 Unix では従来通り `fs::write` (umask / NTFS ACL 既定に任せる)。
+async fn write_private_file(path: &Path, content: &str) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        use tokio::io::AsyncWriteExt;
+        let mut opts = tokio::fs::OpenOptions::new();
+        opts.write(true).create(true).truncate(true).mode(0o600);
+        let mut f = opts.open(path).await?;
+        f.write_all(content.as_bytes()).await?;
+        f.flush().await?;
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, content).await
+    }
 }
 
 /// `<project_root>/.vibe-team/tmp/` を走査し、`SPOOL_TTL_HOURS` を超過した entry を削除する。
@@ -350,5 +409,64 @@ mod tests {
         assert_eq!(sanitize_prefix("a".repeat(50).as_str()), "a".repeat(16));
         assert_eq!(sanitize_prefix(""), "spool");
         assert_eq!(sanitize_prefix("..*?<>"), "______");
+    }
+
+    /// Issue #741 (security): Unix で spool ファイルと dir が 0o700 / 0o600 になることを確認。
+    /// 同一ホストの他ユーザーから読み取られない (other / group ビットが落ちる) ことが目的。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn spool_dir_and_file_are_private_on_unix() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        let result = spool_long_payload(&root, "secret body", "send")
+            .await
+            .expect("spool ok");
+        // ファイルは 0o600
+        let file_meta = tokio::fs::metadata(&result.spool_path).await.unwrap();
+        let file_mode = file_meta.permissions().mode() & 0o777;
+        assert_eq!(
+            file_mode, 0o600,
+            "spool file should be 0o600 (got {file_mode:o})"
+        );
+        // dir (`<root>/.vibe-team/tmp`) は 0o700
+        let dir = result.spool_path.parent().unwrap();
+        let dir_meta = tokio::fs::metadata(dir).await.unwrap();
+        let dir_mode = dir_meta.permissions().mode() & 0o777;
+        assert_eq!(
+            dir_mode, 0o700,
+            "spool dir should be 0o700 (got {dir_mode:o})"
+        );
+        // 親 (`<root>/.vibe-team`) も 0o700
+        let parent = dir.parent().unwrap();
+        let parent_meta = tokio::fs::metadata(parent).await.unwrap();
+        let parent_mode = parent_meta.permissions().mode() & 0o777;
+        assert_eq!(
+            parent_mode, 0o700,
+            "spool parent dir (.vibe-team) should be 0o700 (got {parent_mode:o})"
+        );
+    }
+
+    /// Issue #741 (security): 旧バージョンで 0o755 で作られた dir を持つ既存環境でも、
+    /// 次回 spool 書き込み時に 0o700 へ retroactively 絞り込まれること。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn pre_existing_loose_dir_is_tightened_on_next_spool() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_string_lossy().to_string();
+        // 事前に 0o755 で dir を作っておく (= 旧バージョンの状態を模擬)
+        let dir = tmp.path().join(SPOOL_DIR);
+        tokio::fs::create_dir_all(&dir).await.unwrap();
+        let loose = std::fs::Permissions::from_mode(0o755);
+        tokio::fs::set_permissions(&dir, loose.clone()).await.unwrap();
+        tokio::fs::set_permissions(dir.parent().unwrap(), loose).await.unwrap();
+        // spool 書き出し → dir 権限が 0o700 に絞られているはず
+        spool_long_payload(&root, "body", "send").await.unwrap();
+        let dir_mode = tokio::fs::metadata(&dir).await.unwrap().permissions().mode() & 0o777;
+        assert_eq!(
+            dir_mode, 0o700,
+            "existing 0o755 dir should be tightened to 0o700 (got {dir_mode:o})"
+        );
     }
 }
