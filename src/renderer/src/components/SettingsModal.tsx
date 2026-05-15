@@ -166,7 +166,6 @@ export function SettingsModal({
     setDraft({ ...DEFAULT_SETTINGS });
   };
 
-  const isJa = draft.language === 'ja';
   const customAgents = draft.customAgents ?? [];
 
   // Phase 4-2: nav state (groupsRaw / groups / activeSection 同期) を hook 化
@@ -292,7 +291,7 @@ export function SettingsModal({
     }
   };
 
-  const current = labelOf(activeSection, isJa, customAgents);
+  const current = labelOf(activeSection, t, customAgents);
 
   return (
     <div
@@ -382,7 +381,7 @@ export function SettingsModal({
                           </button>
                         );
                       }
-                      const { label } = labelOf(id, isJa, customAgents);
+                      const { label } = labelOf(id, t, customAgents);
                       const active = id === activeSection;
                       return (
                         <button

@@ -47,62 +47,52 @@ export function iconFor(id: SectionId): JSX.Element {
   return <Icon {...ICON_PROPS} />;
 }
 
-/** 固定セクションのラベル / タイトル / 説明 (i18n)。
- *  毎レンダー新規オブジェクトを生成すると useMemo の deps チェーンが無効化されるため、
- *  ja / en それぞれをモジュールスコープで 1 度だけ作る。 */
-export type FixedLabelEntry = { label: string; title: string; desc: string };
-export const FIXED_LABELS_JA: Record<string, FixedLabelEntry> = {
-  general: { label: '一般', title: '一般', desc: '言語と密度設定' },
-  appearance: { label: '表示', title: '表示', desc: 'テーマ、配色、キャラクター' },
-  fonts: { label: 'フォント', title: 'フォント', desc: 'UI / エディタ / ターミナルのフォント' },
-  claude: { label: 'Claude Code', title: 'Claude Code', desc: '起動コマンドと引数' },
-  codex: { label: 'Codex', title: 'Codex', desc: '起動コマンドと引数' },
-  roles: { label: 'ロール定義', title: 'ロール定義', desc: 'チームメンバーの役割テンプレ' },
-  mcp: { label: 'MCP', title: 'MCP', desc: 'vibe-team MCP の導入方法' },
-  logs: { label: 'ログ', title: 'ログ', desc: 'アプリの実行ログを表示' }
-};
-export const FIXED_LABELS_EN: Record<string, FixedLabelEntry> = {
-  general: { label: 'General', title: 'General', desc: 'Language and density' },
-  appearance: { label: 'Appearance', title: 'Appearance', desc: 'Theme, surfaces, and character' },
-  fonts: { label: 'Fonts', title: 'Typography', desc: 'UI / editor / terminal fonts' },
-  claude: { label: 'Claude Code', title: 'Claude Code', desc: 'Launch command and args' },
-  codex: { label: 'Codex', title: 'Codex', desc: 'Launch command and args' },
-  roles: { label: 'Role profiles', title: 'Role profiles', desc: 'Team member role templates' },
-  mcp: { label: 'MCP', title: 'MCP', desc: 'How to install vibe-team MCP' },
-  logs: { label: 'Logs', title: 'Logs', desc: 'View runtime logs from the app' }
-};
+/** Issue #729: 旧 FIXED_LABELS_JA/EN は i18n.ts の `settings.section.*` キーへ移管した。
+ *  固定セクション ID の列挙のみ残し、ラベル / タイトル / 説明は呼び出し側で
+ *  t(`settings.section.${id}.{label|title|desc}`) を解決する。 */
+export const FIXED_SECTION_IDS = [
+  'general',
+  'appearance',
+  'fonts',
+  'claude',
+  'codex',
+  'roles',
+  'mcp',
+  'logs'
+] as const;
 
-/** 名前未設定のカスタムエージェントに使う fallback 文字列。
- *  fixedLabels と同じく言語切替で同期するモジュール定数として持つことで、
- *  groups useMemo の closure から isJa を直接参照しないで済むようにする。 */
-export const UNTITLED_FALLBACK_JA = '（無名）';
-export const UNTITLED_FALLBACK_EN = '(untitled)';
+export type FixedSectionId = (typeof FIXED_SECTION_IDS)[number];
+
+export type FixedLabelEntry = { label: string; title: string; desc: string };
 
 /** 指定 id のラベル情報を返す (固定 + カスタム動的)。
- *  元 SettingsModal.tsx 内では closure で customAgents / isJa を参照していたが、
- *  独立 module 化に伴い pure 関数として引数化した。 */
+ *  Issue #729: 旧実装は isJa: boolean と FIXED_LABELS_JA/EN 静的テーブルに依存していたが、
+ *  i18n.ts への移管に伴い `t` 関数を受け取って t(`settings.section.${id}.*`) を解決する形に変更。
+ *  caller (SettingsModal / useSettingsNav) は useT() の戻り値をそのまま渡す。 */
 export function labelOf(
   id: SectionId,
-  isJa: boolean,
+  t: (key: string, params?: Record<string, string | number>) => string,
   customAgents: { id: string; name: string }[]
-): { label: string; title: string; desc: string } {
-  const fixedLabels = isJa ? FIXED_LABELS_JA : FIXED_LABELS_EN;
-  if (fixedLabels[id]) return fixedLabels[id];
+): FixedLabelEntry {
+  if ((FIXED_SECTION_IDS as readonly string[]).includes(id)) {
+    return {
+      label: t(`settings.section.${id}.label`),
+      title: t(`settings.section.${id}.title`),
+      desc: t(`settings.section.${id}.desc`)
+    };
+  }
   if (id.startsWith('custom:')) {
     const a = customAgents.find((x) => `custom:${x.id}` === id);
-    const name = a?.name || (isJa ? UNTITLED_FALLBACK_JA : UNTITLED_FALLBACK_EN);
+    const name = a?.name || t('settings.section.untitled');
     return {
       label: name,
       title: name,
-      desc: isJa ? 'カスタムエージェント設定' : 'Custom agent settings'
+      desc: t('settings.section.customDesc')
     };
   }
   if (id === '__addCustom') {
-    return {
-      label: isJa ? '+ 追加' : '+ Add',
-      title: isJa ? '+ 追加' : '+ Add',
-      desc: ''
-    };
+    const label = t('settings.section.addCustom');
+    return { label, title: label, desc: '' };
   }
   return { label: id, title: id, desc: '' };
 }
