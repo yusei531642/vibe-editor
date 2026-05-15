@@ -602,6 +602,9 @@ fn prepare_spawn_command(opts: &SpawnOptions) -> Result<PreparedSpawnCommand> {
     if let Some(reason) = command_validation::reject_immediate_exec_args(&command, &args) {
         return Err(anyhow!("{reason}"));
     }
+    if let Some(reason) = command_validation::reject_danger_flags(&args) {
+        return Err(anyhow!("{reason}"));
+    }
     resolve_spawn_command(&command, args, &opts.env)
 }
 
