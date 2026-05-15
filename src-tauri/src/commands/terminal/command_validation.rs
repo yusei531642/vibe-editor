@@ -199,6 +199,23 @@ pub fn is_allowed_terminal_command(command: &str) -> bool {
     configured_terminal_commands().contains(&trimmed.to_ascii_lowercase())
 }
 
+/// Issue #743: Claude / Codex の承認スキップ・サンドボックス回避フラグを spawn 前に拒否する。
+///
+/// settings.json (`claude_args` / `codex_args`) や起動コマンドの inline 引数経由で
+/// 以下フラグが投入されると外部 CLI が承認・サンドボックス無しで起動できてしまい、
+/// vibe-editor が前提とする「人間レビューア」の制御を回避する経路になる。
+/// normalize 後の args をスキャンして、いずれかが含まれていれば error 文を返す。
+const DENY_FLAGS: &[&str] = &[
+    "--dangerously-skip-permissions",
+    "--dangerously-bypass-approvals-and-sandbox",
+];
+
+pub fn reject_danger_flags(args: &[String]) -> Option<String> {
+    args.iter()
+        .find(|a| DENY_FLAGS.contains(&a.trim()))
+        .map(|flag| format!("dangerous flag is not allowed: {flag}"))
+}
+
 pub fn reject_immediate_exec_args(command: &str, args: &[String]) -> Option<&'static str> {
     let basename = command_basename(command);
     let lower_args: Vec<String> = args.iter().map(|a| a.trim().to_ascii_lowercase()).collect();
@@ -487,7 +504,10 @@ mod codex_command_tests {
 
 #[cfg(test)]
 mod command_normalization_tests {
-    use super::{normalize_terminal_command, reject_immediate_exec_args, split_command_line};
+    use super::{
+        normalize_terminal_command, reject_danger_flags, reject_immediate_exec_args,
+        split_command_line,
+    };
 
     #[test]
     fn splits_inline_codex_flags_from_command_field() {
@@ -592,5 +612,91 @@ mod command_normalization_tests {
             reject_immediate_exec_args(&command, &args),
             Some("cmd immediate-exec flags (/c /k) are blocked")
         );
+    }
+
+    // Issue #743: --dangerously-* フラグの拒否
+    #[test]
+    fn rejects_claude_skip_permissions_flag() {
+        let args = vec!["--dangerously-skip-permissions".to_string()];
+        assert_eq!(
+            reject_danger_flags(&args),
+            Some("dangerous flag is not allowed: --dangerously-skip-permissions".to_string())
+        );
+    }
+
+    #[test]
+    fn rejects_codex_bypass_approvals_and_sandbox_flag() {
+        let args = vec!["--dangerously-bypass-approvals-and-sandbox".to_string()];
+        assert_eq!(
+            reject_danger_flags(&args),
+            Some(
+                "dangerous flag is not allowed: --dangerously-bypass-approvals-and-sandbox"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_dangerous_flag_when_buried_in_args() {
+        let args = vec![
+            "--resume".to_string(),
+            "abc".to_string(),
+            "--dangerously-skip-permissions".to_string(),
+            "--append-system-prompt".to_string(),
+            "hi".to_string(),
+        ];
+        assert!(reject_danger_flags(&args).is_some());
+    }
+
+    #[test]
+    fn rejects_dangerous_flag_via_settings_inline_command() {
+        // settings.json の claude_args / codex_args が inline command field に
+        // 入っているケースも normalize 後に args へ展開されるため拒否されること
+        let (command, args) = normalize_terminal_command(
+            Some("claude --dangerously-skip-permissions --resume abc".to_string()),
+            None,
+        );
+
+        assert_eq!(command, "claude");
+        assert!(reject_danger_flags(&args).is_some());
+    }
+
+    #[test]
+    fn rejects_dangerous_flag_via_separate_args_array() {
+        // claude_args が args フィールド (Vec<String>) として渡されるケース
+        let (command, args) = normalize_terminal_command(
+            Some("codex".to_string()),
+            Some(vec![
+                "--dangerously-bypass-approvals-and-sandbox".to_string(),
+                "--config".to_string(),
+                "model=foo".to_string(),
+            ]),
+        );
+
+        assert_eq!(command, "codex");
+        assert!(reject_danger_flags(&args).is_some());
+    }
+
+    #[test]
+    fn passes_clean_args_unchanged() {
+        let args = vec![
+            "--resume".to_string(),
+            "abc".to_string(),
+            "--append-system-prompt".to_string(),
+            "hi".to_string(),
+        ];
+        assert_eq!(reject_danger_flags(&args), None);
+    }
+
+    #[test]
+    fn passes_empty_args() {
+        assert_eq!(reject_danger_flags(&[]), None);
+    }
+
+    #[test]
+    fn does_not_match_substring_of_dangerous_flag() {
+        // 例えば --dangerously-skip-permissions-x のような未来の擬似フラグは別物として扱う
+        let args = vec!["--dangerously-skip-permissions-extra".to_string()];
+        assert_eq!(reject_danger_flags(&args), None);
     }
 }

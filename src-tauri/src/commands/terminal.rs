@@ -256,6 +256,13 @@ pub async fn terminal_create(
             ..Default::default()
         });
     }
+    if let Some(reason) = command_validation::reject_danger_flags(&args) {
+        return Ok(TerminalCreateResult {
+            ok: false,
+            error: Some(reason),
+            ..Default::default()
+        });
+    }
     let is_codex_command = command_validation::is_codex_command(&command);
 
     // Issue #607 (security): Claude `--resume <id>` に渡される session id は renderer
