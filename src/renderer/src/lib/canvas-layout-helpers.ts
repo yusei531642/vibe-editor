@@ -10,19 +10,20 @@ import type {
   TeamRole,
   TerminalAgent
 } from '../../../types/shared';
+import { translate } from './i18n';
+
+// Issue #729: 旧 `formatCardCount` (未参照) は削除。`formatAgentCount` /
+// `formatOrganizationAgentCount` の hardcoded JP/EN テンプレートは i18n.ts の
+// `canvas.agentCount` / `canvas.orgAgentCount` に集約し、translate() 経由で解決する。
 
 export function localeOf(language: Language): string {
+  // BCP47 locale 文字列は Intl.* に渡す用途で、UI 表示テキストではないので
+  // i18n.ts には載せず language 引数からマップする。
   return language === 'ja' ? 'ja-JP' : 'en-US';
 }
 
-export function formatCardCount(count: number, language: Language): string {
-  return language === 'ja'
-    ? `${count} 枚のカード`
-    : `${count} ${count === 1 ? 'card' : 'cards'}`;
-}
-
 export function formatAgentCount(count: number, language: Language): string {
-  return language === 'ja' ? `${count} エージェント` : `${count} agents`;
+  return translate(language, 'canvas.agentCount', { count });
 }
 
 export function formatOrganizationAgentCount(
@@ -31,9 +32,10 @@ export function formatOrganizationAgentCount(
   language: Language
 ): string {
   if (organizationCount <= 1) return formatAgentCount(agentCount, language);
-  return language === 'ja'
-    ? `${organizationCount} 組織 / ${agentCount} エージェント`
-    : `${organizationCount} orgs / ${agentCount} agents`;
+  return translate(language, 'canvas.orgAgentCount', {
+    organizationCount,
+    agentCount
+  });
 }
 
 export function mergeCanvasMembers(

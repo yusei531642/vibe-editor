@@ -68,7 +68,7 @@ export function StatusBar({
       ) : null}
       <span className="status__item">
         <span className="status__label">{t('status.lang')}</span>
-        <span>{settings.language === 'ja' ? 'ja' : 'en'}</span>
+        <span>{settings.language}</span>
       </span>
       <span className="status__item">
         <span className="status__label">{t('status.theme')}</span>
