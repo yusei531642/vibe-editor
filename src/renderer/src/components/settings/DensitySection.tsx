@@ -27,7 +27,7 @@ export function DensitySection({ draft, update }: Props): JSX.Element {
               onChange={() => update('density', opt.value)}
             />
             <strong>{opt.label}</strong>
-            <span>{opt.desc}</span>
+            <span>{t(`density.desc.${opt.value}`)}</span>
           </label>
         ))}
       </div>
