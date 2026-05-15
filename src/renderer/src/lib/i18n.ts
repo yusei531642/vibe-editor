@@ -417,6 +417,10 @@ const ja: Dict = {
     'cmd.exe / PowerShell 起動時に chcp 65001 を inject して console output を UTF-8 化します。漢字ファイル名や日本語出力が U+FFFD 化するのを防ぎます。OEM コードページを意図的に使いたい場合のみ OFF にしてください。Windows 以外の OS では何もしません。',
   'settings.terminalForceUtf8.nonWindows': 'この設定は Windows でのみ有効です',
   'settings.density': '情報密度',
+  // Issue #729: DensitySection 旧 hardcoded JP desc を i18n.ts に移管 (theme.desc / mascot.desc と同型)
+  'density.desc.compact': '14"以下の画面向け、余白小',
+  'density.desc.normal': '既定',
+  'density.desc.comfortable': '大画面向け、ゆったり',
   'settings.reset': 'デフォルトに戻す',
   'settings.cancel': 'キャンセル',
   'settings.apply': '適用して保存',
@@ -1044,6 +1048,10 @@ const en: Dict = {
     'Inject `chcp 65001` when launching cmd.exe / PowerShell so console output is UTF-8. Prevents Japanese / CJK filenames and output from rendering as U+FFFD. Turn this OFF only if you intentionally want to keep the OEM code page. No-op on non-Windows OSes.',
   'settings.terminalForceUtf8.nonWindows': 'This setting only applies on Windows',
   'settings.density': 'Density',
+  // Issue #729: DensitySection hardcoded JP desc moved to i18n.ts (mirrors theme.desc / mascot.desc)
+  'density.desc.compact': 'For 14" or smaller screens, tighter spacing',
+  'density.desc.normal': 'Default',
+  'density.desc.comfortable': 'For large screens, roomier spacing',
   'settings.reset': 'Reset to defaults',
   'settings.cancel': 'Cancel',
   'settings.apply': 'Apply & save',

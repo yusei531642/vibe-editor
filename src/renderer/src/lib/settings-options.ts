@@ -112,8 +112,10 @@ export const TERMINAL_FONT_PRESETS: { label: string; value: string }[] = [
   }
 ];
 
-export const DENSITY_OPTIONS: { value: Density; label: string; desc: string }[] = [
-  { value: 'compact', label: 'Compact', desc: '14"以下の画面向け、余白小' },
-  { value: 'normal', label: 'Normal', desc: '既定' },
-  { value: 'comfortable', label: 'Comfortable', desc: '大画面向け、ゆったり' }
+// Issue #729: 旧 `desc` field (JP hardcode) は i18n.ts の `density.desc.{value}` に移管。
+// `label` は Latin 文字列で言語非依存なので保持。
+export const DENSITY_OPTIONS: { value: Density; label: string }[] = [
+  { value: 'compact', label: 'Compact' },
+  { value: 'normal', label: 'Normal' },
+  { value: 'comfortable', label: 'Comfortable' }
 ];
