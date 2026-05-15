@@ -87,3 +87,25 @@ jobs:
       - name: Cargo audit
         working-directory: src-tauri
         run: cargo audit
+
+  # Issue #745: 既存の `npm audit` / `cargo audit` は advisory DB ベースの依存脆弱性検査で、
+  # 「うっかり API key / token / 暗号鍵をコミットした」を検知できない。
+  # trufflehog を CI に乗せて entropy + verified 検証ベースの secrets scan を行い、
+  # PR push 時は差分 (base..head)、main / tag push 時は full repo を対象にする。
+  # `--only-verified` で credential が実在エンドポイントで通用するもののみ報告 (false positive 抑制)。
+  secrets-scan:
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # full history が無いと PR の base..head 差分 scan / push の before..after 差分 scan が
+          # commit を取得できず "fatal: bad revision" になる。trufflehog の git driver 要件。
+          fetch-depth: 0
+
+      - name: Secrets scan (trufflehog, verified-only)
+        uses: trufflesecurity/trufflehog@37b77001d0174ebec2fcca2bd83ff83a6d45a3ab # v3.95.3
+        with:
+          extra_args: --only-verified
