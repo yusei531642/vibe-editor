@@ -22,9 +22,50 @@
 //
 // I/O / ロックの失敗はすべて best-effort で warn ログのみに留める。asset scope への
 // 追加に失敗しても画像が表示されないだけで、起動やファイル操作自体は壊さない。
+//
+// PR #775 (auto-review): mascot custom path は renderer 由来 (settings.json の
+// `statusMascotCustomPath`) なので、renderer XSS が `/etc/passwd` のような任意パスを
+// 注入して asset scope に追加させるバイパスを防ぐため、`is_allowed_mascot_path` で
+// 「画像拡張子ホワイトリスト」+「parent ディレクトリの is_safe_watch_root 検証」を
+// 通したものだけを `allow_asset_file` へ渡す。
 
 use std::path::Path;
 use tauri::{AppHandle, Manager};
+
+/// mascot custom 画像として `asset://` 許可してよい拡張子のホワイトリスト。
+/// 旧 `tauri.conf.json` の `assetProtocol.scope` が列挙していた画像形式と同一 (Issue #724)。
+const ALLOWED_MASCOT_EXTENSIONS: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "svg", "apng",
+];
+
+/// PR #775 (auto-review): renderer 由来の mascot custom path を `asset://` 許可リストへ
+/// 加えてよいかを判定する。次の 2 条件を **両方** 満たすときのみ `true`:
+///   1. 拡張子が画像ホワイトリスト (`ALLOWED_MASCOT_EXTENSIONS`) に含まれる
+///      (case-insensitive)。`/etc/passwd` のような非画像ファイルを弾く。
+///   2. その**親ディレクトリ**が `is_safe_watch_root` を通る (canonicalize 可能で
+///      system 領域 / home 直下 / ルートドライブでない実ディレクトリ)。
+///      `app_set_project_root` が project_root に課しているのと同じ judgement を
+///      mascot の置き場所にも適用し、影響半径を「ユーザーが普通に画像を置く場所」に絞る。
+///
+/// `path` が拡張子を持たない / 親を取れない場合は `false`。
+pub fn is_allowed_mascot_path(path: &Path) -> bool {
+    let ext_ok = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| ALLOWED_MASCOT_EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
+        .unwrap_or(false);
+    if !ext_ok {
+        return false;
+    }
+    // 親ディレクトリを is_safe_watch_root で検証する。親が取れない (= ルート直下や
+    // 相対パスの先頭要素) ケースは安全側に倒して reject する。
+    match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => {
+            crate::commands::fs_watch::is_safe_watch_root(parent)
+        }
+        _ => false,
+    }
+}
 
 /// `dir` 配下 (サブディレクトリ含む) を `asset://` で読めるように許可リストへ加える。
 ///

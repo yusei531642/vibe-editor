@@ -352,13 +352,26 @@ pub async fn settings_save(app: tauri::AppHandle, settings: Settings) -> Command
     // Issue #724: mascot custom 画像 (PR #716) をユーザーが設定画面で選び直したとき、
     // assetProtocol.scope は空なので、再起動を待たず同一セッション内でその 1 ファイルを
     // `asset://` で表示できるよう asset scope へ許可する。失敗しても save 自体は成功扱い。
+    //
+    // PR #775 (auto-review): `statusMascotCustomPath` は renderer 由来。XSS が
+    // `/etc/passwd` 等の任意パスを注入して asset scope に追加させるバイパスを防ぐため、
+    // `is_allowed_mascot_path` (画像拡張子ホワイトリスト + parent ディレクトリの
+    // is_safe_watch_root 検証) を通したものだけを許可する。
     if let Some(mascot_path) = settings
         .status_mascot_custom_path
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
     {
-        crate::commands::asset_scope::allow_asset_file(&app, std::path::Path::new(mascot_path));
+        let p = std::path::Path::new(mascot_path);
+        if crate::commands::asset_scope::is_allowed_mascot_path(p) {
+            crate::commands::asset_scope::allow_asset_file(&app, p);
+        } else {
+            tracing::warn!(
+                "[settings_save] rejected mascot path for asset scope (bad extension or unsafe directory): {}",
+                p.display()
+            );
+        }
     }
     Ok(())
 }

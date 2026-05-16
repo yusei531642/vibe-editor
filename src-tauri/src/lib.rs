@@ -382,24 +382,44 @@ pub fn run() {
                     // Issue #724: assetProtocol.scope は空。renderer が `app_set_project_root` を
                     // 呼ぶ前 (起動直後のセッション復元等) でも画像プレビューが project_root 配下の
                     // 画像を `asset://` で開けるよう、復元した root を asset scope に許可しておく。
-                    commands::asset_scope::allow_asset_dir(
-                        &app_handle_for_root,
-                        std::path::Path::new(&root),
-                    );
+                    //
+                    // PR #775 (auto-review): `lastOpenedRoot` は settings.json 由来なので、
+                    // 改ざんされた settings.json に `lastOpenedRoot: "/"` を書かれて再起動
+                    // すると OS 全体が recursive 許可されてしまう。`app_set_project_root` が
+                    // 必須にしているのと同じ `is_safe_watch_root` ガードをここでも通し、
+                    // system 領域 / home 直下 / ルートドライブは reject する。
+                    let root_path = std::path::Path::new(&root);
+                    if commands::fs_watch::is_safe_watch_root(root_path) {
+                        commands::asset_scope::allow_asset_dir(&app_handle_for_root, root_path);
+                    } else {
+                        tracing::warn!(
+                            "[setup] refusing to allow asset scope for unsafe restored root: {root}"
+                        );
+                    }
                 }
                 // Issue #724: mascot custom 画像 (PR #716) はファイルダイアログで選ばれた
                 // 単一画像。assetProtocol.scope は空なので、起動時に settings から復元した
                 // custom path 1 ファイルだけを asset scope に許可する (フォルダごとではない)。
+                //
+                // PR #775 (auto-review): `statusMascotCustomPath` も settings.json 由来。
+                // `is_allowed_mascot_path` (画像拡張子ホワイトリスト + parent ディレクトリの
+                // is_safe_watch_root 検証) を通したものだけを許可し、改ざんされた settings.json
+                // 経由で任意ファイルが asset scope に乗るのを防ぐ。
                 if let Some(mascot_path) = settings
                     .status_mascot_custom_path
                     .as_deref()
                     .map(str::trim)
                     .filter(|s| !s.is_empty())
                 {
-                    commands::asset_scope::allow_asset_file(
-                        &app_handle_for_root,
-                        std::path::Path::new(mascot_path),
-                    );
+                    let mascot = std::path::Path::new(mascot_path);
+                    if commands::asset_scope::is_allowed_mascot_path(mascot) {
+                        commands::asset_scope::allow_asset_file(&app_handle_for_root, mascot);
+                    } else {
+                        tracing::warn!(
+                            "[setup] rejected restored mascot path for asset scope (bad extension or unsafe directory): {}",
+                            mascot.display()
+                        );
+                    }
                 }
                 // Issue #260: theme が glass なら初期 effect を適用。
                 // - tauri.conf.json で `transparent: true` + `backgroundColor: "#171716"` に
