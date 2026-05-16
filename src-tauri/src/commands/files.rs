@@ -739,7 +739,8 @@ async fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
             if file_type.is_symlink() {
                 // Security: planted symlink を経由したプロジェクト外読み出しを防ぐため、
                 // copy 対象から除外する。symlink cycle による無限ループも同時に防止する。
-                eprintln!(
+                // Issue #739: tracing 統一のため eprintln! ではなく tracing::warn! を使う。
+                tracing::warn!(
                     "[files_copy] skipping symlink entry: {}",
                     from_child.display()
                 );
@@ -756,7 +757,8 @@ async fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
                     .map_err(|e| e.to_string())?;
             } else {
                 // 通常ファイル / ディレクトリ / symlink 以外 (FIFO 等) は skip する。
-                eprintln!(
+                // Issue #739: tracing 統一のため eprintln! ではなく tracing::warn! を使う。
+                tracing::warn!(
                     "[files_copy] skipping non-regular entry: {}",
                     from_child.display()
                 );

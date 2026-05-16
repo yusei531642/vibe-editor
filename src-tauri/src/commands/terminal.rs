@@ -18,6 +18,22 @@ use std::time::Duration;
 use tauri::{AppHandle, State};
 use uuid::Uuid;
 
+/// Issue #739: `inject_codex_prompt_to_pty` が PTY 注入を始める前に待つ初期スリープ (ミリ秒)。
+///
+/// Codex の TUI が起動してから prompt 入力を受け付ける状態になるまでの猶予。旧実装は
+/// `sleep(Duration::from_millis(1800))` の magic number 直書きだった。短すぎると注入文字が
+/// TUI 初期化中に取りこぼされ、長すぎると初手の指示が遅れて UX が悪化するため、この 1 箇所で
+/// 調整できるよう定数化する。
+const CODEX_INITIAL_PROMPT_DELAY_MS: u64 = 1800;
+
+/// Issue #739: `inject_codex_prompt_to_pty` のチャンク間 / 末尾 `\r` 送出前スリープ (ミリ秒)。
+///
+/// ConPTY のリングバッファ事故を避けつつ Codex TUI が paste sequence を 1 件として
+/// バンドルできる時間的余裕を確保するための値。`team_hub::protocol::consts::INJECT_CHUNK_DELAY_MS`
+/// と意図的に同値だが、当該定数は `pub(in crate::team_hub)` で `commands` から不可視のため、
+/// terminal 側のチャンク注入用にローカル定数として持つ (旧実装は `15` の直書きだった)。
+const CODEX_PROMPT_CHUNK_DELAY_MS: u64 = 15;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalCreateOptions {
@@ -156,7 +172,7 @@ async fn inject_codex_prompt_to_pty(
     instructions: String,
 ) {
     use tokio::time::sleep;
-    sleep(Duration::from_millis(1800)).await;
+    sleep(Duration::from_millis(CODEX_INITIAL_PROMPT_DELAY_MS)).await;
     let Some(session) = registry.get(&term_id) else {
         return;
     };
@@ -191,7 +207,7 @@ async fn inject_codex_prompt_to_pty(
         }
     }
     for chunk in iter {
-        sleep(Duration::from_millis(15)).await;
+        sleep(Duration::from_millis(CODEX_PROMPT_CHUNK_DELAY_MS)).await;
         if registry.get(&term_id).is_none() {
             return;
         }
@@ -214,7 +230,7 @@ async fn inject_codex_prompt_to_pty(
             }
         }
     }
-    sleep(Duration::from_millis(15)).await;
+    sleep(Duration::from_millis(CODEX_PROMPT_CHUNK_DELAY_MS)).await;
     // Issue #620: 末尾の確定 `\r` も spawn_blocking 経由で送る。
     let s = session.clone();
     match tokio::task::spawn_blocking(move || s.write(b"\r")).await {
@@ -515,10 +531,9 @@ pub async fn terminal_create(
             // Claude Code 起動時のみ session watcher を仕掛ける (codex は jsonl を作らない)
             if command.to_lowercase().contains("claude") {
                 let watcher_id = id.clone();
-                // Issue #147: poison でも recovery して読む
-                let watcher_root = crate::state::lock_project_root_recover(&state.project_root)
-                    .clone()
-                    .unwrap_or_default();
+                // Issue #739: ArcSwapOption の lock-free load で現在値を読む。
+                let watcher_root =
+                    crate::state::current_project_root(&state.project_root).unwrap_or_default();
                 let actual_root = if watcher_root.is_empty() {
                     // PTY spawn 時の cwd を流用
                     std::env::current_dir()

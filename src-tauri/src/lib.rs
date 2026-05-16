@@ -144,61 +144,12 @@ fn prune_old_log_files(log_dir: &std::path::Path, keep_days: u32) {
     }
 }
 
+// Issue #739: 旧ここに inline 同居していた大規模テスト mod (`log_prune_tests`) は
+// `src-tauri/src/log_prune_tests.rs` へ分離。`prune_old_log_files` / `LOG_KEEP_DAYS` は
+// クレートルート private 項目のため、`super::` でアクセスできる in-crate 子モジュール
+// (= 別ファイルの `mod`) として切り出している。
 #[cfg(test)]
-mod log_prune_tests {
-    use super::{prune_old_log_files, LOG_KEEP_DAYS};
-    use std::fs;
-    use std::time::{Duration, SystemTime};
-
-    /// Issue #643: 14 日より古い `vibe-editor.log*` は削除され、
-    /// 新しいファイルや無関係ファイルは残ることを確認する。
-    #[test]
-    fn prunes_only_old_vibe_editor_log_files() {
-        let dir = tempfile::tempdir().expect("tempdir");
-
-        let old_dated = dir.path().join("vibe-editor.log.2020-01-01");
-        let old_legacy = dir.path().join("vibe-editor.log");
-        let recent_dated = dir.path().join("vibe-editor.log.2099-12-31");
-        let unrelated = dir.path().join("other.log");
-        let unrelated_old = dir.path().join("readme.txt");
-
-        for f in [
-            &old_dated,
-            &old_legacy,
-            &recent_dated,
-            &unrelated,
-            &unrelated_old,
-        ] {
-            fs::write(f, b"x").unwrap();
-        }
-
-        // 古い 2 ファイルと「無関係だが古い」ファイルの mtime を 30 日前に倒す。
-        let way_old = SystemTime::now() - Duration::from_secs(60 * 60 * 24 * 30);
-        for f in [&old_dated, &old_legacy, &unrelated_old] {
-            let file = fs::File::options().write(true).open(f).unwrap();
-            file.set_modified(way_old).unwrap();
-        }
-
-        prune_old_log_files(dir.path(), LOG_KEEP_DAYS);
-
-        assert!(!old_dated.exists(), "old dated log should be pruned");
-        assert!(!old_legacy.exists(), "legacy single log should be pruned");
-        assert!(recent_dated.exists(), "recent log must survive");
-        assert!(unrelated.exists(), "non-log file must survive");
-        assert!(
-            unrelated_old.exists(),
-            "files outside vibe-editor.log* prefix must not be touched"
-        );
-    }
-
-    /// 存在しないディレクトリを渡しても panic しない (起動を失敗させない契約)。
-    #[test]
-    fn prune_is_noop_on_missing_dir() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let missing = dir.path().join("does-not-exist");
-        prune_old_log_files(&missing, LOG_KEEP_DAYS);
-    }
-}
+mod log_prune_tests;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -374,10 +325,8 @@ pub fn run() {
                     .or_else(|| Some(settings.claude_cwd.clone()).filter(|s| !s.trim().is_empty()));
                 if let Some(root) = root {
                     let state = app_handle_for_root.state::<state::AppState>();
-                    // Issue #147: poison でも recovery
-                    let mut guard = state::lock_project_root_recover(&state.project_root);
-                    *guard = Some(root.clone());
-                    drop(guard);
+                    // Issue #739: ArcSwapOption の lock-free store で復元する。
+                    state::set_project_root(&state.project_root, Some(root.clone()));
                     tracing::info!("[setup] project_root restored from settings: {root}");
                     // Issue #724: assetProtocol.scope は空。renderer が `app_set_project_root` を
                     // 呼ぶ前 (起動直後のセッション復元等) でも画像プレビューが project_root 配下の

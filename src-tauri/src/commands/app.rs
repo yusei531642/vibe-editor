@@ -26,9 +26,8 @@ pub struct AppUserInfo {
 
 #[tauri::command]
 pub fn app_get_project_root(state: State<AppState>) -> String {
-    // Issue #147: poison しても recovery して値を返す。
-    crate::state::lock_project_root_recover(&state.project_root)
-        .clone()
+    // Issue #739: ArcSwapOption の lock-free load で現在値を取得する。
+    crate::state::current_project_root(&state.project_root)
         .or_else(|| {
             std::env::current_dir()
                 .ok()
@@ -70,14 +69,15 @@ pub fn app_set_project_root(
             "project_root rejected by safety check (system / home / non-existent dir): {trimmed}"
         )));
     }
-    // Issue #147: poison していても recovery して書き込む。失敗で常時死亡しない。
-    let mut guard = crate::state::lock_project_root_recover(&state.project_root);
-    *guard = if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.clone())
-    };
-    drop(guard);
+    // Issue #739: ArcSwapOption の lock-free store で書き込む。
+    crate::state::set_project_root(
+        &state.project_root,
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.clone())
+        },
+    );
     // Issue #66: watcher は project_root 変更ごとに付け替える
     if !trimmed.is_empty() {
         // Issue #724: 画像プレビュー (ImagePreview / EditorView) が `asset://` で開くのは

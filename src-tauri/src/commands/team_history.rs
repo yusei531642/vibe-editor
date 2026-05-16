@@ -12,21 +12,58 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::Mutex;
 
-/// Issue #132: in-memory cache。`load_all` が毎回ディスク I/O していたのを解消する。
-/// `None` は「未ロード」、`Some(...)` は「ディスクと同期済み」状態。
-static CACHE: once_cell::sync::Lazy<Mutex<Option<Vec<TeamHistoryEntry>>>> =
-    once_cell::sync::Lazy::new(|| Mutex::new(None));
-
-/// Issue #642: cache を最後に disk と同期したときの fingerprint (`(mtime, size, sha256)`)。
-/// `Outer None` は「fingerprint 未取得」(= `CACHE` も未ロードの初期状態)。
-/// `Outer Some(None)` は「disk 上にファイルが存在しない状態を確認済み」。
-/// `Outer Some(Some(fp))` は「fingerprint=fp の disk と同期済み」。
+/// Issue #642 / #739: cache を最後に disk と同期したときの状態を表す sum type。
 ///
-/// save 直前に `compute_fingerprint(disk)` と比較し、不一致なら手編集 / 別プロセスによる
-/// 外部変更を検知 → `merge_external_disk` で disk 側の独自エントリを cache に取り込んでから
-/// 上書きする (stale-write 防止)。
-static DISK_FINGERPRINT: once_cell::sync::Lazy<Mutex<Option<Option<DiskFingerprint>>>> =
-    once_cell::sync::Lazy::new(|| Mutex::new(None));
+/// 旧実装は `Option<Option<DiskFingerprint>>` という二重 Option で同じ三状態を表していたが、
+/// 「外側 `None` と内側 `None` のどちらが何を意味するか」がコードを読まないと分からなかった。
+/// 三状態を enum で明示することで、`ensure_loaded` の「ロード済みか」判定と
+/// `reconcile_external_changes` の「同期済み fingerprint」取得が意図どおり読めるようにする。
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+enum DiskSyncState {
+    /// fingerprint 未取得 (= cache も未ロードの初期状態)。旧 `Outer None` に対応。
+    #[default]
+    Unknown,
+    /// disk 上に `team-history.json` が存在しない状態を確認済み。旧 `Outer Some(None)` に対応。
+    Absent,
+    /// `fp` の disk と同期済み。旧 `Outer Some(Some(fp))` に対応。
+    Synced(DiskFingerprint),
+}
+
+impl DiskSyncState {
+    /// `ensure_loaded` 用: 既に disk 状態を確認済み (= cache をロード済み) かどうか。
+    fn is_known(&self) -> bool {
+        !matches!(self, DiskSyncState::Unknown)
+    }
+
+    /// `reconcile_external_changes` 用: 最後に同期した fingerprint。
+    /// `Unknown` / `Absent` はいずれも「ファイルが無い / 未取得」なので `None` を返す
+    /// (= 旧 `Option<Option<DiskFingerprint>>::and_then(|f| f.clone())` と同じ畳み込み)。
+    fn synced_fingerprint(&self) -> Option<DiskFingerprint> {
+        match self {
+            DiskSyncState::Synced(fp) => Some(fp.clone()),
+            _ => None,
+        }
+    }
+}
+
+/// Issue #739: 旧 `LOCK` / `CACHE` / `DISK_FINGERPRINT` の 3 つの Mutex を 1 つに統合した
+/// グローバル state。各 command が「LOCK → CACHE → DISK_FINGERPRINT」を 3 段ロックしていた
+/// (= 4 command で同じパターンが 4 回) のを `STORE` 1 ロックに置き換える。
+///
+/// - `cache`: Issue #132 の in-memory cache。`None` は「未ロード」、`Some(...)` は
+///   「ディスクと同期済み」状態 (旧 `CACHE` と同じセマンティクス)。
+/// - `sync_state`: Issue #642 の disk fingerprint 三状態 (旧 `DISK_FINGERPRINT`)。
+///
+/// `cache` と `sync_state` を同一 Mutex 配下に置くことで、両者が原子的に整合した状態でしか
+/// 観測されないことが型レベルで保証される (旧実装は別 Mutex だったため理論上の skew があった)。
+#[derive(Default)]
+struct TeamHistoryStore {
+    cache: Option<Vec<TeamHistoryEntry>>,
+    sync_state: DiskSyncState,
+}
+
+static STORE: once_cell::sync::Lazy<Mutex<TeamHistoryStore>> =
+    once_cell::sync::Lazy::new(|| Mutex::new(TeamHistoryStore::default()));
 
 /// disk 上の `team-history.json` の状態を一意に識別するフィンガープリント。
 /// Issue #119 と同じく `mtime + size + sha256` の三要素で「秒精度しかない FS で同サイズに
@@ -159,23 +196,20 @@ fn is_false(v: &bool) -> bool {
     !*v
 }
 
-static LOCK: once_cell::sync::Lazy<Mutex<()>> = once_cell::sync::Lazy::new(|| Mutex::new(()));
-
 fn store_path() -> PathBuf {
     crate::util::config_paths::vibe_root().join("team-history.json")
 }
 
 /// Issue #132: cache が live なら disk I/O をスキップ。
-/// 初回呼び出し時のみディスクから読む。以後 LOCK 配下で cache を直接更新する。
+/// 初回呼び出し時のみディスクから読む。以後 STORE ロック配下で cache を直接更新する。
 ///
-/// Issue #642: cache を seed するのと同時に `DISK_FINGERPRINT` も同 disk 状態で初期化する。
-/// fingerprint=Some(None) は「disk 上にファイルなしを確認済み」、fingerprint=Some(Some(fp))
+/// Issue #642: cache を seed するのと同時に `sync_state` も同 disk 状態で初期化する。
+/// `DiskSyncState::Absent` は「disk 上にファイルなしを確認済み」、`DiskSyncState::Synced(fp)`
 /// は「fp の disk と同期済み」を表す。以後の save 系で fingerprint を比較し、外部変更を検知する。
-async fn ensure_loaded(
-    cache: &mut Option<Vec<TeamHistoryEntry>>,
-    fingerprint: &mut Option<Option<DiskFingerprint>>,
-) {
-    if cache.is_some() && fingerprint.is_some() {
+async fn ensure_loaded(store: &mut TeamHistoryStore) {
+    // Issue #739: 旧 `cache.is_some() && fingerprint.is_some()` と等価。
+    // `sync_state.is_known()` (= Absent / Synced) は旧 `fingerprint.is_some()` と一致する。
+    if store.cache.is_some() && store.sync_state.is_known() {
         return;
     }
     let path = store_path();
@@ -183,22 +217,22 @@ async fn ensure_loaded(
         Ok(bytes) => {
             let entries =
                 serde_json::from_slice::<Vec<TeamHistoryEntry>>(&bytes).unwrap_or_default();
-            *cache = Some(entries);
+            store.cache = Some(entries);
             // Issue #642: 起動直後の fingerprint を保存。以後の save 直前にこれと現在 disk の
             // fingerprint を比較して「外部変更が起きたか」を判定する。
             let meta = fs::metadata(&path).await.ok();
             let mtime_ms = meta.as_ref().and_then(mtime_ms_of);
             let size = meta.as_ref().map(|m| m.len()).unwrap_or(bytes.len() as u64);
-            *fingerprint = Some(Some(DiskFingerprint {
+            store.sync_state = DiskSyncState::Synced(DiskFingerprint {
                 mtime_ms,
                 size,
                 hash: sha256_hex(&bytes),
-            }));
+            });
         }
         Err(_) => {
-            *cache = Some(Vec::new());
+            store.cache = Some(Vec::new());
             // ファイルが存在しない状態を確認済みとして記録する。
-            *fingerprint = Some(None);
+            store.sync_state = DiskSyncState::Absent;
         }
     }
 }
@@ -309,18 +343,25 @@ fn same_entry(a: &TeamHistoryEntry, b: &TeamHistoryEntry) -> bool {
 async fn reconcile_external_changes(
     path: &Path,
     cache: &mut Vec<TeamHistoryEntry>,
-    fingerprint: &mut Option<Option<DiskFingerprint>>,
+    sync_state: &mut DiskSyncState,
     incoming_ids: &HashSet<String>,
 ) -> bool {
     let current_disk = compute_fingerprint(path).await;
-    let last_synced = fingerprint.as_ref().and_then(|f| f.clone());
+    // Issue #739: 旧 `fingerprint.as_ref().and_then(|f| f.clone())` と等価。
+    // `Unknown` / `Absent` はいずれも `None` に畳まれる。
+    let last_synced = sync_state.synced_fingerprint();
     if current_disk == last_synced {
         return false;
     }
     // 外部変更検知: disk reload + merge
     let (disk_entries, fp) = reload_disk_entries(path).await;
     let merged = merge_external_disk(cache, disk_entries, incoming_ids);
-    *fingerprint = Some(fp);
+    // `fp` が `None` (= reload 時に disk 不在) なら `Absent`、`Some(fp)` なら `Synced(fp)`。
+    // 旧実装の `*fingerprint = Some(fp)` (= `Some(None)` / `Some(Some(fp))`) と一致する。
+    *sync_state = match fp {
+        Some(fp) => DiskSyncState::Synced(fp),
+        None => DiskSyncState::Absent,
+    };
     merged
 }
 
@@ -336,7 +377,7 @@ async fn save_all(
         .await
         .map_err(|e| e.to_string())?;
     // Issue #642: 書き込み直後の fingerprint を計算して呼び出し側に返す。caller は
-    // `DISK_FINGERPRINT` を更新することで「次回 save 時の比較基準」を最新に保つ。
+    // `STORE.sync_state` を更新することで「次回 save 時の比較基準」を最新に保つ。
     let meta = fs::metadata(path).await.ok();
     let mtime_ms = meta.as_ref().and_then(mtime_ms_of);
     let size = meta.as_ref().map(|m| m.len()).unwrap_or(json.len() as u64);
@@ -362,13 +403,13 @@ async fn save_all(
 ///    失敗なら cache / fingerprint はそのまま
 ///
 /// `external_change_merged` は #642 の reconcile が立てたフラグをそのまま返値に乗せて
-/// renderer まで伝える。`fingerprint` を `&mut` で受け取るのは success path で
-/// disk と同期した最新 fingerprint を caller の `DISK_FINGERPRINT` に書き戻すため。
+/// renderer まで伝える。`sync_state` を `&mut` で受け取るのは success path で
+/// disk と同期した最新 fingerprint を caller の `STORE.sync_state` に書き戻すため。
 ///
 /// テスト容易性のため `save_fn` を引数に取り、失敗 mock を差し込めるようにしている。
 async fn apply_with_disk_commit<F, Fut>(
     cache: &mut Vec<TeamHistoryEntry>,
-    fingerprint: &mut Option<Option<DiskFingerprint>>,
+    sync_state: &mut DiskSyncState,
     external_change_merged: bool,
     mutate: impl FnOnce(&mut Vec<TeamHistoryEntry>),
     save_fn: F,
@@ -384,9 +425,9 @@ where
     // 2. disk 書き込み — 失敗したら cache は旧 state のまま (rollback 不要)
     match save_fn(candidate.clone()).await {
         Ok(new_fp) => {
-            // 3. 成功した場合のみ cache + fingerprint に commit
+            // 3. 成功した場合のみ cache + sync_state に commit
             *cache = candidate;
-            *fingerprint = Some(Some(new_fp));
+            *sync_state = DiskSyncState::Synced(new_fp);
             MutationResult {
                 ok: true,
                 error: None,
@@ -403,17 +444,17 @@ where
 
 #[tauri::command]
 pub async fn team_history_list(project_root: String) -> Vec<TeamHistoryEntry> {
-    let _g = LOCK.lock().await;
-    let mut cache = CACHE.lock().await;
-    let mut fingerprint = DISK_FINGERPRINT.lock().await;
-    ensure_loaded(&mut cache, &mut fingerprint).await;
+    // Issue #739: 旧 LOCK / CACHE / DISK_FINGERPRINT の 3 段ロックを STORE 1 ロックに統合。
+    let mut store = STORE.lock().await;
+    ensure_loaded(&mut store).await;
     // Issue #642: list でも fingerprint を見て外部変更があれば disk を再読込。renderer が
     // ユーザー手編集後に list を再取得したときに古い in-memory cache を返さないようにする。
     // list には書き込み対象 id が無いため `incoming_ids` は空集合 (= 全 entry を disk 側で
     // 上書き可能) として扱う。
     let path = store_path();
+    let TeamHistoryStore { cache, sync_state } = &mut *store;
     let all = cache.as_mut().expect("ensured");
-    let _ = reconcile_external_changes(&path, all, &mut fingerprint, &HashSet::new()).await;
+    let _ = reconcile_external_changes(&path, all, sync_state, &HashSet::new()).await;
     // Issue #32: 比較は normalize 後の値で行う
     let target = normalize_project_root(&project_root);
     all.iter()
@@ -478,10 +519,10 @@ pub async fn team_history_save(mut entry: TeamHistoryEntry) -> MutationResult {
         };
     }
     hydrate_orchestration_summary(&mut entry).await;
-    let _g = LOCK.lock().await;
-    let mut cache = CACHE.lock().await;
-    let mut fingerprint = DISK_FINGERPRINT.lock().await;
-    ensure_loaded(&mut cache, &mut fingerprint).await;
+    // Issue #739: 旧 LOCK / CACHE / DISK_FINGERPRINT の 3 段ロックを STORE 1 ロックに統合。
+    let mut store = STORE.lock().await;
+    ensure_loaded(&mut store).await;
+    let TeamHistoryStore { cache, sync_state } = &mut *store;
     let all = cache.as_mut().expect("ensured");
 
     // Issue #642: save 直前に disk を再 stat。手編集 / 別 vibe-editor インスタンスが
@@ -492,14 +533,14 @@ pub async fn team_history_save(mut entry: TeamHistoryEntry) -> MutationResult {
     let mut incoming_ids = HashSet::new();
     incoming_ids.insert(entry.id.clone());
     let external_change_merged =
-        reconcile_external_changes(&path, all, &mut fingerprint, &incoming_ids).await;
+        reconcile_external_changes(&path, all, sync_state, &incoming_ids).await;
 
     // Issue #46 + #640: 新エントリは必ず残す。merge_entry で per-project MAX 件まで圧縮。
-    // write-ahead — disk write 成功時だけ cache + fingerprint に commit する。
+    // write-ahead — disk write 成功時だけ cache + sync_state に commit する。
     let path_for_save = path.clone();
     apply_with_disk_commit(
         all,
-        &mut fingerprint,
+        sync_state,
         external_change_merged,
         |candidate| merge_entry(candidate, entry),
         |entries| async move { save_all(&path_for_save, &entries).await },
@@ -528,17 +569,17 @@ pub async fn team_history_save_batch(entries: Vec<TeamHistoryEntry>) -> Mutation
             };
         }
     }
-    // hydrate は disk I/O を伴うので LOCK の外で行う (cache mutate は行わないので安全)
+    // hydrate は disk I/O を伴うので STORE ロックの外で行う (cache mutate は行わないので安全)
     let mut hydrated: Vec<TeamHistoryEntry> = Vec::with_capacity(entries.len());
     for mut entry in entries {
         hydrate_orchestration_summary(&mut entry).await;
         hydrated.push(entry);
     }
 
-    let _g = LOCK.lock().await;
-    let mut cache = CACHE.lock().await;
-    let mut fingerprint = DISK_FINGERPRINT.lock().await;
-    ensure_loaded(&mut cache, &mut fingerprint).await;
+    // Issue #739: 旧 LOCK / CACHE / DISK_FINGERPRINT の 3 段ロックを STORE 1 ロックに統合。
+    let mut store = STORE.lock().await;
+    ensure_loaded(&mut store).await;
+    let TeamHistoryStore { cache, sync_state } = &mut *store;
     let all = cache.as_mut().expect("ensured");
     let path = store_path();
 
@@ -546,13 +587,13 @@ pub async fn team_history_save_batch(entries: Vec<TeamHistoryEntry>) -> Mutation
     // 読み直したとき、これら以外の id は disk 側を尊重 (= 外部編集を保持) する。
     let incoming_ids: HashSet<String> = hydrated.iter().map(|e| e.id.clone()).collect();
     let external_change_merged =
-        reconcile_external_changes(&path, all, &mut fingerprint, &incoming_ids).await;
+        reconcile_external_changes(&path, all, sync_state, &incoming_ids).await;
 
-    // Issue #640: write-ahead — disk write 成功時だけ cache + fingerprint に commit する。
+    // Issue #640: write-ahead — disk write 成功時だけ cache + sync_state に commit する。
     let path_for_save = path.clone();
     apply_with_disk_commit(
         all,
-        &mut fingerprint,
+        sync_state,
         external_change_merged,
         |candidate| {
             for entry in hydrated {
@@ -566,10 +607,10 @@ pub async fn team_history_save_batch(entries: Vec<TeamHistoryEntry>) -> Mutation
 
 #[tauri::command]
 pub async fn team_history_delete(id: String) -> MutationResult {
-    let _g = LOCK.lock().await;
-    let mut cache = CACHE.lock().await;
-    let mut fingerprint = DISK_FINGERPRINT.lock().await;
-    ensure_loaded(&mut cache, &mut fingerprint).await;
+    // Issue #739: 旧 LOCK / CACHE / DISK_FINGERPRINT の 3 段ロックを STORE 1 ロックに統合。
+    let mut store = STORE.lock().await;
+    ensure_loaded(&mut store).await;
+    let TeamHistoryStore { cache, sync_state } = &mut *store;
     let all = cache.as_mut().expect("ensured");
     let path = store_path();
 
@@ -578,7 +619,7 @@ pub async fn team_history_delete(id: String) -> MutationResult {
     let mut incoming_ids = HashSet::new();
     incoming_ids.insert(id.clone());
     let external_change_merged =
-        reconcile_external_changes(&path, all, &mut fingerprint, &incoming_ids).await;
+        reconcile_external_changes(&path, all, sync_state, &incoming_ids).await;
 
     // 該当 entry が無く、外部変更の merge も無ければ disk write 自体不要 (ok を返す)。
     // ただし外部変更を merge した場合は disk と cache の差分が変わっている可能性があるため
@@ -591,11 +632,11 @@ pub async fn team_history_delete(id: String) -> MutationResult {
         };
     }
 
-    // Issue #640: write-ahead — disk write 成功時だけ cache + fingerprint に commit する。
+    // Issue #640: write-ahead — disk write 成功時だけ cache + sync_state に commit する。
     let path_for_save = path.clone();
     apply_with_disk_commit(
         all,
-        &mut fingerprint,
+        sync_state,
         external_change_merged,
         |candidate| candidate.retain(|e| e.id != id),
         |entries| async move { save_all(&path_for_save, &entries).await },
@@ -667,12 +708,12 @@ mod tests {
     async fn apply_with_disk_commit_does_not_mutate_cache_on_save_failure() {
         use crate::commands::error::CommandError;
         let mut cache = vec![make_entry("a", "/proj/x", "2026-05-09T00:00:00Z")];
-        let mut fingerprint: Option<Option<DiskFingerprint>> = Some(None);
+        let mut sync_state = DiskSyncState::Absent;
         let snapshot_before = cache.clone();
 
         let result = apply_with_disk_commit(
             &mut cache,
-            &mut fingerprint,
+            &mut sync_state,
             false,
             |candidate| {
                 merge_entry(
@@ -691,19 +732,19 @@ mod tests {
         assert_eq!(cache.len(), snapshot_before.len());
         assert_eq!(cache[0].id, "a");
         assert!(cache.iter().all(|e| e.id != "b"));
-        // fingerprint も touch されていない (Some(None) のまま)
-        assert!(matches!(fingerprint, Some(None)));
+        // sync_state も touch されていない (Absent のまま)
+        assert_eq!(sync_state, DiskSyncState::Absent);
     }
 
     /// 成功 path では cache に candidate が commit される + fingerprint が更新される。
     #[tokio::test]
     async fn apply_with_disk_commit_commits_cache_on_save_success() {
         let mut cache = vec![make_entry("a", "/proj/x", "2026-05-09T00:00:00Z")];
-        let mut fingerprint: Option<Option<DiskFingerprint>> = Some(None);
+        let mut sync_state = DiskSyncState::Absent;
 
         let result = apply_with_disk_commit(
             &mut cache,
-            &mut fingerprint,
+            &mut sync_state,
             false,
             |candidate| {
                 merge_entry(
@@ -727,11 +768,10 @@ mod tests {
         assert_eq!(cache.len(), 2);
         assert!(cache.iter().any(|e| e.id == "b"));
         assert!(cache.iter().any(|e| e.id == "a"));
-        // fingerprint も更新されている
-        let fp = fingerprint
-            .as_ref()
-            .and_then(|f| f.as_ref())
-            .expect("fingerprint set");
+        // sync_state も Synced(fp) に更新されている
+        let fp = sync_state
+            .synced_fingerprint()
+            .expect("sync_state must be Synced after success");
         assert_eq!(fp.size, 42);
         assert_eq!(fp.hash, "deadbeef");
     }
@@ -744,12 +784,12 @@ mod tests {
             make_entry("a", "/proj/x", "2026-05-09T00:00:00Z"),
             make_entry("b", "/proj/x", "2026-05-10T00:00:00Z"),
         ];
-        let mut fingerprint: Option<Option<DiskFingerprint>> = Some(None);
+        let mut sync_state = DiskSyncState::Absent;
 
         let target_id = "a".to_string();
         let result = apply_with_disk_commit(
             &mut cache,
-            &mut fingerprint,
+            &mut sync_state,
             false,
             |candidate| candidate.retain(|e| e.id != target_id),
             |_entries| async { Err(CommandError::Io("permission denied".to_string())) },
@@ -767,7 +807,7 @@ mod tests {
     async fn apply_with_disk_commit_batch_save_rolls_back_all_on_failure() {
         use crate::commands::error::CommandError;
         let mut cache = vec![make_entry("a", "/proj/x", "2026-05-09T00:00:00Z")];
-        let mut fingerprint: Option<Option<DiskFingerprint>> = Some(None);
+        let mut sync_state = DiskSyncState::Absent;
         let new_entries = vec![
             make_entry("b", "/proj/x", "2026-05-10T00:00:00Z"),
             make_entry("c", "/proj/x", "2026-05-10T01:00:00Z"),
@@ -775,7 +815,7 @@ mod tests {
 
         let result = apply_with_disk_commit(
             &mut cache,
-            &mut fingerprint,
+            &mut sync_state,
             false,
             |candidate| {
                 for entry in new_entries {
@@ -798,14 +838,14 @@ mod tests {
     #[tokio::test]
     async fn apply_with_disk_commit_passes_candidate_state_to_save_fn() {
         let mut cache = vec![make_entry("a", "/proj/x", "2026-05-09T00:00:00Z")];
-        let mut fingerprint: Option<Option<DiskFingerprint>> = Some(None);
+        let mut sync_state = DiskSyncState::Absent;
         let captured: std::sync::Arc<std::sync::Mutex<Option<Vec<String>>>> =
             std::sync::Arc::new(std::sync::Mutex::new(None));
         let captured_for_fn = captured.clone();
 
         let result = apply_with_disk_commit(
             &mut cache,
-            &mut fingerprint,
+            &mut sync_state,
             false,
             |candidate| {
                 merge_entry(
@@ -841,11 +881,11 @@ mod tests {
     #[tokio::test]
     async fn apply_with_disk_commit_propagates_external_change_merged_flag() {
         let mut cache = vec![make_entry("a", "/proj/x", "2026-05-09T00:00:00Z")];
-        let mut fingerprint: Option<Option<DiskFingerprint>> = Some(None);
+        let mut sync_state = DiskSyncState::Absent;
 
         let result = apply_with_disk_commit(
             &mut cache,
-            &mut fingerprint,
+            &mut sync_state,
             true, // 外部変更を merge 済み
             |_candidate| {},
             |_entries| async {
@@ -1005,11 +1045,11 @@ mod tests {
         let entries = vec![entry("a", "x", "2026-01-03T00:00:00Z")];
         let fp = save_all(&path, &entries).await.unwrap();
         let mut cache = entries.clone();
-        let mut fingerprint: Option<Option<DiskFingerprint>> = Some(Some(fp));
+        let mut sync_state = DiskSyncState::Synced(fp);
         let incoming = HashSet::new();
 
         let merged =
-            reconcile_external_changes(&path, &mut cache, &mut fingerprint, &incoming).await;
+            reconcile_external_changes(&path, &mut cache, &mut sync_state, &incoming).await;
 
         assert!(!merged, "fingerprint match → no merge");
         assert_eq!(cache.len(), 1);
@@ -1031,7 +1071,7 @@ mod tests {
             entry("b", "original-summary", "2026-01-02T00:00:00Z"),
             entry("a", "new-from-app", "2026-01-03T00:00:00Z"),
         ];
-        let mut fingerprint: Option<Option<DiskFingerprint>> = Some(Some(fp));
+        let mut sync_state = DiskSyncState::Synced(fp);
 
         // Step 3: ユーザーが外部 (jq 等) で disk の entry "b" の summary を直接編集
         let externally_edited = vec![entry("b", "user-hand-edited!", "2026-01-02T00:00:00Z")];
@@ -1043,7 +1083,7 @@ mod tests {
         incoming.insert("a".to_string());
 
         let merged =
-            reconcile_external_changes(&path, &mut cache, &mut fingerprint, &incoming).await;
+            reconcile_external_changes(&path, &mut cache, &mut sync_state, &incoming).await;
 
         assert!(merged, "external edit on 'b' must be detected");
         // cache の "b" は disk 側 (手編集) で上書きされている
@@ -1063,22 +1103,25 @@ mod tests {
                 .and_then(|o| o.blocked_reason.as_deref()),
             Some("new-from-app"),
         );
-        // fingerprint は disk 側に更新されている
-        assert!(fingerprint.as_ref().and_then(|f| f.as_ref()).is_some());
+        // sync_state は disk 側に更新されている (= Synced)
+        assert!(
+            sync_state.synced_fingerprint().is_some(),
+            "sync_state must be Synced after external reload"
+        );
     }
 
     /// disk のファイルが存在しない (= 初回 save 前) ケースで、`reconcile_external_changes` が
-    /// fingerprint=None と一致して no-op になる。
+    /// fingerprint なし (= Absent) と一致して no-op になる。
     #[tokio::test]
     async fn reconcile_no_op_when_disk_absent_and_fingerprint_absent() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("team-history.json");
         let mut cache: Vec<TeamHistoryEntry> = vec![];
-        let mut fingerprint: Option<Option<DiskFingerprint>> = Some(None);
+        let mut sync_state = DiskSyncState::Absent;
         let incoming = HashSet::new();
 
         let merged =
-            reconcile_external_changes(&path, &mut cache, &mut fingerprint, &incoming).await;
+            reconcile_external_changes(&path, &mut cache, &mut sync_state, &incoming).await;
         assert!(!merged);
         assert!(cache.is_empty());
     }

@@ -16,6 +16,8 @@ pub mod git;
 pub mod handoffs;
 pub mod logs;
 pub mod role_profiles;
+// Issue #739: 永続化 schema バージョン定数 + 互換性ガードの集約モジュール。
+pub mod schema_version;
 pub mod sessions;
 pub mod settings;
 pub mod team_diagnostics;

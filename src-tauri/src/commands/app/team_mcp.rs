@@ -172,9 +172,8 @@ pub async fn app_setup_team_mcp(
     // → app_install_vibe_team_skill と同じく req_canon == active_canon を検証してから install する。
     let trimmed = project_root.trim();
     if !trimmed.is_empty() {
-        let active = crate::state::lock_project_root_recover(&state.project_root)
-            .clone()
-            .unwrap_or_default();
+        let active =
+            crate::state::current_project_root(&state.project_root).unwrap_or_default();
         if active.trim().is_empty() {
             tracing::warn!(
                 "[setup_team_mcp] skipping skill install: no active project_root configured"

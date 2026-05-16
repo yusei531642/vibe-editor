@@ -161,10 +161,8 @@ pub async fn app_install_vibe_team_skill(
     // Issue #135 (Security): renderer から来る project_root が AppState の現在値と一致
     // するか canonicalize 比較する。一致しないとユーザー HOME 等の任意ディレクトリ配下に
     // .claude/skills/vibe-team/SKILL.md を作成できてしまい AI hijack 経路になる。
-    // Issue #147: poison でも recovery して読む
-    let active = crate::state::lock_project_root_recover(&state.project_root)
-        .clone()
-        .unwrap_or_default();
+    // Issue #739: ArcSwapOption の lock-free load で現在値を読む。
+    let active = crate::state::current_project_root(&state.project_root).unwrap_or_default();
     if active.trim().is_empty() {
         return Ok(InstallSkillResult {
             ok: false,
