@@ -650,6 +650,10 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     ? healthSnapshot.byAgentId[payload.agentId] ?? null
     : null;
   const health = useMemo(() => deriveHealth(healthRow), [healthRow]);
+  const hasHealthRow = healthRow !== null;
+  const unreadInboxCount = hasHealthRow
+    ? health.pendingInboxCount
+    : payload.unreadInboxCount ?? 0;
 
   return (
     <>
@@ -774,11 +778,13 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
           ) : null}
           {/* Issue #509: 配送済みだが team_read で確認していない message の数。 */}
           {/* 60s 超過で stalled クラスを追加して警告色に切り替える。 */}
-          {(payload.unreadInboxCount ?? 0) > 0 ? (() => {
-            const ageMs = payload.oldestUnreadDeliveredAt
-              ? Math.max(0, nowTick - new Date(payload.oldestUnreadDeliveredAt).getTime())
-              : 0;
-            const stalled = ageMs >= 60_000;
+          {unreadInboxCount > 0 ? (() => {
+            const ageMs = hasHealthRow
+              ? health.oldestPendingInboxAgeMs ?? 0
+              : payload.oldestUnreadDeliveredAt
+                ? Math.max(0, nowTick - new Date(payload.oldestUnreadDeliveredAt).getTime())
+                : 0;
+            const stalled = hasHealthRow ? health.stalledInbound : ageMs >= 60_000;
             const ageSec = Math.floor(ageMs / 1000);
             return (
               <div
@@ -790,14 +796,14 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
                 }
                 role="status"
                 title={t('inboxUnread.tooltip', {
-                  count: payload.unreadInboxCount ?? 0,
+                  count: unreadInboxCount,
                   ageSec
                 })}
               >
                 <Inbox size={11} strokeWidth={2} aria-hidden="true" />
                 <span className="canvas-agent-card__summary-text">
                   {t('inboxUnread.label', {
-                    count: payload.unreadInboxCount ?? 0,
+                    count: unreadInboxCount,
                     ageSec
                   })}
                 </span>

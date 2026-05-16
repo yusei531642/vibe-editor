@@ -30,6 +30,10 @@ export interface HealthDerived {
   currentStatus: string | null;
   /** pendingInbox 数 (UI で badge 表示) */
   pendingInboxCount: number;
+  /** 一番古い pending inbox の経過時間。未読なし / 不明なら null。 */
+  oldestPendingInboxAgeMs: number | null;
+  /** Hub 側が「未読が長く残っている」と判定したか。 */
+  stalledInbound: boolean;
 }
 
 export function deriveHealth(
@@ -40,7 +44,9 @@ export function deriveHealth(
       state: 'unknown',
       ageMs: null,
       currentStatus: null,
-      pendingInboxCount: 0
+      pendingInboxCount: 0,
+      oldestPendingInboxAgeMs: null,
+      stalledInbound: false
     };
   }
 
@@ -66,6 +72,8 @@ export function deriveHealth(
     state,
     ageMs: ageMs ?? null,
     currentStatus: row.currentStatus,
-    pendingInboxCount: row.pendingInboxCount
+    pendingInboxCount: row.pendingInboxCount,
+    oldestPendingInboxAgeMs: row.oldestPendingInboxAgeMs,
+    stalledInbound: row.stalledInbound
   };
 }
