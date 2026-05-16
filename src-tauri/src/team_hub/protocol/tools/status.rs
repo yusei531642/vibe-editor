@@ -282,8 +282,11 @@ mod tests {
             .await
             .expect("ok");
         let saved = result["currentStatus"].as_str().unwrap().to_string();
+        // 入力の非制御文字は "running" + "tests" + "still" + "going"。
+        // sanitize_status_text は制御文字 (ESC seq / BEL / 改行 / NUL) のみ除去し、
+        // 通常文字はそのまま残すため期待値は "runningtestsstillgoing"。
         assert_eq!(
-            saved, "runningteststillgoing",
+            saved, "runningtestsstillgoing",
             "control chars must be stripped (got: {saved:?})"
         );
     }
