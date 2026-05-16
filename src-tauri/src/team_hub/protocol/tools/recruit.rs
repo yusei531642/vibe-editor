@@ -225,7 +225,7 @@ pub async fn team_recruit(
         .unwrap_or("")
         .to_string();
     if role_profile_id.is_empty() {
-        return Err("role_id is required".into());
+        return Err(RecruitError::invalid_args("recruit", "role_id is required"));
     }
     let engine = args
         .get("engine")
@@ -451,9 +451,11 @@ pub async fn team_recruit(
     {
         Ok(c) => c,
         // Issue #737: `try_register_pending_recruit` は hub 内部関数で `Result<_, String>` を
-        // 返す。generic な `tool_error` code で包んで RecruitError へ持ち上げる
-        // (`From<String>` impl と同じ扱い。message 文字列はそのまま保持される)。
-        Err(e) => return Err(e.into()),
+        // 返す。recruit 名前空間の専用 code を付けて RecruitError へ持ち上げる
+        // (message 文字列はそのまま保持される)。
+        Err(e) => {
+            return Err(RecruitError::new("recruit_pending_registration_failed", e))
+        }
     };
     let rx = channels.handshake;
     let ack_rx = channels.ack;
@@ -495,7 +497,10 @@ pub async fn team_recruit(
         }
     } else {
         hub.cancel_pending_recruit(&new_agent_id).await;
-        return Err("renderer not available (canvas mode required)".into());
+        return Err(RecruitError::new(
+            "recruit_renderer_unavailable",
+            "renderer not available (canvas mode required)",
+        ));
     }
 
     // Issue #342 Phase 1 (1.11): 環境変数 `VIBE_TEAM_DISABLE_RECRUIT_ACK=1` で旧 fire-and-forget

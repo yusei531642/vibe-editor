@@ -127,8 +127,13 @@ pub async fn team_create_leader(
     {
         Ok(c) => c,
         // Issue #737: `try_register_pending_recruit` は hub 内部関数で `Result<_, String>` を
-        // 返す。generic な `tool_error` code で包んで RecruitError へ持ち上げる。
-        Err(e) => return Err(e.into()),
+        // 返す。create_leader 名前空間の専用 code を付けて RecruitError へ持ち上げる。
+        Err(e) => {
+            return Err(RecruitError::new(
+                "create_leader_pending_registration_failed",
+                e,
+            ))
+        }
     };
     let rx = channels.handshake;
     let ack_rx = channels.ack;
@@ -154,7 +159,10 @@ pub async fn team_create_leader(
         }
     } else {
         hub.cancel_pending_recruit(&new_agent_id).await;
-        return Err("renderer not available (canvas mode required)".into());
+        return Err(RecruitError::new(
+            "create_leader_renderer_unavailable",
+            "renderer not available (canvas mode required)",
+        ));
     }
 
     // ack 待機 (renderer が `team:recruit-request` を受領 → addCard 開始)
