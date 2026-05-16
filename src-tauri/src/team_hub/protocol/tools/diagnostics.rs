@@ -128,6 +128,10 @@ fn build_member_diagnostics_row(
         "lastStatusAt": diagnostics.last_status_at,
         // Issue #524: PTY 出力アクティビティ + staleness 自動判定
         "lastPtyOutputAt": diagnostics.last_pty_output_at,
+        "lastExitAt": diagnostics.last_exit_at,
+        "lastExitCode": diagnostics.last_exit_code,
+        "lastExitReason": diagnostics.last_exit_reason,
+        "lastExitSessionId": diagnostics.last_exit_session_id,
         "lastStatusAgeMs": last_status_age_ms,
         "lastPtyActivityAgeMs": last_pty_activity_age_ms,
         "autoStale": auto_stale,

@@ -17,11 +17,15 @@ pub(crate) const RECRUIT_TIMEOUT: Duration = Duration::from_secs(30);
 ///
 /// 実行時値は環境変数 `VIBE_TEAM_RECRUIT_CONCURRENCY` で `1..=RECRUIT_MAX_CONCURRENCY`
 /// の範囲に上書き可能 (範囲外 / parse 失敗時は本既定値にフォールバック)。
-pub(crate) const RECRUIT_DEFAULT_CONCURRENCY: usize = 2;
+pub(crate) const RECRUIT_DEFAULT_CONCURRENCY: usize = 1;
 /// Issue #576: `VIBE_TEAM_RECRUIT_CONCURRENCY` で受け付ける permit 数の上限。
 /// 上限 8 は Phase 1 ログ (`[teamhub] recruit_ack received elapsed_ms=...`) で観測される
 /// 「同時 recruit 6 体」が WebView 側で破綻しない範囲を多少上回る程度に絞った安全弁。
 pub(crate) const RECRUIT_MAX_CONCURRENCY: usize = 8;
+/// Issue #752 / #753: handshake が返った直後に Claude CLI が
+/// `No conversation found with session ID` 等で終了するケースを success 扱いしないため、
+/// `team_recruit` が成功を返す前にこの時間だけ roster 上の生存を再確認する。
+pub(crate) const RECRUIT_POST_HANDSHAKE_LIVENESS_GRACE: Duration = Duration::from_millis(1_500);
 /// Issue #342 Phase 1: renderer 側 `app_recruit_ack` invoke 受領を待つ短期タイムアウトの
 /// デフォルト値。「addCard / spawn 開始の受領通知」を待つ (handshake 完了までは待たない)。
 ///

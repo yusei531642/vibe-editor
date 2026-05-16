@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use super::super::consts::RECRUIT_ACK_TIMEOUT;
 use super::super::consts::RECRUIT_ACK_TIMEOUT_MAX_SECS;
+use super::super::consts::RECRUIT_POST_HANDSHAKE_LIVENESS_GRACE;
 use super::super::consts::RECRUIT_TIMEOUT;
 use super::super::dynamic_role::{validate_and_register_dynamic_role, DynamicRoleOutcome};
 use super::super::instruction_lint::{lint_all, LintReport};
@@ -76,6 +77,94 @@ fn parse_wait_policy(args: &Value) -> Result<String, String> {
         .with_phase("args")
         .into_err_string()),
     }
+}
+
+fn recruit_liveness_error(
+    code: &str,
+    message: String,
+    agent_id: &str,
+    role_profile_id: &str,
+    elapsed_ms: u64,
+    diag: Option<crate::team_hub::MemberDiagnostics>,
+) -> String {
+    let (session_id, exit_code, exit_reason) = match diag {
+        Some(d) => (d.last_exit_session_id, d.last_exit_code, d.last_exit_reason),
+        None => (None, None, None),
+    };
+    serde_json::to_string(&json!({
+        "code": code,
+        "message": message,
+        "phase": "post_handshake_liveness",
+        "elapsed_ms": elapsed_ms,
+        "agentId": agent_id,
+        "roleProfileId": role_profile_id,
+        "sessionId": session_id,
+        "exitCode": exit_code,
+        "exitReason": exit_reason,
+        "logPath": crate::team_hub::server_log_path_for_diagnostics(),
+    }))
+    .unwrap_or_else(|_| message)
+}
+
+async fn verify_recruit_liveness(
+    hub: &TeamHub,
+    team_id: &str,
+    agent_id: &str,
+    role_profile_id: &str,
+    started: Instant,
+) -> Result<(), String> {
+    tokio::time::sleep(RECRUIT_POST_HANDSHAKE_LIVENESS_GRACE).await;
+
+    let members = hub.registry.list_team_members(team_id);
+    if members
+        .iter()
+        .any(|(aid, role)| aid == agent_id && role == role_profile_id)
+    {
+        return Ok(());
+    }
+
+    let diag = hub.get_member_diagnostics(agent_id).await;
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    let code = if diag
+        .as_ref()
+        .and_then(|d| d.last_exit_session_id.as_deref())
+        .is_some()
+    {
+        "recruit_session_not_found"
+    } else if diag.as_ref().and_then(|d| d.last_exit_code).is_some() {
+        "child_process_exited"
+    } else {
+        "recruit_roster_inconsistent"
+    };
+    let message = match code {
+        "recruit_session_not_found" => {
+            let sid = diag
+                .as_ref()
+                .and_then(|d| d.last_exit_session_id.as_deref())
+                .unwrap_or("unknown");
+            format!("recruited agent exited because Claude session was not found: {sid}")
+        }
+        "child_process_exited" => {
+            let exit_code = diag
+                .as_ref()
+                .and_then(|d| d.last_exit_code)
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            format!("recruited agent exited before it became assignable (exitCode={exit_code})")
+        }
+        _ => format!(
+            "recruited agent did not remain in team roster after handshake (agentId={agent_id})"
+        ),
+    };
+
+    Err(recruit_liveness_error(
+        code,
+        message,
+        agent_id,
+        role_profile_id,
+        elapsed_ms,
+        diag,
+    ))
 }
 
 /// team_recruit: 新メンバーをチームに追加する。Renderer に event::emit でカード生成を依頼し、
@@ -473,6 +562,15 @@ pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Res
     // handshake 完了を待つ (Issue #342 Phase 1: ack 成功後のみ到達。disable_ack=1 では従来通り即座に到達)
     match tokio::time::timeout(RECRUIT_TIMEOUT, rx).await {
         Ok(Ok(outcome)) => {
+            verify_recruit_liveness(
+                hub,
+                &ctx.team_id,
+                &outcome.agent_id,
+                &outcome.role_profile_id,
+                started,
+            )
+            .await?;
+
             // Issue #342 Phase 3 (3.6): 成功時に recruitedAt / handshakeAt を返す。
             // recruited_at は registry 登録時刻、handshakeAt は handshake 完了時刻。
             // どちらも `resolve_pending_recruit` で member_diagnostics に書き込み済み。

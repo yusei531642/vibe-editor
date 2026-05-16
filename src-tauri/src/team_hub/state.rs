@@ -111,6 +111,15 @@ pub struct MemberDiagnostics {
     /// に diagnostics 側で `autoStale: true` を立てる元データ。
     /// 大量出力で hub の lock 競合を避けるため、PTY batcher が 1 秒間隔で dedup して update する。
     pub last_pty_output_at: Option<String>,
+    /// 子プロセスが終了した最終時刻。`team_recruit` が handshake 直後の即終了を成功扱い
+    /// しないための診断情報として保持する。
+    pub last_exit_at: Option<String>,
+    /// 子プロセスの終了コード。OS から取れない場合は -1。
+    pub last_exit_code: Option<i64>,
+    /// 終了直前の出力から推定した短い理由。
+    pub last_exit_reason: Option<String>,
+    /// Claude CLI が出した `No conversation found with session ID: ...` から抽出した session id。
+    pub last_exit_session_id: Option<String>,
 }
 
 /// Issue #342 Phase 3 (3.11): tracing-appender が書き出すログファイルの絶対パスを
@@ -174,9 +183,24 @@ pub fn server_log_path_for_diagnostics() -> String {
     }
 }
 
+fn extract_no_conversation_session_id(output_tail: &str) -> Option<String> {
+    const MARKER: &str = "No conversation found with session ID:";
+    let idx = output_tail.rfind(MARKER)?;
+    let rest = output_tail[idx + MARKER.len()..].trim_start();
+    let session_id: String = rest
+        .chars()
+        .take_while(|ch| ch.is_ascii_alphanumeric() || *ch == '-' || *ch == '_')
+        .collect();
+    if session_id.is_empty() {
+        None
+    } else {
+        Some(session_id)
+    }
+}
+
 #[cfg(test)]
 mod path_tests {
-    use super::reduce_home_prefix;
+    use super::{extract_no_conversation_session_id, reduce_home_prefix};
 
     /// home prefix が正しく `~` に置換され、home 配下でないパスは原文のまま。
     /// home 解決失敗環境を想定した静的テストではないので、CI 環境次第で home が
@@ -210,6 +234,15 @@ mod path_tests {
         };
         let reduced = reduce_home_prefix(outside);
         assert_eq!(reduced, outside);
+    }
+
+    #[test]
+    fn extracts_no_conversation_session_id_from_tail() {
+        let tail = "\r\nNo conversation found with session ID: f45f9cf8-eddc-4e70-a5a9-d4d2e6aa0ef9\r\n[process exited]";
+        assert_eq!(
+            extract_no_conversation_session_id(tail).as_deref(),
+            Some("f45f9cf8-eddc-4e70-a5a9-d4d2e6aa0ef9")
+        );
     }
 }
 
@@ -1070,6 +1103,59 @@ impl TeamHub {
             .member_diagnostics
             .get(agent_id)
             .cloned()
+    }
+
+    /// PTY の子プロセス終了を TeamHub 側の診断・整合性情報へ反映する。
+    ///
+    /// registry からは exit watcher が先に remove するため、roster 自体はそこで消える。
+    /// ここでは role binding / file lock / 終了診断を掃除し、`team_recruit` が handshake
+    /// 直後の即終了を検出して構造化エラーにできるようにする。
+    pub async fn record_agent_process_exit(
+        &self,
+        team_id: &str,
+        agent_id: &str,
+        exit_code: i64,
+        output_tail: Option<String>,
+    ) {
+        let now_iso = chrono::Utc::now().to_rfc3339();
+        let session_id = output_tail
+            .as_deref()
+            .and_then(extract_no_conversation_session_id);
+        let reason = if let Some(session_id) = &session_id {
+            Some(format!(
+                "No conversation found with session ID: {session_id}"
+            ))
+        } else {
+            Some(format!("child process exited with exitCode={exit_code}"))
+        };
+        {
+            let mut s = self.state.lock().await;
+            let diag = s
+                .member_diagnostics
+                .entry(agent_id.to_string())
+                .or_default();
+            if diag.recruited_at.is_empty() {
+                diag.recruited_at = now_iso.clone();
+            }
+            diag.last_exit_at = Some(now_iso);
+            diag.last_exit_code = Some(exit_code);
+            diag.last_exit_reason = reason;
+            diag.last_exit_session_id = session_id;
+            s.agent_role_bindings
+                .remove(&(team_id.to_string(), agent_id.to_string()));
+        }
+
+        let released_lock_count = self
+            .release_all_file_locks_for_agent(team_id, agent_id)
+            .await;
+        if released_lock_count > 0 {
+            tracing::info!(
+                "[teamhub] released {released_lock_count} advisory file lock(s) on process exit \
+                 (team={} agent={})",
+                team_id,
+                agent_id
+            );
+        }
     }
 
     /// Issue #342 Phase 3 (3.3): MemberDiagnostics 全体のスナップショットを返す。
