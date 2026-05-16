@@ -48,17 +48,17 @@ fn parse_target_paths(args: &Value) -> Vec<String> {
     out
 }
 
-fn assign_invalid_done_criteria(message: impl Into<String>) -> String {
+fn assign_invalid_done_criteria(message: impl Into<String>) -> AssignError {
     AssignError {
         code: "assign_done_criteria_required".into(),
         message: message.into(),
         phase: None,
         elapsed_ms: None,
+        details: None,
     }
-    .into_err_string()
 }
 
-fn parse_done_criteria(args: &Value) -> Result<Vec<String>, String> {
+fn parse_done_criteria(args: &Value) -> Result<Vec<String>, AssignError> {
     let arr = args
         .get("done_criteria")
         .or_else(|| args.get("doneCriteria"))
@@ -101,17 +101,17 @@ fn optional_text_field(
         .map(ToOwned::to_owned)
 }
 
-fn assign_invalid_pre_approval(message: impl Into<String>) -> String {
+fn assign_invalid_pre_approval(message: impl Into<String>) -> AssignError {
     AssignError {
         code: "assign_invalid_pre_approval".into(),
         message: message.into(),
         phase: None,
         elapsed_ms: None,
+        details: None,
     }
-    .into_err_string()
 }
 
-fn parse_pre_approval(args: &Value) -> Result<Option<TaskPreApprovalSnapshot>, String> {
+fn parse_pre_approval(args: &Value) -> Result<Option<TaskPreApprovalSnapshot>, AssignError> {
     let Some(raw) = args.get("pre_approval").or_else(|| args.get("preApproval")) else {
         return Ok(None);
     };
@@ -196,13 +196,15 @@ pub async fn team_assign_task(
     hub: &TeamHub,
     ctx: &CallContext,
     args: &Value,
-) -> Result<Value, String> {
+) -> Result<Value, AssignError> {
     // Issue #114: 旧実装は assignee / description の空チェックだけで権限を見ておらず、
     // canAssignTasks=false のロールでも task を作成できてしまっていた。先頭で必ず権限検証する。
     if let Err(e) = check_permission(&ctx.role, Permission::AssignTasks) {
-        return Err(
-            AssignError::permission_denied("assign", &e.role, "assign tasks").into_err_string(),
-        );
+        return Err(AssignError::permission_denied(
+            "assign",
+            &e.role,
+            "assign tasks",
+        ));
     }
     let assignee_raw = args.get("assignee").and_then(|v| v.as_str()).unwrap_or("");
     let assignee = assignee_raw.trim();
@@ -216,8 +218,8 @@ pub async fn team_assign_task(
             message: "assignee and description are required".into(),
             phase: None,
             elapsed_ms: None,
-        }
-        .into_err_string());
+            details: None,
+        });
     }
     // Issue #526: `target_paths: string[]` (任意) — このタスクで触る予定のファイル / dir 宣言。
     // Hub は assign_task 時点で同 path を別 agent が握っていないか peek し、
@@ -263,8 +265,8 @@ pub async fn team_assign_task(
             ),
             phase: None,
             elapsed_ms: None,
-        }
-        .into_err_string());
+            details: None,
+        });
     }
     // Issue #525: #526 の advisory lock を task state へ接続する。
     // target_paths がある時点で既存 lock と peek し、response だけでなく TeamTaskSnapshot にも
@@ -330,8 +332,8 @@ pub async fn team_assign_task(
                     ),
                     phase: None,
                     elapsed_ms: None,
-                }
-                .into_err_string());
+                    details: None,
+                });
             }
         };
         match crate::team_hub::spool::spool_long_payload(&project_root, description, "assign").await
@@ -367,8 +369,8 @@ pub async fn team_assign_task(
                     ),
                     phase: None,
                     elapsed_ms: None,
-                }
-                .into_err_string());
+                    details: None,
+                });
             }
         }
     }
@@ -764,8 +766,8 @@ mod tests {
         let missing = parse_done_criteria(&json!({})).unwrap_err();
         let empty = parse_done_criteria(&json!({ "done_criteria": [" "] })).unwrap_err();
 
-        assert!(missing.contains("assign_done_criteria_required"));
-        assert!(empty.contains("at least one non-empty criterion"));
+        assert_eq!(missing.code, "assign_done_criteria_required");
+        assert!(empty.message.contains("at least one non-empty criterion"));
     }
 
     #[test]
@@ -793,8 +795,8 @@ mod tests {
         }))
         .unwrap_err();
 
-        assert!(err.contains("assign_invalid_pre_approval"));
-        assert!(err.contains("at least one non-empty action"));
+        assert_eq!(err.code, "assign_invalid_pre_approval");
+        assert!(err.message.contains("at least one non-empty action"));
     }
 
     #[test]

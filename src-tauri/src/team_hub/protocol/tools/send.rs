@@ -68,7 +68,7 @@ impl MessageKind {
     }
 }
 
-fn parse_message_kind(args: &Value) -> Result<MessageKind, String> {
+fn parse_message_kind(args: &Value) -> Result<MessageKind, SendError> {
     let raw = args
         .get("kind")
         .and_then(|v| v.as_str())
@@ -79,20 +79,17 @@ fn parse_message_kind(args: &Value) -> Result<MessageKind, String> {
         "advisory" => Ok(MessageKind::Advisory),
         "request" => Ok(MessageKind::Request),
         "report" => Ok(MessageKind::Report),
-        other => Err(SendError {
-            code: "send_invalid_args".into(),
-            message: format!("kind must be advisory, request, or report (got {other:?})"),
-            phase: None,
-            elapsed_ms: None,
-        }
-        .into_err_string()),
+        other => Err(SendError::invalid_args(
+            "send",
+            format!("kind must be advisory, request, or report (got {other:?})"),
+        )),
     }
 }
 
 fn non_empty_optional_field(
     obj: &serde_json::Map<String, Value>,
     field: &str,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, SendError> {
     match obj.get(field) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(s)) => {
@@ -103,17 +100,14 @@ fn non_empty_optional_field(
                 Ok(Some(trimmed.to_string()))
             }
         }
-        Some(_) => Err(SendError {
-            code: "send_invalid_args".into(),
-            message: format!("message.{field} must be a string when provided"),
-            phase: None,
-            elapsed_ms: None,
-        }
-        .into_err_string()),
+        Some(_) => Err(SendError::invalid_args(
+            "send",
+            format!("message.{field} must be a string when provided"),
+        )),
     }
 }
 
-fn parse_message_body(args: &Value) -> Result<(String, MessageBodyKind), String> {
+fn parse_message_body(args: &Value) -> Result<(String, MessageBodyKind), SendError> {
     let Some(message_value) = args.get("message") else {
         return Ok((String::new(), MessageBodyKind::Plain));
     };
@@ -123,25 +117,18 @@ fn parse_message_body(args: &Value) -> Result<(String, MessageBodyKind), String>
     }
 
     let Some(obj) = message_value.as_object() else {
-        return Err(SendError {
-            code: "send_invalid_args".into(),
-            message: "message must be a string or an object with instructions/context/data fields"
-                .into(),
-            phase: None,
-            elapsed_ms: None,
-        }
-        .into_err_string());
+        return Err(SendError::invalid_args(
+            "send",
+            "message must be a string or an object with instructions/context/data fields",
+        ));
     };
 
     for field in obj.keys() {
         if !matches!(field.as_str(), "instructions" | "context" | "data") {
-            return Err(SendError {
-                code: "send_invalid_args".into(),
-                message: format!("message.{field} is not allowed"),
-                phase: None,
-                elapsed_ms: None,
-            }
-            .into_err_string());
+            return Err(SendError::invalid_args(
+                "send",
+                format!("message.{field} is not allowed"),
+            ));
         }
     }
 
@@ -265,7 +252,7 @@ struct SendArgs {
 ///   - `to` / `message` (+body kind) / `kind` / `handoff_id` を取り出す
 ///   - `to` 空 or `message` 空 → `send_invalid_args`
 ///   - `message` が `MAX_MESSAGE_LEN` 超過 → `send_message_too_large`
-fn parse_send_args(args: &Value) -> Result<SendArgs, String> {
+fn parse_send_args(args: &Value) -> Result<SendArgs, SendError> {
     // trim は resolve_targets 内で行うので、ここでは生文字列を保持して履歴 / 検証に使う。
     let to = args
         .get("to")
@@ -276,27 +263,21 @@ fn parse_send_args(args: &Value) -> Result<SendArgs, String> {
     let message_kind = parse_message_kind(args)?;
     let handoff_id = optional_string(args, "handoff_id", "handoffId");
     if to.trim().is_empty() || message.is_empty() {
-        return Err(SendError {
-            code: "send_invalid_args".into(),
-            message: "to and a non-empty message are required".into(),
-            phase: None,
-            elapsed_ms: None,
-        }
-        .into_err_string());
+        return Err(SendError::invalid_args(
+            "send",
+            "to and a non-empty message are required",
+        ));
     }
     // Issue #107: 1 メッセージのハードリミット超過は拒否 (途中で truncate すると意味が壊れる)
     if message.len() > MAX_MESSAGE_LEN {
-        return Err(SendError {
-            code: "send_message_too_large".into(),
-            message: format!(
+        return Err(SendError::new(
+            "send_message_too_large",
+            format!(
                 "message too large: {} bytes (limit {} bytes)",
                 message.len(),
                 MAX_MESSAGE_LEN
             ),
-            phase: None,
-            elapsed_ms: None,
-        }
-        .into_err_string());
+        ));
     }
     Ok(SendArgs {
         to,
@@ -327,7 +308,7 @@ async fn spool_oversized_message(
     ctx: &CallContext,
     to: &str,
     message: &str,
-) -> Result<Option<String>, String> {
+) -> Result<Option<String>, SendError> {
     if message.len() <= SOFT_PAYLOAD_LIMIT {
         return Ok(None);
     }
@@ -344,14 +325,14 @@ async fn spool_oversized_message(
     {
         Some(p) => p.to_string(),
         None => {
-            return Err(SendError {
-                // Issue #512 ↔ #545 review: error code は旧名 `send_payload_threshold`
-                // を維持して後方互換を保つ。新実装で挙動が変わったのは「成功時に reject せず
-                // spool 化する」path であり、reject 時の error code は旧来の SOFT_PAYLOAD_LIMIT
-                // 超過と同じ意味で扱える。caller (Leader / HR / worker) が code 判定で
-                // fallback handler を持っていても、本 PR で挙動が壊れない。
-                code: "send_payload_threshold".into(),
-                message: format!(
+            // Issue #512 ↔ #545 review: error code は旧名 `send_payload_threshold`
+            // を維持して後方互換を保つ。新実装で挙動が変わったのは「成功時に reject せず
+            // spool 化する」path であり、reject 時の error code は旧来の SOFT_PAYLOAD_LIMIT
+            // 超過と同じ意味で扱える。caller (Leader / HR / worker) が code 判定で
+            // fallback handler を持っていても、本 PR で挙動が壊れない。
+            return Err(SendError::new(
+                "send_payload_threshold",
+                format!(
                     "message exceeds the long-payload threshold ({} > {} bytes) and \
                      this team has no project_root configured for auto-spool. \
                      Setup the team via Canvas (setupTeamMcp) or write the full content to \
@@ -359,10 +340,7 @@ async fn spool_oversized_message(
                     message.len(),
                     SOFT_PAYLOAD_LIMIT
                 ),
-                phase: None,
-                elapsed_ms: None,
-            }
-            .into_err_string());
+            ));
         }
     };
     match crate::team_hub::spool::spool_long_payload(&project_root, message, "send").await {
@@ -382,14 +360,14 @@ async fn spool_oversized_message(
                 "[team_send] auto-spool failed for team={}: {e:#}; falling back to reject",
                 ctx.team_id
             );
-            Err(SendError {
-                // Issue #512 ↔ #545 review: error code は旧名 `send_payload_threshold`
-                // を維持して後方互換を保つ。新実装で挙動が変わったのは「成功時に reject せず
-                // spool 化する」path であり、reject 時の error code は旧来の SOFT_PAYLOAD_LIMIT
-                // 超過と同じ意味で扱える。caller (Leader / HR / worker) が code 判定で
-                // fallback handler を持っていても、本 PR で挙動が壊れない。
-                code: "send_payload_threshold".into(),
-                message: format!(
+            // Issue #512 ↔ #545 review: error code は旧名 `send_payload_threshold`
+            // を維持して後方互換を保つ。新実装で挙動が変わったのは「成功時に reject せず
+            // spool 化する」path であり、reject 時の error code は旧来の SOFT_PAYLOAD_LIMIT
+            // 超過と同じ意味で扱える。caller (Leader / HR / worker) が code 判定で
+            // fallback handler を持っていても、本 PR で挙動が壊れない。
+            Err(SendError::new(
+                "send_payload_threshold",
+                format!(
                     "message exceeds the long-payload threshold ({} > {} bytes) and \
                      auto-spool to `.vibe-team/tmp/` failed: {e}. \
                      Write the full content to a file with the Write tool, then call team_send \
@@ -397,10 +375,7 @@ async fn spool_oversized_message(
                     message.len(),
                     SOFT_PAYLOAD_LIMIT
                 ),
-                phase: None,
-                elapsed_ms: None,
-            }
-            .into_err_string())
+            ))
         }
     }
 }
@@ -914,7 +889,7 @@ fn build_send_response(
     })
 }
 
-pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
+pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, SendError> {
     // 段階 1: 引数 parse / 検証。
     let sargs = parse_send_args(args)?;
 
@@ -1052,8 +1027,10 @@ mod tests {
     fn parse_message_kind_rejects_unknown_kind() {
         let err = parse_message_kind(&json!({ "kind": "delegate" })).unwrap_err();
 
-        assert!(err.contains("send_invalid_args"));
-        assert!(err.contains("kind must be advisory, request, or report"));
+        assert_eq!(err.code, "send_invalid_args");
+        assert!(err
+            .message
+            .contains("kind must be advisory, request, or report"));
     }
 
     #[test]
@@ -1170,8 +1147,8 @@ mod tests {
         }))
         .unwrap_err();
 
-        assert!(err.contains("send_invalid_args"));
-        assert!(err.contains("message.data must be a string"));
+        assert_eq!(err.code, "send_invalid_args");
+        assert!(err.message.contains("message.data must be a string"));
     }
 
     #[test]
@@ -1184,7 +1161,7 @@ mod tests {
         }))
         .unwrap_err();
 
-        assert!(err.contains("send_invalid_args"));
-        assert!(err.contains("message.system is not allowed"));
+        assert_eq!(err.code, "send_invalid_args");
+        assert!(err.message.contains("message.system is not allowed"));
     }
 }

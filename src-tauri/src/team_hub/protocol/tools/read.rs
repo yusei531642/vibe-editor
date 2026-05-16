@@ -8,8 +8,13 @@ use serde_json::{json, Value};
 use tauri::Emitter;
 
 use super::super::helpers::message_is_for_me;
+use super::error::ToolError;
 
-pub async fn team_read(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
+pub async fn team_read(
+    hub: &TeamHub,
+    ctx: &CallContext,
+    args: &Value,
+) -> Result<Value, ToolError> {
     let unread_only = args
         .get("unread_only")
         .and_then(|v| v.as_bool())

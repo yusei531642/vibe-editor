@@ -48,34 +48,48 @@ pub struct RetryInjectResult {
     pub failed_at: Option<String>,
 }
 
+/// `team_send_retry_inject` が `Err` で返す構造化エラー (JSON object) を組み立てる。
+///
+/// Issue #737: 戻り値を `CommandResult<RetryInjectResult>` に統一した後も、renderer に届く
+/// payload は従来どおり `{"code":"retry_*","message":"..."}` の JSON 文字列を保つ。
+/// `CommandError` の `Serialize` は message をそのまま文字列化するため、`CommandError::internal`
+/// に JSON 文字列を載せれば旧 `Err(String)` と完全同一の wire 出力になる。
+fn retry_err(code: &str, message: String) -> crate::commands::error::CommandError {
+    let payload = json!({ "code": code, "message": message });
+    crate::commands::error::CommandError::internal(payload.to_string())
+}
+
 /// `team_send` の partial failure に対する手動リトライ。同じ team / message / agent を 1 件単位で再 inject する。
 #[tauri::command]
 pub async fn team_send_retry_inject(
     app: AppHandle,
     state: State<'_, AppState>,
     args: RetryInjectArgs,
-) -> Result<RetryInjectResult, String> {
+) -> crate::commands::error::CommandResult<RetryInjectResult> {
     let hub = state.team_hub.clone();
     let registry = hub.registry.clone();
 
     // Step 1: message を lookup。lock は短く保持し、inject の long PTY write 中は離す。
-    let lookup: Result<(String, String, String), String> = {
+    let lookup: crate::commands::error::CommandResult<(String, String, String)> = {
         let s = hub.state.lock().await;
         let team = match s.teams.get(&args.team_id) {
             Some(t) => t,
             None => {
-                return Err(format!(
-                    "{{\"code\":\"retry_unknown_team\",\"message\":\"unknown team_id '{}'\"}}",
-                    args.team_id
+                return Err(retry_err(
+                    "retry_unknown_team",
+                    format!("unknown team_id '{}'", args.team_id),
                 ))
             }
         };
         let msg = match team.messages.iter().find(|m| m.id == args.message_id) {
             Some(m) => m,
             None => {
-                return Err(format!(
-                    "{{\"code\":\"retry_unknown_message\",\"message\":\"message {} not found in team '{}' (history may have been evicted)\"}}",
-                    args.message_id, args.team_id
+                return Err(retry_err(
+                    "retry_unknown_message",
+                    format!(
+                        "message {} not found in team '{}' (history may have been evicted)",
+                        args.message_id, args.team_id
+                    ),
                 ))
             }
         };
@@ -86,9 +100,12 @@ pub async fn team_send_retry_inject(
             .iter()
             .any(|id| id == &args.agent_id)
         {
-            return Err(format!(
-                "{{\"code\":\"retry_invalid_recipient\",\"message\":\"agent '{}' was not a recipient of message {} (resolved_recipient_ids does not contain it)\"}}",
-                args.agent_id, args.message_id
+            return Err(retry_err(
+                "retry_invalid_recipient",
+                format!(
+                    "agent '{}' was not a recipient of message {} (resolved_recipient_ids does not contain it)",
+                    args.agent_id, args.message_id
+                ),
             ));
         }
         Ok((msg.message.clone(), msg.from.clone(), msg.from_agent_id.clone()))

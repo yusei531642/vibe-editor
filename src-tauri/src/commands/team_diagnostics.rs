@@ -33,12 +33,11 @@ use tauri::State;
 pub async fn team_diagnostics_read(
     state: State<'_, AppState>,
     team_id: String,
-) -> Result<Value, String> {
+) -> crate::commands::error::CommandResult<Value> {
     // Issue #601: active な team_id でなければ reject。
     // empty / unknown / dismissed は同じ generic message にして recon 抑止。
-    crate::commands::authz::assert_active_team(&state.team_hub, &team_id)
-        .await
-        .map_err(String::from)?;
+    // Issue #737: `assert_active_team` は既に `CommandResult` を返すため、そのまま `?` で伝播する。
+    crate::commands::authz::assert_active_team(&state.team_hub, &team_id).await?;
 
     let hub = state.team_hub.clone();
     let ctx = CallContext {
@@ -53,5 +52,11 @@ pub async fn team_diagnostics_read(
         // フィルタで誤って team message を除外しないよう、いずれの agent_id とも被らない名前。
         agent_id: "vibe-editor.renderer".to_string(),
     };
-    team_diagnostics(&hub, &ctx).await
+    // Issue #737: MCP tool は `Result<Value, ToolError>` を返す。`team_diagnostics_read` は
+    // Tauri command なので `CommandResult<Value>` に揃える。`ToolError` の構造化情報
+    // (`code` / `message`) を失わないよう、flat JSON 文字列のまま `CommandError` に載せて
+    // renderer へ届ける (= renderer 側は従来どおり JSON 文字列として error を受け取れる)。
+    team_diagnostics(&hub, &ctx)
+        .await
+        .map_err(|e| crate::commands::error::CommandError::internal(e.to_json_value().to_string()))
 }

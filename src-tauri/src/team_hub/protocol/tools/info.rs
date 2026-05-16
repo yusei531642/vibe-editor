@@ -6,7 +6,9 @@ use crate::team_hub::{CallContext, TeamHub};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-pub async fn team_info(hub: &TeamHub, ctx: &CallContext) -> Result<Value, String> {
+use super::error::ToolError;
+
+pub async fn team_info(hub: &TeamHub, ctx: &CallContext) -> Result<Value, ToolError> {
     // Issue #342 Phase 2: identity 分離検出のため `agent_role_bindings` を一緒に取る。
     // member の registry 上 role と handshake 時に bind した role が乖離している (= 別
     // プロセスが同 agent_id で違う role を主張した / context が古い) なら

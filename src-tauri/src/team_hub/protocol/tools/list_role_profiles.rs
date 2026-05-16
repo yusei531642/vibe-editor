@@ -5,10 +5,12 @@
 use crate::team_hub::{CallContext, TeamHub};
 use serde_json::{json, Value};
 
+use super::error::ToolError;
+
 pub async fn team_list_role_profiles(
     hub: &TeamHub,
     ctx: &CallContext,
-) -> Result<Value, String> {
+) -> Result<Value, ToolError> {
     let summary = hub.get_role_profile_summary().await;
     let dynamic = hub.get_dynamic_roles(&ctx.team_id).await;
     let mut profiles: Vec<Value> = summary

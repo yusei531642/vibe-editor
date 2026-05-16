@@ -420,14 +420,12 @@ pub struct RecruitObservedWhileHiddenArgs {
 #[tauri::command]
 pub async fn recruit_observed_while_hidden(
     args: RecruitObservedWhileHiddenArgs,
-) -> Result<(), String> {
+) -> crate::commands::error::CommandResult<()> {
     // Issue #624 (Security): renderer 由来 string が tracing 行に直接乗るため、
     // (1) [A-Za-z0-9_-]{1,64} の id segment 検証で改行 / 制御文字 / shell metachar を弾き、
     // (2) sanitize_for_log で出力直前にも追加防御する (defense-in-depth)。
-    crate::commands::validation::validate_id_segment("team_id", &args.team_id)
-        .map_err(|e| e.to_string())?;
-    crate::commands::validation::validate_id_segment("agent_id", &args.agent_id)
-        .map_err(|e| e.to_string())?;
+    crate::commands::validation::validate_id_segment("team_id", &args.team_id)?;
+    crate::commands::validation::validate_id_segment("agent_id", &args.agent_id)?;
     tracing::info!(
         target: "teamhub",
         team_id = %crate::commands::validation::sanitize_for_log(&args.team_id, 64),

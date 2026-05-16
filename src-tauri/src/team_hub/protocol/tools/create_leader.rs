@@ -34,12 +34,13 @@ pub async fn team_create_leader(
     hub: &TeamHub,
     ctx: &CallContext,
     args: &Value,
-) -> Result<Value, String> {
+) -> Result<Value, RecruitError> {
     if let Err(e) = check_permission(&ctx.role, Permission::Recruit) {
-        return Err(
-            RecruitError::permission_denied("create_leader", &e.role, "create leader")
-                .into_err_string(),
-        );
+        return Err(RecruitError::permission_denied(
+            "create_leader",
+            &e.role,
+            "create leader",
+        ));
     }
 
     // Issue #576: 同チーム内の同時 recruit / create_leader を team_id 単位 semaphore で
@@ -50,9 +51,7 @@ pub async fn team_create_leader(
         Ok(p) => p,
         Err(msg) => {
             return Err(
-                RecruitError::new("create_leader_permit_timeout", msg)
-                    .with_phase("permit")
-                    .into_err_string(),
+                RecruitError::new("create_leader_permit_timeout", msg).with_phase("permit"),
             );
         }
     };
@@ -85,8 +84,7 @@ pub async fn team_create_leader(
         let parsed_policy = parse_engine_policy_value(policy_value)?;
         if let Err(e) = parsed_policy.validate(&engine) {
             return Err(RecruitError::new("create_leader_engine_policy_violation", e)
-                .with_phase("engine_policy")
-                .into_err_string());
+                .with_phase("engine_policy"));
         }
         hub.set_engine_policy(&ctx.team_id, parsed_policy).await;
     }
@@ -107,8 +105,7 @@ pub async fn team_create_leader(
     // engine 引数が policy 違反になっていないかも改めて検証する (set 後の policy 基準)。
     if let Err(e) = engine_policy.validate(&resolved_engine) {
         return Err(RecruitError::new("create_leader_engine_policy_violation", e)
-            .with_phase("engine_policy")
-            .into_err_string());
+            .with_phase("engine_policy"));
     }
 
     let new_agent_id = format!("vc-{}", Uuid::new_v4());
@@ -129,7 +126,14 @@ pub async fn team_create_leader(
         .await
     {
         Ok(c) => c,
-        Err(e) => return Err(e),
+        // Issue #737: `try_register_pending_recruit` は hub 内部関数で `Result<_, String>` を
+        // 返す。create_leader 名前空間の専用 code を付けて RecruitError へ持ち上げる。
+        Err(e) => {
+            return Err(RecruitError::new(
+                "create_leader_pending_registration_failed",
+                e,
+            ))
+        }
     };
     let rx = channels.handshake;
     let ack_rx = channels.ack;
@@ -148,11 +152,17 @@ pub async fn team_create_leader(
         });
         if let Err(e) = app.emit("team:recruit-request", payload) {
             hub.cancel_pending_recruit(&new_agent_id).await;
-            return Err(format!("failed to emit recruit-request: {e}"));
+            return Err(RecruitError::new(
+                "create_leader_emit_failed",
+                format!("failed to emit recruit-request: {e}"),
+            ));
         }
     } else {
         hub.cancel_pending_recruit(&new_agent_id).await;
-        return Err("renderer not available (canvas mode required)".into());
+        return Err(RecruitError::new(
+            "create_leader_renderer_unavailable",
+            "renderer not available (canvas mode required)",
+        ));
     }
 
     // ack 待機 (renderer が `team:recruit-request` を受領 → addCard 開始)
@@ -190,8 +200,8 @@ pub async fn team_create_leader(
                 message,
                 phase: Some(phase_str),
                 elapsed_ms: Some(started.elapsed().as_millis() as u64),
-            }
-            .into_err_string());
+                details: None,
+            });
         }
         Ok(Err(_)) => {
             hub.cancel_pending_recruit(&new_agent_id).await;
@@ -206,8 +216,8 @@ pub async fn team_create_leader(
                 message: "renderer ack channel was dropped before reply".into(),
                 phase: Some("ack".into()),
                 elapsed_ms: Some(started.elapsed().as_millis() as u64),
-            }
-            .into_err_string());
+                details: None,
+            });
         }
         Err(_) => {
             let elapsed_ms = started.elapsed().as_millis() as u64;
@@ -231,8 +241,8 @@ pub async fn team_create_leader(
                 ),
                 phase: Some("ack".into()),
                 elapsed_ms: Some(elapsed_ms),
-            }
-            .into_err_string());
+                details: None,
+            });
         }
     }
 
@@ -275,8 +285,8 @@ pub async fn team_create_leader(
                 message: "create_leader cancelled before handshake".into(),
                 phase: Some("handshake".into()),
                 elapsed_ms: Some(started.elapsed().as_millis() as u64),
-            }
-            .into_err_string())
+                details: None,
+            })
         }
         Err(_) => {
             hub.cancel_pending_recruit(&new_agent_id).await;
@@ -294,8 +304,8 @@ pub async fn team_create_leader(
                 ),
                 phase: Some("handshake".into()),
                 elapsed_ms: Some(started.elapsed().as_millis() as u64),
-            }
-            .into_err_string())
+                details: None,
+            })
         }
     }
 }
@@ -304,13 +314,12 @@ pub async fn team_create_leader(
 /// パースする。値が object でない / `kind` が不正なら `create_leader_invalid_engine_policy`
 /// エラー。`defaultEngine` は省略可 (ClaudeOnly / CodexOnly のときは自動で対応する engine が
 /// resolve される)、明示する場合は "claude" / "codex" のみ許可。
-fn parse_engine_policy_value(v: &Value) -> Result<EnginePolicy, String> {
+fn parse_engine_policy_value(v: &Value) -> Result<EnginePolicy, RecruitError> {
     let obj = v.as_object().ok_or_else(|| {
         RecruitError::invalid_args(
             "create_leader",
             "engine_policy must be an object: { kind, defaultEngine? }",
         )
-        .into_err_string()
     })?;
     let kind_str = obj
         .get("kind")
@@ -321,7 +330,6 @@ fn parse_engine_policy_value(v: &Value) -> Result<EnginePolicy, String> {
                 "create_leader",
                 "engine_policy.kind is required (claude_only / codex_only / mixed_allowed)",
             )
-            .into_err_string()
         })?;
     let kind = match kind_str.as_str() {
         "claude_only" | "claudeonly" => EnginePolicyKind::ClaudeOnly,
@@ -334,8 +342,7 @@ fn parse_engine_policy_value(v: &Value) -> Result<EnginePolicy, String> {
                     "unknown engine_policy.kind '{other}' \
                      (expected: claude_only / codex_only / mixed_allowed)"
                 ),
-            )
-            .into_err_string());
+            ));
         }
     };
     // `defaultEngine` (camelCase / 正) と `default_engine` (snake_case / alias) の両 case を accept する。
@@ -356,8 +363,7 @@ fn parse_engine_policy_value(v: &Value) -> Result<EnginePolicy, String> {
                 format!(
                     "engine_policy.defaultEngine must be 'claude' or 'codex' (or omit the field), got '{de}'"
                 ),
-            )
-            .into_err_string());
+            ));
         }
     }
     Ok(EnginePolicy {
@@ -411,29 +417,29 @@ mod tests {
     fn parse_rejects_unknown_kind() {
         let v = json!({ "kind": "claude_or_codex" });
         let err = parse_engine_policy_value(&v).unwrap_err();
-        assert!(err.contains("create_leader_invalid_args"));
-        assert!(err.contains("unknown engine_policy.kind"));
+        assert_eq!(err.code, "create_leader_invalid_args");
+        assert!(err.message.contains("unknown engine_policy.kind"));
     }
 
     #[test]
     fn parse_rejects_missing_kind() {
         let v = json!({ "defaultEngine": "claude" });
         let err = parse_engine_policy_value(&v).unwrap_err();
-        assert!(err.contains("engine_policy.kind is required"));
+        assert!(err.message.contains("engine_policy.kind is required"));
     }
 
     #[test]
     fn parse_rejects_invalid_default_engine() {
         let v = json!({ "kind": "mixed_allowed", "defaultEngine": "gpt" });
         let err = parse_engine_policy_value(&v).unwrap_err();
-        assert!(err.contains("must be 'claude' or 'codex'"));
+        assert!(err.message.contains("must be 'claude' or 'codex'"));
     }
 
     #[test]
     fn parse_rejects_non_object() {
         let v = json!("claude_only");
         let err = parse_engine_policy_value(&v).unwrap_err();
-        assert!(err.contains("must be an object"));
+        assert!(err.message.contains("must be an object"));
     }
 
     #[test]

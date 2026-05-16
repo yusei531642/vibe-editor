@@ -21,12 +21,13 @@ pub async fn team_switch_leader(
     hub: &TeamHub,
     ctx: &CallContext,
     args: &Value,
-) -> Result<Value, String> {
+) -> Result<Value, ToolError> {
     if let Err(e) = check_permission(&ctx.role, Permission::Recruit) {
-        return Err(
-            ToolError::permission_denied("switch_leader", &e.role, "switch leader")
-                .into_err_string(),
-        );
+        return Err(ToolError::permission_denied(
+            "switch_leader",
+            &e.role,
+            "switch leader",
+        ));
     }
 
     let new_leader_agent_id = args
@@ -41,8 +42,8 @@ pub async fn team_switch_leader(
             message: "new_leader_agent_id is required".into(),
             phase: None,
             elapsed_ms: None,
-        }
-        .into_err_string());
+            details: None,
+        });
     }
     if new_leader_agent_id == ctx.agent_id {
         return Err(ToolError {
@@ -50,8 +51,8 @@ pub async fn team_switch_leader(
             message: "new_leader_agent_id must differ from the caller".into(),
             phase: None,
             elapsed_ms: None,
-        }
-        .into_err_string());
+            details: None,
+        });
     }
 
     let close_old_card = args
@@ -80,8 +81,8 @@ pub async fn team_switch_leader(
             ),
             phase: None,
             elapsed_ms: None,
-        }
-        .into_err_string());
+            details: None,
+        });
     };
     if new_role != "leader" {
         return Err(ToolError {
@@ -91,8 +92,8 @@ pub async fn team_switch_leader(
             ),
             phase: None,
             elapsed_ms: None,
-        }
-        .into_err_string());
+            details: None,
+        });
     }
 
     // active leader を切替え

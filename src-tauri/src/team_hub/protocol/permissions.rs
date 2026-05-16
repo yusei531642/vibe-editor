@@ -52,22 +52,13 @@ impl Permission {
     }
 }
 
-/// `check_permission` の失敗値。`into_message(action)` で各 tool 固有の
-/// "permission denied: role 'X' cannot {action}" エラー文を組み立てる。
+/// `check_permission` の失敗値。各 tool は `role` を使って
+/// `ToolError::permission_denied(code_prefix, &e.role, action)` で構造化エラーを組み立てる
+/// (Issue #737: 旧 `into_message` による生 String 化は廃止し、flat JSON の `ToolError` に統一)。
 #[derive(Clone, Debug)]
 pub(in crate::team_hub) struct PermissionError {
     pub role: String,
     pub permission: Permission,
-}
-
-impl PermissionError {
-    /// 既存の各 tool が出していた "permission denied: role 'X' cannot Y" 形へ整形。
-    /// `action` は tool ごとに違う (例: "recruit" / "dismiss" / "assign tasks" /
-    /// "create role profiles" / "view diagnostics" / "ack handoff" / "create leader" /
-    /// "switch leader") ので呼び出し側で指定する。
-    pub(in crate::team_hub) fn into_message(self, action: &str) -> String {
-        format!("permission denied: role '{}' cannot {action}", self.role)
-    }
 }
 
 impl fmt::Display for PermissionError {
@@ -176,15 +167,22 @@ mod tests {
         }
     }
 
+    /// Issue #737: `PermissionError` から各 tool が `ToolError::permission_denied` で構造化
+    /// エラーを組み立てる経路 (旧 `into_message` による生 String 化の置き換え) を検証する。
     #[test]
-    fn permission_error_into_message_uses_caller_action_verb() {
+    fn permission_error_role_drives_structured_tool_error() {
+        use super::super::tools::error::ToolError;
         let err = check_permission("planner", Permission::Recruit).unwrap_err();
+        let recruit = ToolError::permission_denied("recruit", &err.role, "recruit");
+        assert_eq!(recruit.code, "recruit_permission_denied");
         assert_eq!(
-            err.clone().into_message("recruit"),
+            recruit.message,
             "permission denied: role 'planner' cannot recruit"
         );
+        let ack = ToolError::permission_denied("ack_handoff", &err.role, "ack handoff");
+        assert_eq!(ack.code, "ack_handoff_permission_denied");
         assert_eq!(
-            err.into_message("ack handoff"),
+            ack.message,
             "permission denied: role 'planner' cannot ack handoff"
         );
     }

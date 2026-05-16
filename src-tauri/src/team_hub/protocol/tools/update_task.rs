@@ -39,24 +39,27 @@ fn is_done_status(status: &str) -> bool {
     )
 }
 
-fn done_evidence_invalid(message: impl Into<String>) -> String {
-    json!({
-        "code": "task_done_evidence_invalid",
-        "message": message.into(),
-    })
-    .to_string()
+fn done_evidence_invalid(message: impl Into<String>) -> ToolError {
+    ToolError::new("task_done_evidence_invalid", message)
 }
 
-fn done_evidence_missing(missing: Vec<String>) -> String {
-    json!({
-        "code": "task_done_evidence_missing",
-        "message": "done_evidence must cover every done_criteria item before marking the task done",
-        "missingCriteria": missing,
-    })
-    .to_string()
+/// Issue #737 (PR #787 二次レビュー): `task_done_evidence_missing` エラーは旧来
+/// `missingCriteria` 配列を **トップレベル JSON フィールド**で返していた。flat ToolError 化で
+/// 一度 message 末尾への畳み込みだけにしたが、wire 後方互換のため `with_details` で
+/// `missingCriteria` をトップレベルフィールドとして復元する (`#[serde(flatten)]` 経由)。
+/// message 末尾の `missing criteria: {missing:?}` 畳み込みは併存させる (情報冗長化、害なし)。
+fn done_evidence_missing(missing: Vec<String>) -> ToolError {
+    ToolError::new(
+        "task_done_evidence_missing",
+        format!(
+            "done_evidence must cover every done_criteria item before marking the task done; \
+             missing criteria: {missing:?}"
+        ),
+    )
+    .with_details(json!({ "missingCriteria": missing }))
 }
 
-fn parse_done_evidence(args: &Value) -> Result<Vec<TaskDoneEvidenceSnapshot>, String> {
+fn parse_done_evidence(args: &Value) -> Result<Vec<TaskDoneEvidenceSnapshot>, ToolError> {
     let Some(raw) = args
         .get("done_evidence")
         .or_else(|| args.get("doneEvidence"))
@@ -160,7 +163,7 @@ pub async fn team_update_task(
     hub: &TeamHub,
     ctx: &CallContext,
     args: &Value,
-) -> Result<Value, String> {
+) -> Result<Value, ToolError> {
     let task_id = args.get("task_id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
     let status = args.get("status").and_then(|v| v.as_str()).unwrap_or("");
     let done_evidence = parse_done_evidence(args)?;
@@ -192,12 +195,17 @@ pub async fn team_update_task(
         let team = state
             .teams
             .get_mut(&ctx.team_id)
-            .ok_or_else(|| "Team not found".to_string())?;
+            .ok_or_else(|| ToolError::new("update_task_team_not_found", "Team not found"))?;
         let task = team
             .tasks
             .iter_mut()
             .find(|t| t.id == task_id)
-            .ok_or_else(|| format!("Task #{task_id} not found"))?;
+            .ok_or_else(|| {
+                ToolError::new(
+                    "update_task_task_not_found",
+                    format!("Task #{task_id} not found"),
+                )
+            })?;
         // Issue #594 (Tier S-1): assignee / leader 検証。
         // `team_report` (report.rs:285) で同等のガードを入れた対称穴の補完。
         // これが無いと、同 team の任意 worker が他者 task を `done` 化 + `done_evidence` 捏造して
@@ -219,8 +227,7 @@ pub async fn team_update_task(
                 "update_task",
                 &ctx.role,
                 "update task assigned to another agent",
-            )
-            .into_err_string());
+            ));
         }
         if is_done_status(status) && !task.done_criteria.is_empty() {
             let missing = task
@@ -655,8 +662,8 @@ mod tests {
         .await
         .unwrap_err();
 
-        assert!(err.contains("task_done_evidence_missing"));
-        assert!(err.contains("security reviewed"));
+        assert_eq!(err.code, "task_done_evidence_missing");
+        assert!(err.message.contains("security reviewed"));
         let state = hub.state.lock().await;
         let task = state
             .teams
@@ -726,9 +733,9 @@ mod tests {
         .await
         .unwrap_err();
 
-        assert!(
-            err.contains("update_task_permission_denied"),
-            "expected permission_denied code, got: {err}"
+        assert_eq!(
+            err.code, "update_task_permission_denied",
+            "expected permission_denied code, got: {err:?}"
         );
 
         let state = hub.state.lock().await;

@@ -24,11 +24,11 @@ const MAX_FINDINGS_PER_REPORT: usize = 200;
 /// 1 レポートあたりの changed_files / artifact_refs / next_actions 上限。
 const MAX_LIST_ENTRIES: usize = 200;
 
-fn invalid_args(message: impl Into<String>) -> String {
-    ToolError::invalid_args("report", message).into_err_string()
+fn invalid_args(message: impl Into<String>) -> ToolError {
+    ToolError::invalid_args("report", message)
 }
 
-fn parse_string_list(args: &Value, snake: &str, camel: &str) -> Result<Vec<String>, String> {
+fn parse_string_list(args: &Value, snake: &str, camel: &str) -> Result<Vec<String>, ToolError> {
     let raw = match args.get(snake).or_else(|| args.get(camel)) {
         Some(v) => v,
         None => return Ok(Vec::new()),
@@ -58,7 +58,7 @@ fn parse_string_list(args: &Value, snake: &str, camel: &str) -> Result<Vec<Strin
     Ok(out)
 }
 
-fn parse_findings(args: &Value) -> Result<Vec<TeamReportFinding>, String> {
+fn parse_findings(args: &Value) -> Result<Vec<TeamReportFinding>, ToolError> {
     let raw = match args.get("findings") {
         Some(v) => v,
         None => return Ok(Vec::new()),
@@ -121,7 +121,7 @@ fn parse_findings(args: &Value) -> Result<Vec<TeamReportFinding>, String> {
     Ok(out)
 }
 
-fn parse_status(args: &Value) -> Result<String, String> {
+fn parse_status(args: &Value) -> Result<String, ToolError> {
     let raw = args
         .get("status")
         .and_then(|v| v.as_str())
@@ -136,7 +136,7 @@ fn parse_status(args: &Value) -> Result<String, String> {
     Ok(lower)
 }
 
-fn parse_task_id(args: &Value) -> Result<(String, Option<u32>), String> {
+fn parse_task_id(args: &Value) -> Result<(String, Option<u32>), ToolError> {
     let value = args
         .get("task_id")
         .or_else(|| args.get("taskId"))
@@ -174,7 +174,7 @@ fn parse_task_id(args: &Value) -> Result<(String, Option<u32>), String> {
     Ok((raw, numeric))
 }
 
-fn parse_summary(args: &Value) -> Result<String, String> {
+fn parse_summary(args: &Value) -> Result<String, ToolError> {
     let summary = args
         .get("summary")
         .and_then(|v| v.as_str())
@@ -229,7 +229,11 @@ fn format_terminal_summary(snapshot: &TeamReportSnapshot) -> String {
     )
 }
 
-pub async fn team_report(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
+pub async fn team_report(
+    hub: &TeamHub,
+    ctx: &CallContext,
+    args: &Value,
+) -> Result<Value, ToolError> {
     let (task_id_raw, task_id_num) = parse_task_id(args)?;
     let status = parse_status(args)?;
     let summary = parse_summary(args)?;
@@ -395,8 +399,8 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.contains("report_invalid_args"));
-        assert!(err.contains("task_id"));
+        assert_eq!(err.code, "report_invalid_args");
+        assert!(err.message.contains("task_id"));
     }
 
     #[tokio::test]
@@ -410,8 +414,8 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.contains("report_invalid_args"));
-        assert!(err.contains("status"));
+        assert_eq!(err.code, "report_invalid_args");
+        assert!(err.message.contains("status"));
     }
 
     #[tokio::test]
@@ -431,9 +435,9 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert!(err.contains("report_invalid_args"), "raw err: {err}");
-            assert!(err.contains("task_id"), "raw err: {err}");
-            assert!(err.contains("control"), "raw err: {err}");
+            assert_eq!(err.code, "report_invalid_args", "raw err: {err:?}");
+            assert!(err.message.contains("task_id"), "raw err: {err:?}");
+            assert!(err.message.contains("control"), "raw err: {err:?}");
         }
     }
 
@@ -450,7 +454,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.contains("≤ 256 bytes"), "got: {err}");
+        assert!(err.message.contains("≤ 256 bytes"), "got: {err:?}");
     }
 
     /// PR #575 review (defense-in-depth): persisted snapshot 経由で改行 / ESC を含む task_id を
@@ -492,7 +496,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.contains("summary"));
+        assert!(err.message.contains("summary"));
     }
 
     #[tokio::test]
@@ -515,7 +519,7 @@ mod tests {
         )
         .await
         .unwrap_err();
-        assert!(err.contains("severity"));
+        assert!(err.message.contains("severity"));
     }
 
     #[tokio::test]

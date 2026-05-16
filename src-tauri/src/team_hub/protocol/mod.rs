@@ -40,6 +40,7 @@ pub(crate) mod tools;
 use crate::team_hub::{CallContext, TeamHub};
 use schema::tool_defs;
 use serde_json::{json, Value};
+use tools::error::ToolError;
 use tools::{
     team_ack_handoff, team_assign_task, team_create_leader, team_diagnostics, team_dismiss,
     team_get_tasks, team_info, team_list_role_profiles, team_lock_files, team_read, team_recruit,
@@ -88,16 +89,13 @@ pub async fn handle(hub: &TeamHub, ctx: &CallContext, req: &Value) -> Option<Val
                         ]
                     }
                 })),
-                Err(msg) => {
-                    // Issue #342 Phase 1 (1.7b): 構造化 JSON 文字列を Err に詰めるツール
-                    // (現在は team_recruit のみ) が、`json!({"error": msg})` で文字列値として
-                    // 二重エスケープされてクライアントが 2 回 parse する必要がある問題を回避。
-                    // msg が JSON object として parse できれば object のまま `error` キーに乗せ、
-                    // そうでなければ従来どおり文字列値として包む。
-                    let text = match serde_json::from_str::<Value>(&msg) {
-                        Ok(v) if v.is_object() => json!({ "error": v }).to_string(),
-                        _ => json!({ "error": msg }).to_string(),
-                    };
+                Err(err) => {
+                    // Issue #737: 各 tool は `Result<Value, ToolError>` を返すようになったため、
+                    // JSON 化はここ (dispatcher) で 1 度だけ行う。旧実装は各 tool が
+                    // `ToolError::into_err_string()` で String 化 → ここで再 parse する二度手間
+                    // (flavor #3: ToolError(JSON-in-String)) だったのを解消する。
+                    // `result.content[0].text` の shape は従来どおり `{"error": {code, message, ...}}`。
+                    let text = json!({ "error": err.to_json_value() }).to_string();
                     Some(json!({
                         "jsonrpc": "2.0",
                         "id": id,
@@ -130,7 +128,7 @@ async fn dispatch_tool(
     ctx: &CallContext,
     name: &str,
     args: &Value,
-) -> Result<Value, String> {
+) -> Result<Value, ToolError> {
     match name {
         "team_send" => team_send(hub, ctx, args).await,
         "team_read" => team_read(hub, ctx, args).await,
@@ -151,6 +149,9 @@ async fn dispatch_tool(
         // Issue #526: vibe-team の advisory file lock。
         "team_lock_files" => team_lock_files(hub, ctx, args).await,
         "team_unlock_files" => team_unlock_files(hub, ctx, args).await,
-        other => Err(format!("Unknown tool: {other}")),
+        other => Err(ToolError::new(
+            "unknown_tool",
+            format!("Unknown tool: {other}"),
+        )),
     }
 }

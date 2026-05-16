@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use super::super::consts::STATUS_STALE_THRESHOLD_SECS;
 use super::super::helpers::message_is_for_me;
 use super::super::permissions::{check_permission, Permission};
+use super::error::ToolError;
 
 const STALLED_INBOUND_THRESHOLD_MS: i64 = 60_000;
 
@@ -139,9 +140,9 @@ fn build_member_diagnostics_row(
     })
 }
 
-pub async fn team_diagnostics(hub: &TeamHub, ctx: &CallContext) -> Result<Value, String> {
+pub async fn team_diagnostics(hub: &TeamHub, ctx: &CallContext) -> Result<Value, ToolError> {
     check_permission(&ctx.role, Permission::ViewDiagnostics)
-        .map_err(|e| e.into_message("view diagnostics"))?;
+        .map_err(|e| ToolError::permission_denied("diagnostics", &e.role, "view diagnostics"))?;
 
     let bindings_snapshot: HashMap<String, String>;
     let diag_snapshot: HashMap<String, MemberDiagnostics>;

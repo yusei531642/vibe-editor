@@ -33,6 +33,11 @@ import { terminalTabs } from './tauri-api/terminal-tabs';
 // Tauri 側 TeamHub に同期する role profile の要約形。
 export type { RoleProfileSummary } from './tauri-api/app';
 
+// Issue #737: IPC コマンド失敗の共通 Error subclass。`Result<T, CommandError>` を返す
+// Rust command の wrapper は reject を `CommandError` に正規化するため、caller は
+// `err instanceof CommandError` で構造化エラー (`.code` / `.message`) を扱える。
+export { CommandError } from './tauri-api/command-error';
+
 // Issue #294: `subscribeEvent` / `subscribeEventReady` は `./subscribe-event.ts` に
 // 切り出し、`subscribeEvent` は `subscribeEventReady` の sync ラッパとして再実装。
 // terminal.* event ハンドラ (onData / onExit / ...) からのみ参照される。
