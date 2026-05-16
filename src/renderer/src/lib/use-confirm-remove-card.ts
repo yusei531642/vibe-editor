@@ -14,12 +14,14 @@
 import { useCallback } from 'react';
 import { useCanvasStore, cardTeamId, cardTeamName } from '../stores/canvas';
 import { useT } from './i18n';
+import { useNativeConfirm } from './use-native-confirm';
 import { getDirtyEditorCardSnapshots } from './editor-card-dirty-registry';
 
-export function useConfirmRemoveCard(): (id: string) => void {
+export function useConfirmRemoveCard(): (id: string) => Promise<void> {
   const t = useT();
+  const confirm = useNativeConfirm();
   return useCallback(
-    (id: string) => {
+    async (id: string) => {
       const state = useCanvasStore.getState();
       const target = state.nodes.find((n) => n.id === id);
       // Issue #732: teamId / teamName 抽出は判別可能 union を見る共通 helper に集約
@@ -37,7 +39,7 @@ export function useConfirmRemoveCard(): (id: string) => void {
       // ---- 1) チーム cascade confirm (既存仕様) ----
       if (teamId && idsToRemove.size > 1) {
         const teamName = cardTeamName(target?.data) ?? teamId;
-        const ok = window.confirm(
+        const ok = await confirm(
           t('agentCard.confirmCloseTeam', {
             count: idsToRemove.size,
             name: teamName
@@ -48,19 +50,19 @@ export function useConfirmRemoveCard(): (id: string) => void {
       // ---- 2) editor dirty confirm (Issue #595) ----
       const dirty = getDirtyEditorCardSnapshots(idsToRemove);
       if (dirty.length === 1) {
-        const ok = window.confirm(
+        const ok = await confirm(
           t('editor.confirmDiscardChanges', { path: dirty[0].relPath })
         );
         if (!ok) return;
       } else if (dirty.length > 1) {
         const paths = dirty.map((d) => `• ${d.relPath}`).join('\n');
-        const ok = window.confirm(
+        const ok = await confirm(
           t('editor.confirmDiscardChangesPlural', { count: dirty.length, paths })
         );
         if (!ok) return;
       }
       state.removeCard(id);
     },
-    [t]
+    [t, confirm]
   );
 }

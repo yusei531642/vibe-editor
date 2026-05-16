@@ -12,6 +12,7 @@ import { useCanvasStore } from '../../../stores/canvas';
 import type { CardDataOf } from '../../../stores/canvas';
 import { useSettings } from '../../../lib/settings-context';
 import { useT } from '../../../lib/i18n';
+import { useNativeConfirm } from '../../../lib/use-native-confirm';
 
 // Issue #732: payload 型は canvas store の判別可能 union に集約。`NodeProps` を
 // `Node<CardDataOf<'fileTree'>>` で具体化することで `data.payload` が直接読め、inline cast を撤廃。
@@ -23,6 +24,7 @@ function FileTreeCardImpl({
 }: NodeProps<Node<CardDataOf<'fileTree'>>>): JSX.Element {
   const { settings, update } = useSettings();
   const t = useT();
+  const confirm = useNativeConfirm();
   const payload = data?.payload ?? {};
   // Issue #23: lastOpenedRoot (現在プロジェクト) を最優先、claudeCwd は fallback。
   const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || payload.projectRoot || '';
@@ -63,7 +65,7 @@ function FileTreeCardImpl({
       if (!isPrimary && !current.includes(path)) return;
       if (isPrimary) {
         const name = path.split(/[\\/]/).pop() ?? path;
-        if (!window.confirm(t('workspace.removePrimaryConfirm', { name }))) return;
+        if (!(await confirm(t('workspace.removePrimaryConfirm', { name })))) return;
       }
       const nextPrimary = isPrimary ? current.find((p) => p !== path) ?? '' : projectRoot;
       await update({
@@ -71,7 +73,7 @@ function FileTreeCardImpl({
         ...(isPrimary ? { lastOpenedRoot: nextPrimary } : {})
       });
     },
-    [settings.workspaceFolders, projectRoot, update, t]
+    [settings.workspaceFolders, projectRoot, update, t, confirm]
   );
 
   // Issue #273: 展開状態 / 永続化は FileTreeStateProvider に集約済み。FileTreeCard 自身は

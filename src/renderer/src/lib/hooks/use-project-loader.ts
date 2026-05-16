@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { GitStatus, SessionInfo } from '../../../../types/shared';
 import { useT } from '../i18n';
+import { useNativeConfirm } from '../use-native-confirm';
 import {
   useSettingsActions,
   useSettingsLoading,
@@ -68,6 +69,7 @@ export function useProjectLoader(
   const hasCompletedOnboarding = useSettingsValue('hasCompletedOnboarding');
   const mcpAutoSetup = useSettingsValue('mcpAutoSetup');
   const t = useT();
+  const confirm = useNativeConfirm();
 
   const [projectRoot, setProjectRoot] = useState<string>('');
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
@@ -304,7 +306,7 @@ export function useProjectLoader(
       if (!isPrimary && !current.includes(path)) return;
       const name = path.split(/[\\/]/).pop() ?? path;
 
-      if (isPrimary && !window.confirm(t('workspace.removePrimaryConfirm', { name }))) {
+      if (isPrimary && !(await confirm(t('workspace.removePrimaryConfirm', { name })))) {
         return;
       }
 
@@ -338,7 +340,7 @@ export function useProjectLoader(
       }
       optsRef.current.showToast(t('workspace.removed', { name }), { tone: 'info' });
     },
-    [workspaceFoldersFromSettings, projectRoot, loadProject, updateSettings, t]
+    [workspaceFoldersFromSettings, projectRoot, loadProject, updateSettings, t, confirm]
   );
 
   return {

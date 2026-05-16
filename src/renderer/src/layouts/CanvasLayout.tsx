@@ -39,6 +39,7 @@ import { AppMenuBar } from '../components/shell/AppMenuBar';
 import type { SidebarView } from '../components/Sidebar';
 import { SettingsModal } from '../components/SettingsModal';
 import { useT } from '../lib/i18n';
+import { useNativeConfirm } from '../lib/use-native-confirm';
 import { useUiStore } from '../stores/ui';
 import { useCanvasStore } from '../stores/canvas';
 import { useCanvasViewport } from '../stores/canvas-selectors';
@@ -101,6 +102,7 @@ export function CanvasLayout(): JSX.Element {
   const notifyRecruit = useCanvasStore((s) => s.notifyRecruit);
   const { settings, update: updateSettings, reset: resetSettings } = useSettings();
   const t = useT();
+  const confirm = useNativeConfirm();
   // プロジェクトルート: runtime の lastOpenedRoot を優先。ユーザー設定の
   // claudeCwd (明示指定された作業ディレクトリ) は互換フォールバックとして扱う。
   const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || '';
@@ -362,7 +364,7 @@ export function CanvasLayout(): JSX.Element {
         count: dirty.length,
         paths
       });
-      if (!window.confirm(message)) return;
+      if (!(await confirm(message))) return;
     }
     await window.api.app.restart();
   };
@@ -444,10 +446,10 @@ export function CanvasLayout(): JSX.Element {
     void window.api.app.openExternal('https://github.com/yusei531642/vibe-editor');
   }, []);
 
-  const clearCanvas = (): void => {
+  const clearCanvas = async (): Promise<void> => {
     const dirty = getDirtyEditorCardSnapshots();
     if (dirty.length === 0) {
-      if (window.confirm(t('canvas.clearConfirm'))) clear();
+      if (await confirm(t('canvas.clearConfirm'))) clear();
       return;
     }
     const paths = dirty.map((d) => `• ${d.relPath}`).join('\n');
@@ -455,7 +457,7 @@ export function CanvasLayout(): JSX.Element {
       count: dirty.length,
       paths
     });
-    if (window.confirm(message)) clear();
+    if (await confirm(message)) clear();
   };
 
   const canvasActions = useMemo<CanvasActions>(
@@ -509,7 +511,7 @@ export function CanvasLayout(): JSX.Element {
               <button
                 type="button"
                 className="canvas-btn canvas-btn--ghost"
-                onClick={clearCanvas}
+                onClick={() => void clearCanvas()}
                 title={t('canvas.clear.tooltip')}
                 aria-label={t('canvas.clear.tooltip')}
               >

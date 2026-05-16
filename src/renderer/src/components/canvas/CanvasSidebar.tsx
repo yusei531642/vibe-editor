@@ -12,6 +12,7 @@ import { Sidebar, type SidebarView } from '../Sidebar';
 import { useCanvasStore } from '../../stores/canvas';
 import { useSettings } from '../../lib/settings-context';
 import { useT } from '../../lib/i18n';
+import { useNativeConfirm } from '../../lib/use-native-confirm';
 import { useUiStore } from '../../stores/ui';
 import { ROLE_META } from '../../lib/team-roles';
 import { useFilesChanged } from '../../lib/use-files-changed';
@@ -35,6 +36,7 @@ export function CanvasSidebar({
 }: CanvasSidebarProps = {}): JSX.Element {
   const { settings, update } = useSettings();
   const t = useT();
+  const confirm = useNativeConfirm();
   // Issue #23: projectRoot は「現在開いているプロジェクト」= lastOpenedRoot を優先。
   // claudeCwd は Claude CLI 起動時の作業ディレクトリ設定 (別用途) としてだけ使う。
   // lastOpenedRoot が空 (初回) のときだけ claudeCwd にフォールバック。
@@ -243,7 +245,7 @@ export function CanvasSidebar({
       const isPrimary = path === projectRoot;
       if (isPrimary) {
         const name = path.split(/[\\/]/).pop() ?? path;
-        if (!window.confirm(t('workspace.removePrimaryConfirm', { name }))) return;
+        if (!(await confirm(t('workspace.removePrimaryConfirm', { name })))) return;
       }
       const nextPrimary = isPrimary ? workspaceFolders.find((p) => p !== path) ?? '' : projectRoot;
       const next = workspaceFolders.filter((p) => p !== path && p !== nextPrimary);
@@ -253,7 +255,7 @@ export function CanvasSidebar({
         ...(isPrimary ? { lastOpenedRoot: nextPrimary } : {})
       });
     },
-    [workspaceFolders, projectRoot, update, t]
+    [workspaceFolders, projectRoot, update, t, confirm]
   );
 
   const handleOpenRecent = useCallback(

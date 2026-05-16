@@ -135,7 +135,7 @@ function FlowApp({ actions }: FlowAppProps): JSX.Element {
       // (Delete キー / React Flow 内部削除でもチーム全員が一括で閉じるように)
       const removes = changes.filter((c) => c.type === 'remove');
       for (const r of removes) {
-        confirmRemoveCard(r.id);
+        void confirmRemoveCard(r.id);
       }
       const remaining = removes.length > 0
         ? changes.filter((c) => c.type !== 'remove')
@@ -288,7 +288,7 @@ function FlowApp({ actions }: FlowAppProps): JSX.Element {
       }
       items.push({
         label: t('canvasMenu.deleteCard'),
-        action: () => confirmRemoveCard(node.id)
+        action: () => void confirmRemoveCard(node.id)
       });
       setContextMenu({ x: e.clientX, y: e.clientY, items });
     },

@@ -12,12 +12,14 @@ import { useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import type { RoleProfile } from '../../../../types/shared';
 import { useT } from '../../lib/i18n';
+import { useNativeConfirm } from '../../lib/use-native-confirm';
 import { useSettings } from '../../lib/settings-context';
 import { useRoleProfiles } from '../../lib/role-profiles-context';
 import { BUILTIN_BY_ID } from '../../lib/role-profiles-builtin';
 
 export function RoleProfilesSection(): JSX.Element {
   const t = useT();
+  const confirm = useNativeConfirm();
   const { settings } = useSettings();
   const { ordered, file, upsertOverride, addCustom, removeCustom, saveFile } = useRoleProfiles();
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -126,7 +128,7 @@ export function RoleProfilesSection(): JSX.Element {
               BUILTIN_BY_ID[p.id]
                 ? undefined
                 : async () => {
-                    if (window.confirm(t('settings.roles.confirmDelete', { id: p.id }))) {
+                    if (await confirm(t('settings.roles.confirmDelete', { id: p.id }))) {
                       await removeCustom(p.id);
                     }
                   }
