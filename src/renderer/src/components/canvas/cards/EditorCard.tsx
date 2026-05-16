@@ -10,19 +10,21 @@
  * dirty card 一覧を覗いて confirm dialog を出せる。
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { CardFrame } from '../CardFrame';
 import { EditorView } from '../../EditorView';
 import { detectLanguage } from '../../../lib/language';
 import { registerEditorCardDirty } from '../../../lib/editor-card-dirty-registry';
+import type { CardDataOf, EditorCardPayload } from '../../../stores/canvas';
 
-interface EditorPayload {
-  projectRoot: string;
-  relPath: string;
-}
-
-function EditorCardImpl({ id, data }: NodeProps): JSX.Element {
-  const payload = (data?.payload ?? {}) as EditorPayload;
+// Issue #732: payload 型は canvas store の判別可能 union に集約。`NodeProps` を
+// `Node<CardDataOf<'editor'>>` で具体化することで `data.payload` が `EditorCardPayload`
+// として読め、`unknown` からの型再構築 (inline cast) が不要になる。
+function EditorCardImpl({ id, data }: NodeProps<Node<CardDataOf<'editor'>>>): JSX.Element {
+  // payload 未設定の「空 EditorCard」もあり得るので空オブジェクトでフォールバックする
+  // (旧 `(data?.payload ?? {}) as EditorPayload` と同一挙動。`{}` 既定なので
+  //  projectRoot / relPath は undefined 扱いになり、既存の null チェックで吸収される)。
+  const payload = (data?.payload ?? {}) as EditorCardPayload;
   const { projectRoot, relPath } = payload;
   const title = (data?.title as string) ?? relPath ?? 'Editor';
   const isImage = useMemo(

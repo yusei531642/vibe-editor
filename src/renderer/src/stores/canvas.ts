@@ -20,14 +20,190 @@ import {
   runCanvasMigration,
   normalizeCanvasState
 } from '../lib/canvas-migrations';
+import type { AgentPayload } from '../components/canvas/cards/AgentNodeCard/types';
 
 export type CardType = 'terminal' | 'agent' | 'editor' | 'diff' | 'fileTree' | 'changes';
 
-export interface CardData extends Record<string, unknown> {
-  cardType: CardType;
+/**
+ * Issue #732: カード種別ごとの payload 型。
+ *
+ * 以前は `CardData.payload?: unknown` だったため、消費側 (Canvas / CardFrame /
+ * StageHud / QuickNav 等) が `(card.payload as XxxPayload)` という inline cast を
+ * 20+ 箇所で再構築していた。`cardType` をタグにした判別可能 union (`CardData`) に
+ * することで、`switch (card.cardType)` で TS が payload を自動 narrowing できる。
+ *
+ * agent カードの payload (`AgentPayload`) は AgentNodeCard 配下に既存定義があるので
+ * そこから import して `AgentCardPayload` に合成する。残る 5 種はここで定義し、
+ * 各カードコンポーネント (TerminalCard / EditorCard / ...) はこの型を import して
+ * ローカル重複定義を撤廃する。
+ */
+
+/**
+ * 全カード種別の payload が共通で持てる「チーム所属」フィールド。
+ *
+ * 旧 `payload?: unknown` 時代は teamId / teamName を「種別を問わず」 payload に積めて、
+ * team cascade 削除 (`removeCard` / `useConfirmRemoveCard`) や同期ドラッグがそれを
+ * `payload as { teamId? }` で読み取っていた。判別可能 union 化でこの「どのカードでも
+ * teamId を持てる」性質を失わないよう、共通フィールドを base にまとめて全 payload に
+ * 継承させる (例: editor カードを team locked にして一緒に動かす経路を維持)。
+ */
+export interface CardPayloadBase {
+  /** チーム識別子。同 teamId のカードは team cascade / 同期ドラッグでまとまって動く。 */
+  teamId?: string;
+  /** チーム表示名 (cascade 削除 confirm のメッセージ等で使用)。 */
+  teamName?: string;
+}
+
+/** agent カード payload: 既存 `AgentPayload` に共通 base を合成したもの。 */
+export type AgentCardPayload = AgentPayload & CardPayloadBase;
+
+/** terminal カード: 単発の Claude/Codex/シェル端末を起動するための payload。 */
+export interface TerminalCardPayload extends CardPayloadBase {
+  agent?: 'claude' | 'codex';
+  role?: string;
+  agentId?: string;
+  command?: string;
+  args?: string[];
+  cwd?: string;
+  /** Issue #22: Canvas Resume 起動時の Claude セッション id (`--resume <id>`)。 */
+  resumeSessionId?: string | null;
+  /** Issue #63: Codex の role system prompt (一時ファイル化されて model_instructions_file へ)。 */
+  codexInstructions?: string;
+}
+
+/** editor カード: 1 ファイルを Monaco で編集する payload。 */
+export interface EditorCardPayload extends CardPayloadBase {
+  projectRoot: string;
+  relPath: string;
+}
+
+/** diff カード: 1 ファイルの git diff を表示する payload。 */
+export interface DiffCardPayload extends CardPayloadBase {
+  projectRoot: string;
+  relPath: string;
+  /** Issue #19: rename の HEAD 側パス。 */
+  originalRelPath?: string;
+}
+
+/** fileTree カード: プロジェクトのファイルツリーを表示する payload。 */
+export interface FileTreeCardPayload extends CardPayloadBase {
+  projectRoot?: string;
+  extraRoots?: string[];
+}
+
+/** changes カード: git status 一覧を表示する payload。 */
+export interface ChangesCardPayload extends CardPayloadBase {
+  projectRoot?: string;
+}
+
+/** `CardType` → そのカードの payload 型へのマッピング。 */
+export interface CardPayloadMap {
+  terminal: TerminalCardPayload;
+  agent: AgentCardPayload;
+  editor: EditorCardPayload;
+  diff: DiffCardPayload;
+  fileTree: FileTreeCardPayload;
+  changes: ChangesCardPayload;
+}
+
+/**
+ * `cardType` をタグとする 1 variant 分の card data。
+ * `Record<string, unknown>` を継承するのは @xyflow/react の `Node<T>` 制約
+ * (`T extends Record<string, unknown>`) を満たすため。
+ */
+export type CardDataOf<T extends CardType> = {
+  cardType: T;
   title: string;
-  /** terminal の sessionId / editor の filePath 等 */
-  payload?: unknown;
+  /** カード種別ごとの payload。`cardType` で narrowing される (Issue #732)。 */
+  payload?: CardPayloadMap[T];
+} & Record<string, unknown>;
+
+/**
+ * Issue #732: `cardType` による判別可能 union。
+ * `switch (card.cardType)` で各 case の `card.payload` が対応する payload 型に
+ * 自動 narrowing される。
+ */
+export type CardData =
+  | CardDataOf<'terminal'>
+  | CardDataOf<'agent'>
+  | CardDataOf<'editor'>
+  | CardDataOf<'diff'>
+  | CardDataOf<'fileTree'>
+  | CardDataOf<'changes'>;
+
+/**
+ * Issue #732: `addCards` に渡す 1 件分の card 指定 (`cardType` 判別可能 union)。
+ * `addCard` は generic 引数で同等のことを表現するが、`addCards` は配列なので
+ * 「配列内で type ごとに payload 型が異なる」を表すために専用 union を使う。
+ */
+export type CardSpecOf<T extends CardType> = {
+  type: T;
+  title: string;
+  payload?: CardPayloadMap[T];
+  position: { x: number; y: number };
+};
+export type CardSpec =
+  | CardSpecOf<'terminal'>
+  | CardSpecOf<'agent'>
+  | CardSpecOf<'editor'>
+  | CardSpecOf<'diff'>
+  | CardSpecOf<'fileTree'>
+  | CardSpecOf<'changes'>;
+
+/**
+ * Issue #732: 任意の `CardData` から teamId を取り出すヘルパ。
+ * teamId は `CardPayloadBase` 経由で全カード種別の payload が共通で持てるため、
+ * 種別を問わず `payload?.teamId` を読める (旧 `payload as { teamId? }` の置き換え)。
+ */
+export function cardTeamId(data: CardData | undefined): string | undefined {
+  return data?.payload?.teamId;
+}
+
+/**
+ * Issue #732: 任意の `CardData` から teamName を取り出すヘルパ。
+ * teamName も `CardPayloadBase` 経由で全カード種別の payload が共通で持てる。
+ */
+export function cardTeamName(data: CardData | undefined): string | undefined {
+  return data?.payload?.teamName;
+}
+
+/**
+ * Issue #732: 任意の `CardData` から agentId を取り出すヘルパ。
+ * agentId を持つのは agent / terminal カードのみ (TeamHub の宛先解決に使う)。
+ * 旧コードの `(payload as { agentId?: string }).agentId` 局所 cast を置き換える。
+ */
+export function cardAgentId(data: CardData | undefined): string | undefined {
+  if (!data) return undefined;
+  if (data.cardType === 'agent' || data.cardType === 'terminal') {
+    return data.payload?.agentId;
+  }
+  return undefined;
+}
+
+/**
+ * Issue #732: agent カードなら payload を、それ以外なら undefined を返すヘルパ。
+ * 「agent カードだけ見る」消費側の `switch` narrowing を 1 行に畳む。
+ */
+export function agentPayloadOf(
+  data: CardData | undefined
+): AgentCardPayload | undefined {
+  return data?.cardType === 'agent' ? data.payload : undefined;
+}
+
+/**
+ * Issue #732: 任意の `CardData` から role 識別子 (roleProfileId ?? role) を取り出すヘルパ。
+ * roleProfileId を持つのは agent、role を持つのは agent / terminal カード。
+ * 旧コードの `(payload as { roleProfileId?; role? })` 局所 cast を置き換える。
+ */
+export function cardRoleId(data: CardData | undefined): string | undefined {
+  if (!data) return undefined;
+  if (data.cardType === 'agent') {
+    return data.payload?.roleProfileId ?? data.payload?.role;
+  }
+  if (data.cardType === 'terminal') {
+    return data.payload?.role;
+  }
+  return undefined;
 }
 
 interface CanvasState {
@@ -41,17 +217,20 @@ interface CanvasState {
   setCanvasDragging: (dragging: boolean) => void;
   /** clear() 後に React Flow の内部 viewport も同期リセットするための signal。 */
   viewportResetSeq: number;
-  addCard: (card: {
-    type: CardType;
+  /**
+   * カードを 1 枚配置する。
+   * Issue #732: `type` から payload 型を導出する generic にしたので、呼び出し側で
+   * `payload` がカード種別に合っているか TS が検証する。
+   */
+  addCard: <T extends CardType>(card: {
+    type: T;
     title: string;
-    payload?: unknown;
+    payload?: CardPayloadMap[T];
     /** 明示位置 (preset 用) */
     position?: { x: number; y: number };
   }) => string;
   /** 複数 Card をまとめて配置 (preset 適用用)。1 トランザクションで永続化される */
-  addCards: (
-    cards: { type: CardType; title: string; payload?: unknown; position: { x: number; y: number } }[]
-  ) => string[];
+  addCards: (cards: CardSpec[]) => string[];
   /** カードを 1 枚削除する。
    *  デフォルトは teamId が一致する仲間カードを「チーム単位」で全部閉じる挙動 (× ボタン等の UX)。
    *  `cascadeTeam: false` を渡すと指定 id 1 枚だけを閉じる (`team_dismiss` で 1 名解雇する経路で使う)。 */
@@ -130,6 +309,29 @@ const pulseTimers = new Map<string, number>();
  *  実体は `lib/canvas-migrations.ts` 側に移し、こちらは互換維持のための re-export。 */
 export const __testables = MIGRATION_TESTABLES;
 
+/**
+ * Issue #732: `addCard` / `addCards` 共通の `Node<CardData>` 生成ヘルパ。
+ * `type` と `payload` は呼び出し側 (generic / `CardSpec`) で対応付けて渡されるため、
+ * 構築する `data` は実体として `CardDataOf<T>` (= `CardData` のいずれかの variant)。
+ * generic `T` を union member へ静的に絞れないので `data` 構築の 1 箇所だけ cast する
+ * (構造は変えず、判別 tag `cardType` と payload の対応は呼び出し側の型で保証される)。
+ */
+function makeCardNode<T extends CardType>(
+  id: string,
+  type: T,
+  position: { x: number; y: number },
+  title: string,
+  payload: CardPayloadMap[T] | undefined
+): Node<CardData> {
+  return {
+    id,
+    type,
+    position,
+    data: { cardType: type, title, payload } as CardData,
+    style: { width: NODE_W, height: NODE_H }
+  };
+}
+
 export const useCanvasStore = create<CanvasState>()(
   /**
    * Issue #253 sub: subscribeWithSelector で `subscribe(selector, listener)` API を有効化。
@@ -174,16 +376,7 @@ export const useCanvasStore = create<CanvasState>()(
           };
         }
         set({
-          nodes: [
-            ...existing,
-            {
-              id,
-              type,
-              position: pos,
-              data: { cardType: type, title, payload },
-              style: { width: NODE_W, height: NODE_H }
-            }
-          ]
+          nodes: [...existing, makeCardNode(id, type, pos, title, payload)]
         });
         return id;
       },
@@ -192,13 +385,7 @@ export const useCanvasStore = create<CanvasState>()(
         const newNodes: Node<CardData>[] = cards.map((c) => {
           const id = newId(c.type);
           ids.push(id);
-          return {
-            id,
-            type: c.type,
-            position: c.position,
-            data: { cardType: c.type, title: c.title, payload: c.payload },
-            style: { width: NODE_W, height: NODE_H }
-          };
+          return makeCardNode(id, c.type, c.position, c.title, c.payload);
         });
         set({ nodes: [...get().nodes, ...newNodes] });
         return ids;
@@ -209,12 +396,12 @@ export const useCanvasStore = create<CanvasState>()(
           // cascadeTeam=true (× ボタン等): 同 teamId 全員 + teamLocks も掃除
           // cascadeTeam=false (team_dismiss 1 名解雇): 指定 id だけを閉じ、Leader や他メンバーは残す
           const target = state.nodes.find((n) => n.id === id);
-          const teamId = (target?.data?.payload as { teamId?: string } | undefined)?.teamId;
+          const teamId = cardTeamId(target?.data);
           const ids = new Set<string>([id]);
           let teamLocksNext = state.teamLocks;
           if (cascadeTeam && teamId) {
             for (const n of state.nodes) {
-              const tid = (n.data?.payload as { teamId?: string } | undefined)?.teamId;
+              const tid = cardTeamId(n.data);
               if (tid === teamId) ids.add(n.id);
             }
             // ロック状態も一緒に掃除 (再度同じ teamId を立てる将来のために残骸を残さない)
@@ -242,10 +429,14 @@ export const useCanvasStore = create<CanvasState>()(
         set({
           nodes: get().nodes.map((n) => {
             if (n.id !== id) return n;
-            const prev = (n.data?.payload as Record<string, unknown> | undefined) ?? {};
+            // setCardPayload は意図的に「種別を問わない浅いマージ」のエスケープハッチ。
+            // patch は Record<string, unknown> なので、マージ結果を判別 union の
+            // payload 型へ静的に絞れない。data 構築の 1 箇所だけ cast する
+            // (Issue #732: 旧 `payload as Record<string,unknown>` の置き換え)。
+            const prev = (n.data.payload ?? {}) as Record<string, unknown>;
             return {
               ...n,
-              data: { ...n.data, payload: { ...prev, ...patch } }
+              data: { ...n.data, payload: { ...prev, ...patch } } as CardData
             };
           })
         }),

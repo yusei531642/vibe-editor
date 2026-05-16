@@ -24,9 +24,6 @@ import type {
   TeamPresetLayoutEntry,
   TeamPresetRole
 } from '../../../../types/shared';
-import type {
-  AgentPayload
-} from './cards/AgentNodeCard/types';
 import { spawnTeam, type SpawnTeamMember } from '../../lib/canvas-team-spawn';
 
 interface TeamPresetsPanelProps {
@@ -62,8 +59,10 @@ function buildPresetFromCanvas(
   let agents: Array<'claude' | 'codex' | 'mixed'> = [];
   for (const node of agentNodes) {
     const data = node.data as CardData | undefined;
+    // Issue #732: `cardType !== 'agent'` の continue で data が agent カードに narrowing され、
+    // 続く data.payload は AgentPayload。旧 `data.payload as AgentPayload` キャストは不要。
     if (data?.cardType !== 'agent') continue;
-    const payload = data.payload as AgentPayload | undefined;
+    const payload = data.payload;
     const roleProfileId = payload?.roleProfileId ?? payload?.role ?? '';
     if (!roleProfileId) continue;
     const agent = (payload?.agent ?? 'claude') as 'claude' | 'codex';

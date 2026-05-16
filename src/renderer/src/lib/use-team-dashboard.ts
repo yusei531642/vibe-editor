@@ -22,7 +22,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Node } from '@xyflow/react';
 import { useCanvasNodes } from '../stores/canvas-selectors';
 import { useAgentActivityStore } from '../stores/agent-activity';
-import type { CardData } from '../stores/canvas';
+import { agentPayloadOf, type CardData } from '../stores/canvas';
 import type {
   TeamOrchestrationState,
   TeamTaskSnapshot
@@ -111,7 +111,7 @@ export function useTeamDashboard(input: {
     () =>
       allNodes.filter((n) => {
         if (n.type !== 'agent') return false;
-        const payload = (n.data as CardData | undefined)?.payload as AgentPayload | undefined;
+        const payload = agentPayloadOf(n.data as CardData | undefined);
         return !teamId || payload?.teamId === teamId;
       }),
     [allNodes, teamId]
@@ -154,7 +154,7 @@ export function useTeamDashboard(input: {
     if (agentNodes.length === 0) return [];
     return agentNodes.map((node) => {
       const data = node.data as CardData | undefined;
-      const payload = data?.payload as AgentPayload | undefined;
+      const payload = agentPayloadOf(data);
       const agentId = payload?.agentId ?? null;
       const roleProfileId = payload?.roleProfileId ?? payload?.role ?? 'unknown';
       const agentKind = payload?.agent ?? 'claude';
@@ -342,7 +342,7 @@ export function useTeamDashboardMulti(input: {
       const state = stateByTeam[teamId] ?? null;
       const rows: TeamDashboardRow[] = nodes.map((node) => {
         const data = node.data as CardData | undefined;
-        const payload = data?.payload as AgentPayload | undefined;
+        const payload = agentPayloadOf(data);
         const agentId = payload?.agentId ?? null;
         const roleProfileId = payload?.roleProfileId ?? payload?.role ?? 'unknown';
         const agentKind = payload?.agent ?? 'claude';

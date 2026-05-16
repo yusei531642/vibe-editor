@@ -18,7 +18,12 @@ import {
 import { useReactFlow } from '@xyflow/react';
 import { useT } from '../../lib/i18n';
 import { useSettings } from '../../lib/settings-context';
-import { useCanvasStore, type StageView, type CardData } from '../../stores/canvas';
+import {
+  useCanvasStore,
+  agentPayloadOf,
+  type StageView,
+  type CardData
+} from '../../stores/canvas';
 import { useCanvasNodes, useCanvasStageView } from '../../stores/canvas-selectors';
 import { useAgentActivityStore } from '../../stores/agent-activity';
 import {
@@ -29,7 +34,6 @@ import { useTeamHealthMulti } from '../../lib/use-team-health';
 import { deriveHealth } from '../../lib/agent-health';
 import { TeamPresetsPanel } from './TeamPresetsPanel';
 import { TeamDashboard } from './TeamDashboard';
-import type { AgentPayload } from './cards/AgentNodeCard/types';
 import type { ArrangeGap } from '../../lib/canvas-arrange';
 
 /**
@@ -188,7 +192,8 @@ export function StageHud(): JSX.Element {
   const aggregatedTeamIds = useMemo<string[]>(() => {
     const seen = new Set<string>();
     for (const node of agentNodes) {
-      const payload = (node.data as CardData | undefined)?.payload as AgentPayload | undefined;
+      // Issue #732: 旧 `(node.data as CardData)?.payload as AgentPayload` を agentPayloadOf に置換。
+      const payload = agentPayloadOf(node.data);
       if (payload?.teamId) seen.add(payload.teamId);
     }
     return Array.from(seen);
@@ -197,7 +202,8 @@ export function StageHud(): JSX.Element {
   const deadCount = useMemo(() => {
     let n = 0;
     for (const node of agentNodes) {
-      const payload = (node.data as CardData | undefined)?.payload as AgentPayload | undefined;
+      // Issue #732: 旧 `(node.data as CardData)?.payload as AgentPayload` を agentPayloadOf に置換。
+      const payload = agentPayloadOf(node.data);
       if (!payload?.agentId) continue;
       const row = healthSnapshot.byAgentId[payload.agentId];
       const h = deriveHealth(row);
@@ -215,7 +221,8 @@ export function StageHud(): JSX.Element {
     const allTeams: string[] = [];
     const seen = new Set<string>();
     for (const node of agentNodes) {
-      const payload = (node.data as CardData | undefined)?.payload as AgentPayload | undefined;
+      // Issue #732: 旧 `(node.data as CardData)?.payload as AgentPayload` を agentPayloadOf に置換。
+      const payload = agentPayloadOf(node.data);
       if (!payload?.teamId) continue;
       if (!seen.has(payload.teamId)) {
         seen.add(payload.teamId);

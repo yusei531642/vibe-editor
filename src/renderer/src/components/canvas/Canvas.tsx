@@ -34,7 +34,14 @@ import HandoffEdge from './HandoffEdge';
 import { QuickNav } from './QuickNav';
 import { LeaderGlow } from './LeaderGlow';
 import { StageHud } from './StageHud';
-import { useCanvasStore, NODE_W, NODE_H, type CardData } from '../../stores/canvas';
+import {
+  useCanvasStore,
+  NODE_W,
+  NODE_H,
+  cardTeamId,
+  agentPayloadOf,
+  type CardData
+} from '../../stores/canvas';
 import {
   useCanvasNodes,
   useCanvasEdges,
@@ -49,7 +56,6 @@ import { useConfirmRemoveCard } from '../../lib/use-confirm-remove-card';
 import { useRoleProfiles } from '../../lib/role-profiles-context';
 import { useSettings } from '../../lib/settings-context';
 import { resolveAgentVisual, type AgentVisualPayload } from '../../lib/agent-visual';
-import type { TeamOrganizationMeta } from '../../../../types/shared';
 
 const nodeTypes = {
   terminal: TerminalCard,
@@ -150,10 +156,9 @@ function FlowApp({ actions }: FlowAppProps): JSX.Element {
       //   - pendingPosIds / pendingDimIds: remaining 内に既存の position/dimensions 変更がある id の Set
       //     (旧 remaining.some 二重ループを Set.has の O(1) に置換)
       //   - lockedTeams: teamId → boolean のキャッシュ (isTeamLocked の重複呼び出しを削減)
-      // payload は CardData 内で複数のサブ型を持つため { teamId?: string } で局所キャストする。
-      // 同じキャストが index 構築 + position/dimensions 分岐で計 3 回走るので helper に集約。
-      const teamIdOf = (n: Node<CardData>): string | undefined =>
-        (n.data?.payload as { teamId?: string } | undefined)?.teamId;
+      // Issue #732: teamId 抽出は cardData の判別可能 union を見る共通 helper
+      // `cardTeamId` に集約済み (旧 `payload as { teamId?: string }` 局所キャストを撤去)。
+      const teamIdOf = (n: Node<CardData>): string | undefined => cardTeamId(n.data);
       // store から最新 nodes を直接取り出す (subscribe している `nodes` と等価だが、
       // ここで getState 越しに読むと callback の deps から `nodes` を外せる →
       // ドラッグ中に毎フレーム識別子が変わる onNodesChange を React Flow に再 bind せずに済む)。
@@ -271,7 +276,7 @@ function FlowApp({ actions }: FlowAppProps): JSX.Element {
     (e: React.MouseEvent, node: Node<CardData>) => {
       e.preventDefault();
       e.stopPropagation();
-      const teamId = (node.data?.payload as { teamId?: string } | undefined)?.teamId;
+      const teamId = cardTeamId(node.data);
       const items: ContextMenuItem[] = [];
       if (teamId) {
         const locked = isTeamLocked(teamId);
@@ -338,11 +343,13 @@ function FlowApp({ actions }: FlowAppProps): JSX.Element {
   // Tauri listen は ActivityFeed と共有なので二重登録にならない。
   useTeamHandoff((p) => {
     const currentNodes = useCanvasStore.getState().nodes;
+    // Issue #732: agentPayloadOf が agent カードのみ payload を返すので
+    // 旧 `cardType === 'agent' && (payload as { agentId? }).agentId` の二段判定が 1 本化される。
     const fromNode = currentNodes.find(
-      (n) => n.data?.cardType === 'agent' && (n.data.payload as { agentId?: string } | undefined)?.agentId === p.fromAgentId
+      (n) => agentPayloadOf(n.data)?.agentId === p.fromAgentId
     );
     const toNode = currentNodes.find(
-      (n) => n.data?.cardType === 'agent' && (n.data.payload as { agentId?: string } | undefined)?.agentId === p.toAgentId
+      (n) => agentPayloadOf(n.data)?.agentId === p.toAgentId
     );
     if (!fromNode || !toNode) return;
     pulseEdge({
@@ -356,8 +363,10 @@ function FlowApp({ actions }: FlowAppProps): JSX.Element {
 
   const minimapColor = useCallback((node: Node) => {
     const data = node.data as CardData | undefined;
+    // Issue #732: `cardType === 'agent'` で data が agent カードに narrowing され、
+    // payload は AgentPayload。AgentVisualPayload は AgentPayload の部分集合なので cast 不要。
     if (data?.cardType === 'agent') {
-      return resolveAccent(data.payload as AgentVisualPayload | undefined);
+      return resolveAccent(data.payload);
     }
     return '#7a7afd';
   }, [resolveAccent]);
@@ -529,15 +538,8 @@ function StageListOverlay(): JSX.Element {
           <div className="tc-list-overlay__empty">まだエージェントが配置されていません</div>
         ) : (
           agentNodes.map((n) => {
-            const payload = (n.data as CardData | undefined)?.payload as
-              | {
-                  roleProfileId?: string;
-                  role?: string;
-                  agentId?: string;
-                  agent?: string;
-                  organization?: TeamOrganizationMeta;
-                }
-              | undefined;
+            // Issue #732: 旧 inline 型キャストを agentPayloadOf に置換 (agent カードのみ payload を返す)。
+            const payload = agentPayloadOf(n.data as CardData | undefined);
             const visual = resolveAgentVisual(payload, profilesById, settings.language);
             const rowStyle = {
               ['--agent-accent' as string]: visual.agentAccent,

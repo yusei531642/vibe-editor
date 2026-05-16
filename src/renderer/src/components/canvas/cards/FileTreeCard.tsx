@@ -5,22 +5,25 @@
  * payload: { projectRoot, extraRoots? }
  */
 import { memo, useCallback } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { CardFrame } from '../CardFrame';
 import { FileTreePanel } from '../../FileTreePanel';
 import { useCanvasStore } from '../../../stores/canvas';
+import type { CardDataOf } from '../../../stores/canvas';
 import { useSettings } from '../../../lib/settings-context';
 import { useT } from '../../../lib/i18n';
 
-interface FileTreePayload {
-  projectRoot?: string;
-  extraRoots?: string[];
-}
-
-function FileTreeCardImpl({ id, data, positionAbsoluteX, positionAbsoluteY }: NodeProps): JSX.Element {
+// Issue #732: payload 型は canvas store の判別可能 union に集約。`NodeProps` を
+// `Node<CardDataOf<'fileTree'>>` で具体化することで `data.payload` が直接読め、inline cast を撤廃。
+function FileTreeCardImpl({
+  id,
+  data,
+  positionAbsoluteX,
+  positionAbsoluteY
+}: NodeProps<Node<CardDataOf<'fileTree'>>>): JSX.Element {
   const { settings, update } = useSettings();
   const t = useT();
-  const payload = (data?.payload ?? {}) as FileTreePayload;
+  const payload = data?.payload ?? {};
   // Issue #23: lastOpenedRoot (現在プロジェクト) を最優先、claudeCwd は fallback。
   const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || payload.projectRoot || '';
   const extraRoots = payload.extraRoots ?? settings.workspaceFolders ?? [];
