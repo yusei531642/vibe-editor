@@ -135,6 +135,19 @@ static SERVER_LOG_PATH: OnceCell<PathBuf> = OnceCell::new();
 const RECRUIT_GRACE_DEFAULT_MS: u64 = 2_000;
 const RECRUIT_GRACE_MAX_MS: u64 = 10_000;
 
+/// Issue #742 (Security): recruit grant (= 事前発行された pending recruit) の有効期限。
+/// `try_register_pending_recruit` で agent_id を登録した瞬間から計時し、handshake が
+/// この時間内に来なければ「期限切れ token」として reject する。短い TTL により、
+/// `VIBE_TEAM_TOKEN` を盗んだ別プロセスが「子プロセスが起動に失敗して未 handshake のまま
+/// 放置された grant」を後から悪用できる窓を最小化する。
+/// recruit フロー自体の `RECRUIT_TIMEOUT` (30s) より長めの 60s を既定にして、
+/// recruit-timeout 側 cleanup の belt に対する suspenders として機能させる。
+/// `VIBE_TEAM_HANDSHAKE_TTL_MS` で上書き可能 (parse 失敗 / 範囲外 / 未設定は既定値)。
+const HANDSHAKE_GRANT_TTL_DEFAULT_MS: u64 = 60_000;
+/// TTL の許容上限。これより大きい env 値は無効として既定値に丸める
+/// (TTL を実質無効化するような巨大値の誤設定 / 改ざんを防ぐ)。
+const HANDSHAKE_GRANT_TTL_MAX_MS: u64 = 300_000;
+
 #[cfg(test)]
 static RECRUIT_RESCUED_EVENTS_FOR_TEST: once_cell::sync::Lazy<
     std::sync::Mutex<Vec<RecruitRescuedPayload>>,
@@ -307,6 +320,11 @@ pub struct PendingRecruit {
     pub ack_done: AtomicBool,
     /// Issue #577: ack timeout 済みだが grace window 中で、遅着 ack を rescue できる状態。
     pub timed_out_at: Option<Instant>,
+    /// Issue #742 (Security): この recruit grant を発行した時刻。
+    /// `resolve_pending_recruit` の handshake で `issued_at.elapsed()` が
+    /// `HANDSHAKE_GRANT_TTL` を超えていたら「期限切れ token」として reject する
+    /// (未使用 token を短時間で無効化 = 盗まれた token の有効窓を絞る)。
+    pub issued_at: Instant,
 }
 
 /// Issue #577: timeout 後 grace 期間中に遅着 ack を救済したことを renderer に知らせる event payload。
@@ -873,6 +891,8 @@ impl TeamHub {
                 ack_tx: Some(ack_tx),
                 ack_done: AtomicBool::new(false),
                 timed_out_at: None,
+                // Issue #742: grant 発行時刻。handshake TTL 検証の起点。
+                issued_at: Instant::now(),
             },
         );
         Ok(PendingRecruitChannels {
@@ -896,14 +916,56 @@ impl TeamHub {
     /// Issue #637: `agent_role_bindings` の key を `(team_id, agent_id)` tuple に拡張。
     /// 同 agent_id が別 team で handshake してきても old team の binding を上書きしない
     /// (cross-team race の遮断)。lookup / insert は team_id ペアで行う。
+    ///
+    /// Issue #742 (Security): handshake を「Hub が事前発行した recruit grant の照合」に格上げする。
+    /// 1. **TTL**: pending grant が `HANDSHAKE_GRANT_TTL` を超過していたら期限切れ token として
+    ///    reject し、stale な pending entry をその場で除去する (未使用 token の有効窓を最小化)。
+    /// 2. **single-use**: pending entry は初回 handshake 成功で `remove` される (旧来挙動)。
+    ///    同 grant での 2 回目以降はこの remove 済み状態のため pending 経路には乗らない。
+    /// 3. **agent_id binding**: pending grant も既存 binding も無い「未知 agent_id」は reject する。
+    ///    旧実装は未知 agent_id でも binding を新規作成して `true` を返していたため、正しい
+    ///    global token さえあれば任意の偽 agent_id で接続できた。Hub が `try_register_pending_recruit`
+    ///    で事前発行した agent_id (= pending) か、過去に handshake 済みの agent_id (= binding) の
+    ///    いずれかでなければ通さない。
     pub async fn resolve_pending_recruit(
         &self,
         agent_id: &str,
         team_id: &str,
         role_profile_id: &str,
     ) -> bool {
+        self.resolve_pending_recruit_with_ttl(
+            agent_id,
+            team_id,
+            role_profile_id,
+            handshake_grant_ttl_from_env(),
+        )
+        .await
+    }
+
+    /// Issue #742: TTL を引数で受ける本体。test から短い TTL を注入して期限切れ経路を
+    /// 検証できるようにするため `resolve_pending_recruit` から分離した。
+    pub(crate) async fn resolve_pending_recruit_with_ttl(
+        &self,
+        agent_id: &str,
+        team_id: &str,
+        role_profile_id: &str,
+        grant_ttl: Duration,
+    ) -> bool {
         let mut s = self.state.lock().await;
+        // Issue #742: pending grant が存在するなら TTL / team_id / role を順に検証する。
+        let mut consumed_pending = false;
         if let Some(p) = s.pending_recruits.get(agent_id) {
+            // TTL 超過 = 期限切れ token。stale entry を除去してから reject する
+            // (recruit 側 cancel 経路が拾えなかった残骸を handshake 側でも掃除)。
+            if p.issued_at.elapsed() > grant_ttl {
+                tracing::warn!(
+                    "[teamhub] handshake rejected: recruit grant expired \
+                     (agent={agent_id} team={team_id} age={:?} ttl={grant_ttl:?})",
+                    p.issued_at.elapsed()
+                );
+                s.pending_recruits.remove(agent_id);
+                return false;
+            }
             if p.team_id != team_id {
                 tracing::warn!(
                     "[teamhub] team_id mismatch on handshake (pending) agent={} expected={} got={}",
@@ -922,11 +984,13 @@ impl TeamHub {
                 );
                 return false;
             }
+            // single-use: 成功確定なので grant を消費 (remove) する。
             let p = s.pending_recruits.remove(agent_id).expect("just checked");
             let _ = p.tx.send(RecruitOutcome {
                 agent_id: agent_id.to_string(),
                 role_profile_id: role_profile_id.to_string(),
             });
+            consumed_pending = true;
         }
         // 既に bind 済みの (team_id, agent_id) なら role 一致を強制。
         // Issue #637: team_id 次元で分離しているので、別 team の同 agent_id binding は
@@ -943,10 +1007,19 @@ impl TeamHub {
                 );
                 return false;
             }
-        } else {
-            // 初回 handshake で bind
+        } else if consumed_pending {
+            // 初回 handshake: たった今 grant を消費したので bind を確立する。
+            // 以後の再接続 (bridge の onClose→connect) はこの binding 経路で許可される。
             s.agent_role_bindings
                 .insert(binding_key, role_profile_id.to_string());
+        } else {
+            // Issue #742: pending grant も binding も無い = Hub が発行していない未知 agent_id。
+            // 正しい global token を持っていても、ここで reject して接続を切る。
+            tracing::warn!(
+                "[teamhub] handshake rejected: unknown agent_id (no pending grant, no binding) \
+                 team={team_id} agent={agent_id}"
+            );
+            return false;
         }
         // Issue #342 Phase 3 (3.3): 初回 handshake / 再接続 handshake いずれも last_handshake_at と
         // last_seen_at を更新する。recruit 経路を通らずに直接 handshake してきた場合 (= 旧 context
@@ -1702,6 +1775,18 @@ fn recruit_grace_from_env() -> Duration {
     Duration::from_millis(ms)
 }
 
+/// Issue #742 (Security): recruit grant の TTL。`HANDSHAKE_GRANT_TTL_DEFAULT_MS` 既定。
+/// `VIBE_TEAM_HANDSHAKE_TTL_MS` で上書き可能だが、`1..=HANDSHAKE_GRANT_TTL_MAX_MS` の範囲外
+/// (= 0 で実質即時失効 / 上限超で TTL 無効化) や parse 失敗時は既定値に丸める。
+pub(crate) fn handshake_grant_ttl_from_env() -> Duration {
+    let ms = std::env::var("VIBE_TEAM_HANDSHAKE_TTL_MS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|&n| (1..=HANDSHAKE_GRANT_TTL_MAX_MS).contains(&n))
+        .unwrap_or(HANDSHAKE_GRANT_TTL_DEFAULT_MS);
+    Duration::from_millis(ms)
+}
+
 /// Issue #513: `~/.vibe-editor/role-profiles.json#dynamic[]` から **指定 team_id に紐付く
 /// entry だけ** を抽出して返す内部 helper。`register_team` の前段で呼び、Hub state.lock を
 /// 取らずに async I/O を済ませてから replay する設計。
@@ -1767,18 +1852,36 @@ mod role_binding_team_id_tests {
         TeamHub::new(Arc::new(SessionRegistry::new()))
     }
 
+    /// Issue #742: handshake は「Hub が事前発行した recruit grant」を要求するようになったため、
+    /// 初回 handshake をシミュレートするテストは事前に pending grant を登録する。
+    /// `team_recruit` / `team_create_leader` が裏で行う `try_register_pending_recruit` の最小版。
+    async fn seed_pending(hub: &TeamHub, agent_id: &str, team_id: &str, role: &str) {
+        hub.try_register_pending_recruit(
+            agent_id.to_string(),
+            team_id.to_string(),
+            role.to_string(),
+            "leader-seed".to_string(),
+            false,
+            &[],
+        )
+        .await
+        .expect("seed pending recruit should succeed");
+    }
+
     /// 同じ `agent_id` を 2 つの team でそれぞれ違う role として handshake させても、
     /// 各 team の binding は独立に保持される (= cross-team での role 上書きが起きない)。
     #[tokio::test]
     async fn cross_team_same_agent_id_does_not_overwrite_role_binding() {
         let hub = make_hub();
         // team-a で programmer として handshake
+        seed_pending(&hub, "agent-1", "team-a", "programmer").await;
         assert!(
             hub.resolve_pending_recruit("agent-1", "team-a", "programmer")
                 .await,
             "first handshake on team-a should succeed"
         );
         // team-b で同 agent_id を reviewer として handshake
+        seed_pending(&hub, "agent-1", "team-b", "reviewer").await;
         assert!(
             hub.resolve_pending_recruit("agent-1", "team-b", "reviewer")
                 .await,
@@ -1804,10 +1907,12 @@ mod role_binding_team_id_tests {
     #[tokio::test]
     async fn same_team_role_mismatch_on_rehandshake_is_rejected() {
         let hub = make_hub();
+        seed_pending(&hub, "agent-1", "team-a", "programmer").await;
         assert!(
             hub.resolve_pending_recruit("agent-1", "team-a", "programmer")
                 .await
         );
+        // 2 回目は binding 経由 (Issue #742 の grant は single-use で消費済み) で role 不一致を検出する。
         assert!(
             !hub.resolve_pending_recruit("agent-1", "team-a", "reviewer")
                 .await,
@@ -1820,10 +1925,12 @@ mod role_binding_team_id_tests {
     #[tokio::test]
     async fn remove_agent_role_binding_only_targets_specified_team_scope() {
         let hub = make_hub();
+        seed_pending(&hub, "agent-1", "team-a", "programmer").await;
         assert!(
             hub.resolve_pending_recruit("agent-1", "team-a", "programmer")
                 .await
         );
+        seed_pending(&hub, "agent-1", "team-b", "reviewer").await;
         assert!(
             hub.resolve_pending_recruit("agent-1", "team-b", "reviewer")
                 .await

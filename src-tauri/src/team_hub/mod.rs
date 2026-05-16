@@ -584,6 +584,22 @@ mod disconnect_release_tests {
         hub
     }
 
+    /// Issue #742: handshake は Hub が事前発行した recruit grant を要求するようになったため、
+    /// `handle_client` を直接駆動するテストでは事前に pending grant を仕込む。
+    /// `team_recruit` 経路で `try_register_pending_recruit` が登録するのと同じ最小エントリ。
+    async fn seed_pending_grant(hub: &TeamHub, agent_id: &str, team_id: &str, role: &str) {
+        hub.try_register_pending_recruit(
+            agent_id.to_string(),
+            team_id.to_string(),
+            role.to_string(),
+            "leader-seed".to_string(),
+            false,
+            &[],
+        )
+        .await
+        .expect("seed pending recruit should succeed");
+    }
+
     /// agent 用の lock を直接 map に push しておく。
     async fn pre_acquire_lock(hub: &TeamHub, team_id: &str, agent_id: &str, role: &str, path: &str) {
         let mut s = hub.state.lock().await;
@@ -615,6 +631,8 @@ mod disconnect_release_tests {
         let role = "programmer";
         let token = "deadbeef-test-token";
         let hub = setup_hub_for_test(team_id, token).await;
+        // Issue #742: handshake が pending grant を要求するので、recruit 済みを模擬する。
+        seed_pending_grant(&hub, agent_id, team_id, role).await;
         pre_acquire_lock(&hub, team_id, agent_id, role, "src/foo.rs").await;
         assert_eq!(count_team_locks(&hub, team_id).await, 1);
 
@@ -669,6 +687,8 @@ mod disconnect_release_tests {
         let hub = setup_hub_for_test(team_id, token).await;
 
         // 1 回目: lock を取って disconnect。
+        // Issue #742: handshake が pending grant を要求するので recruit 済みを模擬する。
+        seed_pending_grant(&hub, agent_id, team_id, role).await;
         pre_acquire_lock(&hub, team_id, agent_id, role, "src/bar.rs").await;
         let (s1, mut c1) = tokio::io::duplex(8 * 1024);
         let hello = json!({
@@ -709,5 +729,228 @@ mod disconnect_release_tests {
         );
         assert!(!result.has_conflicts());
         assert_eq!(result.locked, vec!["src/bar.rs".to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod handshake_auth_tests {
+    //! Issue #742 (Security): handshake を「Hub が事前発行した recruit grant の照合」に
+    //! 格上げしたことの regression test。
+    //!
+    //! 検証する 3 点:
+    //!   1. **期限切れ token (TTL)**: `issued_at` が TTL を超過した pending grant は reject され、
+    //!      stale な pending entry も掃除される。binding は作られない。
+    //!   2. **未知 agent_id (agent_id binding)**: 正しい global token を持っていても、Hub が
+    //!      発行していない agent_id (pending grant も binding も無い) の handshake は reject される。
+    //!      旧実装はここで binding を新規作成して接続を通していた = 本 issue の主穴。
+    //!   3. **single-use + 正常系維持**: 正しい grant の初回 handshake は成功して grant を消費し、
+    //!      binding を確立する。以後の再接続 (bridge の onClose→connect) は binding 経路で
+    //!      通る (= single-use 化が正常な再接続を壊さない)。
+    use super::*;
+    use crate::pty::SessionRegistry;
+    use serde_json::json;
+    use std::sync::Arc;
+    use std::time::Duration as StdDuration;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::time::{timeout, Duration};
+
+    const TOKEN: &str = "deadbeef-742-token";
+
+    async fn setup_hub(team_id: &str) -> TeamHub {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let mut s = hub.state.lock().await;
+        s.active_teams.insert(team_id.to_string());
+        s.token = TOKEN.to_string();
+        drop(s);
+        hub
+    }
+
+    async fn seed_grant(hub: &TeamHub, agent_id: &str, team_id: &str, role: &str) {
+        hub.try_register_pending_recruit(
+            agent_id.to_string(),
+            team_id.to_string(),
+            role.to_string(),
+            "leader-seed".to_string(),
+            false,
+            &[],
+        )
+        .await
+        .expect("seed pending recruit should succeed");
+    }
+
+    async fn has_binding(hub: &TeamHub, team_id: &str, agent_id: &str) -> bool {
+        hub.state
+            .lock()
+            .await
+            .agent_role_bindings
+            .contains_key(&(team_id.to_string(), agent_id.to_string()))
+    }
+
+    async fn has_pending(hub: &TeamHub, agent_id: &str) -> bool {
+        hub.state
+            .lock()
+            .await
+            .pending_recruits
+            .contains_key(agent_id)
+    }
+
+    fn hello_line(agent_id: &str, team_id: &str, role: &str) -> Vec<u8> {
+        let mut v = serde_json::to_vec(&json!({
+            "token": TOKEN,
+            "teamId": team_id,
+            "role": role,
+            "agentId": agent_id,
+        }))
+        .unwrap();
+        v.push(b'\n');
+        v
+    }
+
+    /// `handle_client` を duplex socket 上で駆動し、handshake 後に `initialize` を 1 本投げて
+    /// 「応答が返るか (= handshake 通過)」「EOF で切られるか (= reject)」を判定する。
+    /// `Some(_)` = handshake 成功して RPC 応答あり、`None` = handshake reject で接続切断。
+    async fn run_handshake_probe(hub: &TeamHub, hello: &[u8]) -> Option<serde_json::Value> {
+        let (server_side, client_side) = tokio::io::duplex(16 * 1024);
+        let hub_clone = hub.clone();
+        let server = tokio::spawn(async move {
+            let _ = handle_client(hub_clone, server_side, TOKEN.to_string()).await;
+        });
+
+        let (rd, mut wr) = tokio::io::split(client_side);
+        let mut reader = BufReader::new(rd);
+        wr.write_all(hello).await.unwrap();
+        wr.flush().await.unwrap();
+        // handshake 通過なら initialize に応答が返る。reject されていれば read_line が 0 を返す。
+        wr.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n")
+            .await
+            .unwrap();
+        wr.flush().await.unwrap();
+
+        let mut line = String::new();
+        let read_res = timeout(Duration::from_secs(5), reader.read_line(&mut line)).await;
+        let outcome = match read_res {
+            Ok(Ok(0)) | Ok(Err(_)) | Err(_) => None,
+            Ok(Ok(_)) => serde_json::from_str::<serde_json::Value>(line.trim()).ok(),
+        };
+
+        // client を畳んで server task を終わらせる。
+        drop(wr);
+        drop(reader);
+        let _ = timeout(Duration::from_secs(5), server).await;
+        outcome
+    }
+
+    /// (1) TTL: `issued_at` が TTL を超過した grant は期限切れ token として reject され、
+    /// stale な pending entry が掃除され、binding も作られない。
+    #[tokio::test]
+    async fn expired_recruit_grant_is_rejected_and_pending_is_cleaned() {
+        let team_id = "team-742-ttl";
+        let agent_id = "vc-worker-742-ttl";
+        let role = "programmer";
+        let hub = setup_hub(team_id).await;
+        seed_grant(&hub, agent_id, team_id, role).await;
+
+        // grant 発行から少し経過させ、TTL を 1ms に絞って確実に期限切れにする。
+        tokio::time::sleep(StdDuration::from_millis(8)).await;
+        let accepted = hub
+            .resolve_pending_recruit_with_ttl(
+                agent_id,
+                team_id,
+                role,
+                StdDuration::from_millis(1),
+            )
+            .await;
+
+        assert!(!accepted, "expired recruit grant must be rejected");
+        assert!(
+            !has_pending(&hub, agent_id).await,
+            "stale (expired) pending grant must be removed on rejection"
+        );
+        assert!(
+            !has_binding(&hub, team_id, agent_id).await,
+            "no role binding may be established for an expired grant"
+        );
+    }
+
+    /// (1b) 同じ grant でも TTL 内なら通る (TTL 検証が正常系を誤爆しないことの対照)。
+    #[tokio::test]
+    async fn fresh_recruit_grant_within_ttl_is_accepted() {
+        let team_id = "team-742-fresh";
+        let agent_id = "vc-worker-742-fresh";
+        let role = "reviewer";
+        let hub = setup_hub(team_id).await;
+        seed_grant(&hub, agent_id, team_id, role).await;
+
+        let accepted = hub
+            .resolve_pending_recruit_with_ttl(agent_id, team_id, role, StdDuration::from_secs(60))
+            .await;
+
+        assert!(accepted, "a fresh grant within TTL must be accepted");
+        assert!(
+            has_binding(&hub, team_id, agent_id).await,
+            "a successful first handshake must establish the role binding"
+        );
+        assert!(
+            !has_pending(&hub, agent_id).await,
+            "single-use: the pending grant must be consumed on success"
+        );
+    }
+
+    /// (2) 未知 agent_id: 正しい global token を持っていても、Hub が事前発行していない
+    /// agent_id の handshake は reject され、binding も作られない (= 主穴の塞ぎ込み確認)。
+    #[tokio::test]
+    async fn handshake_with_unknown_agent_id_is_rejected() {
+        let team_id = "team-742-unknown";
+        let hub = setup_hub(team_id).await;
+        // grant を仕込まずに、正しい token + 登録済み team で偽 agent_id を名乗る。
+        let bogus_agent = "vc-attacker-not-issued";
+        let resp = run_handshake_probe(
+            &hub,
+            &hello_line(bogus_agent, team_id, "programmer"),
+        )
+        .await;
+
+        assert!(
+            resp.is_none(),
+            "handshake with an agent_id the Hub never issued must be rejected (connection closed)"
+        );
+        assert!(
+            !has_binding(&hub, team_id, bogus_agent).await,
+            "rejected unknown agent_id must NOT create a role binding"
+        );
+    }
+
+    /// (3) 正常系 + single-use: 正しい grant の初回 handshake は通り (initialize に応答が返る)、
+    /// grant は消費され binding が確立される。続けて同 agent_id が grant 無しで再接続しても、
+    /// binding 経路で通る (single-use 化が bridge の再接続を壊さないことの担保)。
+    #[tokio::test]
+    async fn valid_grant_handshake_succeeds_then_reconnect_via_binding_works() {
+        let team_id = "team-742-ok";
+        let agent_id = "vc-worker-742-ok";
+        let role = "programmer";
+        let hub = setup_hub(team_id).await;
+        seed_grant(&hub, agent_id, team_id, role).await;
+
+        // 初回 handshake: grant 経由で成功する。
+        let first = run_handshake_probe(&hub, &hello_line(agent_id, team_id, role)).await;
+        assert!(
+            first.is_some(),
+            "first handshake with a valid recruit grant must succeed"
+        );
+        assert!(
+            !has_pending(&hub, agent_id).await,
+            "single-use: grant must be consumed after the first successful handshake"
+        );
+        assert!(
+            has_binding(&hub, team_id, agent_id).await,
+            "first handshake must establish the role binding"
+        );
+
+        // 再接続: grant は既に消費済み。binding 経路で通らなければならない。
+        let second = run_handshake_probe(&hub, &hello_line(agent_id, team_id, role)).await;
+        assert!(
+            second.is_some(),
+            "reconnect of an already-bound agent must still succeed via the binding path"
+        );
     }
 }
