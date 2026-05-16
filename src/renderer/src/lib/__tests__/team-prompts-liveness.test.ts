@@ -13,7 +13,6 @@ import {
   composeWorkerProfile
 } from '../role-profiles-builtin';
 import { generateTeamSystemPrompt } from '../team-prompts';
-import { BUILTIN_PRESETS } from '../workspace-presets';
 
 describe('Issue #409: worker template enforces ACK / progress / completion protocol', () => {
   it('English worker template requires ACK + team_update_task on receipt', () => {
@@ -80,17 +79,6 @@ describe('Issue #409: leader template forbids dismiss-on-team_read-zero', () => 
 describe('Issue #456: Codex-only team keeps every recruited seat on Codex', () => {
   const leader = BUILTIN_BY_ID['leader'];
   const hr = BUILTIN_BY_ID['hr'];
-
-  it('Codex Leader + HR preset actually starts HR on Codex', () => {
-    const preset = BUILTIN_PRESETS.find((p) => p.id === 'leader-hr-codex');
-    expect(preset).toBeTruthy();
-    expect(preset?.members).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ role: 'leader', agent: 'codex' }),
-        expect.objectContaining({ role: 'hr', agent: 'codex' })
-      ])
-    );
-  });
 
   it('leader prompt requires Codex-only / same-engine constraints to be preserved for HR and workers', () => {
     const en = leader.prompt.template;

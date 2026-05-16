@@ -58,6 +58,17 @@ jobs:
       - name: TypeScript typecheck
         run: npm run typecheck
 
+      # Issue #721: ESLint flat config (eslint.config.mjs) によるベースライン lint。
+      # 現状はエラー 0 で通る最小ルールセット (将来 PR で段階的に厳格化する)。
+      - name: ESLint
+        run: npm run lint
+
+      # Issue #721: renderer の単体テスト (vitest) を CI で実行する。
+      # 従来は package.json に test スクリプトと vitest.config.ts があるのに
+      # CI で一度も走らず、renderer のリグレッションがフリーパスだった。
+      - name: Vitest
+        run: npm test
+
       - name: Build renderer
         run: npm run build:vite
 
@@ -91,6 +102,35 @@ jobs:
       - name: Cargo audit
         working-directory: src-tauri
         run: cargo audit
+
+  # Issue #721: verify job は ubuntu のみで動くため、`cfg(windows)` の windows-sys /
+  # ConPTY 経路や `cfg(target_os = "macos")` のコードが CI で一度もコンパイルされず、
+  # OS 固有のビルド破壊が main 入後に初めて発覚していた。Windows / macOS でも
+  # `cargo check` を走らせ、cfg-gated コードのコンパイルを保証する。
+  # apt 依存は Linux 専用なので、ここでは不要 (cargo check は webkit 等を要求しない)。
+  cargo-cfg:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-04-26
+        with:
+          toolchain: stable
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Cargo check (cfg-gated build)
+        run: cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets
 
   # Issue #745: 既存の `npm audit` / `cargo audit` は advisory DB ベースの依存脆弱性検査で、
   # 「うっかり API key / token / 暗号鍵をコミットした」を検知できない。

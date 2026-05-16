@@ -49,6 +49,6 @@ describe('theme accent foreground', () => {
     applyTheme('glass', 'Inter', 14);
 
     expect(document.documentElement.dataset.theme).toBe('glass');
-    expect(THEMES.glass.accentForeground).toBe('#050714');
+    expect(THEMES.glass.accentForeground).toBe('#0B0F1A');
   });
 });

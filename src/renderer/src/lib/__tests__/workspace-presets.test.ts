@@ -12,23 +12,20 @@ import { NODE_H, NODE_W } from '../../stores/canvas';
 const t = (key: string): string => key;
 
 describe('workspace presets', () => {
-  it('expands Issue #370 dual organization presets as independent organizations', () => {
-    const dualPresets = BUILTIN_PRESETS.filter((preset) => preset.id.startsWith('dual-'));
+  // PR #713 (v1.6.0 UI ポリッシュ) で builtin プリセットを Leader-only の
+  // 2 つ (leader-claude / leader-codex) に集約し、Issue #370 の dual-* /
+  // leader-hr-* マルチ組織プリセットは撤去された。複数組織は Leader の
+  // team_recruit で動的に増やす運用に一本化されている。
+  it('only ships the Leader-only builtin presets after PR #713 cleanup', () => {
+    expect(BUILTIN_PRESETS.map((preset) => preset.id)).toEqual(['leader-claude', 'leader-codex']);
+    expect(BUILTIN_PRESETS.some((preset) => preset.id.startsWith('dual-'))).toBe(false);
 
-    expect(dualPresets.map((preset) => preset.id)).toEqual([
-      'dual-claude-claude',
-      'dual-claude-codex',
-      'dual-codex-codex',
-      'dual-codex-claude'
-    ]);
-
-    for (const preset of dualPresets) {
-      expect(presetOrganizationCount(preset)).toBe(2);
-      expect(presetMemberCount(preset)).toBe(2);
+    for (const preset of BUILTIN_PRESETS) {
+      expect(presetOrganizationCount(preset)).toBe(1);
+      expect(presetMemberCount(preset)).toBe(1);
       const organizations = expandPresetOrganizations(preset, t, preset.i18nKey);
-      expect(organizations).toHaveLength(2);
-      expect(organizations[0].meta.color).not.toBe(organizations[1].meta.color);
-      expect(organizations.every((org) => org.members[0]?.role === 'leader')).toBe(true);
+      expect(organizations).toHaveLength(1);
+      expect(organizations[0].members[0]?.role).toBe('leader');
     }
   });
 
