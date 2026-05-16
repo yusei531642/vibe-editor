@@ -50,6 +50,11 @@ pub fn app_get_project_root(state: State<AppState>) -> String {
 /// 入口で必ず通す。検証失敗時は `CommandError::Validation` で reject し、project_root state は
 /// 変更しない (= 後続の git_*, fs_watch::start_for_root, file 読み書きが信頼できない場所で
 /// 発火するのを TOCTOU 含めて阻止する)。
+///
+/// Issue #724 (Security): tauri.conf.json の assetProtocol.scope を空にした (= 起動時は OS 全体の
+/// 画像/SVG が `asset://` で読めない)。代わりに、画像プレビュー (Issue #325 — ImagePreview /
+/// EditorView) が表示対象とする project_root 配下だけを `asset_scope::allow_asset_dir` で
+/// 動的に許可リストへ加える。`is_safe_watch_root` を通過した正当な project_root のみが対象。
 #[tauri::command]
 pub fn app_set_project_root(
     app: tauri::AppHandle,
@@ -75,6 +80,10 @@ pub fn app_set_project_root(
     drop(guard);
     // Issue #66: watcher は project_root 変更ごとに付け替える
     if !trimmed.is_empty() {
+        // Issue #724: 画像プレビュー (ImagePreview / EditorView) が `asset://` で開くのは
+        // project_root 配下の画像のみ。assetProtocol.scope は空なので、ここで開いた
+        // project_root だけを recursive で許可リストに加える。
+        crate::commands::asset_scope::allow_asset_dir(&app, std::path::Path::new(&trimmed));
         crate::commands::fs_watch::start_for_root(app, trimmed);
     }
     Ok(())

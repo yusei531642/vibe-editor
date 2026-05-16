@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "vibe-editor renderer permissions. Issue #98: renderer から emit / shell 直接実行は使っていないので最小化する。process は updater の relaunch で必要。",
+  "description": "vibe-editor renderer base permissions. Issue #98: renderer から emit / shell 直接実行は使っていないので最小化する。Issue #744: renderer 侵害時の影響半径を縮めるため、process / updater (自動更新でのみ必要な権限) はこの base から外し capabilities/updater.json に分離した。",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -16,8 +16,6 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-close",
     "core:app:default",
-    "dialog:default",
-    "process:default",
-    "updater:default"
+    "dialog:default"
   ]
 }

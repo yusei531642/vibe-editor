@@ -336,7 +336,7 @@ async fn read_disk_schema_version(path: &std::path::Path) -> Option<u32> {
 }
 
 #[tauri::command]
-pub async fn settings_save(settings: Settings) -> CommandResult<()> {
+pub async fn settings_save(app: tauri::AppHandle, settings: Settings) -> CommandResult<()> {
     let _g = SAVE_LOCK.lock().await;
     let path = crate::util::config_paths::settings_path();
     // Issue #641: 古い build が新スキーマの settings.json を silent に上書きするのを防ぐ。
@@ -349,6 +349,17 @@ pub async fn settings_save(settings: Settings) -> CommandResult<()> {
     atomic_write(&path, &json)
         .await
         .map_err(|e| CommandError::Internal(e.to_string()))?;
+    // Issue #724: mascot custom 画像 (PR #716) をユーザーが設定画面で選び直したとき、
+    // assetProtocol.scope は空なので、再起動を待たず同一セッション内でその 1 ファイルを
+    // `asset://` で表示できるよう asset scope へ許可する。失敗しても save 自体は成功扱い。
+    if let Some(mascot_path) = settings
+        .status_mascot_custom_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        crate::commands::asset_scope::allow_asset_file(&app, std::path::Path::new(mascot_path));
+    }
     Ok(())
 }
 

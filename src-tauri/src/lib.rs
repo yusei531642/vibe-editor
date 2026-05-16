@@ -377,7 +377,29 @@ pub fn run() {
                     // Issue #147: poison でも recovery
                     let mut guard = state::lock_project_root_recover(&state.project_root);
                     *guard = Some(root.clone());
+                    drop(guard);
                     tracing::info!("[setup] project_root restored from settings: {root}");
+                    // Issue #724: assetProtocol.scope は空。renderer が `app_set_project_root` を
+                    // 呼ぶ前 (起動直後のセッション復元等) でも画像プレビューが project_root 配下の
+                    // 画像を `asset://` で開けるよう、復元した root を asset scope に許可しておく。
+                    commands::asset_scope::allow_asset_dir(
+                        &app_handle_for_root,
+                        std::path::Path::new(&root),
+                    );
+                }
+                // Issue #724: mascot custom 画像 (PR #716) はファイルダイアログで選ばれた
+                // 単一画像。assetProtocol.scope は空なので、起動時に settings から復元した
+                // custom path 1 ファイルだけを asset scope に許可する (フォルダごとではない)。
+                if let Some(mascot_path) = settings
+                    .status_mascot_custom_path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    commands::asset_scope::allow_asset_file(
+                        &app_handle_for_root,
+                        std::path::Path::new(mascot_path),
+                    );
                 }
                 // Issue #260: theme が glass なら初期 effect を適用。
                 // - tauri.conf.json で `transparent: true` + `backgroundColor: "#171716"` に
