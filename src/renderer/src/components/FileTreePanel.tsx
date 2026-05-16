@@ -16,6 +16,7 @@ import {
 import type { FileNode } from '../../../types/shared';
 import type { RecentFileEntry } from '../lib/hooks/use-file-tabs';
 import { useT } from '../lib/i18n';
+import { useNativeConfirm } from '../lib/use-native-confirm';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu';
 import { useToast } from '../lib/toast-context';
 import { api } from '../lib/tauri-api';
@@ -63,6 +64,7 @@ export function FileTreePanel({
   onRemoveWorkspaceFolder
 }: FileTreePanelProps): JSX.Element {
   const t = useT();
+  const confirm = useNativeConfirm();
   // Issue #273: 展開状態 / 折り畳み / dir キャッシュは Provider に集約。
   // 同じ Provider を見ている Sidebar / FileTreeCard は同じ参照を持つので、
   // 一方でトグルした結果が他方に即時反映され、`update({ fileTreeExpanded })` の
@@ -297,7 +299,7 @@ export function FileTreePanel({
       const baseKey = node.isDir
         ? 'filetree.confirmDeleteFolder'
         : 'filetree.confirmDeleteFile';
-      if (!window.confirm(t(baseKey, { name: node.name }))) return;
+      if (!(await confirm(t(baseKey, { name: node.name })))) return;
       const res = await api.files.delete(rootPath, node.path, false);
       if (res.ok) {
         showToast(t('toast.fileDeleted', { name: node.name }), { tone: 'success' });
@@ -305,7 +307,7 @@ export function FileTreePanel({
         return;
       }
       // ゴミ箱が使えない環境 (XDG ゴミ箱が無い Linux 等) → 完全削除に fallback
-      if (window.confirm(t('filetree.confirmDeletePermanent', { name: node.name }))) {
+      if (await confirm(t('filetree.confirmDeletePermanent', { name: node.name }))) {
         const r2 = await api.files.delete(rootPath, node.path, true);
         if (r2.ok) {
           showToast(t('toast.fileDeleted', { name: node.name }), { tone: 'success' });
@@ -315,7 +317,7 @@ export function FileTreePanel({
         }
       }
     },
-    [refreshDir, showOpError, showToast, t]
+    [confirm, refreshDir, showOpError, showToast, t]
   );
 
   /** Issue #592: cut / copy で clipboard に積む。paste 時に rename or copy を判定する。 */

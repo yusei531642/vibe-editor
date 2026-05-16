@@ -343,7 +343,10 @@ function AgentNodeCardImpl({
     [health]
   );
 
-  const handleClose = useCallback(() => confirmRemoveCard(id), [confirmRemoveCard, id]);
+  const handleClose = useCallback(
+    () => void confirmRemoveCard(id),
+    [confirmRemoveCard, id]
+  );
 
   return (
     <>

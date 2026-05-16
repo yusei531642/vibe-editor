@@ -60,7 +60,7 @@ export function CardFrame({
         <button
           type="button"
           className="nodrag canvas-card-frame__close"
-          onClick={() => confirmRemoveCard(id)}
+          onClick={() => void confirmRemoveCard(id)}
           title="Close"
         >
           ×

@@ -5,6 +5,7 @@ import type {
   GitStatus
 } from '../../../../types/shared';
 import { useT } from '../i18n';
+import { useNativeConfirm } from '../use-native-confirm';
 
 export interface DiffTab {
   id: string;
@@ -86,8 +87,8 @@ export interface UseFileTabsResult {
 
   // ---- 派生値 ----
   dirtyEditorTabs: EditorTab[];
-  /** tabIds 省略時は全 dirty を対象。confirm dialog を出して bool を返す。 */
-  confirmDiscardEditorTabs: (tabIds?: string[]) => boolean;
+  /** tabIds 省略時は全 dirty を対象。ネイティブ確認 dialog を出して bool を resolve する。 */
+  confirmDiscardEditorTabs: (tabIds?: string[]) => Promise<boolean>;
   /**
    * Issue #480: 最近開いたファイルの履歴 (新しい順)。
    * active ファイルも含むが、UI 側で active を優先表示する。
@@ -100,7 +101,7 @@ export interface UseFileTabsResult {
   saveEditorTab: (id: string) => Promise<void>;
   openDiffTab: (file: GitFileChange) => Promise<void>;
   refreshDiffTabsForPath: (relPath: string) => Promise<void>;
-  closeTab: (id: string) => void;
+  closeTab: (id: string) => Promise<void>;
   togglePin: (id: string) => void;
   reopenLastClosed: () => void;
   cycleTab: (direction: 1 | -1) => void;
@@ -126,6 +127,7 @@ export interface UseFileTabsResult {
  */
 export function useFileTabs(opts: UseFileTabsOptions): UseFileTabsResult {
   const t = useT();
+  const confirm = useNativeConfirm();
 
   const optsRef = useRef(opts);
   optsRef.current = opts;
@@ -144,18 +146,18 @@ export function useFileTabs(opts: UseFileTabsOptions): UseFileTabsResult {
   );
 
   const confirmDiscardEditorTabs = useCallback(
-    (tabIds?: string[]): boolean => {
+    async (tabIds?: string[]): Promise<boolean> => {
       const targets =
         tabIds && tabIds.length > 0
           ? dirtyEditorTabs.filter((tab) => tabIds.includes(tab.id))
           : dirtyEditorTabs;
       if (targets.length === 0) return true;
       if (targets.length === 1) {
-        return window.confirm(t('editor.discardSingle', { path: targets[0].relPath }));
+        return confirm(t('editor.discardSingle', { path: targets[0].relPath }));
       }
-      return window.confirm(t('editor.discardMultiple', { count: targets.length }));
+      return confirm(t('editor.discardMultiple', { count: targets.length }));
     },
-    [dirtyEditorTabs, t]
+    [dirtyEditorTabs, t, confirm]
   );
 
   const openDiffTab = useCallback(
@@ -352,7 +354,7 @@ export function useFileTabs(opts: UseFileTabsOptions): UseFileTabsResult {
         );
         if (res.conflict) {
           // ユーザーに確認 → OK なら再度 mtime/size/hash チェックなしで書き込む
-          const overwrite = window.confirm(
+          const overwrite = await confirm(
             t('editor.externalChangeConfirm', { path: tab.relPath })
           );
           if (!overwrite) {
@@ -395,22 +397,27 @@ export function useFileTabs(opts: UseFileTabsOptions): UseFileTabsResult {
         showToast(t('editor.saveFailed', { error: String(err) }), { tone: 'error' });
       }
     },
-    [editorTabs, refreshDiffTabsForPath, t]
+    [editorTabs, refreshDiffTabsForPath, t, confirm]
   );
 
   const closeTab = useCallback(
-    (id: string) => {
+    async (id: string) => {
       if (id.startsWith('edit:')) {
+        // confirm がネイティブ dialog (非同期) になったため、setEditorTabs の
+        // updater 内では確認できない。先に対象タブの dirty 判定 → 確認 → その後
+        // setState でフィルタする (旧 updater 内ガードと同じ「pinned/不在/cancel
+        // なら何もしない」挙動を保つ)。
+        const target = editorTabs.find((t) => t.id === id);
+        if (!target || target.pinned) return;
+        if (
+          !target.isBinary &&
+          target.content !== target.originalContent &&
+          !(await confirmDiscardEditorTabs([id]))
+        ) {
+          return;
+        }
         setEditorTabs((prev) => {
-          const target = prev.find((t) => t.id === id);
-          if (!target || target.pinned) return prev;
-          if (
-            !target.isBinary &&
-            target.content !== target.originalContent &&
-            !confirmDiscardEditorTabs([id])
-          ) {
-            return prev;
-          }
+          if (!prev.some((t) => t.id === id)) return prev;
           const next = prev.filter((t) => t.id !== id);
           if (activeTabId === id) {
             // 残ったエディタ or 差分タブのうち末尾を選択

@@ -1,5 +1,6 @@
 import type { AgentConfig, AppSettings } from '../../../../types/shared';
 import { useT } from '../../lib/i18n';
+import { useNativeConfirm } from '../../lib/use-native-confirm';
 import { parseShellArgsStrict } from '../../lib/parse-args';
 import type { UpdateSetting } from './types';
 
@@ -16,6 +17,7 @@ interface Props {
  */
 export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element {
   const t = useT();
+  const confirm = useNativeConfirm();
   const argsParse = parseShellArgsStrict(agent.args);
 
   const patchAgent = (patch: Partial<AgentConfig>): void => {
@@ -25,8 +27,8 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
     update('customAgents', next);
   };
 
-  const remove = (): void => {
-    if (!window.confirm(t('settings.customAgents.confirmDelete', { name: agent.name }))) return;
+  const remove = async (): Promise<void> => {
+    if (!(await confirm(t('settings.customAgents.confirmDelete', { name: agent.name })))) return;
     update(
       'customAgents',
       (draft.customAgents ?? []).filter((a) => a.id !== agent.id)

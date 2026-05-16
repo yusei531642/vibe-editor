@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Copy, Eraser } from 'lucide-react';
 import { useSettings } from '../lib/settings-context';
 import { useT } from '../lib/i18n';
+import { useNativeConfirm } from '../lib/use-native-confirm';
 import { useToast } from '../lib/toast-context';
 
 const SAVE_DEBOUNCE_MS = 600;
@@ -19,6 +20,7 @@ export function NotesPanel(): JSX.Element {
   const { settings, update } = useSettings();
   const t = useT();
   const toast = useToast();
+  const confirm = useNativeConfirm();
   const [draft, setDraft] = useState<string>(settings.notepad ?? '');
   const debounceRef = useRef<number | null>(null);
   const lastSavedRef = useRef<string>(settings.notepad ?? '');
@@ -69,9 +71,9 @@ export function NotesPanel(): JSX.Element {
     }
   };
 
-  const onClear = (): void => {
+  const onClear = async (): Promise<void> => {
     if (draft.length === 0) return;
-    if (!window.confirm(t('notes.confirmClear'))) return;
+    if (!(await confirm(t('notes.confirmClear')))) return;
     onChange('');
   };
 
