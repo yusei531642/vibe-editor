@@ -95,6 +95,7 @@ export class CommandError extends Error {
  * 扱う箇所 (`JSON.parse(err)` / `err.startsWith()` / `err.includes()` 等) は 0 件で、
  * 全 caller は generic な error handler を使う。よって本ラッパへの切替で実行時に
  * 壊れる diff 外の呼び出し元は存在しない。
+ */
 export async function invokeCommand<T>(command: string, args?: InvokeArgs): Promise<T> {
   try {
     return await invoke<T>(command, args);
