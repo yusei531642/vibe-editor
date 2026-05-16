@@ -1,6 +1,19 @@
 //! tool: `team_send` — send a message into another team member's terminal.
 //!
 //! Issue #373 Phase 2 で `protocol.rs` から切り出し。
+//!
+//! Issue #736: 534 行あった `team_send` god-fn を段階関数に分解。
+//! 元の挙動 (lock の取得/解放タイミング・メッセージ順序・エラー挙動) は一切変えていない。
+//! データフローは以下の段階関数を `team_send` が順に呼ぶ形:
+//!   1. [`parse_send_args`]   — 引数 parse + 検証 (`to` / `message` / `kind` / `handoff_id`)。
+//!   2. [`spool_oversized_message`] — SOFT_PAYLOAD_LIMIT 超過時の自動 spool 化 (state.lock #1)。
+//!   3. [`resolve_send_targets`]    — registry から宛先解決 + 配信先 (state.lock #2)。
+//!   4. [`insert_team_message`]     — message 履歴への push + diagnostics 更新 (state.lock #3)。
+//!      戻り値の [`MessageInsertionGuard`] が「挿入した message を delivery 更新で再取得する」
+//!      責務を型として持つ (= ロック再取得のタイミングを型で固定)。
+//!   5. [`dispatch_injects`]        — 各宛先への並列 inject + delivery 集計 (state.lock #4 は
+//!      `MessageInsertionGuard::record_delivery` 経由)。
+//!   6. [`build_send_response`]     — note 文の生成 + 戻り値 JSON 構築。
 
 use crate::team_hub::{inject, CallContext, MemberDiagnostics, TeamHub, TeamMessage};
 
@@ -230,7 +243,27 @@ fn resolve_targets_with_request_cc(
     (targets, leader_cc_agent_ids)
 }
 
-pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
+// ===== Issue #736: team_send の段階関数 =====
+
+/// 段階 1 の出力 — parse 済みの `team_send` 引数。
+struct SendArgs {
+    /// trim 前の生 `to` 文字列。resolve_targets / 履歴 / 検証で使う。
+    to: String,
+    /// `message` 引数本体 (plain 文字列、または structured 整形済み文字列)。
+    message: String,
+    message_body_kind: MessageBodyKind,
+    message_kind: MessageKind,
+    /// 任意の handoff_id (`handoff_id` / `handoffId` のどちらか)。
+    handoff_id: Option<String>,
+}
+
+/// 段階 1: `team_send` の引数を parse / 検証する。
+///
+/// 元 god-fn の冒頭ブロックと等価:
+///   - `to` / `message` (+body kind) / `kind` / `handoff_id` を取り出す
+///   - `to` 空 or `message` 空 → `send_invalid_args`
+///   - `message` が `MAX_MESSAGE_LEN` 超過 → `send_message_too_large`
+fn parse_send_args(args: &Value) -> Result<SendArgs, String> {
     // trim は resolve_targets 内で行うので、ここでは生文字列を保持して履歴 / 検証に使う。
     let to = args
         .get("to")
@@ -239,7 +272,6 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         .to_string();
     let (message, message_body_kind) = parse_message_body(args)?;
     let message_kind = parse_message_kind(args)?;
-    let message = message.as_str();
     let handoff_id = optional_string(args, "handoff_id", "handoffId");
     if to.trim().is_empty() || message.is_empty() {
         return Err(SendError {
@@ -264,104 +296,140 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         }
         .into_err_string());
     }
-    // Issue #512: 「長文ペイロード」(SOFT_PAYLOAD_LIMIT 超過) は **Hub 側で自動 spool 化** する。
-    //
-    // 旧実装は呼び出し側 (Leader / HR / worker) に「自分でファイル書き出してから path で送れ」と
-    // reject で要求していたため、運用知識への依存と再呼び出しの往復コストが発生していた
-    // (Issue #107 の運用回避策が前提)。Hub が自動で `<project_root>/.vibe-team/tmp/<short_id>.md` に
-    // 本文書き出し → message を「summary + attached: <path>」に置換することで、Leader が
-    // 知らない状態でも長文が安全に流れる。
-    //
-    // 旧 `send_payload_threshold` error は project_root が無い (= MCP setup 未完の稀ケース) と
-    // spool 書き込みが失敗した場合のみ発火する fallback として残す (code 名は旧名のまま、
-    // message 文で「auto-spool 失敗」を伝える形にして既存 caller の condition 判定を壊さない)。
-    let mut spooled_message: Option<String> = None;
-    if message.len() > SOFT_PAYLOAD_LIMIT {
-        let project_root = {
-            let s = hub.state.lock().await;
-            s.teams
-                .get(&ctx.team_id)
-                .and_then(|t| t.project_root.clone())
-        };
-        let project_root = match project_root
-            .as_deref()
-            .map(str::trim)
-            .filter(|p| !p.is_empty())
-        {
-            Some(p) => p.to_string(),
-            None => {
-                return Err(SendError {
-                    // Issue #512 ↔ #545 review: error code は旧名 `send_payload_threshold`
-                    // を維持して後方互換を保つ。新実装で挙動が変わったのは「成功時に reject せず
-                    // spool 化する」path であり、reject 時の error code は旧来の SOFT_PAYLOAD_LIMIT
-                    // 超過と同じ意味で扱える。caller (Leader / HR / worker) が code 判定で
-                    // fallback handler を持っていても、本 PR で挙動が壊れない。
-                    code: "send_payload_threshold".into(),
-                    message: format!(
-                        "message exceeds the long-payload threshold ({} > {} bytes) and \
-                         this team has no project_root configured for auto-spool. \
-                         Setup the team via Canvas (setupTeamMcp) or write the full content to \
-                         a file with the Write tool and call team_send again with a brief summary plus the file path.",
-                        message.len(),
-                        SOFT_PAYLOAD_LIMIT
-                    ),
-                    phase: None,
-                    elapsed_ms: None,
-                }
-                .into_err_string());
-            }
-        };
-        match crate::team_hub::spool::spool_long_payload(&project_root, message, "send").await {
-            Ok(result) => {
-                tracing::info!(
-                    "[team_send] auto-spooled long payload ({} bytes) team={} role={} to={} → {}",
+    Ok(SendArgs {
+        to,
+        message,
+        message_body_kind,
+        message_kind,
+        handoff_id,
+    })
+}
+
+/// 段階 2: `message` が `SOFT_PAYLOAD_LIMIT` を超過していたら自動 spool 化する。
+///
+/// Issue #512: 「長文ペイロード」(SOFT_PAYLOAD_LIMIT 超過) は **Hub 側で自動 spool 化** する。
+///
+/// 旧実装は呼び出し側 (Leader / HR / worker) に「自分でファイル書き出してから path で送れ」と
+/// reject で要求していたため、運用知識への依存と再呼び出しの往復コストが発生していた
+/// (Issue #107 の運用回避策が前提)。Hub が自動で `<project_root>/.vibe-team/tmp/<short_id>.md` に
+/// 本文書き出し → message を「summary + attached: <path>」に置換することで、Leader が
+/// 知らない状態でも長文が安全に流れる。
+///
+/// 旧 `send_payload_threshold` error は project_root が無い (= MCP setup 未完の稀ケース) と
+/// spool 書き込みが失敗した場合のみ発火する fallback として残す (code 名は旧名のまま、
+/// message 文で「auto-spool 失敗」を伝える形にして既存 caller の condition 判定を壊さない)。
+///
+/// 戻り値 `Some(replacement)` は spool 置換後本文、`None` は spool 不要 (= 元 message を使う)。
+async fn spool_oversized_message(
+    hub: &TeamHub,
+    ctx: &CallContext,
+    to: &str,
+    message: &str,
+) -> Result<Option<String>, String> {
+    if message.len() <= SOFT_PAYLOAD_LIMIT {
+        return Ok(None);
+    }
+    let project_root = {
+        let s = hub.state.lock().await;
+        s.teams
+            .get(&ctx.team_id)
+            .and_then(|t| t.project_root.clone())
+    };
+    let project_root = match project_root
+        .as_deref()
+        .map(str::trim)
+        .filter(|p| !p.is_empty())
+    {
+        Some(p) => p.to_string(),
+        None => {
+            return Err(SendError {
+                // Issue #512 ↔ #545 review: error code は旧名 `send_payload_threshold`
+                // を維持して後方互換を保つ。新実装で挙動が変わったのは「成功時に reject せず
+                // spool 化する」path であり、reject 時の error code は旧来の SOFT_PAYLOAD_LIMIT
+                // 超過と同じ意味で扱える。caller (Leader / HR / worker) が code 判定で
+                // fallback handler を持っていても、本 PR で挙動が壊れない。
+                code: "send_payload_threshold".into(),
+                message: format!(
+                    "message exceeds the long-payload threshold ({} > {} bytes) and \
+                     this team has no project_root configured for auto-spool. \
+                     Setup the team via Canvas (setupTeamMcp) or write the full content to \
+                     a file with the Write tool and call team_send again with a brief summary plus the file path.",
                     message.len(),
-                    ctx.team_id,
-                    ctx.role,
-                    to,
-                    result.spool_path.display()
-                );
-                spooled_message = Some(result.replacement_message);
+                    SOFT_PAYLOAD_LIMIT
+                ),
+                phase: None,
+                elapsed_ms: None,
             }
-            Err(e) => {
-                tracing::warn!(
-                    "[team_send] auto-spool failed for team={}: {e:#}; falling back to reject",
-                    ctx.team_id
-                );
-                return Err(SendError {
-                    // Issue #512 ↔ #545 review: error code は旧名 `send_payload_threshold`
-                    // を維持して後方互換を保つ。新実装で挙動が変わったのは「成功時に reject せず
-                    // spool 化する」path であり、reject 時の error code は旧来の SOFT_PAYLOAD_LIMIT
-                    // 超過と同じ意味で扱える。caller (Leader / HR / worker) が code 判定で
-                    // fallback handler を持っていても、本 PR で挙動が壊れない。
-                    code: "send_payload_threshold".into(),
-                    message: format!(
-                        "message exceeds the long-payload threshold ({} > {} bytes) and \
-                         auto-spool to `.vibe-team/tmp/` failed: {e}. \
-                         Write the full content to a file with the Write tool, then call team_send \
-                         again with a brief summary plus the file path.",
-                        message.len(),
-                        SOFT_PAYLOAD_LIMIT
-                    ),
-                    phase: None,
-                    elapsed_ms: None,
-                }
-                .into_err_string());
+            .into_err_string());
+        }
+    };
+    match crate::team_hub::spool::spool_long_payload(&project_root, message, "send").await {
+        Ok(result) => {
+            tracing::info!(
+                "[team_send] auto-spooled long payload ({} bytes) team={} role={} to={} → {}",
+                message.len(),
+                ctx.team_id,
+                ctx.role,
+                to,
+                result.spool_path.display()
+            );
+            Ok(Some(result.replacement_message))
+        }
+        Err(e) => {
+            tracing::warn!(
+                "[team_send] auto-spool failed for team={}: {e:#}; falling back to reject",
+                ctx.team_id
+            );
+            Err(SendError {
+                // Issue #512 ↔ #545 review: error code は旧名 `send_payload_threshold`
+                // を維持して後方互換を保つ。新実装で挙動が変わったのは「成功時に reject せず
+                // spool 化する」path であり、reject 時の error code は旧来の SOFT_PAYLOAD_LIMIT
+                // 超過と同じ意味で扱える。caller (Leader / HR / worker) が code 判定で
+                // fallback handler を持っていても、本 PR で挙動が壊れない。
+                code: "send_payload_threshold".into(),
+                message: format!(
+                    "message exceeds the long-payload threshold ({} > {} bytes) and \
+                     auto-spool to `.vibe-team/tmp/` failed: {e}. \
+                     Write the full content to a file with the Write tool, then call team_send \
+                     again with a brief summary plus the file path.",
+                    message.len(),
+                    SOFT_PAYLOAD_LIMIT
+                ),
+                phase: None,
+                elapsed_ms: None,
             }
+            .into_err_string())
         }
     }
-    // 以後は spool 化された場合は `effective_message`、そうでなければ元 `message` を使う。
-    // 既存の history 保存 (TeamMessage.message) / preview 切り出し / inject 全てに共通の
-    // 「実際に送られた本文」として使われるので、shadow ではなく明示的な変数で扱う。
-    let effective_message: &str = spooled_message.as_deref().unwrap_or(message);
+}
 
-    // Issue #342 Phase 2: lock 順序を逆転。先に registry から宛先を解決して
-    // `resolved_recipient_ids` を作り、それから state.lock を取って message を
-    // 「最初から resolved_recipient_ids を埋めた状態」で push する。
-    // 旧実装は (a) state.lock → push (b) drop → list_team_members → resolve_targets
-    // の 2 段で、push 時点では recipient 情報を持てなかったため `team_read` が raw `to`
-    // を読み手 ctx で再解釈する設計になっていた (identity 分離でサイレント沈黙の温床)。
-    // 新順序では state.lock を保持しない時に registry を呼ぶので、deadlock 余地は無い。
+/// 段階 3 の出力 — 解決済みの宛先情報。
+struct SendTargets {
+    /// チーム全メンバー (agent_id, role)。送信者自身も含む。
+    team_members: Vec<(String, String)>,
+    /// `resolve_targets_with_request_cc` が解決した配信先 (agent_id, role)。
+    targets: Vec<(String, String)>,
+    /// request kind で leader を CC した agent_id 群 (応答 JSON の `leaderCcAgentIds`)。
+    leader_cc_agent_ids: Vec<String>,
+    /// `targets` の agent_id だけを取り出したリスト (`TeamMessage.resolved_recipient_ids` 用)。
+    resolved_recipient_ids: Vec<String>,
+}
+
+/// 段階 3: registry からチームメンバーを取得し、配信先を解決する。
+///
+/// Issue #342 Phase 2: lock 順序を逆転。先に registry から宛先を解決して
+/// `resolved_recipient_ids` を作り、それから state.lock を取って message を
+/// 「最初から resolved_recipient_ids を埋めた状態」で push する。
+/// 旧実装は (a) state.lock → push (b) drop → list_team_members → resolve_targets
+/// の 2 段で、push 時点では recipient 情報を持てなかったため `team_read` が raw `to`
+/// を読み手 ctx で再解釈する設計になっていた (identity 分離でサイレント沈黙の温床)。
+/// 新順序では state.lock を保持しない時に registry を呼ぶので、deadlock 余地は無い。
+async fn resolve_send_targets(
+    hub: &TeamHub,
+    ctx: &CallContext,
+    to: &str,
+    message_kind: MessageKind,
+) -> SendTargets {
     let registry = hub.registry.clone();
     let team_members = registry.list_team_members(&ctx.team_id);
     let active_leader_agent_id = {
@@ -374,16 +442,99 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
     let (targets, leader_cc_agent_ids) = resolve_targets_with_request_cc(
         &team_members,
         &ctx.agent_id,
-        &to,
+        to,
         active_leader_agent_id.as_deref(),
         message_kind,
     );
     let resolved_recipient_ids: Vec<String> = targets.iter().map(|(aid, _)| aid.clone()).collect();
+    SendTargets {
+        team_members,
+        targets,
+        leader_cc_agent_ids,
+        resolved_recipient_ids,
+    }
+}
+
+/// Issue #736: 段階 4 (`insert_team_message`) が発行する「挿入済み message のハンドル」。
+///
+/// `team_send` は state.lock を一度 drop した後、inject 成功ごとに lock を取り直して
+/// `delivered_to` / `delivered_at` を更新する (元 god-fn の lock #4)。この再取得の対象が
+/// 「段階 4 で push した message」であることを型で固定するため、`msg_id` と送信 `timestamp`
+/// を guard 値として持たせ、delivery 更新は必ず [`MessageInsertionGuard::record_delivery`]
+/// 経由でしか書けないようにする。
+///
+/// **挙動は不変**: guard は新しい lock を導入せず、元コードが `msg_id` で `messages` を
+/// 線形検索して `delivered_*` を更新していたのと同じ処理をメソッド化しただけ。
+struct MessageInsertionGuard {
+    /// 段階 4 で採番された message_id。
+    msg_id: u32,
+    /// message の送信 timestamp (RFC3339)。応答 JSON / handoff event / preview で共有する。
+    timestamp: String,
+}
+
+impl MessageInsertionGuard {
+    /// inject が成功した recipient 1 件分の配達事実を state へ反映する (元 god-fn の lock #4)。
+    ///
+    /// - 対象 message を `msg_id` で引き当て、`delivered_to` / `delivered_at` を更新
+    ///   (`read_by` / `read_at` は触らない — Issue #378)。
+    /// - 受信側 agent の `MemberDiagnostics` (`last_message_in_at` / `messages_in_count`) を更新。
+    ///
+    /// 元コードと同じく、ここで state.lock を 1 回取って即 drop する。
+    async fn record_delivery(
+        &self,
+        hub: &TeamHub,
+        team_id: &str,
+        target_aid: &str,
+        delivered_at: &str,
+    ) {
+        // Issue #378: read_by/read_at は触らない。delivered_to/delivered_at だけを更新する。
+        // (旧実装は inject 成功で recipient まで read_by に入れていたため、worker が実際に
+        //  Enter を確認していない 1 回目の指示も「既読」扱いになり、`team_read({unread_only: true})`
+        //  fallback で再取得できなかった。delivered/read を分離することで、worker が処理した
+        //  ことの真の証拠 (= team_read 呼び出し) でしか read_by に印が付かなくなる。)
+        let mut state = hub.state.lock().await;
+        if let Some(t) = state.teams.get_mut(team_id) {
+            if let Some(m) = t.messages.iter_mut().find(|m| m.id == self.msg_id) {
+                if !m.delivered_to.iter().any(|id| id == target_aid) {
+                    m.delivered_to.push(target_aid.to_string());
+                }
+                m.delivered_at
+                    .insert(target_aid.to_string(), delivered_at.to_string());
+            }
+        }
+        // Issue #342 Phase 3 (3.3): 受信側 diagnostics 更新
+        let recipient_diag = state
+            .member_diagnostics
+            .entry(target_aid.to_string())
+            .or_default();
+        record_recipient_delivery_diagnostics(recipient_diag, delivered_at);
+    }
+}
+
+/// 段階 4: message を履歴へ push し、worker_reports / sender diagnostics を更新する
+/// (元 god-fn の lock #3 ブロック + その後の `should_record_summary_feed` 永続化)。
+///
+/// 戻り値の [`MessageInsertionGuard`] が、段階 5 の delivery 更新 (lock #4) の起点になる。
+async fn insert_team_message(
+    hub: &TeamHub,
+    ctx: &CallContext,
+    sargs: &SendArgs,
+    targets: &SendTargets,
+    effective_message: &str,
+) -> MessageInsertionGuard {
+    let to = &sargs.to;
+    let message = sargs.message.as_str();
+    let message_kind = sargs.message_kind;
 
     // メッセージ履歴に追加
     let timestamp = Utc::now().to_rfc3339();
-    let should_record_summary_feed =
-        should_record_leader_summary_feed(&to, message, &ctx.role, &targets, message_kind);
+    let should_record_summary_feed = should_record_leader_summary_feed(
+        to,
+        message,
+        &ctx.role,
+        &targets.targets,
+        message_kind,
+    );
     let mut state = hub.state.lock().await;
     let team = state
         .teams
@@ -402,7 +553,7 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         from_agent_id: ctx.agent_id.clone(),
         to: to.clone(),
         kind: message_kind.as_str().to_string(),
-        resolved_recipient_ids: resolved_recipient_ids.clone(),
+        resolved_recipient_ids: targets.resolved_recipient_ids.clone(),
         message: effective_message.to_string(),
         timestamp: timestamp.clone(),
         // Issue #378: sender 自身は送信時点で既読扱いを継続。recipient は inject が成功
@@ -459,44 +610,55 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         }
     }
 
-    // Issue #150: 宛先メンバーへの inject を並列実行する。
-    // 旧実装はメンバーごとに inject().await を直列で回し、to=all + 6 メンバー +
-    // 4KB メッセージで 6 秒間 RPC を握りっぱなしになっていた (sleep 15ms × 64chunk × 6人)。
-    // → 各宛先を tokio::spawn で並列発火して JoinSet で集約する。
+    MessageInsertionGuard { msg_id, timestamp }
+}
+
+/// 段階 5 の出力 — 各宛先への inject 結果を集計したもの。
+struct DispatchOutcome {
+    /// inject に成功した宛先の表示名 (role 名、空なら agent_id)。応答 JSON の `delivered`。
+    delivered: Vec<String>,
+    /// agent_id → 配達時刻 (`Some`) / 未配達 (`None`)。`deliveredAtPerRecipient` 用。
+    delivered_at_per_recipient: HashMap<String, Option<String>>,
+    /// agent_id → ack 時刻。現状常に `None` (`acknowledgedAtPerRecipient` 用)。
+    acknowledged_at_per_recipient: HashMap<String, Option<String>>,
+    /// agent_id → `{ state, deliveredAt | failedAt+reason }` の正規化 map。
+    delivery_status: serde_json::Map<String, Value>,
+    /// 失敗した宛先の正規化リスト (`failedRecipients` 用)。
+    failed_recipients: Vec<Value>,
+    /// 配達成功だが send 時点で未読の宛先 (`pendingRecipients` 用)。
+    pending_recipients: Vec<Value>,
+}
+
+/// 段階 5: 各宛先へ並列に inject し、配達結果を集計する (元 god-fn の inject ループ)。
+///
+/// Issue #150: 宛先メンバーへの inject を並列実行する。
+/// 旧実装はメンバーごとに inject().await を直列で回し、to=all + 6 メンバー +
+/// 4KB メッセージで 6 秒間 RPC を握りっぱなしになっていた (sleep 15ms × 64chunk × 6人)。
+/// → 各宛先を tokio::spawn で並列発火して JoinSet で集約する。
+///
+/// Issue #630: 各 inject() 呼び出しを `pty_inflight` tracker に計上する。
+/// Issue #511: inject の `Result<(), InjectError>` を delivered / failed の 2 種に集計する。
+/// 配達成功ごとに `guard.record_delivery` (lock #4) を呼び、失敗ごとに
+/// `team:inject_failed` event を emit する。
+async fn dispatch_injects(
+    hub: &TeamHub,
+    ctx: &CallContext,
+    targets: &SendTargets,
+    guard: &MessageInsertionGuard,
+    effective_message: &str,
+    app: &Option<tauri::AppHandle>,
+    message_kind: MessageKind,
+) -> DispatchOutcome {
+    // hand-off event の preview。元 god-fn と同じく effective_message の先頭 80 文字。
     let preview: String = effective_message.chars().take(80).collect();
-    let app = hub.app_handle.lock().await.clone();
-
-    let other_members: Vec<(String, String)> = team_members
-        .iter()
-        .filter(|(aid, _)| aid != &ctx.agent_id)
-        .cloned()
-        .collect();
-    tracing::debug!(
-        "[team_send] from agent={} role={} to={} kind={} body_kind={} → targets={}/{} other_members",
-        ctx.agent_id,
-        ctx.role,
-        to,
-        message_kind.as_str(),
-        message_body_kind.as_str(),
-        targets.len(),
-        other_members.len()
-    );
-    if targets.is_empty() {
-        tracing::warn!(
-            "[team_send] no targets for to={:?} in team={} (other members: {:?})",
-            to,
-            ctx.team_id,
-            other_members
-        );
-    }
-
+    let registry = hub.registry.clone();
     // Issue #630: 各 inject() 呼び出しを `pty_inflight` tracker に計上する。これにより
     // window CloseRequested handler の wait_idle(3s) が、PTY write 中の inject task の
     // 自然完了を待ってから kill_all() を呼べるようになる (= SessionHandle Mutex poison /
     // 半端 inject の race を防止)。
     let inflight = hub.inflight.clone();
     let mut join_set = tokio::task::JoinSet::new();
-    for (target_aid, target_role) in &targets {
+    for (target_aid, target_role) in &targets.targets {
         let reg = registry.clone();
         let aid = target_aid.clone();
         let from_role = message_kind.inject_from_label(&ctx.role);
@@ -528,10 +690,16 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
     //   - `failedRecipients`: 失敗した agent_id の配列 (UI が一覧表示しやすいよう正規化)
     // 失敗 agent ごとに `team:inject_failed` event を AppHandle へ emit し、Canvas 側 UI が
     // リアルタイムで warning indicator を出せるようにする。
-    let mut delivered_at_per_recipient: HashMap<String, Option<String>> =
-        targets.iter().map(|(aid, _)| (aid.clone(), None)).collect();
-    let acknowledged_at_per_recipient: HashMap<String, Option<String>> =
-        targets.iter().map(|(aid, _)| (aid.clone(), None)).collect();
+    let mut delivered_at_per_recipient: HashMap<String, Option<String>> = targets
+        .targets
+        .iter()
+        .map(|(aid, _)| (aid.clone(), None))
+        .collect();
+    let acknowledged_at_per_recipient: HashMap<String, Option<String>> = targets
+        .targets
+        .iter()
+        .map(|(aid, _)| (aid.clone(), None))
+        .collect();
     let mut delivery_status: serde_json::Map<String, Value> = serde_json::Map::new();
     let mut failed_recipients: Vec<Value> = Vec::new();
     // Issue #509: 「配送 (delivered) と読了 (read) の状態」を機械的に区別できるよう、
@@ -571,31 +739,11 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
                         "role": target_role.clone(),
                         "deliveredAt": delivered_at.clone(),
                     }));
-                    // Issue #378: read_by/read_at は触らない。delivered_to/delivered_at だけを更新する。
-                    // (旧実装は inject 成功で recipient まで read_by に入れていたため、worker が実際に
-                    //  Enter を確認していない 1 回目の指示も「既読」扱いになり、`team_read({unread_only: true})`
-                    //  fallback で再取得できなかった。delivered/read を分離することで、worker が処理した
-                    //  ことの真の証拠 (= team_read 呼び出し) でしか read_by に印が付かなくなる。)
-                    {
-                        let mut state = hub.state.lock().await;
-                        if let Some(t) = state.teams.get_mut(&ctx.team_id) {
-                            if let Some(m) = t.messages.iter_mut().find(|m| m.id == msg_id) {
-                                if !m.delivered_to.iter().any(|id| id == &target_aid) {
-                                    m.delivered_to.push(target_aid.clone());
-                                }
-                                m.delivered_at
-                                    .insert(target_aid.clone(), delivered_at.clone());
-                            }
-                        }
-                        // Issue #342 Phase 3 (3.3): 受信側 diagnostics 更新
-                        let recipient_diag = state
-                            .member_diagnostics
-                            .entry(target_aid.clone())
-                            .or_default();
-                        record_recipient_delivery_diagnostics(recipient_diag, &delivered_at);
-                    }
+                    guard
+                        .record_delivery(hub, &ctx.team_id, &target_aid, &delivered_at)
+                        .await;
                     // Phase 3: hand-off イベントを Canvas にブロードキャスト
-                    if let Some(app) = &app {
+                    if let Some(app) = app {
                         let payload = json!({
                             "teamId": ctx.team_id,
                             "fromAgentId": ctx.agent_id,
@@ -603,8 +751,8 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
                             "toAgentId": target_aid,
                             "toRole": target_role,
                             "preview": preview,
-                            "messageId": msg_id,
-                            "timestamp": timestamp,
+                            "messageId": guard.msg_id,
+                            "timestamp": guard.timestamp,
                         });
                         if let Err(e) = app.emit("team:handoff", payload) {
                             tracing::warn!("emit team:handoff failed: {e}");
@@ -648,14 +796,14 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
                     // post-subscribe race を許容する `subscribeEvent` 経路で受ける想定 (vibeeditor
                     // skill の guidelines 参照): inject_failed は send 後にしか来ないため、
                     // listener 登録前に emit が走る race は構造的に発生しない。
-                    if let Some(app) = &app {
+                    if let Some(app) = app {
                         let payload = json!({
                             "teamId": ctx.team_id,
                             "fromAgentId": ctx.agent_id,
                             "fromRole": ctx.role,
                             "toAgentId": target_aid,
                             "toRole": target_role,
-                            "messageId": msg_id,
+                            "messageId": guard.msg_id,
                             "reasonCode": reason_code,
                             "reasonMessage": reason_message,
                             "failedAt": failed_at,
@@ -669,29 +817,28 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
         }
     }
 
-    if let Some(handoff_id) = handoff_id {
-        if let Some((target_aid, _)) = targets.iter().find(|(aid, _)| {
-            delivered_at_per_recipient
-                .get(aid)
-                .and_then(|v| v.as_ref())
-                .is_some()
-        }) {
-            if let Err(e) = hub
-                .record_handoff_lifecycle(
-                    &ctx.team_id,
-                    &handoff_id,
-                    "injected",
-                    Some(target_aid.clone()),
-                    Some("team_send delivered handoff".into()),
-                )
-                .await
-            {
-                tracing::warn!("[team_send] handoff lifecycle update failed: {e}");
-            }
-        }
+    DispatchOutcome {
+        delivered,
+        delivered_at_per_recipient,
+        acknowledged_at_per_recipient,
+        delivery_status,
+        failed_recipients,
+        pending_recipients,
     }
+}
 
-    let note = if delivered.is_empty() && failed_recipients.is_empty() {
+/// 段階 6: `delivered` / `failed_recipients` の件数から note 文を組み立て、
+/// `team_send` の戻り値 JSON を構築する (元 god-fn の末尾ブロック)。
+fn build_send_response(
+    ctx: &CallContext,
+    sargs: &SendArgs,
+    targets: &SendTargets,
+    guard: &MessageInsertionGuard,
+    dispatch: &DispatchOutcome,
+    other_members: &[(String, String)],
+) -> Value {
+    let to = &sargs.to;
+    let note = if dispatch.delivered.is_empty() && dispatch.failed_recipients.is_empty() {
         // 受信者ゼロは「サイレント失敗」を起こしがちなので、現在のメンバーを文字列でヒントする。
         // 同 role 複数名がいる場合に "[programmer, programmer]" のような重複表示を避けるため
         // sort + dedup で一意化する (順序を安定させたいので HashSet ではなく Vec で処理)。
@@ -711,58 +858,149 @@ pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result
                 "宛先 '{to}' に該当するメンバーが居ません。現在のメンバーロール: {hint:?} (role 名 / agentId / 'all' で指定してください)"
             )
         }
-    } else if failed_recipients.is_empty() {
-        format!("{} 名に直接配信しました。", delivered.len())
-    } else if delivered.is_empty() {
+    } else if dispatch.failed_recipients.is_empty() {
+        format!("{} 名に直接配信しました。", dispatch.delivered.len())
+    } else if dispatch.delivered.is_empty() {
         // Issue #511: 全送信先が失敗。caller に「送ったけど誰にも届いていない」が伝わる文言にする。
         format!(
             "{} 名への配信が失敗しました (delivered=0)。failedRecipients[].reason.code を確認してください。",
-            failed_recipients.len()
+            dispatch.failed_recipients.len()
         )
     } else {
         // Issue #511: partial failure。delivered と failed の数を両方明示する。
         format!(
             "{} 名に配信、{} 名は失敗 (failedRecipients[].reason.code を確認してください)。",
-            delivered.len(),
-            failed_recipients.len()
+            dispatch.delivered.len(),
+            dispatch.failed_recipients.len()
         )
     };
-    Ok(json!({
+    json!({
         "success": true,
-        "messageId": msg_id,
-        "kind": message_kind.as_str(),
-        "messageBodyKind": message_body_kind.as_str(),
-        "leaderCcAgentIds": leader_cc_agent_ids,
-        "delivered": delivered,
+        "messageId": guard.msg_id,
+        "kind": sargs.message_kind.as_str(),
+        "messageBodyKind": sargs.message_body_kind.as_str(),
+        "leaderCcAgentIds": targets.leader_cc_agent_ids,
+        "delivered": dispatch.delivered,
         "note": note,
-        "sentAt": timestamp,
+        "sentAt": guard.timestamp,
         // Issue #378: delivered と read を分離した正本フィールド。inject (= PTY 配達) 成功時刻だけを持つ。
-        "deliveredAtPerRecipient": delivered_at_per_recipient,
+        "deliveredAtPerRecipient": dispatch.delivered_at_per_recipient,
         // legacy alias: 旧 UI / 診断ツールが `receivedAtPerRecipient` を読むため同値を残す。
         // 名前が「受信して読まれた時刻」を連想させやすいが、現行は `deliveredAtPerRecipient` と同義
         // (= inject 成功時刻)。読了印は `team_read` が呼ばれた瞬間に message.read_at に書かれる別経路。
-        "receivedAtPerRecipient": delivered_at_per_recipient,
+        "receivedAtPerRecipient": dispatch.delivered_at_per_recipient,
         "acknowledged": false,
-        "acknowledgedAtPerRecipient": acknowledged_at_per_recipient,
+        "acknowledgedAtPerRecipient": dispatch.acknowledged_at_per_recipient,
         // Issue #511: agent_id ごとの最終 inject 結果。caller (Leader / UI) が delivered/failed
         // を 1 か所で機械的に分岐できる正本フィールド。`deliveredAtPerRecipient` は legacy として残す。
         // shape: { [agentId]: { state: "delivered", deliveredAt }
         //        | { state: "failed", failedAt, reason: { code, message } } }
-        "deliveryStatus": Value::Object(delivery_status),
+        "deliveryStatus": Value::Object(dispatch.delivery_status.clone()),
         // 失敗 agent_id の正規化済みリスト。UI が「再送候補」を一覧する用途。
         // 成功のみのときは空配列を返す (`null` ではない、JS 側で `.length === 0` で分岐できる)。
-        "failedRecipients": Value::Array(failed_recipients),
+        "failedRecipients": Value::Array(dispatch.failed_recipients.clone()),
         // Issue #509: 「配送 (delivered) と読了 (read) の状態」を区別できるよう、
         // pending (delivered だが send 時点で未読) と readSoFar (send 時点で既読) を正規化済みリストで返す。
         //   - pendingRecipients: 送信直後に Leader が「相手が読んだか」を 60s 後に確認するための候補リスト。
         //     `team_diagnostics.pendingInbox*` と組み合わせて督促判断する。
         //   - readSoFarRecipients: 送信時点で既読の agent (通常は sender 自身のみ)。caller 側 UI で
         //     send→read を相関させやすいよう含める (空でも配列は返す)。
-        "pendingRecipients": Value::Array(pending_recipients),
+        "pendingRecipients": Value::Array(dispatch.pending_recipients.clone()),
         "readSoFarRecipients": json!([
-            { "agentId": ctx.agent_id, "role": ctx.role, "readAt": timestamp }
+            { "agentId": ctx.agent_id, "role": ctx.role, "readAt": guard.timestamp }
         ]),
-    }))
+    })
+}
+
+pub async fn team_send(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
+    // 段階 1: 引数 parse / 検証。
+    let sargs = parse_send_args(args)?;
+
+    // 段階 2: 長文 payload の自動 spool 化。
+    let spooled_message =
+        spool_oversized_message(hub, ctx, &sargs.to, &sargs.message).await?;
+    // 以後は spool 化された場合は `effective_message`、そうでなければ元 `message` を使う。
+    // 既存の history 保存 (TeamMessage.message) / preview 切り出し / inject 全てに共通の
+    // 「実際に送られた本文」として使われるので、shadow ではなく明示的な変数で扱う。
+    let effective_message: &str = spooled_message.as_deref().unwrap_or(&sargs.message);
+
+    // 段階 3: 宛先解決。
+    let targets = resolve_send_targets(hub, ctx, &sargs.to, sargs.message_kind).await;
+
+    // 段階 4: message 履歴へ push。戻り値の guard が delivery 更新の起点。
+    let guard = insert_team_message(hub, ctx, &sargs, &targets, effective_message).await;
+
+    // inject 並列発火の前準備 (元 god-fn と同じ順序・同じ値)。
+    let app = hub.app_handle.lock().await.clone();
+    let other_members: Vec<(String, String)> = targets
+        .team_members
+        .iter()
+        .filter(|(aid, _)| aid != &ctx.agent_id)
+        .cloned()
+        .collect();
+    tracing::debug!(
+        "[team_send] from agent={} role={} to={} kind={} body_kind={} → targets={}/{} other_members",
+        ctx.agent_id,
+        ctx.role,
+        sargs.to,
+        sargs.message_kind.as_str(),
+        sargs.message_body_kind.as_str(),
+        targets.targets.len(),
+        other_members.len()
+    );
+    if targets.targets.is_empty() {
+        tracing::warn!(
+            "[team_send] no targets for to={:?} in team={} (other members: {:?})",
+            sargs.to,
+            ctx.team_id,
+            other_members
+        );
+    }
+
+    // 段階 5: 各宛先へ並列 inject + 配達結果集計。
+    let dispatch = dispatch_injects(
+        hub,
+        ctx,
+        &targets,
+        &guard,
+        effective_message,
+        &app,
+        sargs.message_kind,
+    )
+    .await;
+
+    if let Some(handoff_id) = sargs.handoff_id.as_deref() {
+        if let Some((target_aid, _)) = targets.targets.iter().find(|(aid, _)| {
+            dispatch
+                .delivered_at_per_recipient
+                .get(aid)
+                .and_then(|v| v.as_ref())
+                .is_some()
+        }) {
+            if let Err(e) = hub
+                .record_handoff_lifecycle(
+                    &ctx.team_id,
+                    handoff_id,
+                    "injected",
+                    Some(target_aid.clone()),
+                    Some("team_send delivered handoff".into()),
+                )
+                .await
+            {
+                tracing::warn!("[team_send] handoff lifecycle update failed: {e}");
+            }
+        }
+    }
+
+    // 段階 6: note 文 + 戻り値 JSON 構築。
+    Ok(build_send_response(
+        ctx,
+        &sargs,
+        &targets,
+        &guard,
+        &dispatch,
+        &other_members,
+    ))
 }
 
 #[cfg(test)]
