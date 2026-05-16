@@ -272,7 +272,8 @@ pub async fn terminal_create(
             ..Default::default()
         });
     }
-    if let Some(reason) = command_validation::reject_danger_flags(&args) {
+    let sanctioned_flags = command_validation::settings_sanctioned_danger_flags();
+    if let Some(reason) = command_validation::reject_danger_flags(&args, &sanctioned_flags) {
         return Ok(TerminalCreateResult {
             ok: false,
             error: Some(reason),
