@@ -20,7 +20,7 @@ import { invoke, type InvokeArgs } from '@tauri-apps/api/core';
 /**
  * すべての IPC コマンド失敗を表す共通 Error。
  *
- * `code` は Rust 側が `{"code","message"}` の JSON 文字列で返した場合のみ非 null。
+ * `code` は Rust 側が `{"code":"...","message":"..."}` の JSON 文字列で返した場合のみ非 null。
  * 非構造化エラー (素の message 文字列) の場合は `code === null`。
  * `raw` には reject された元の値を保持する (デバッグ / 後方互換の JSON.parse 用)。
  */
@@ -44,7 +44,7 @@ export class CommandError extends Error {
    * `invoke()` の reject 値を `CommandError` に正規化する。
    *
    * - 既に `CommandError` ならそのまま返す。
-   * - string なら `{"code","message"}` JSON として parse を試み、成功すれば `code` を立てる。
+   * - string なら `{"code":"...","message":"..."}` JSON として parse を試み、成功すれば `code` を立てる。
    *   (Rust の `CommandError` は message 文字列で来るため、JSON でなければ message 全体を使う)
    * - object なら `code` / `message` フィールドを拾う。
    * - それ以外は `String(value)` を message にする。

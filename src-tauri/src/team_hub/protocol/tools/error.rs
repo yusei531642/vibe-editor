@@ -32,16 +32,25 @@ pub struct ToolError {
     pub phase: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub elapsed_ms: Option<u64>,
+    /// Issue #737 (PR #787 二次レビュー): tool 固有の追加構造化フィールドを **トップレベルに
+    /// flatten** して載せるための拡張ポイント。`Some(object)` ならその object の各キーが
+    /// `{code, message, phase, elapsed_ms}` と同階層に展開される (例: `team_update_task` の
+    /// `task_done_evidence_missing` が返す `missingCriteria` 配列の wire 後方互換)。
+    /// `None` なら `skip_serializing_if` で完全に省略され、従来の flat shape と一致する。
+    #[serde(flatten, skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Value>,
 }
 
 impl ToolError {
-    /// 任意 code / message でインスタンス化。`with_phase` / `with_elapsed_ms` で追加情報を載せる。
+    /// 任意 code / message でインスタンス化。`with_phase` / `with_elapsed_ms` / `with_details`
+    /// で追加情報を載せる。
     pub fn new(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             code: code.into(),
             message: message.into(),
             phase: None,
             elapsed_ms: None,
+            details: None,
         }
     }
 
@@ -69,6 +78,15 @@ impl ToolError {
     /// 経過ミリ秒を後付けする builder (timeout 等の調査に使う)。
     pub fn with_elapsed_ms(mut self, ms: u64) -> Self {
         self.elapsed_ms = Some(ms);
+        self
+    }
+
+    /// Issue #737 (PR #787 二次レビュー): tool 固有の追加構造化フィールドを後付けする builder。
+    /// 渡す `details` は **object** であることを想定する (`#[serde(flatten)]` でトップレベルに
+    /// 展開されるため)。object 以外 (配列 / scalar) を渡すと serde のシリアライズが失敗するが、
+    /// その場合 `to_json_value()` の fallback で message 文字列値へ degrade する。
+    pub fn with_details(mut self, details: serde_json::Value) -> Self {
+        self.details = Some(details);
         self
     }
 
@@ -133,6 +151,33 @@ mod tests {
         let obj = value.as_object().expect("flat object");
         assert!(!obj.contains_key("phase"));
         assert!(!obj.contains_key("elapsed_ms"));
+        // PR #787 二次レビュー: `details` が None なら追加 key は一切 flatten されない。
+        assert_eq!(obj.len(), 2);
+    }
+
+    /// PR #787 二次レビュー (API Contract): `with_details` で渡した object のキーは
+    /// `{code, message}` と **同階層** にトップレベル展開される (`#[serde(flatten)]`)。
+    /// `task_done_evidence_missing` の `missingCriteria` 配列の wire 後方互換を担保する。
+    #[test]
+    fn with_details_flattens_extra_fields_to_top_level() {
+        let err = ToolError::new(
+            "task_done_evidence_missing",
+            "done_evidence must cover every done_criteria item",
+        )
+        .with_details(serde_json::json!({
+            "missingCriteria": ["focused test passes", "security reviewed"]
+        }));
+        let value = err.to_json_value();
+        let obj = value.as_object().expect("flat object");
+        // code / message は従来どおり。
+        assert_eq!(obj["code"], "task_done_evidence_missing");
+        // `missingCriteria` はネストではなくトップレベルに展開されている。
+        assert_eq!(
+            obj["missingCriteria"],
+            serde_json::json!(["focused test passes", "security reviewed"])
+        );
+        // `details` という中間 key は wire に現れない (flatten のため)。
+        assert!(!obj.contains_key("details"));
     }
 
     /// Issue #737: tool ではない hub 内部関数が返す `String` エラーは generic な

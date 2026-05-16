@@ -42,6 +42,7 @@ pub async fn team_switch_leader(
             message: "new_leader_agent_id is required".into(),
             phase: None,
             elapsed_ms: None,
+            details: None,
         });
     }
     if new_leader_agent_id == ctx.agent_id {
@@ -50,6 +51,7 @@ pub async fn team_switch_leader(
             message: "new_leader_agent_id must differ from the caller".into(),
             phase: None,
             elapsed_ms: None,
+            details: None,
         });
     }
 
@@ -79,6 +81,7 @@ pub async fn team_switch_leader(
             ),
             phase: None,
             elapsed_ms: None,
+            details: None,
         });
     };
     if new_role != "leader" {
@@ -89,6 +92,7 @@ pub async fn team_switch_leader(
             ),
             phase: None,
             elapsed_ms: None,
+            details: None,
         });
     }
 

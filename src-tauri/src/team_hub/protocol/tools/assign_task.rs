@@ -54,6 +54,7 @@ fn assign_invalid_done_criteria(message: impl Into<String>) -> AssignError {
         message: message.into(),
         phase: None,
         elapsed_ms: None,
+        details: None,
     }
 }
 
@@ -106,6 +107,7 @@ fn assign_invalid_pre_approval(message: impl Into<String>) -> AssignError {
         message: message.into(),
         phase: None,
         elapsed_ms: None,
+        details: None,
     }
 }
 
@@ -216,6 +218,7 @@ pub async fn team_assign_task(
             message: "assignee and description are required".into(),
             phase: None,
             elapsed_ms: None,
+            details: None,
         });
     }
     // Issue #526: `target_paths: string[]` (任意) — このタスクで触る予定のファイル / dir 宣言。
@@ -262,6 +265,7 @@ pub async fn team_assign_task(
             ),
             phase: None,
             elapsed_ms: None,
+            details: None,
         });
     }
     // Issue #525: #526 の advisory lock を task state へ接続する。
@@ -328,6 +332,7 @@ pub async fn team_assign_task(
                     ),
                     phase: None,
                     elapsed_ms: None,
+                    details: None,
                 });
             }
         };
@@ -364,6 +369,7 @@ pub async fn team_assign_task(
                     ),
                     phase: None,
                     elapsed_ms: None,
+                    details: None,
                 });
             }
         }

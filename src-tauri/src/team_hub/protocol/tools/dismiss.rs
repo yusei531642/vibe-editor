@@ -32,6 +32,7 @@ pub async fn team_dismiss(
             message: "cannot dismiss yourself".into(),
             phase: None,
             elapsed_ms: None,
+            details: None,
         });
     }
     // チーム所属チェック
@@ -42,6 +43,7 @@ pub async fn team_dismiss(
             message: format!("agent '{agent_id}' is not in this team"),
             phase: None,
             elapsed_ms: None,
+            details: None,
         });
     }
     // Issue #342 Phase 3 (3.6): dismiss 直前に被 dismiss 側の last_seen_at / 既存 recruited_at を

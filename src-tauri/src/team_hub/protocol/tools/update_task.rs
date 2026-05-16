@@ -43,9 +43,11 @@ fn done_evidence_invalid(message: impl Into<String>) -> ToolError {
     ToolError::new("task_done_evidence_invalid", message)
 }
 
-/// Issue #737: 旧実装は `missingCriteria` 配列を JSON 文字列で別フィールドとして返していた。
-/// `ToolError` の flat shape に合わせ、未充足の criteria を message 末尾に畳み込んで保持する
-/// (= caller / LLM が「どの criterion が足りないか」を引き続き読み取れる)。
+/// Issue #737 (PR #787 二次レビュー): `task_done_evidence_missing` エラーは旧来
+/// `missingCriteria` 配列を **トップレベル JSON フィールド**で返していた。flat ToolError 化で
+/// 一度 message 末尾への畳み込みだけにしたが、wire 後方互換のため `with_details` で
+/// `missingCriteria` をトップレベルフィールドとして復元する (`#[serde(flatten)]` 経由)。
+/// message 末尾の `missing criteria: {missing:?}` 畳み込みは併存させる (情報冗長化、害なし)。
 fn done_evidence_missing(missing: Vec<String>) -> ToolError {
     ToolError::new(
         "task_done_evidence_missing",
@@ -54,6 +56,7 @@ fn done_evidence_missing(missing: Vec<String>) -> ToolError {
              missing criteria: {missing:?}"
         ),
     )
+    .with_details(json!({ "missingCriteria": missing }))
 }
 
 fn parse_done_evidence(args: &Value) -> Result<Vec<TaskDoneEvidenceSnapshot>, ToolError> {

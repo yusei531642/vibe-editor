@@ -192,6 +192,7 @@ pub async fn team_create_leader(
                 message,
                 phase: Some(phase_str),
                 elapsed_ms: Some(started.elapsed().as_millis() as u64),
+                details: None,
             });
         }
         Ok(Err(_)) => {
@@ -207,6 +208,7 @@ pub async fn team_create_leader(
                 message: "renderer ack channel was dropped before reply".into(),
                 phase: Some("ack".into()),
                 elapsed_ms: Some(started.elapsed().as_millis() as u64),
+                details: None,
             });
         }
         Err(_) => {
@@ -231,6 +233,7 @@ pub async fn team_create_leader(
                 ),
                 phase: Some("ack".into()),
                 elapsed_ms: Some(elapsed_ms),
+                details: None,
             });
         }
     }
@@ -274,6 +277,7 @@ pub async fn team_create_leader(
                 message: "create_leader cancelled before handshake".into(),
                 phase: Some("handshake".into()),
                 elapsed_ms: Some(started.elapsed().as_millis() as u64),
+                details: None,
             })
         }
         Err(_) => {
@@ -292,6 +296,7 @@ pub async fn team_create_leader(
                 ),
                 phase: Some("handshake".into()),
                 elapsed_ms: Some(started.elapsed().as_millis() as u64),
+                details: None,
             })
         }
     }
