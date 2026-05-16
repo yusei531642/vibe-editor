@@ -16,7 +16,7 @@
  * 完全に AppStateProvider 内部へ閉じ込められ、ここからは見えない (callbacks-down /
  * events-up の依存性逆転)。
  */
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import type { SessionInfo } from '../../types/shared';
 import { useWindowFrameInsets } from './lib/use-window-frame-insets';
 import { AppStateProvider } from './lib/app-state-context';
@@ -27,14 +27,30 @@ export function App(): JSX.Element {
   useWindowFrameInsets();
 
   // セッションパネル UI の state。AppStateProvider の `onSessionsLoaded`
-  // (events-up: loadProject が取得した初期 sessions を流す) と AppShell の
-  // セッションパネル (callbacks-down) の両方から触れるよう、共通の親である
-  // App が hold する。旧 App.tsx では同コンポーネント内の useState だった。
+  // (events-up: loadProject が取得した初期 sessions を流す) / `onProjectSwitched`
+  // (events-up: プロジェクト切替時のリセット) と AppShell のセッションパネル
+  // (callbacks-down) の両方から触れるよう、共通の親である App が hold する。
+  // 旧 App.tsx では同コンポーネント内の useState だった。
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
+  // プロジェクト切替時に activeSessionId を null へ戻す (旧 App.tsx の
+  // `projectSwitchedRef.current` 内 `setActiveSessionId(null)` 相当)。
+  const handleProjectSwitched = useCallback(() => {
+    setActiveSessionId(null);
+  }, []);
 
   return (
-    <AppStateProvider onSessionsLoaded={setSessions}>
-      <AppShell sessions={sessions} setSessions={setSessions} />
+    <AppStateProvider
+      onSessionsLoaded={setSessions}
+      onProjectSwitched={handleProjectSwitched}
+    >
+      <AppShell
+        sessions={sessions}
+        setSessions={setSessions}
+        activeSessionId={activeSessionId}
+        setActiveSessionId={setActiveSessionId}
+      />
     </AppStateProvider>
   );
 }

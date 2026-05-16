@@ -75,14 +75,26 @@ import { useProject, useTabs, useTeam } from '../lib/app-state-context';
 export interface AppShellProps {
   /**
    * セッションパネル UI の state。App が hold し AppStateProvider の
-   * `onSessionsLoaded` (events-up) と整合させるため props 経由で受け取る
-   * (Issue #731)。旧 App.tsx では同コンポーネント内の useState だった。
+   * `onSessionsLoaded` / `onProjectSwitched` (events-up) と整合させるため
+   * props 経由で受け取る (Issue #731)。旧 App.tsx では同コンポーネント内の
+   * useState だった。
    */
   sessions: SessionInfo[];
   setSessions: Dispatch<SetStateAction<SessionInfo[]>>;
+  /**
+   * 現在復帰中のセッション id。プロジェクト切替時に AppStateProvider の
+   * `onProjectSwitched` callback (App 経由) で null にリセットされる。
+   */
+  activeSessionId: string | null;
+  setActiveSessionId: Dispatch<SetStateAction<string | null>>;
 }
 
-export function AppShell({ sessions, setSessions }: AppShellProps): JSX.Element {
+export function AppShell({
+  sessions,
+  setSessions,
+  activeSessionId,
+  setActiveSessionId
+}: AppShellProps): JSX.Element {
   const settingsLoading = useSettingsLoading();
   const { update: updateSettings, reset: resetSettings } = useSettingsActions();
   // Phase 2 (Issue #487): App.tsx 冒頭の `useSettingsValue` 17 連発合成は
@@ -172,10 +184,10 @@ export function AppShell({ sessions, setSessions }: AppShellProps): JSX.Element 
     reportTerminalSize
   } = useTeam();
 
-  // sessions (セッションパネル UI): sessions / setSessions は App から props で受け取る
-  // (AppStateProvider の onSessionsLoaded と整合させるため。Issue #731)。
+  // sessions (セッションパネル UI): sessions / setSessions / activeSessionId /
+  // setActiveSessionId は App から props で受け取る (AppStateProvider の
+  // onSessionsLoaded / onProjectSwitched と整合させるため。Issue #731)。
   const [sessionsLoading, setSessionsLoading] = useState<boolean>(false);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   // tabs (editor / diff / recentlyClosed) は useFileTabs で集中管理する。
   const [sideBySide, setSideBySide] = useState<boolean>(true);

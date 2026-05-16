@@ -94,16 +94,30 @@ export interface AppStateProviderProps {
    * 受け渡す。AppShell が自身の `setSessions` を安定参照で渡す。
    */
   onSessionsLoaded?: (sessions: SessionInfo[]) => void;
+  /**
+   * プロジェクト切替時に AppShell 側のセッション UI state をリセットするための
+   * callback (events-up)。旧 App.tsx の `projectSwitchedRef.current` は
+   * `setActiveSessionId(null)` も呼んでいたが、activeSessionId は AppShell の
+   * ローカル state へ移ったため Provider から直接触れない。`onSessionsLoaded`
+   * と同じパターンで callback 経由でリセットする。
+   * editor/diff/terminal/teams のリセット (各 hook に委譲) と同じタイミングで
+   * 呼ばれる (順序は旧 App.tsx と一致)。
+   */
+  onProjectSwitched?: () => void;
 }
 
 export function AppStateProvider({
   children,
-  onSessionsLoaded
+  onSessionsLoaded,
+  onProjectSwitched
 }: AppStateProviderProps): JSX.Element {
   const { showToast } = useToast();
-  // onSessionsLoaded を ref に詰めて render body 内のブリッジ代入から最新参照を引く。
+  // onSessionsLoaded / onProjectSwitched を ref に詰めて render body 内の
+  // ブリッジ代入から最新参照を引く。
   const onSessionsLoadedRef = useRef(onSessionsLoaded);
   onSessionsLoadedRef.current = onSessionsLoaded;
+  const onProjectSwitchedRef = useRef(onProjectSwitched);
+  onProjectSwitchedRef.current = onProjectSwitched;
   // Canvas モードでは App が裏で常時マウントされるため、useTerminalTabs に
   // viewMode を渡して「迷子ターミナル」の裏起動を抑制する (旧 App.tsx と同じ)。
   const viewMode = useUiStore((s) => s.viewMode);
@@ -220,7 +234,12 @@ export function AppStateProvider({
   // editor/diff/terminal/teams のリセットはそれぞれの hook に委譲。
   confirmDiscardRef.current = confirmDiscardEditorTabs;
   projectSwitchedRef.current = (root: string): void => {
+    // 旧 App.tsx と同じ順序を厳守:
+    //   resetTabs → (AppShell の activeSessionId リセット) → resetTeams → resetTerminals
+    // activeSessionId は AppShell ローカル state へ移ったので onProjectSwitched
+    // callback 経由でリセットする (`setActiveSessionId(null)` 相当)。
     resetTabsForProjectSwitch();
+    onProjectSwitchedRef.current?.();
     resetTeamsForProjectSwitch();
     resetTerminalsForProjectSwitch();
     void root; // root は現状未使用 (将来の拡張余地として残す)
