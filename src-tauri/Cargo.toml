@@ -96,7 +96,10 @@ legacy_message_fallback = []
 
 [lib]
 name = "vibe_editor_lib"
-crate-type = ["staticlib", "cdylib"]
+# rlib は desktop バイナリ (src/main.rs の vibe_editor_lib::run()) が lib を Rust
+# クレートとしてリンクするのに必須 (staticlib/cdylib は mobile 用の C 成果物で
+# Rust クレートとして消費できない)。削除すると desktop ビルドが壊れる (#779)。
+crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
 name = "vibe-editor"
