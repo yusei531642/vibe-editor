@@ -319,22 +319,16 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const isClaude = payload.agent === 'claude' || !payload.agent;
   const isCodex = payload.agent === 'codex';
 
-  // Issue #660: client-side UUID 事前注入。
+  // Issue #660 / #752 / #753: client-side UUID 事前注入。
   // payload.resumeSessionId が無い (= 新規 mount) なら UUID v4 を採番して
-  // `--session-id <uuid>` で起動 → 新規 jsonl が確定する。次回以降は payload に
-  // 焼き付いた id を `--resume <uuid>` で読み戻す経路に切替わる。
+  // `--session-id <uuid>` で起動する。ここで Canvas store へ先に書き戻すと、
+  // TerminalView の初回 spawn が走る前の再描画で `--resume <まだ存在しないuuid>` に
+  // 切り替わり、Claude CLI が "No conversation found with session ID" で終了する。
+  // そのため永続化は TerminalOverlay の onSessionId (jsonl 検出後) にだけ任せる。
   const ensuredSessionId = useMemo<string | null>(() => {
     if (!isClaude) return null;
     return payload.resumeSessionId ?? crypto.randomUUID();
   }, [isClaude, payload.resumeSessionId]);
-
-  useEffect(() => {
-    // 採番した UUID を Canvas store に書き戻して永続化する。
-    // payload に既に値があれば書き込まない (zustand 側で同値検出)。
-    if (isClaude && ensuredSessionId && !payload.resumeSessionId) {
-      setCardPayload(id, { resumeSessionId: ensuredSessionId });
-    }
-  }, [id, isClaude, ensuredSessionId, payload.resumeSessionId, setCardPayload]);
 
   const args = useMemo<string[] | undefined>(() => {
     const rawArgs = isClaude
@@ -352,11 +346,11 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
         base.push('-c', 'disable_paste_burst=true');
       }
     }
-    // Issue #660: Claude のみ session 制御フラグを付与 (Codex は両方とも非対応)。
+    // Issue #660 / #752 / #753: Claude のみ session 制御フラグを付与 (Codex は両方とも非対応)。
     //   - payload.resumeSessionId 既存 → 永続化済みなので `--resume` で前回会話を継続
     //   - payload.resumeSessionId 空 → 採番した UUID を `--session-id` で強制注入
-    // useEffect 側で payload に書き戻すと次 render で `--resume` 経路に切り替わる。
-    // 初回 spawn の args は本 render の値が snapRef に固定されるので問題ない。
+    // 新規 UUID は jsonl 検出後にだけ payload へ保存する。初回 spawn 前に保存すると
+    // まだ存在しない会話を resume してしまうため。
     if (isClaude && ensuredSessionId) {
       if (payload.resumeSessionId) {
         base.push('--resume', ensuredSessionId);

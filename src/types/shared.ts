@@ -1204,6 +1204,14 @@ export interface TeamDiagnosticsMemberRow {
    * 続いた場合は実際にプロセスが動いていない可能性が高い。
    */
   lastPtyOutputAt: string | null;
+  /** 子プロセスが最後に終了した時刻。online row では通常 null。 */
+  lastExitAt?: string | null;
+  /** 子プロセスの終了コード。 */
+  lastExitCode?: number | null;
+  /** 終了直前の出力から推定した短い理由。 */
+  lastExitReason?: string | null;
+  /** `No conversation found with session ID` から抽出した session id。 */
+  lastExitSessionId?: string | null;
   /** `lastStatusAt` から現在までの経過 ms (`null` なら一度も自己申告がない)。 */
   lastStatusAgeMs: number | null;
   /** `lastPtyOutputAt` から現在までの経過 ms (`null` なら一度も PTY 出力が観測されていない)。 */

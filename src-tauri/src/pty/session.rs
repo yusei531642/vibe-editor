@@ -1453,12 +1453,28 @@ pub fn spawn_session(
                 .unwrap_or(-1),
             signal: None,
         };
-        if let Err(e) = app_for_exit.emit(&exit_event_clone, info) {
+        if let Err(e) = app_for_exit.emit(&exit_event_clone, info.clone()) {
             tracing::warn!("emit {exit_event_clone} failed: {e}");
         }
         // child.wait() が返った時点で kill 不要だが、registry::remove は handle.kill() を呼ぶ。
         // SessionHandle::kill() は何度呼んでも安全 (ChildKiller 内部で no-op)。
-        let _ = registry_for_exit.remove(&id_for_exit);
+        let removed = registry_for_exit.remove(&id_for_exit);
+        if let Some(handle) = removed {
+            if let (Some(team_id), Some(agent_id)) =
+                (handle.team_id.clone(), handle.agent_id.clone())
+            {
+                let output_tail = handle.scrollback_snapshot();
+                let app = app_for_exit.clone();
+                tauri::async_runtime::spawn(async move {
+                    let Some(state) = app.try_state::<crate::state::AppState>() else {
+                        return;
+                    };
+                    let hub = state.team_hub.clone();
+                    hub.record_agent_process_exit(&team_id, &agent_id, info.exit_code, output_tail)
+                        .await;
+                });
+            }
+        }
     });
 
     Ok(SessionHandle {
