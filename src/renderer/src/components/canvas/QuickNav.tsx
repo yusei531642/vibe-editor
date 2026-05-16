@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { useCanvasNodes } from '../../stores/canvas-selectors';
+import { cardRoleId } from '../../stores/canvas';
 import { useT } from '../../lib/i18n';
 import { metaOf } from '../../lib/team-roles';
 
@@ -38,16 +39,14 @@ export function QuickNav({ open, onClose }: QuickNavProps): JSX.Element | null {
     const q = query.trim().toLowerCase();
     return nodes
       .map((n) => {
-        const data = n.data ?? {};
-        const title = String(data.title ?? n.id);
-        const cardType = String(data.cardType ?? n.type ?? '');
+        const data = n.data;
+        const title = String(data?.title ?? n.id);
+        const cardType = String(data?.cardType ?? n.type ?? '');
         // Issue #194: canvas store v2 マイグレーションで legacy `role` は基本 undefined になり、
         // 全カードがデフォルト紫 + 汎用 glyph で表示されて QuickNav が機能ほぼ無価値だった。
         // AgentNodeCard と同じく roleProfileId を優先し、無ければ legacy role を fallback。
-        const payload = data.payload as
-          | { roleProfileId?: string; role?: string }
-          | undefined;
-        const roleId = payload?.roleProfileId ?? payload?.role;
+        // Issue #732: 旧 `payload as { roleProfileId?; role? }` を cardRoleId helper に置換。
+        const roleId = cardRoleId(data);
         const meta = metaOf(roleId);
         const subtitle = meta ? meta.label : cardType;
         const haystack = `${title} ${subtitle} ${roleId ?? ''}`.toLowerCase();

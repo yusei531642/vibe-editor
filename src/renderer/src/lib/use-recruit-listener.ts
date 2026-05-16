@@ -16,7 +16,13 @@
  */
 import { useEffect, useRef } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { useCanvasStore } from '../stores/canvas';
+import {
+  useCanvasStore,
+  cardTeamId,
+  cardAgentId,
+  cardRoleId,
+  agentPayloadOf
+} from '../stores/canvas';
 import type { Node } from '@xyflow/react';
 import type { CardData } from '../stores/canvas';
 import { useRoleProfiles } from './role-profiles-context';
@@ -190,18 +196,15 @@ export function useRecruitListener(): void {
         // ハンドラ側で一元的に removeCard する (チャネル方向の一意化)。
         const findRequester = (): Node<CardData> | undefined => {
           const nodes = useCanvasStore.getState().nodes;
-          const exact = nodes.find((n) => {
-            const data = n.data?.payload as { agentId?: string } | undefined;
-            return data?.agentId === p.requesterAgentId;
-          });
+          // Issue #732: agentId / teamId / role 抽出は判別可能 union 用の共通 helper に置換。
+          const exact = nodes.find(
+            (n) => cardAgentId(n.data) === p.requesterAgentId
+          );
           if (exact) return exact;
           // 同 teamId 内の leader / hr に fallback
           return nodes.find((n) => {
-            const data = n.data?.payload as
-              | { agentId?: string; teamId?: string; roleProfileId?: string; role?: string }
-              | undefined;
-            if (!data || data.teamId !== p.teamId) return false;
-            const r = data.roleProfileId ?? data.role ?? '';
+            if (cardTeamId(n.data) !== p.teamId) return false;
+            const r = cardRoleId(n.data) ?? '';
             return r === 'leader' || r === 'hr';
           });
         };
@@ -239,13 +242,13 @@ export function useRecruitListener(): void {
           });
         }
         const store = useCanvasStore.getState();
-        const requesterPayload = (requester.data?.payload ?? {}) as {
-          organization?: unknown;
-        };
-        const teamNodes = store.nodes.filter((n) => {
-          const data = n.data?.payload as { teamId?: string } | undefined;
-          return data?.teamId === p.teamId;
-        });
+        // Issue #732: requester は recruit を呼んだ agent カード。agentPayloadOf で
+        // payload (AgentPayload) を取り出し、organization を継承させる
+        // (旧 `payload as { organization?: unknown }` の置き換え)。
+        const requesterOrganization = agentPayloadOf(requester.data)?.organization;
+        const teamNodes = store.nodes.filter(
+          (n) => cardTeamId(n.data) === p.teamId
+        );
         const pos = findRecruitPosition(requester, teamNodes);
         const titleHint = p.agentLabelHint?.trim() || p.roleProfileId;
         const newNodeId = store.addCard({
@@ -259,7 +262,7 @@ export function useRecruitListener(): void {
             role: p.roleProfileId,
             teamId: p.teamId,
             agentId: p.newAgentId,
-            organization: requesterPayload.organization,
+            organization: requesterOrganization,
             // Issue #117: AgentNodeCard が拾って Claude(--append-system-prompt) /
             // Codex(model_instructions_file) 両方の経路に注入する正本フィールド。
             customInstructions: mergeCustomInstructions(p.customInstructions, p.waitPolicy),
@@ -291,10 +294,10 @@ export function useRecruitListener(): void {
       if (cancelled) return;
       const p = e.payload;
       const store = useCanvasStore.getState();
-      const target = store.nodes.find((n) => {
-        const data = n.data?.payload as { agentId?: string; teamId?: string } | undefined;
-        return data?.agentId === p.agentId && data?.teamId === p.teamId;
-      });
+      // Issue #732: agentId / teamId 抽出を判別可能 union 用の共通 helper に置換。
+      const target = store.nodes.find(
+        (n) => cardAgentId(n.data) === p.agentId && cardTeamId(n.data) === p.teamId
+      );
       if (target) {
         // team_dismiss は 1 名だけ解雇する MCP 経路。チーム単位カスケードを無効化して、
         // Leader や他メンバーが連鎖的に閉じないようにする。
@@ -312,10 +315,10 @@ export function useRecruitListener(): void {
       if (cancelled) return;
       const p = e.payload;
       const store = useCanvasStore.getState();
-      const target = store.nodes.find((n) => {
-        const data = n.data?.payload as { agentId?: string } | undefined;
-        return data?.agentId === p.newAgentId;
-      });
+      // Issue #732: agentId 抽出を判別可能 union 用の共通 helper に置換。
+      const target = store.nodes.find(
+        (n) => cardAgentId(n.data) === p.newAgentId
+      );
       if (target) {
         console.warn(`[recruit] cancelled: ${p.reason}`);
         // recruit timeout / cancel で出る暫定カードだけを撤収する。

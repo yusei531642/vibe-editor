@@ -6,39 +6,27 @@
  * TerminalView に伝える。Phase 3 で AgentNodeCard (ロール色) に派生させる。
  */
 import { memo, useCallback, useMemo, useRef, useState } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { CardFrame } from '../CardFrame';
 import { TerminalView, type TerminalViewHandle } from '../../TerminalView';
 import { useSettings } from '../../../lib/settings-context';
 import { useCanvasStore, NODE_MIN_W, NODE_MIN_H } from '../../../stores/canvas';
+import type { CardDataOf } from '../../../stores/canvas';
 import { useUiStore } from '../../../stores/ui';
 import { useCanvasTerminalFit } from '../../../lib/use-canvas-terminal-fit';
 import { useXtermScrollToBottomOnResize } from '../../../lib/use-xterm-scroll-on-resize';
 
-interface TerminalPayload {
-  agent?: 'claude' | 'codex';
-  role?: string;
-  teamId?: string;
-  agentId?: string;
-  command?: string;
-  args?: string[];
-  cwd?: string;
-  /** Issue #22: Canvas から Resume 起動したときの Claude セッション id。
-   *  Claude の場合は args に `--resume <id>` を追加して既存会話を再開する。 */
-  resumeSessionId?: string | null;
-  /** Issue #63: Codex の role system prompt (一時ファイル化されて model_instructions_file へ)。
-   *  Canvas から team 外の Codex を起動するケースでも使えるよう payload 経由で渡せるようにする。 */
-  codexInstructions?: string;
-}
-
-function TerminalCardImpl({ id, data }: NodeProps): JSX.Element {
+// Issue #732: payload 型 (旧ローカル `TerminalPayload`) は canvas store の判別可能 union
+// 側 `TerminalCardPayload` に集約。`NodeProps` を `Node<CardDataOf<'terminal'>>` で具体化し、
+// `data.payload` の inline cast を撤廃する。
+function TerminalCardImpl({ id, data }: NodeProps<Node<CardDataOf<'terminal'>>>): JSX.Element {
   const ref = useRef<TerminalViewHandle | null>(null);
   // Issue #272: NodeResizer でカードをリサイズしたとき、内部 `.xterm-viewport`
   // の scrollTop が古い値で残り最終行が下端で見切れるのを防ぐため、
   // wrapper div の ref を ResizeObserver に渡して末尾追従させる。
   const termContainerRef = useRef<HTMLDivElement | null>(null);
   const { settings } = useSettings();
-  const payload = (data?.payload ?? {}) as TerminalPayload;
+  const payload = data?.payload ?? {};
   const title = (data?.title as string) ?? 'Terminal';
   const [, setStatus] = useState<string>('');
   const setCardPayload = useCanvasStore((s) => s.setCardPayload);

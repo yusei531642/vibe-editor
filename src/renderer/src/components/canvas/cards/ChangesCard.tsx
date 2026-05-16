@@ -4,21 +4,25 @@
  * payload: { projectRoot }
  */
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import type { GitStatus } from '../../../../../types/shared';
 import { CardFrame } from '../CardFrame';
 import { ChangesPanel } from '../../ChangesPanel';
 import { useCanvasStore } from '../../../stores/canvas';
+import type { CardDataOf } from '../../../stores/canvas';
 import { useSettings } from '../../../lib/settings-context';
 import { useFilesChanged } from '../../../lib/use-files-changed';
 
-interface ChangesPayload {
-  projectRoot?: string;
-}
-
-function ChangesCardImpl({ id, data, positionAbsoluteX, positionAbsoluteY }: NodeProps): JSX.Element {
+// Issue #732: payload 型は canvas store の判別可能 union に集約。`NodeProps` を
+// `Node<CardDataOf<'changes'>>` で具体化することで `data.payload` が直接読め、inline cast を撤廃。
+function ChangesCardImpl({
+  id,
+  data,
+  positionAbsoluteX,
+  positionAbsoluteY
+}: NodeProps<Node<CardDataOf<'changes'>>>): JSX.Element {
   const { settings } = useSettings();
-  const payload = (data?.payload ?? {}) as ChangesPayload;
+  const payload = data?.payload ?? {};
   // Issue #23: lastOpenedRoot (現在プロジェクト) を最優先、claudeCwd は fallback。
   const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || payload.projectRoot || '';
   const title = (data?.title as string) ?? 'Changes';

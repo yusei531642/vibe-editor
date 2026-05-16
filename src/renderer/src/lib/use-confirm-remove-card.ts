@@ -12,7 +12,7 @@
  *   を出す。dirty 検出は editor-card-dirty-registry が一元管理する。
  */
 import { useCallback } from 'react';
-import { useCanvasStore } from '../stores/canvas';
+import { useCanvasStore, cardTeamId, cardTeamName } from '../stores/canvas';
 import { useT } from './i18n';
 import { getDirtyEditorCardSnapshots } from './editor-card-dirty-registry';
 
@@ -22,20 +22,21 @@ export function useConfirmRemoveCard(): (id: string) => void {
     (id: string) => {
       const state = useCanvasStore.getState();
       const target = state.nodes.find((n) => n.id === id);
-      const teamId = (target?.data?.payload as { teamId?: string } | undefined)?.teamId;
+      // Issue #732: teamId / teamName 抽出は判別可能 union を見る共通 helper に集約
+      // (旧 `payload as { teamId? } / { teamName? }` 局所キャストを撤去)。
+      const teamId = cardTeamId(target?.data);
       // store.removeCard と同じ「cascadeTeam=true」の動きで削除対象 id 集合を作る。
       // editor dirty チェックはこの集合全体に対して行う。
       const idsToRemove = new Set<string>([id]);
       if (teamId) {
         for (const n of state.nodes) {
-          const tid = (n.data?.payload as { teamId?: string } | undefined)?.teamId;
+          const tid = cardTeamId(n.data);
           if (tid === teamId) idsToRemove.add(n.id);
         }
       }
       // ---- 1) チーム cascade confirm (既存仕様) ----
       if (teamId && idsToRemove.size > 1) {
-        const teamName =
-          (target?.data?.payload as { teamName?: string } | undefined)?.teamName ?? teamId;
+        const teamName = cardTeamName(target?.data) ?? teamId;
         const ok = window.confirm(
           t('agentCard.confirmCloseTeam', {
             count: idsToRemove.size,

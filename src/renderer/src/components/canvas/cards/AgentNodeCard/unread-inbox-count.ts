@@ -17,7 +17,7 @@
 
 import type { HandoffPayload } from '../../../../lib/use-team-handoff';
 import type { TeamInboxReadEvent } from '../../../../../../types/shared';
-import { useCanvasStore } from '../../../../stores/canvas';
+import { useCanvasStore, agentPayloadOf } from '../../../../stores/canvas';
 import type { AgentPayload } from './types';
 
 /** test と本体で `useCanvasStore` を共有するための型 alias。 */
@@ -25,7 +25,8 @@ export type CanvasStoreApi = typeof useCanvasStore;
 
 function readLatestPayload(store: CanvasStoreApi, id: string): AgentPayload {
   const node = store.getState().nodes.find((n) => n.id === id);
-  return ((node?.data?.payload as AgentPayload | undefined) ?? {}) as AgentPayload;
+  // Issue #732: 旧 `node?.data?.payload as AgentPayload` を agentPayloadOf に置換。
+  return agentPayloadOf(node?.data) ?? {};
 }
 
 /**

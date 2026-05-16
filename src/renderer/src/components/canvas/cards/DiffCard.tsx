@@ -4,21 +4,18 @@
  * payload: { projectRoot, relPath }
  */
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Handle, Position, type NodeProps } from '@xyflow/react';
+import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import type { GitDiffResult } from '../../../../../types/shared';
 import { CardFrame } from '../CardFrame';
 import { DiffView } from '../../DiffView';
 import { useFilesChanged } from '../../../lib/use-files-changed';
+import type { CardDataOf, DiffCardPayload } from '../../../stores/canvas';
 
-interface DiffPayload {
-  projectRoot: string;
-  relPath: string;
-  /** Issue #19: rename の HEAD 側パス。CanvasSidebar / ChangesCard が渡す。 */
-  originalRelPath?: string;
-}
-
-function DiffCardImpl({ id, data }: NodeProps): JSX.Element {
-  const payload = (data?.payload ?? {}) as DiffPayload;
+// Issue #732: payload 型は canvas store の判別可能 union に集約。`NodeProps` を
+// `Node<CardDataOf<'diff'>>` で具体化することで `data.payload` の inline cast を撤廃。
+function DiffCardImpl({ id, data }: NodeProps<Node<CardDataOf<'diff'>>>): JSX.Element {
+  // 旧 `(data?.payload ?? {}) as DiffPayload` と同一挙動 (空 payload を許容)。
+  const payload = (data?.payload ?? {}) as DiffCardPayload;
   const { projectRoot, relPath, originalRelPath } = payload;
   const title = (data?.title as string) ?? `diff: ${relPath}`;
 

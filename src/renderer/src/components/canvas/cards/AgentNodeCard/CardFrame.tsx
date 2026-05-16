@@ -15,7 +15,13 @@
  * 挙動は元 AgentNodeCard.tsx と完全一致。構造のみ整理。
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react';
+import {
+  Handle,
+  NodeResizer,
+  Position,
+  type Node,
+  type NodeProps
+} from '@xyflow/react';
 import {
   AlertTriangle,
   ClipboardCheck,
@@ -38,7 +44,9 @@ import { useSettings } from '../../../../lib/settings-context';
 import {
   useCanvasStore,
   NODE_MIN_W,
-  NODE_MIN_H
+  NODE_MIN_H,
+  agentPayloadOf,
+  type CardDataOf
 } from '../../../../stores/canvas';
 import { useAgentActivityStore } from '../../../../stores/agent-activity';
 import { useConfirmRemoveCard } from '../../../../lib/use-confirm-remove-card';
@@ -183,14 +191,20 @@ function formatHealthLabel(
   });
 }
 
-function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
+// Issue #732: `NodeProps` を `Node<CardDataOf<'agent'>>` で具体化することで
+// `data.payload` が `AgentPayload` として読め、`unknown` からの inline cast が不要になる。
+function AgentNodeCardImpl({
+  id,
+  data
+}: NodeProps<Node<CardDataOf<'agent'>>>): JSX.Element {
   const termRef = useRef<TerminalViewHandle | null>(null);
   const { settings } = useSettings();
   const t = useT();
   const confirmRemoveCard = useConfirmRemoveCard();
   const setCardPayload = useCanvasStore((s) => s.setCardPayload);
   const { showToast } = useToast();
-  const payload = (data?.payload ?? {}) as AgentPayload;
+  // payload 未設定でも落ちないよう空オブジェクトでフォールバック (AgentPayload は全 field optional)。
+  const payload: AgentPayload = data?.payload ?? {};
   // 新スキーマ roleProfileId を優先、無ければ legacy role を読む
   const roleProfiles = useRoleProfiles();
   const profilesById = roleProfiles.byId;
@@ -200,7 +214,7 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
   const profile = visual.profile;
   const accent = visual.agentAccent;
   const organizationAccent = visual.organizationAccent;
-  const title = (data?.title as string) ?? visual.label;
+  const title = data?.title ?? visual.label;
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [status, setStatus] = useState<string>('');
   const [activity, setActivityState] = useState<AgentStatus>('idle');
@@ -248,7 +262,8 @@ function AgentNodeCardImpl({ id, data }: NodeProps): JSX.Element {
     const sigs: string[] = [];
     for (const n of s.nodes) {
       if (n.type !== 'agent') continue;
-      const p = n.data?.payload as AgentPayload | undefined;
+      // Issue #732: 旧 `n.data?.payload as AgentPayload` を agentPayloadOf に置換。
+      const p = agentPayloadOf(n.data);
       const rp = p?.roleProfileId ?? p?.role;
       if (!p || p.teamId !== payload.teamId || !p.agentId || !rp) continue;
       sigs.push(`${p.agentId}:${rp}:${p.agent ?? 'claude'}`);
