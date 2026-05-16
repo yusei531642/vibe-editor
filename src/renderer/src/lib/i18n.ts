@@ -663,6 +663,10 @@ const ja: Dict = {
   'settings.mcp.manualStep3': 'Codex を使う場合は ~/.codex/config.toml に同等の [mcp_servers.vibe-team] を追加。',
   'settings.mcp.copy': 'コピー',
   'settings.mcp.copied': 'コピーしました',
+  // Issue #729: McpSection の isJa 三項を i18n.ts に移管
+  'settings.mcp.claudeSampleNote': '~/.claude.json のサンプル (既存の mcpServers と統合してください):',
+  'settings.mcp.codexSampleNote': '~/.codex/config.toml のサンプル:',
+  'settings.mcp.connInfoLabel': '接続情報 (現在値):',
 
   // ---------- Updater (Issue #59) ----------
   'updater.confirm': 'vibe-editor v{version} が利用可能です。今すぐ更新しますか?',
@@ -1384,6 +1388,10 @@ const en: Dict = {
     'For Codex, add the equivalent [mcp_servers.vibe-team] section to ~/.codex/config.toml.',
   'settings.mcp.copy': 'Copy',
   'settings.mcp.copied': 'Copied',
+  // Issue #729: McpSection inline isJa moved into i18n.ts
+  'settings.mcp.claudeSampleNote': 'Sample for ~/.claude.json (merge with existing mcpServers):',
+  'settings.mcp.codexSampleNote': 'Sample for ~/.codex/config.toml:',
+  'settings.mcp.connInfoLabel': 'Connection info:',
 
   // ---------- Updater (Issue #59) ----------
   'updater.confirm': 'vibe-editor v{version} is available. Install it now?',
