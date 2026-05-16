@@ -99,6 +99,9 @@ export function CardInject({
       })
       .catch((err) => {
         // unknown_team / unknown_message / invalid_recipient の構造化エラーはここに来る。
+        // Issue #737: retryInject の reject は CommandError (Error サブクラス) に統一済み。
+        // `err instanceof Error` 分岐が clean な message を取り出す (旧来の raw JSON 文字列
+        // reject も invokeCommand wrapper が CommandError へ正規化するため契約は不変)。
         const detail = err instanceof Error ? err.message : String(err);
         showToast(t('injectFailure.retryError', { detail }), {
           tone: 'error',
