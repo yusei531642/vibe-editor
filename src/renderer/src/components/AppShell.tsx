@@ -16,7 +16,7 @@
  *   - <TerminalView> ref Map (JSX 配線が App 側に残るため hook 化対象外)
  *
  * 振る舞いは旧 App.tsx と完全一致 (純粋リファクタ)。state 宣言順・effect・
- * useMemo deps・JSX 構造はすべて旧コードを保存している。
+ * useMemo deps・JSX 構造はすべて旧コードを保持している。
  */
 import {
   useCallback,
@@ -74,7 +74,7 @@ import { useProject, useTabs, useTeam } from '../lib/app-state-context';
 
 export interface AppShellProps {
   /**
-   * セッションパネル UI の state。App が hold し AppStateProvider の
+   * セッションパネル UI の state。App が保持し AppStateProvider の
    * `onSessionsLoaded` / `onProjectSwitched` (events-up) と整合させるため
    * props 経由で受け取る (Issue #731)。旧 App.tsx では同コンポーネント内の
    * useState だった。
@@ -234,7 +234,7 @@ export function AppShell({
 
   // ---------- 差分レビュー依頼 ----------
 
-  /** 指定ファイルの変更を Claude Code にレビュー依頼するプロンプトを生成して ターミナルに送信 */
+  /** 指定ファイルの変更を Claude Code にレビュー依頼するプロンプトを生成してターミナルに送信 */
   const reviewDiff = useCallback(
     (file: GitFileChange) => {
       const prompt =
