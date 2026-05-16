@@ -285,7 +285,7 @@ async fn write_handoff(
 pub async fn handoffs_create(
     state: tauri::State<'_, crate::state::AppState>,
     req: HandoffCreateRequest,
-) -> Result<HandoffCreateResult, String> {
+) -> crate::commands::error::CommandResult<HandoffCreateResult> {
     if req.project_root.trim().is_empty() {
         return Ok(HandoffCreateResult {
             ok: false,
@@ -295,9 +295,9 @@ pub async fn handoffs_create(
     }
     // Issue #606 (Security): renderer 由来の project_root が active project_root と一致するか検証。
     // 不一致なら handoff body (= 引き継ぎ context / 機微テキスト) の cross-project write を阻止。
-    // 既存 caller の signature を壊さないため、Authz reject は `Ok(error 入り result)` で返す
-    // (Tauri 2 の `tauri::State<'_>` async command は戻り値が `Result<T, E>` であることを要求するため
-    //  外側を `Result<HandoffCreateResult, String>` に格上げするが、reject 経路は内部 error フィールド)。
+    // 既存 caller の挙動を壊さないため、Authz reject は `Ok(error 入り result)` で返す
+    // (Issue #737: 外側は `CommandResult<HandoffCreateResult>` だが、失敗は一貫して内部
+    //  error フィールドで表現し、外側 `Err` 経路は使わない)。
     if let Err(e) =
         crate::commands::authz::assert_active_project_root(&state.project_root, &req.project_root)
             .await
@@ -362,10 +362,11 @@ pub async fn handoffs_list(
     state: tauri::State<'_, crate::state::AppState>,
     project_root: String,
     team_id: Option<String>,
-) -> Result<Vec<HandoffCheckpoint>, String> {
+) -> crate::commands::error::CommandResult<Vec<HandoffCheckpoint>> {
     // Issue #606 (Security): cross-project read を阻止するため active project_root 一致を検証。
     // reject 時は空 Vec を `Ok` で返し既存 caller (renderer) の挙動を維持する
-    // (Tauri 2 の async command + ref input は戻り値 `Result<T, E>` 必須のため外側を Result 化)。
+    // (Issue #737: 外側は `CommandResult` だが、この command は失敗を `Err` ではなく
+    //  「空 Vec を Ok」で表現する設計を維持する)。
     if crate::commands::authz::assert_active_project_root(&state.project_root, &project_root)
         .await
         .is_err()
@@ -400,9 +401,10 @@ pub async fn handoffs_read(
     project_root: String,
     team_id: Option<String>,
     handoff_id: String,
-) -> Result<Option<HandoffCheckpoint>, String> {
+) -> crate::commands::error::CommandResult<Option<HandoffCheckpoint>> {
     // Issue #606 (Security): cross-project read を阻止。reject 時は `Ok(None)` で返し
-    // 既存の「該当なし」挙動を維持する (Tauri 2 の async command 制約のため Result 外殻化)。
+    // 既存の「該当なし」挙動を維持する (Issue #737: 外側は `CommandResult` だが、失敗は
+    //  `Err` ではなく `Ok(None)` で表現する設計を維持する)。
     if crate::commands::authz::assert_active_project_root(&state.project_root, &project_root)
         .await
         .is_err()
@@ -425,10 +427,10 @@ pub async fn handoffs_update_status(
     handoff_id: String,
     status: String,
     to_agent_id: Option<String>,
-) -> Result<HandoffMutationResult, String> {
+) -> crate::commands::error::CommandResult<HandoffMutationResult> {
     // Issue #606 (Security): cross-project write を阻止。Authz reject は内部 error フィールド
-    // で表現し、外側の `Result` は Tauri 2 の async command 制約 (ref input → Result 必須) を満たす
-    // ためのもの。renderer 側は従来通り `result.ok` で分岐する。
+    // で表現し、renderer 側は従来通り `result.ok` で分岐する (Issue #737: 外側 `Err` 経路は
+    // 使わず、失敗は常に内部 error フィールドで返す)。
     if let Err(e) =
         crate::commands::authz::assert_active_project_root(&state.project_root, &project_root)
             .await

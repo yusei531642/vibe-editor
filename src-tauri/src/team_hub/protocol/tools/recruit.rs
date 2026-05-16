@@ -60,7 +60,7 @@ pub(super) fn recruit_ack_timeout() -> Duration {
     }
 }
 
-fn parse_wait_policy(args: &Value) -> Result<String, String> {
+fn parse_wait_policy(args: &Value) -> Result<String, RecruitError> {
     let raw = args
         .get("wait_policy")
         .or_else(|| args.get("waitPolicy"))
@@ -74,11 +74,16 @@ fn parse_wait_policy(args: &Value) -> Result<String, String> {
             "recruit_invalid_wait_policy",
             format!("wait_policy must be strict, standard, or proactive (got {other:?})"),
         )
-        .with_phase("args")
-        .into_err_string()),
+        .with_phase("args")),
     }
 }
 
+/// post-handshake liveness 失敗用の構造化エラーを組み立てる。
+///
+/// Issue #737: 旧実装は `agentId` / `sessionId` / `exitCode` / `exitReason` / `logPath` /
+/// `roleProfileId` を JSON 文字列の追加フィールドとして返していた。`ToolError` の flat shape
+/// (`code` / `message` / `phase` / `elapsed_ms`) に揃えるため、これらの診断情報は message 末尾に
+/// 畳み込んで保持する (= renderer / Leader が exit 原因 / session / log path を引き続き読める)。
 fn recruit_liveness_error(
     code: &str,
     message: String,
@@ -86,24 +91,27 @@ fn recruit_liveness_error(
     role_profile_id: &str,
     elapsed_ms: u64,
     diag: Option<crate::team_hub::MemberDiagnostics>,
-) -> String {
+) -> RecruitError {
     let (session_id, exit_code, exit_reason) = match diag {
         Some(d) => (d.last_exit_session_id, d.last_exit_code, d.last_exit_reason),
         None => (None, None, None),
     };
-    serde_json::to_string(&json!({
-        "code": code,
-        "message": message,
-        "phase": "post_handshake_liveness",
-        "elapsed_ms": elapsed_ms,
-        "agentId": agent_id,
-        "roleProfileId": role_profile_id,
-        "sessionId": session_id,
-        "exitCode": exit_code,
-        "exitReason": exit_reason,
-        "logPath": crate::team_hub::server_log_path_for_diagnostics(),
-    }))
-    .unwrap_or_else(|_| message)
+    let mut detail = format!(
+        " (agentId={agent_id}, roleProfileId={role_profile_id}, logPath={})",
+        crate::team_hub::server_log_path_for_diagnostics()
+    );
+    if let Some(sid) = session_id {
+        detail.push_str(&format!(", sessionId={sid}"));
+    }
+    if let Some(ec) = exit_code {
+        detail.push_str(&format!(", exitCode={ec}"));
+    }
+    if let Some(er) = exit_reason {
+        detail.push_str(&format!(", exitReason={er}"));
+    }
+    RecruitError::new(code, format!("{message}{detail}"))
+        .with_phase("post_handshake_liveness")
+        .with_elapsed_ms(elapsed_ms)
 }
 
 async fn verify_recruit_liveness(
@@ -112,7 +120,7 @@ async fn verify_recruit_liveness(
     agent_id: &str,
     role_profile_id: &str,
     started: Instant,
-) -> Result<(), String> {
+) -> Result<(), RecruitError> {
     tokio::time::sleep(RECRUIT_POST_HANDSHAKE_LIVENESS_GRACE).await;
 
     let members = hub.registry.list_team_members(team_id);
@@ -177,8 +185,13 @@ async fn verify_recruit_liveness(
 ///     既存 role_id と被る場合は「既に存在する」エラーになる。
 ///   - instructions_ja: 任意の日本語版 instructions。
 ///   - agent_label_hint: 任意。canvas カードのタイトル上書き。
-pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Result<Value, String> {
-    check_permission(&ctx.role, Permission::Recruit).map_err(|e| e.into_message("recruit"))?;
+pub async fn team_recruit(
+    hub: &TeamHub,
+    ctx: &CallContext,
+    args: &Value,
+) -> Result<Value, RecruitError> {
+    check_permission(&ctx.role, Permission::Recruit)
+        .map_err(|e| RecruitError::permission_denied("recruit", &e.role, "recruit"))?;
 
     // Issue #576: 同チーム内の同時 recruit を team_id 単位 semaphore で順番待ち化する。
     // permit 保持のまま emit → ack 受領 (or timeout) → cancel_pending_recruit までを
@@ -188,9 +201,7 @@ pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Res
     let _permit = match hub.acquire_recruit_permit(&ctx.team_id).await {
         Ok(p) => p,
         Err(msg) => {
-            return Err(RecruitError::new("recruit_permit_timeout", msg)
-                .with_phase("permit")
-                .into_err_string());
+            return Err(RecruitError::new("recruit_permit_timeout", msg).with_phase("permit"));
         }
     };
 
@@ -257,8 +268,7 @@ pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Res
         if report.has_deny() {
             return Err(
                 RecruitError::new("recruit_lint_denied", report.deny_message())
-                    .with_phase("lint")
-                    .into_err_string(),
+                    .with_phase("lint"),
             );
         }
         report
@@ -353,8 +363,11 @@ pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Res
         None
     };
     if summary_match.is_none() && dynamic_match.is_none() {
-        return Err(format!(
-            "unknown role_profile_id: {role_profile_id} (call team_create_role first, or pass role_definition to team_recruit)"
+        return Err(RecruitError::new(
+            "recruit_unknown_role",
+            format!(
+                "unknown role_profile_id: {role_profile_id} (call team_create_role first, or pass role_definition to team_recruit)"
+            ),
         ));
     }
 
@@ -384,8 +397,7 @@ pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Res
     // ハード拒否し、HR / Leader が誤って混合してしまう経路を構造的に潰す。
     if let Err(msg) = engine_policy.validate(&resolved_engine) {
         return Err(RecruitError::new("recruit_engine_policy_violation", msg)
-            .with_phase("engine_policy")
-            .into_err_string());
+            .with_phase("engine_policy"));
     }
 
     // 動的ロールの場合は agent_label_hint をロール label で補完する (renderer 側カード表示が綺麗になる)
@@ -426,7 +438,10 @@ pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Res
         .await
     {
         Ok(c) => c,
-        Err(e) => return Err(e),
+        // Issue #737: `try_register_pending_recruit` は hub 内部関数で `Result<_, String>` を
+        // 返す。generic な `tool_error` code で包んで RecruitError へ持ち上げる
+        // (`From<String>` impl と同じ扱い。message 文字列はそのまま保持される)。
+        Err(e) => return Err(e.into()),
     };
     let rx = channels.handshake;
     let ack_rx = channels.ack;
@@ -461,7 +476,10 @@ pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Res
         });
         if let Err(e) = app.emit("team:recruit-request", payload) {
             hub.cancel_pending_recruit(&new_agent_id).await;
-            return Err(format!("failed to emit recruit-request: {e}"));
+            return Err(RecruitError::new(
+                "recruit_emit_failed",
+                format!("failed to emit recruit-request: {e}"),
+            ));
         }
     } else {
         hub.cancel_pending_recruit(&new_agent_id).await;
@@ -510,8 +528,7 @@ pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Res
                 };
                 return Err(RecruitError::new("recruit_failed", message)
                     .with_phase(phase_str)
-                    .with_elapsed_ms(started.elapsed().as_millis() as u64)
-                    .into_err_string());
+                    .with_elapsed_ms(started.elapsed().as_millis() as u64));
             }
             Ok(Err(_)) => {
                 // ack_tx が drop された (renderer 側が pending を resolve せずに崩壊) — 緊急 cancel 扱い
@@ -527,8 +544,7 @@ pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Res
                     "renderer ack channel was dropped before reply",
                 )
                 .with_phase("ack")
-                .with_elapsed_ms(started.elapsed().as_millis() as u64)
-                .into_err_string());
+                .with_elapsed_ms(started.elapsed().as_millis() as u64));
             }
             Err(_) => {
                 // ack timeout。renderer が `team:recruit-request` を受け取れていない可能性。
@@ -553,8 +569,7 @@ pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Res
                     ),
                 )
                 .with_phase("ack")
-                .with_elapsed_ms(elapsed_ms)
-                .into_err_string());
+                .with_elapsed_ms(elapsed_ms));
             }
         }
     }
@@ -630,8 +645,7 @@ pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Res
             Err(
                 RecruitError::new("recruit_cancelled", "recruit cancelled before handshake")
                     .with_phase("handshake")
-                    .with_elapsed_ms(started.elapsed().as_millis() as u64)
-                    .into_err_string(),
+                    .with_elapsed_ms(started.elapsed().as_millis() as u64),
             )
         }
         Err(_) => {
@@ -653,8 +667,7 @@ pub async fn team_recruit(hub: &TeamHub, ctx: &CallContext, args: &Value) -> Res
                 ),
             )
             .with_phase("handshake")
-            .with_elapsed_ms(started.elapsed().as_millis() as u64)
-            .into_err_string())
+            .with_elapsed_ms(started.elapsed().as_millis() as u64))
         }
     }
 }
@@ -705,8 +718,8 @@ mod tests {
     fn parse_wait_policy_rejects_unknown_value() {
         let err = parse_wait_policy(&json!({ "wait_policy": "autonomous" })).unwrap_err();
 
-        assert!(err.contains("recruit_invalid_wait_policy"));
-        assert!(err.contains("strict, standard, or proactive"));
+        assert_eq!(err.code, "recruit_invalid_wait_policy");
+        assert!(err.message.contains("strict, standard, or proactive"));
     }
 
     /// Issue #587: `VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS=0` は default にフォールバック。

@@ -43,7 +43,7 @@ fn validate_and_normalize_paths(
     ctx: &CallContext,
     raw_paths: &[String],
     code_prefix: &str,
-) -> Result<Vec<String>, String> {
+) -> Result<Vec<String>, ToolError> {
     let mut out = Vec::with_capacity(raw_paths.len());
     for raw in raw_paths {
         match normalize_path(raw) {
@@ -61,22 +61,22 @@ fn validate_and_normalize_paths(
                 return Err(ToolError::new(
                     format!("{code_prefix}_invalid_path"),
                     format!("invalid path '{}': {e}", clamp_for_log(raw)),
-                )
-                .into_err_string());
+                ));
             }
         }
     }
     Ok(out)
 }
 
-fn parse_paths_arg(args: &Value, code_prefix: &str) -> Result<Vec<String>, String> {
+fn parse_paths_arg(args: &Value, code_prefix: &str) -> Result<Vec<String>, ToolError> {
     let arr = args.get("paths").and_then(|v| v.as_array()).ok_or_else(|| {
         ToolError::invalid_args(code_prefix, "`paths` must be a non-empty string array")
-            .into_err_string()
     })?;
     if arr.is_empty() {
-        return Err(ToolError::invalid_args(code_prefix, "`paths` must be a non-empty string array")
-            .into_err_string());
+        return Err(ToolError::invalid_args(
+            code_prefix,
+            "`paths` must be a non-empty string array",
+        ));
     }
     if arr.len() > MAX_LOCK_PATHS_PER_CALL {
         return Err(ToolError::invalid_args(
@@ -86,14 +86,12 @@ fn parse_paths_arg(args: &Value, code_prefix: &str) -> Result<Vec<String>, Strin
                 arr.len(),
                 MAX_LOCK_PATHS_PER_CALL
             ),
-        )
-        .into_err_string());
+        ));
     }
     let mut out = Vec::with_capacity(arr.len());
     for v in arr {
         let s = v.as_str().ok_or_else(|| {
             ToolError::invalid_args(code_prefix, "`paths` must be an array of strings")
-                .into_err_string()
         })?;
         if s.len() > MAX_LOCK_PATH_LEN {
             return Err(ToolError::invalid_args(
@@ -103,8 +101,7 @@ fn parse_paths_arg(args: &Value, code_prefix: &str) -> Result<Vec<String>, Strin
                     s.len(),
                     MAX_LOCK_PATH_LEN
                 ),
-            )
-            .into_err_string());
+            ));
         }
         out.push(s.to_string());
     }
@@ -120,7 +117,7 @@ pub async fn team_lock_files(
     hub: &TeamHub,
     ctx: &CallContext,
     args: &Value,
-) -> Result<Value, String> {
+) -> Result<Value, ToolError> {
     let raw_paths = parse_paths_arg(args, "lock_files")?;
     let paths = validate_and_normalize_paths(ctx, &raw_paths, "lock_files")?;
     let result = match hub
@@ -150,8 +147,7 @@ pub async fn team_lock_files(
                     "team lock cap exceeded: {} existing + {} requested > {} (limit per team)",
                     cap_exceeded.current, cap_exceeded.requested, cap_exceeded.cap,
                 ),
-            )
-            .into_err_string());
+            ));
         }
     };
     Ok(json!({
@@ -170,7 +166,7 @@ pub async fn team_unlock_files(
     hub: &TeamHub,
     ctx: &CallContext,
     args: &Value,
-) -> Result<Value, String> {
+) -> Result<Value, ToolError> {
     let raw_paths = parse_paths_arg(args, "unlock_files")?;
     let paths = validate_and_normalize_paths(ctx, &raw_paths, "unlock_files")?;
     let result = hub
@@ -190,22 +186,22 @@ mod tests {
     fn parse_paths_rejects_missing_paths() {
         let args = json!({});
         let err = parse_paths_arg(&args, "lock_files").unwrap_err();
-        assert!(err.contains("lock_files_invalid_args"));
-        assert!(err.contains("non-empty string array"));
+        assert_eq!(err.code, "lock_files_invalid_args");
+        assert!(err.message.contains("non-empty string array"));
     }
 
     #[test]
     fn parse_paths_rejects_empty_array() {
         let args = json!({ "paths": [] });
         let err = parse_paths_arg(&args, "lock_files").unwrap_err();
-        assert!(err.contains("non-empty string array"));
+        assert!(err.message.contains("non-empty string array"));
     }
 
     #[test]
     fn parse_paths_rejects_non_string_element() {
         let args = json!({ "paths": ["ok.rs", 42, "ok2.rs"] });
         let err = parse_paths_arg(&args, "lock_files").unwrap_err();
-        assert!(err.contains("array of strings"));
+        assert!(err.message.contains("array of strings"));
     }
 
     #[test]
@@ -222,7 +218,7 @@ mod tests {
             .collect();
         let args = json!({ "paths": huge });
         let err = parse_paths_arg(&args, "lock_files").unwrap_err();
-        assert!(err.contains("too many paths"));
+        assert!(err.message.contains("too many paths"));
     }
 
     #[test]
@@ -230,7 +226,7 @@ mod tests {
         let big = "a".repeat(MAX_LOCK_PATH_LEN + 1);
         let args = json!({ "paths": [big] });
         let err = parse_paths_arg(&args, "lock_files").unwrap_err();
-        assert!(err.contains("path too long"));
+        assert!(err.message.contains("path too long"));
     }
 
     /// Issue #599 (Tier A-1): `team_lock_files` IPC は traversal / 絶対 / 制御文字 / 過大長を
@@ -268,9 +264,9 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert!(
-                err.contains("lock_files_invalid_path"),
-                "expected invalid_path code, got: {err}"
+            assert_eq!(
+                err.code, "lock_files_invalid_path",
+                "expected invalid_path code, got: {err:?}"
             );
             // even the legitimate "src/foo.rs" must NOT be locked when the request is rejected.
             assert_eq!(team_locks_count(&hub, "team-599-pd").await, 0);
@@ -289,9 +285,9 @@ mod tests {
                 let err = team_lock_files(&hub, &ctx, &json!({ "paths": [evil] }))
                     .await
                     .unwrap_err();
-                assert!(
-                    err.contains("lock_files_invalid_path"),
-                    "[{evil}] expected invalid_path, got: {err}"
+                assert_eq!(
+                    err.code, "lock_files_invalid_path",
+                    "[{evil}] expected invalid_path, got: {err:?}"
                 );
             }
             assert_eq!(team_locks_count(&hub, "team-599-abs").await, 0);
@@ -309,7 +305,7 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert!(err.contains("lock_files_invalid_path"));
+            assert_eq!(err.code, "lock_files_invalid_path");
             assert_eq!(team_locks_count(&hub, "team-599-ctrl").await, 0);
         }
 
@@ -339,9 +335,9 @@ mod tests {
             )
             .await
             .unwrap_err();
-            assert!(
-                err.contains("lock_files_too_many_locks"),
-                "expected too_many_locks, got: {err}"
+            assert_eq!(
+                err.code, "lock_files_too_many_locks",
+                "expected too_many_locks, got: {err:?}"
             );
             // map は 128 のまま (atomic に reject されているので追加されない)。
             assert_eq!(team_locks_count(&hub, "team-599-cap").await, MAX_LOCKS_PER_TEAM);
@@ -354,9 +350,9 @@ mod tests {
             let err = team_unlock_files(&hub, &ctx, &json!({ "paths": ["../../etc/passwd"] }))
                 .await
                 .unwrap_err();
-            assert!(
-                err.contains("unlock_files_invalid_path"),
-                "expected unlock_files_invalid_path, got: {err}"
+            assert_eq!(
+                err.code, "unlock_files_invalid_path",
+                "expected unlock_files_invalid_path, got: {err:?}"
             );
         }
     }

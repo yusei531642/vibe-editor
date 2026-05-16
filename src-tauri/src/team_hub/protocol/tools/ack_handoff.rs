@@ -10,11 +10,13 @@ pub async fn team_ack_handoff(
     hub: &TeamHub,
     ctx: &CallContext,
     args: &Value,
-) -> Result<Value, String> {
+) -> Result<Value, ToolError> {
     if let Err(e) = check_permission(&ctx.role, Permission::Recruit) {
-        return Err(
-            ToolError::permission_denied("ack_handoff", &e.role, "ack handoff").into_err_string(),
-        );
+        return Err(ToolError::permission_denied(
+            "ack_handoff",
+            &e.role,
+            "ack handoff",
+        ));
     }
 
     let handoff_id = args
@@ -23,7 +25,7 @@ pub async fn team_ack_handoff(
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|v| !v.is_empty())
-        .ok_or_else(|| "handoff_id is required".to_string())?;
+        .ok_or_else(|| ToolError::invalid_args("ack_handoff", "handoff_id is required"))?;
     let note = args
         .get("note")
         .and_then(|v| v.as_str())

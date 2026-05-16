@@ -14,6 +14,8 @@ use chrono::Utc;
 use serde_json::{json, Value};
 use std::time::{Duration, Instant};
 
+use super::error::ToolError;
+
 /// Issue #634: `current_status` の最大長 (UTF-8 バイト数)。超過分は `… (truncated)` を末尾に付けて切る。
 /// renderer 側 chat row はそもそも 1 行の現況メモなので 256 byte で十分。
 const MAX_STATUS_LEN: usize = 256;
@@ -98,11 +100,14 @@ pub async fn team_status(
     hub: &TeamHub,
     ctx: &CallContext,
     args: &Value,
-) -> Result<Value, String> {
+) -> Result<Value, ToolError> {
     let status_raw = args.get("status").and_then(|v| v.as_str()).unwrap_or("");
     let status = status_raw.trim();
     if status.is_empty() {
-        return Err("status is required and must be a non-empty string".to_string());
+        return Err(ToolError::invalid_args(
+            "status",
+            "status is required and must be a non-empty string",
+        ));
     }
     // Issue #634: control char strip → length cap (byte 単位)。
     // truncate は UTF-8 文字境界で行わないと panic するため、char_indices で安全に切る。

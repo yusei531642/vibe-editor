@@ -11,7 +11,6 @@
  * thunk wrapper として動かす。Issue #510 / #514 の diagnostics + tasks IPC が入ったら、
  * ここで invoke を併用して実値を流し込めるようにする。
  */
-import { invoke } from '@tauri-apps/api/core';
 import type { Node } from '@xyflow/react';
 import type { CardData } from '../../stores/canvas';
 import {
@@ -24,6 +23,7 @@ import type {
   RetryInjectResult,
   TeamDiagnosticsMemberRow
 } from '../../../../types/shared';
+import { invokeCommand } from './command-error';
 
 /**
  * Issue #510: `team_diagnostics_read` IPC の戻り値。Rust 側 `team_diagnostics` 関数の
@@ -63,11 +63,12 @@ export const team = {
    *
    * - 成功時: `{ ok: true, deliveredAt }` を返し、Hub は `team:handoff` event を emit する。
    * - 再失敗時: `{ ok: false, reasonCode, error, failedAt }` を返し、Hub は `team:inject_failed` event を再 emit する。
-   * - 不正引数 (unknown team / message が evict 済み / agentId が recipient でない) は `Err(string)` で reject される。
-   *   reject されたエラー文字列は JSON `{"code":"retry_*","message":"..."}` 形式。caller は `JSON.parse()` で分岐できる。
+   * - 不正引数 (unknown team / message が evict 済み / agentId が recipient でない) は reject される。
+   *   Issue #737: reject は共通 `CommandError` に正規化され、`.code` に `retry_*`、`.message`
+   *   に human-readable な説明が入る (旧来は素の JSON 文字列で reject していた)。
    */
   retryInject: (args: RetryInjectArgs): Promise<RetryInjectResult> =>
-    invoke('team_send_retry_inject', { args }),
+    invokeCommand('team_send_retry_inject', { args }),
   /**
    * Issue #510: TeamHub の per-member 診断値を Leader 視点で取得する。
    * 内部で leader 役を impersonate して MCP `team_diagnostics` と同一データを返す。
@@ -82,5 +83,5 @@ export const team = {
    * ここでも他 wrapper と揃えて camelCase で送る。
    */
   diagnosticsRead: (teamId: string): Promise<TeamDiagnosticsResponse> =>
-    invoke('team_diagnostics_read', { teamId })
+    invokeCommand('team_diagnostics_read', { teamId })
 };

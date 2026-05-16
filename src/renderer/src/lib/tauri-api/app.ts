@@ -9,6 +9,7 @@ import type {
   ThemeName,
   UpdaterShouldWarnResult
 } from '../../../../types/shared';
+import { invokeCommand } from './command-error';
 
 /** Tauri 側 TeamHub に同期する role profile の要約形 */
 export interface RoleProfileSummary {
@@ -110,6 +111,9 @@ export const app = {
    * `<projectRoot>/.claude/skills/vibe-team/SKILL.md` を書き出す。
    * setupTeamMcp でも best-effort で実行されるが、Onboarding / 設定 UI から手動で
    * 強制再配置 (forceOverwrite=true) したい場合のために露出する。
+   *
+   * Issue #737: Rust 側 `app_install_vibe_team_skill` は `CommandResult<T>` を返すため、
+   * reject を共通 `CommandError` に正規化する `invokeCommand` 経由で呼ぶ。
    */
   installVibeTeamSkill: (
     projectRoot: string,
@@ -121,7 +125,10 @@ export const app = {
     overwritten?: boolean;
     error?: string;
   }> =>
-    invoke('app_install_vibe_team_skill', { projectRoot, forceOverwrite: !!forceOverwrite }),
+    invokeCommand('app_install_vibe_team_skill', {
+      projectRoot,
+      forceOverwrite: !!forceOverwrite
+    }),
   getUserInfo: (): Promise<AppUserInfo> => invoke('app_get_user_info'),
   openExternal: (url: string): Promise<OpenExternalResult> => invoke('app_open_external', { url }),
   /** Issue #251: OS のファイルマネージャで親フォルダを開き該当ファイルをハイライト */

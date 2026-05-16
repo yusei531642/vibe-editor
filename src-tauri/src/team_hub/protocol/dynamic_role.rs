@@ -44,45 +44,58 @@ pub(super) async fn validate_and_register_dynamic_role(
     description: &str,
     instructions: &str,
     instructions_ja: Option<&str>,
-) -> Result<DynamicRoleOutcome, String> {
+) -> Result<DynamicRoleOutcome, RecruitError> {
     // 権限チェック (Leader だけが動的ロールを作れる)
     check_permission(&ctx.role, Permission::CreateRoleProfile)
-        .map_err(|e| e.into_message("create role profiles"))?;
+        .map_err(|e| RecruitError::permission_denied("recruit", &e.role, "create role profiles"))?;
     // バリデーション: id
     let role_id = role_id.trim();
     if role_id.is_empty() {
-        return Err("role_id is required".into());
+        return Err(RecruitError::invalid_args("recruit", "role_id is required"));
     }
     if role_id.len() > 80 {
-        return Err("role_id is too long (max 80)".into());
+        return Err(RecruitError::invalid_args(
+            "recruit",
+            "role_id is too long (max 80)",
+        ));
     }
     // ASCII alnum + _ - のみ許可 (`vc-` などのプレフィックスとの混同を避ける)
     if !role_id
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     {
-        return Err("role_id must contain only ASCII letters, digits, '_' or '-'".into());
+        return Err(RecruitError::invalid_args(
+            "recruit",
+            "role_id must contain only ASCII letters, digits, '_' or '-'",
+        ));
     }
     // builtin との衝突 (summary に id が居れば builtin or override)
     let summary = hub.get_role_profile_summary().await;
     if summary.iter().any(|p| p.id == role_id) {
-        return Err(format!(
-            "role_id '{role_id}' is reserved by a built-in / existing role profile"
+        return Err(RecruitError::new(
+            "recruit_role_id_reserved",
+            format!("role_id '{role_id}' is reserved by a built-in / existing role profile"),
         ));
     }
     // 長さ上限
     if label.len() > MAX_DYNAMIC_LABEL_LEN {
-        return Err(format!(
-            "label too long: {} bytes (limit {})",
-            label.len(),
-            MAX_DYNAMIC_LABEL_LEN
+        return Err(RecruitError::new(
+            "recruit_role_label_too_long",
+            format!(
+                "label too long: {} bytes (limit {})",
+                label.len(),
+                MAX_DYNAMIC_LABEL_LEN
+            ),
         ));
     }
     if description.len() > MAX_DYNAMIC_DESCRIPTION_LEN {
-        return Err(format!(
-            "description too long: {} bytes (limit {})",
-            description.len(),
-            MAX_DYNAMIC_DESCRIPTION_LEN
+        return Err(RecruitError::new(
+            "recruit_role_description_too_long",
+            format!(
+                "description too long: {} bytes (limit {})",
+                description.len(),
+                MAX_DYNAMIC_DESCRIPTION_LEN
+            ),
         ));
     }
     // Issue #512: instructions は recruit の prompt 本体になる重要 payload。`team_send` /
@@ -100,8 +113,7 @@ pub(super) async fn validate_and_register_dynamic_role(
                 MAX_DYNAMIC_INSTRUCTIONS_LEN
             ),
         )
-        .with_phase("validate")
-        .into_err_string());
+        .with_phase("validate"));
     }
     if let Some(ja) = instructions_ja {
         if ja.len() > MAX_DYNAMIC_INSTRUCTIONS_LEN {
@@ -115,8 +127,7 @@ pub(super) async fn validate_and_register_dynamic_role(
                     MAX_DYNAMIC_INSTRUCTIONS_LEN
                 ),
             )
-            .with_phase("validate")
-            .into_err_string());
+            .with_phase("validate"));
         }
     }
     // Issue #508: 必須テンプレ / 曖昧名 / Worktree Isolation Rule の validation。
@@ -127,8 +138,7 @@ pub(super) async fn validate_and_register_dynamic_role(
             "recruit_role_too_vague",
             template_report.deny_message(),
         )
-        .with_phase("template_validation")
-        .into_err_string());
+        .with_phase("template_validation"));
     }
     let template_warnings: Vec<TemplateFinding> = template_report
         .findings
@@ -141,10 +151,13 @@ pub(super) async fn validate_and_register_dynamic_role(
     if existing.len() >= MAX_DYNAMIC_ROLES_PER_TEAM
         && !existing.iter().any(|r| r.id == role_id)
     {
-        return Err(format!(
-            "too many dynamic roles in this team ({}/{} max)",
-            existing.len(),
-            MAX_DYNAMIC_ROLES_PER_TEAM
+        return Err(RecruitError::new(
+            "recruit_too_many_dynamic_roles",
+            format!(
+                "too many dynamic roles in this team ({}/{} max)",
+                existing.len(),
+                MAX_DYNAMIC_ROLES_PER_TEAM
+            ),
         ));
     }
     let role = DynamicRole {

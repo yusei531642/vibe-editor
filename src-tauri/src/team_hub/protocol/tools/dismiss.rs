@@ -14,10 +14,9 @@ pub async fn team_dismiss(
     hub: &TeamHub,
     ctx: &CallContext,
     args: &Value,
-) -> Result<Value, String> {
+) -> Result<Value, DismissError> {
     if let Err(e) = check_permission(&ctx.role, Permission::Dismiss) {
-        return Err(DismissError::permission_denied("dismiss", &e.role, "dismiss")
-            .into_err_string());
+        return Err(DismissError::permission_denied("dismiss", &e.role, "dismiss"));
     }
     let agent_id = args
         .get("agent_id")
@@ -25,7 +24,7 @@ pub async fn team_dismiss(
         .unwrap_or("")
         .to_string();
     if agent_id.is_empty() {
-        return Err(DismissError::invalid_args("dismiss", "agent_id is required").into_err_string());
+        return Err(DismissError::invalid_args("dismiss", "agent_id is required"));
     }
     if agent_id == ctx.agent_id {
         return Err(DismissError {
@@ -33,8 +32,7 @@ pub async fn team_dismiss(
             message: "cannot dismiss yourself".into(),
             phase: None,
             elapsed_ms: None,
-        }
-        .into_err_string());
+        });
     }
     // チーム所属チェック
     let members = hub.registry.list_team_members(&ctx.team_id);
@@ -44,8 +42,7 @@ pub async fn team_dismiss(
             message: format!("agent '{agent_id}' is not in this team"),
             phase: None,
             elapsed_ms: None,
-        }
-        .into_err_string());
+        });
     }
     // Issue #342 Phase 3 (3.6): dismiss 直前に被 dismiss 側の last_seen_at / 既存 recruited_at を
     // スナップしておき、戻り値に `lastSeenAt` を載せる (= 最後の生存時刻)。

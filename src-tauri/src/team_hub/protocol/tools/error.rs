@@ -72,13 +72,29 @@ impl ToolError {
         self
     }
 
-    /// JSON 文字列化して `Err(String)` に詰めるヘルパ。
-    /// to_string() に失敗したら message だけを返す (生 String fallback)。
-    pub fn into_err_string(self) -> String {
-        match serde_json::to_string(&self) {
-            Ok(s) => s,
-            Err(_) => self.message,
-        }
+    /// Issue #737: dispatcher が `{"error": ...}` に詰めるための JSON 値化。
+    /// flat object へのシリアライズに失敗した場合は message 文字列値へ degrade する
+    /// (旧 `into_err_string` の生 String fallback と等価の安全策)。
+    pub fn to_json_value(&self) -> serde_json::Value {
+        serde_json::to_value(self)
+            .unwrap_or_else(|_| serde_json::Value::String(self.message.clone()))
+    }
+}
+
+/// Issue #737: MCP tool を `Result<Value, ToolError>` に統一したことで、`?` で
+/// 伝播してくる `String` エラー (例: `record_handoff_lifecycle` / `acquire_recruit_permit`
+/// 等、tool ではない hub 内部関数が返す `Result<_, String>`) を `ToolError` に持ち上げる。
+/// tool 固有の code 名前空間を持たない内部エラーなので、generic な `tool_error` code で包む。
+/// message 文字列はそのまま保持するため、呼び出し側が受け取る情報量は従来と変わらない。
+impl From<String> for ToolError {
+    fn from(message: String) -> Self {
+        Self::new("tool_error", message)
+    }
+}
+
+impl From<&str> for ToolError {
+    fn from(message: &str) -> Self {
+        Self::new("tool_error", message.to_string())
     }
 }
 
@@ -105,13 +121,28 @@ mod tests {
     #[test]
     fn flat_json_payload_is_preserved() {
         let err = ToolError::new("dismiss_permission_denied", "permission denied: role 'planner' cannot dismiss");
-        let json = err.into_err_string();
+        // Issue #737: dispatcher は `to_json_value()` で flat object を取り出す。
+        let value = err.to_json_value();
         // 旧 RecruitError / ToolError と同じ flat shape (`{"code":"...","message":"..."}`)。
-        assert!(json.contains("\"code\":\"dismiss_permission_denied\""));
-        assert!(json.contains("\"message\":\"permission denied: role 'planner' cannot dismiss\""));
-        // optional フィールドは skip_serializing_if で省略
-        assert!(!json.contains("\"phase\""));
-        assert!(!json.contains("\"elapsed_ms\""));
+        assert_eq!(value["code"], "dismiss_permission_denied");
+        assert_eq!(
+            value["message"],
+            "permission denied: role 'planner' cannot dismiss"
+        );
+        // optional フィールドは skip_serializing_if で省略 (object に key 自体が無い)。
+        let obj = value.as_object().expect("flat object");
+        assert!(!obj.contains_key("phase"));
+        assert!(!obj.contains_key("elapsed_ms"));
+    }
+
+    /// Issue #737: tool ではない hub 内部関数が返す `String` エラーは generic な
+    /// `tool_error` code で包まれる。message 文字列はそのまま保持される。
+    #[test]
+    fn from_string_wraps_with_generic_code() {
+        let err: ToolError = "project_root is not registered for this team".to_string().into();
+        assert_eq!(err.code, "tool_error");
+        assert_eq!(err.message, "project_root is not registered for this team");
+        assert!(err.phase.is_none());
     }
 
     #[test]

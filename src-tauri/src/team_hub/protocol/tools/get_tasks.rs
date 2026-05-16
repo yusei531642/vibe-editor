@@ -6,7 +6,9 @@
 use crate::team_hub::{CallContext, TeamHub};
 use serde_json::{json, Value};
 
-pub async fn team_get_tasks(hub: &TeamHub, ctx: &CallContext) -> Result<Value, String> {
+use super::error::ToolError;
+
+pub async fn team_get_tasks(hub: &TeamHub, ctx: &CallContext) -> Result<Value, ToolError> {
     let state = hub.state.lock().await;
     let team = match state.teams.get(&ctx.team_id) {
         Some(t) => t,
