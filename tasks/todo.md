@@ -1,5 +1,36 @@
 # vibe-editor Tauri ハイブリッド移行 + 無限キャンバス UI 革新 TODO
 
+## #736 team_hub/state.rs god-file 分割 + team_send 段階関数化 (完了)
+
+方針: 振る舞いを一切変えない純粋なリファクタ。lock の取得/解放タイミング・
+メッセージ順序・エラー挙動を保つ。
+
+- [x] state.rs (2485 行) を `team_hub/state/` 配下のサブモジュールに分割
+  - [x] `state/mod.rs` — モジュール宣言 + re-export ハブ (39 行)
+  - [x] `state/hub_state.rs` — HubState struct + 型群 + コンストラクタ + start/info/set_app_handle (725 行)
+  - [x] `state/recruit.rs` — recruit / pending / ack / semaphore 型 + impl + tests (1252 行)
+  - [x] `state/member_diagnostics.rs` — MemberDiagnostics struct + diagnostic 計算 impl (125 行)
+  - [x] `state/file_locks_glue.rs` — file_locks / dynamic role / engine policy 連携 impl (163 行)
+  - [x] `state/persistence.rs` — register_team / clear_team / persist 関連 impl (276 行)
+- [x] team_send (534 行 god-fn) を段階関数化 (`send.rs` 内に private fn 群を切り出し)
+  - [x] parse_send_args ステージ
+  - [x] spool_oversized_message ステージ
+  - [x] resolve_send_targets ステージ
+  - [x] insert_team_message ステージ (MessageInsertionGuard 型でロック再取得を固定)
+  - [x] dispatch_injects ステージ
+  - [x] build_send_response ステージ
+- [x] cargo check --lib / cargo test --lib team_hub が通ること (237 passed, 1 pre-existing fail)
+- [ ] 1 commit + push
+
+検証結果:
+- `cargo check --lib`: 成功 (3 warning = baseline と同一、新規 warning なし)
+- `cargo test --lib team_hub`: 237 passed / 1 failed
+  (failed = pre-existing `status::tests::strips_control_characters_from_status_text`、本変更と無関係)
+- 振る舞い不変: lock 取得/解放タイミング・メッセージ順序・エラー挙動を保持
+  (コードは逐語移動、段階関数は同順序で呼び出し、MessageInsertionGuard は新規 lock を導入しない)
+
+
+
 ## ステータスマスコット スプライト追加 (完了)
 
 計画: `tasks/mascot-sprite-plan.md`
