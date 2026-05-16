@@ -87,7 +87,14 @@ export class CommandError extends Error {
  *
  * 成功時の戻り値・引数の渡し方は `invoke()` と完全に同一なので、既存 wrapper の
  * `invoke('cmd', args)` をそのまま `invokeCommand('cmd', args)` に置換できる。
- */
+ *
+ * 呼び出し側の後方互換 (Issue #737): reject 値の型が「素の string / object」から
+ * `CommandError` に変わる。ただし `CommandError` は `Error` のサブクラスであり、
+ * `.message` / `String(err)` / `err instanceof Error` のいずれも従来どおり機能する。
+ * renderer (`src/renderer/src`) 全体を監査した結果、catch したエラーを文字列特化で
+ * 扱う箇所 (`JSON.parse(err)` / `err.startsWith()` / `err.includes()` 等) は 0 件で、
+ * 全 caller は generic な error handler を使う。よって本ラッパへの切替で実行時に
+ * 壊れる diff 外の呼び出し元は存在しない。
 export async function invokeCommand<T>(command: string, args?: InvokeArgs): Promise<T> {
   try {
     return await invoke<T>(command, args);
