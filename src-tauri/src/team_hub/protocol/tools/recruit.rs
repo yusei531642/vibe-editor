@@ -96,22 +96,33 @@ fn recruit_liveness_error(
         Some(d) => (d.last_exit_session_id, d.last_exit_code, d.last_exit_reason),
         None => (None, None, None),
     };
-    let mut detail = format!(
-        " (agentId={agent_id}, roleProfileId={role_profile_id}, logPath={})",
-        crate::team_hub::server_log_path_for_diagnostics()
-    );
-    if let Some(sid) = session_id {
+    let log_path = crate::team_hub::server_log_path_for_diagnostics();
+    let mut detail =
+        format!(" (agentId={agent_id}, roleProfileId={role_profile_id}, logPath={log_path})");
+    // Issue #737: 構造化フィールドを wire のトップレベルへ復元する details object。
+    // message 末尾の人間可読 detail と併存させ、後方互換と可読性を両立する
+    // (done_evidence_missing の missingCriteria と同じ with_details 経路)。
+    let mut details = serde_json::json!({
+        "agentId": agent_id,
+        "roleProfileId": role_profile_id,
+        "logPath": log_path,
+    });
+    if let Some(sid) = &session_id {
         detail.push_str(&format!(", sessionId={sid}"));
+        details["sessionId"] = serde_json::Value::String(sid.clone());
     }
     if let Some(ec) = exit_code {
         detail.push_str(&format!(", exitCode={ec}"));
+        details["exitCode"] = serde_json::Value::from(ec);
     }
-    if let Some(er) = exit_reason {
+    if let Some(er) = &exit_reason {
         detail.push_str(&format!(", exitReason={er}"));
+        details["exitReason"] = serde_json::Value::String(er.clone());
     }
     RecruitError::new(code, format!("{message}{detail}"))
         .with_phase("post_handshake_liveness")
         .with_elapsed_ms(elapsed_ms)
+        .with_details(details)
 }
 
 async fn verify_recruit_liveness(
