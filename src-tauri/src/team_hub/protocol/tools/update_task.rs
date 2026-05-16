@@ -7,6 +7,7 @@ use crate::team_hub::{CallContext, TeamHub};
 use chrono::Utc;
 use serde_json::{json, Value};
 
+use super::super::consts::{MAX_NEXT_ACTIONS, MAX_WORKER_REPORTS};
 use super::error::ToolError;
 
 fn optional_string(args: &Value, snake: &str, camel: &str) -> Option<String> {
@@ -272,7 +273,7 @@ pub async fn team_update_task(
         }
         if let Some(action) = &next_action {
             team.next_actions.push_back(action.clone());
-            while team.next_actions.len() > 20 {
+            while team.next_actions.len() > MAX_NEXT_ACTIONS {
                 let _ = team.next_actions.pop_front();
             }
         }
@@ -301,7 +302,7 @@ pub async fn team_update_task(
                     payload: report_payload.clone(),
                     created_at: now_iso.clone(),
                 });
-            while team.worker_reports.len() > 50 {
+            while team.worker_reports.len() > MAX_WORKER_REPORTS {
                 let _ = team.worker_reports.pop_front();
             }
         }

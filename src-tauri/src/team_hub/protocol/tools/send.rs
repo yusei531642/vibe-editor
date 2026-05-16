@@ -23,7 +23,9 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use tauri::Emitter;
 
-use super::super::consts::{MAX_MESSAGES_PER_TEAM, MAX_MESSAGE_LEN, SOFT_PAYLOAD_LIMIT};
+use super::super::consts::{
+    MAX_MESSAGES_PER_TEAM, MAX_MESSAGE_LEN, MAX_WORKER_REPORTS, SOFT_PAYLOAD_LIMIT,
+};
 use super::super::helpers::resolve_targets;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -591,7 +593,7 @@ async fn insert_team_message(
                 payload: None,
                 created_at: timestamp.clone(),
             });
-        while team.worker_reports.len() > 50 {
+        while team.worker_reports.len() > MAX_WORKER_REPORTS {
             let _ = team.worker_reports.pop_front();
         }
     }

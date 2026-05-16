@@ -12,14 +12,13 @@
 use crate::commands::team_state::{TeamReportFinding, TeamReportSnapshot};
 use crate::team_hub::{inject, CallContext, TeamHub};
 
+use super::super::consts::MAX_TEAM_REPORTS;
 use super::error::ToolError;
 use chrono::Utc;
 use serde_json::{json, Value};
 
 const ALLOWED_STATUSES: &[&str] = &["done", "blocked", "needs_input", "failed"];
 const ALLOWED_SEVERITIES: &[&str] = &["high", "medium", "low"];
-/// `team_reports` backlog の上限。`worker_reports` と同じ運用閾値で揃える。
-const MAX_TEAM_REPORTS: usize = 50;
 /// 1 レポートあたりの findings 上限 (Hub 側 OOM 防止)。
 const MAX_FINDINGS_PER_REPORT: usize = 200;
 /// 1 レポートあたりの changed_files / artifact_refs / next_actions 上限。
