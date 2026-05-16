@@ -81,8 +81,12 @@ jobs:
       - name: npm audit signatures
         run: npm audit signatures
 
+      # cargo-audit を毎回 source ビルドすると 1-2 分かかり、Swatinem/rust-cache は
+      # ~/.cargo/bin を共有しないため再利用も効きにくい。pre-built バイナリを取得する。
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        uses: taiki-e/install-action@184183c2401be73c3bf42c2e61268aa5855379c1 # v2.78.1
+        with:
+          tool: cargo-audit
 
       - name: Cargo audit
         working-directory: src-tauri
