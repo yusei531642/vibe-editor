@@ -1,17 +1,13 @@
 import {
-  memo,
   useEffect,
   useId,
   useMemo,
-  useRef,
   useState,
-  useCallback,
-  type KeyboardEvent
+  useCallback
 } from 'react';
 import {
   ChevronDown,
   ChevronRight,
-  File as DefaultFileIcon,
   FilePlus,
   FolderPlus,
   RefreshCw,
@@ -20,7 +16,6 @@ import {
 import type { FileNode } from '../../../types/shared';
 import type { RecentFileEntry } from '../lib/hooks/use-file-tabs';
 import { useT } from '../lib/i18n';
-import { fileIcon, folderIcon } from '../lib/file-icon-color';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu';
 import { useToast } from '../lib/toast-context';
 import { api } from '../lib/tauri-api';
@@ -28,63 +23,18 @@ import {
   KEY_SEP,
   dirKey,
   splitKey,
-  useFileTreeState,
-  type DirState
+  useFileTreeState
 } from '../lib/filetree-state-context';
-
-// Issue #592: VS Code 互換 cut / copy clipboard。サイドバーと FileTreeCard で共有するため
-// module-level に置く。subscribe で UI を再描画する軽量 pub-sub。
-type FileTreeClipboard = {
-  rootPath: string;
-  relPath: string;
-  isDir: boolean;
-  /** 'cut' は paste 後に元を消す (move)、'copy' は元を残す (copy)。 */
-  mode: 'cut' | 'copy';
-};
-let clipboardState: FileTreeClipboard | null = null;
-const clipboardListeners = new Set<() => void>();
-const setClipboard = (next: FileTreeClipboard | null): void => {
-  clipboardState = next;
-  for (const fn of clipboardListeners) fn();
-};
-const getClipboard = (): FileTreeClipboard | null => clipboardState;
-
-/** Issue #592: 親ディレクトリの entries にぶつからない basename を作る。
- *  `foo.txt` → 衝突したら `foo.copy.txt` → `foo.copy 2.txt` → `foo.copy 3.txt` …
- *  拡張子無しなら末尾に `.copy` を付けるだけ。先頭ドットファイル (.gitignore 等) は
- *  拡張子と見なさない。 */
-function uniqueName(base: string, taken: ReadonlySet<string>): string {
-  if (!taken.has(base)) return base;
-  const dotIdx = base.lastIndexOf('.');
-  const hasExt = dotIdx > 0;
-  const stem = hasExt ? base.slice(0, dotIdx) : base;
-  const ext = hasExt ? base.slice(dotIdx) : '';
-  for (let n = 1; n < 1000; n += 1) {
-    const suffix = n === 1 ? '.copy' : `.copy ${n}`;
-    const candidate = `${stem}${suffix}${ext}`;
-    if (!taken.has(candidate)) return candidate;
-  }
-  // 1000 回衝突は事実上ありえないが、無限ループを避けるため timestamp を足す
-  return `${stem}.copy.${Date.now()}${ext}`;
-}
-
-/** parent 相対パスを basename と join する (POSIX 区切り)。 */
-function joinRel(parent: string, name: string): string {
-  if (!parent) return name;
-  return `${parent.replace(/\/$/, '')}/${name}`;
-}
-
-/** 相対パスから親ディレクトリ部分 (POSIX) を取り出す。`a/b/c` → `a/b`、`a` → ''。 */
-function parentOfRel(relPath: string): string {
-  const idx = relPath.lastIndexOf('/');
-  return idx >= 0 ? relPath.slice(0, idx) : '';
-}
-
-/** 相対パスから basename を取り出す。 */
-function basenameOfRel(relPath: string): string {
-  const idx = relPath.lastIndexOf('/');
-  return idx >= 0 ? relPath.slice(idx + 1) : relPath;
-}
+import { useFileTreeClipboardStore } from '../stores/fileTreeClipboard';
+import { FileTreeChildren } from './filetree/FileTreeChildren';
+import type { InlineInputState } from './filetree/types';
+import {
+  basenameOfRel,
+  joinRel,
+  parentOfRel,
+  shortName,
+  uniqueName
+} from './filetree/utils';
 
 interface FileTreePanelProps {
   /** メインのプロジェクトルート(ターミナル/Git 等はこちら基準で動作する) */
@@ -102,23 +52,6 @@ interface FileTreePanelProps {
   onAddWorkspaceFolder: () => void;
   onRemoveWorkspaceFolder: (path: string) => void;
 }
-
-const shortName = (abs: string): string => {
-  const parts = abs.split(/[\\/]/).filter(Boolean);
-  return parts[parts.length - 1] || abs;
-};
-
-/** Issue #592: インライン入力 (新規ファイル / 新規フォルダ / リネーム) の状態。 */
-type InlineInputState = {
-  rootPath: string;
-  /** 入力 row を表示する親ディレクトリの相対パス。'' でルート直下。 */
-  parentRel: string;
-  mode: 'create-file' | 'create-folder' | 'rename';
-  /** rename のときの旧 basename。create のときは空文字。 */
-  initialName: string;
-  /** rename のときの旧相対パス。create のときは undefined。 */
-  originalRelPath?: string;
-};
 
 export function FileTreePanel({
   primaryRoot,
@@ -157,16 +90,10 @@ export function FileTreePanel({
 
   // Issue #592: VS Code 互換のインライン入力 (新規ファイル / フォルダ / リネーム)。
   const [inlineInput, setInlineInput] = useState<InlineInputState | null>(null);
-
-  // Issue #592: clipboard の購読。setClipboard の度に再描画して paste 項目の disabled を更新。
-  const [, forceRender] = useState(0);
-  useEffect(() => {
-    const fn = (): void => forceRender((n) => n + 1);
-    clipboardListeners.add(fn);
-    return () => {
-      clipboardListeners.delete(fn);
-    };
-  }, []);
+  // Issue #734: clipboard は module-level mutable state ではなく zustand 管理にする。
+  // hook 購読により paste 項目の disabled 更新も React の再描画として扱える。
+  const clipboard = useFileTreeClipboardStore((state) => state.clipboard);
+  const setClipboard = useFileTreeClipboardStore((state) => state.setClipboard);
 
   /** 現在サイドバーに表示するルート一覧(primary + extras から重複除去)。
    *  Issue #129: 配列リテラルを毎レンダー作ると useEffect deps や子供 props が
@@ -397,7 +324,7 @@ export function FileTreePanel({
       if (!node.path) return; // root を cut/copy しない
       setClipboard({ rootPath, relPath: node.path, isDir: node.isDir, mode });
     },
-    []
+    [setClipboard]
   );
 
   /** Issue #592: paste 実行。clipboard が `cut` なら files.rename (move)、
@@ -405,7 +332,7 @@ export function FileTreePanel({
    *  `targetParentRel` は paste 先のディレクトリ相対パス (空文字でルート)。 */
   const handlePaste = useCallback(
     async (rootPath: string, targetParentRel: string) => {
-      const cb = getClipboard();
+      const cb = useFileTreeClipboardStore.getState().clipboard;
       if (!cb) {
         showToast(t('toast.fileOpClipboardEmpty'), { tone: 'warning' });
         return;
@@ -449,7 +376,7 @@ export function FileTreePanel({
         setClipboard(null);
       }
     },
-    [dirs, refreshDir, showOpError, showToast, t]
+    [dirs, refreshDir, setClipboard, showOpError, showToast, t]
   );
 
   /** Issue #592: 同じディレクトリに `<base>.copy` (もしくは衝突回避サフィックス付) でコピー。 */
@@ -491,7 +418,6 @@ export function FileTreePanel({
           .then(() => showToast(t('toast.pathCopied'), { tone: 'info' }))
           .catch(() => showToast(t('toast.copyFailed'), { tone: 'error' }));
       };
-      const cb = getClipboard();
       // paste 先は: ディレクトリなら自身、ファイルならその親ディレクトリ。
       const pasteTarget = node.isDir ? relPath : parentOfRel(relPath);
       const items: ContextMenuItem[] = [];
@@ -520,7 +446,7 @@ export function FileTreePanel({
       items.push({
         label: t('ctxMenu.paste'),
         action: () => void handlePaste(rootPath, pasteTarget),
-        disabled: !cb || cb.rootPath !== rootPath
+        disabled: !clipboard || clipboard.rootPath !== rootPath
       });
       items.push({
         label: t('ctxMenu.duplicate'),
@@ -569,6 +495,7 @@ export function FileTreePanel({
     [
       beginCreate,
       beginRename,
+      clipboard,
       handleCutCopy,
       handleDelete,
       handleDuplicate,
@@ -583,7 +510,6 @@ export function FileTreePanel({
     (e: React.MouseEvent, rootPath: string) => {
       e.preventDefault();
       e.stopPropagation();
-      const cb = getClipboard();
       const items: ContextMenuItem[] = [
         {
           label: t('ctxMenu.newFile'),
@@ -597,7 +523,7 @@ export function FileTreePanel({
         {
           label: t('ctxMenu.paste'),
           action: () => void handlePaste(rootPath, ''),
-          disabled: !cb || cb.rootPath !== rootPath,
+          disabled: !clipboard || clipboard.rootPath !== rootPath,
           divider: true
         },
         {
@@ -607,108 +533,8 @@ export function FileTreePanel({
       ];
       setContextMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [beginCreate, handlePaste, onRemoveWorkspaceFolder, t]
+    [beginCreate, clipboard, handlePaste, onRemoveWorkspaceFolder, t]
   );
-
-  const renderChildren = (
-    rootPath: string,
-    relPath: string,
-    depth: number
-  ): JSX.Element | null => {
-    const state = dirs.get(dirKey(rootPath, relPath));
-    if (!state) return null;
-    if (state.loading && state.entries.length === 0) {
-      return (
-        <div className="filetree__loading" style={{ paddingLeft: 10 + depth * 12 }}>
-          …
-        </div>
-      );
-    }
-    if (state.error) {
-      return (
-        <div className="filetree__error" style={{ paddingLeft: 10 + depth * 12 }}>
-          {state.error}
-        </div>
-      );
-    }
-    // Issue #592: 当該ディレクトリ直下に inline-input が出る場合は、entries 一覧の頭で表示する。
-    const showInline =
-      inlineInput &&
-      inlineInput.rootPath === rootPath &&
-      inlineInput.parentRel === relPath &&
-      (inlineInput.mode === 'create-file' || inlineInput.mode === 'create-folder');
-    if (state.entries.length === 0 && !showInline) {
-      return (
-        <div className="filetree__empty" style={{ paddingLeft: 10 + depth * 12 }}>
-          —
-        </div>
-      );
-    }
-    return (
-      <>
-        {showInline && (
-          <FileTreeInlineRow
-            depth={depth + 1}
-            kind={inlineInput.mode === 'create-folder' ? 'folder' : 'file'}
-            placeholder={t(
-              inlineInput.mode === 'create-folder'
-                ? 'filetree.prompt.newFolderName'
-                : 'filetree.prompt.newFileName'
-            )}
-            initialValue=""
-            onSubmit={submitInlineInput}
-            onCancel={() => setInlineInput(null)}
-          />
-        )}
-        {state.entries.map((node) => {
-          const childKey = dirKey(rootPath, node.path);
-          const isOpen = node.isDir && expanded.has(childKey);
-          const childState: DirState | null = node.isDir
-            ? dirs.get(childKey) ?? null
-            : null;
-          const isActive = !node.isDir && activeFilePath === node.path;
-          const recentRank = node.isDir
-            ? -1
-            : recentRankMap.get(`${rootPath}${KEY_SEP}${node.path}`) ?? -1;
-          // Issue #592: rename inline-input は対象 entry を inline 入力欄で置換する。
-          const isRenaming =
-            inlineInput &&
-            inlineInput.mode === 'rename' &&
-            inlineInput.rootPath === rootPath &&
-            inlineInput.originalRelPath === node.path;
-          if (isRenaming) {
-            return (
-              <FileTreeInlineRow
-                key={`rename-${childKey}`}
-                depth={depth + 1}
-                kind={node.isDir ? 'folder' : 'file'}
-                placeholder={t('filetree.prompt.renameTo')}
-                initialValue={node.name}
-                onSubmit={submitInlineInput}
-                onCancel={() => setInlineInput(null)}
-              />
-            );
-          }
-          return (
-            <FileTreeNode
-              key={childKey}
-              rootPath={rootPath}
-              node={node}
-              depth={depth}
-              isOpen={isOpen}
-              isActive={isActive}
-              recentRank={recentRank}
-              childState={childState}
-              onToggle={toggleDir}
-              onOpenFile={onOpenFile}
-              onContextMenu={handleContextMenu}
-              renderChildren={renderChildren}
-            />
-          );
-        })}
-      </>
-    );
-  };
 
   return (
     <div className="filetree">
@@ -793,7 +619,26 @@ export function FileTreePanel({
                   <X size={12} strokeWidth={2} />
                 </button>
               </div>
-              {!collapsed && renderChildren(root, '', 0)}
+              {!collapsed && (
+                <FileTreeChildren
+                  rootPath={root}
+                  relPath=""
+                  depth={0}
+                  dirs={dirs}
+                  expanded={expanded}
+                  activeFilePath={activeFilePath}
+                  recentRankMap={recentRankMap}
+                  inlineInput={inlineInput}
+                  newFolderPlaceholder={t('filetree.prompt.newFolderName')}
+                  newFilePlaceholder={t('filetree.prompt.newFileName')}
+                  renamePlaceholder={t('filetree.prompt.renameTo')}
+                  onInlineSubmit={submitInlineInput}
+                  onInlineCancel={() => setInlineInput(null)}
+                  onToggle={toggleDir}
+                  onOpenFile={onOpenFile}
+                  onContextMenu={handleContextMenu}
+                />
+              )}
             </div>
           );
         })}
@@ -806,286 +651,6 @@ export function FileTreePanel({
           onClose={() => setContextMenu(null)}
         />
       )}
-    </div>
-  );
-}
-
-interface FileTreeNodeProps {
-  rootPath: string;
-  node: FileNode;
-  depth: number;
-  isOpen: boolean;
-  isActive: boolean;
-  /**
-   * Issue #480: 最近開いたファイルの順位 (0 = 直近, 1 = その前, ...)。
-   * -1 は履歴に含まれていない。active と重なる場合は UI 側で active を優先する。
-   */
-  recentRank: number;
-  /** 子ディレクトリの DirState (再レンダー判定用)。null は未読込 or ファイル */
-  childState: DirState | null;
-  onToggle: (rootPath: string, node: FileNode) => void;
-  onOpenFile: (rootPath: string, relPath: string) => void;
-  /** Issue #251: 右クリックメニュー要求 */
-  onContextMenu: (e: React.MouseEvent, rootPath: string, node: FileNode) => void;
-  renderChildren: (
-    rootPath: string,
-    relPath: string,
-    depth: number
-  ) => JSX.Element | null;
-}
-
-function FileTreeNodeImpl({
-  rootPath,
-  node,
-  depth,
-  isOpen,
-  isActive,
-  recentRank,
-  onToggle,
-  onOpenFile,
-  onContextMenu,
-  renderChildren
-}: FileTreeNodeProps): JSX.Element {
-  const fileIconDef = node.isDir ? undefined : fileIcon(node.name);
-  const FileTypeIcon = fileIconDef?.Icon ?? DefaultFileIcon;
-  const fileTypeColor = fileIconDef?.color;
-  const folderDef = node.isDir ? folderIcon(node.name, isOpen) : undefined;
-
-  const handleClick = (): void => {
-    if (node.isDir) onToggle(rootPath, node);
-    else onOpenFile(rootPath, node.path);
-  };
-
-  // Issue #18: 階層ごとのインデントガイドを background-image で描く。
-  // 1px の縦線を 12px 間隔で depth 本だけ。深い階層でも視線が迷子にならない。
-  const guideStyle: React.CSSProperties =
-    depth > 0
-      ? {
-          paddingLeft: 4 + depth * 12,
-          backgroundImage:
-            'repeating-linear-gradient(to right, var(--filetree-guide, rgba(127,127,127,0.16)) 0 1px, transparent 1px 12px)',
-          backgroundSize: `${depth * 12}px 100%`,
-          backgroundRepeat: 'no-repeat',
-          backgroundPosition: '4px 0'
-        }
-      : { paddingLeft: 4 };
-
-  return (
-    <>
-      <button
-        type="button"
-        className={`filetree__row${isActive ? ' is-active' : ''}`}
-        style={guideStyle}
-        onClick={handleClick}
-        onContextMenu={(e) => onContextMenu(e, rootPath, node)}
-      >
-        {node.isDir && folderDef ? (
-          <>
-            <ChevronRight
-              size={13}
-              strokeWidth={2.25}
-              className={`filetree__chevron${isOpen ? ' is-open' : ''}`}
-            />
-            <folderDef.Icon
-              size={14}
-              strokeWidth={2}
-              fill="currentColor"
-              fillOpacity={isOpen ? 0.22 : 0.18}
-              className={`filetree__icon${isOpen ? ' filetree__icon--open' : ''}${folderDef.color ? ' filetree__icon--colored' : ''}`}
-              style={folderDef.color ? { color: folderDef.color } : undefined}
-              aria-hidden
-            />
-          </>
-        ) : (
-          <>
-            <span className="filetree__chevron-spacer" />
-            <FileTypeIcon
-              size={14}
-              strokeWidth={2}
-              className="filetree__file-icon"
-              style={fileTypeColor ? { color: fileTypeColor } : undefined}
-              aria-hidden
-            />
-          </>
-        )}
-        <span
-          className={
-            'filetree__name' +
-            // Issue #480: active でない最近ファイルに段階的な色クラスを付与
-            (!isActive && recentRank >= 0
-              ? recentRank === 0
-                ? ' is-recent is-recent-1'
-                : recentRank <= 2
-                  ? ' is-recent is-recent-2'
-                  : recentRank <= 5
-                    ? ' is-recent is-recent-3'
-                    : ' is-recent'
-              : '')
-          }
-        >{node.name}</span>
-      </button>
-      {node.isDir && isOpen ? renderChildren(rootPath, node.path, depth + 1) : null}
-    </>
-  );
-}
-
-/**
- * Issue #129: React.memo で「親が再レンダーしても自分の入力 (node, isOpen, isActive,
- * childState など) が変わらない限り再レンダーしない」ようにする。
- * 親が expanded Set を新規生成しても、各ノードの isOpen は親側で計算してから
- * primitive boolean として渡しているので memo が安全に効く。
- * renderChildren は親が毎レンダー再生成するため、ここでは再レンダー判定から外す
- * (renderChildren 経由で開いた子供は依然として再帰的に再構築されるが、
- *  閉じているノード/葉は本 memo + props 比較で再レンダーをスキップできる)。
- */
-const FileTreeNode = memo(FileTreeNodeImpl, (prev, next) => {
-  return (
-    prev.rootPath === next.rootPath &&
-    prev.node === next.node &&
-    prev.depth === next.depth &&
-    prev.isOpen === next.isOpen &&
-    prev.isActive === next.isActive &&
-    prev.recentRank === next.recentRank &&
-    prev.childState === next.childState &&
-    prev.onToggle === next.onToggle &&
-    prev.onOpenFile === next.onOpenFile &&
-    prev.onContextMenu === next.onContextMenu
-    // renderChildren は意図的に比較しない (毎レンダー新参照になるが、
-    // 開いているディレクトリは isOpen + childState の変化で再レンダーが
-    // 既に走るので問題なし。閉じているノード/葉は早期 return できる)。
-  );
-});
-
-/**
- * Issue #592: ファイルツリーのインライン入力行 (新規ファイル / 新規フォルダ / リネーム)。
- * Enter で確定 / Esc でキャンセル。blur でも確定する (VS Code と同じ挙動)。
- *
- * **PR #695 review (Correctness)**: `onSubmit` は確定が成功したかを `Promise<boolean>` で返す。
- * 失敗 (`false`) の場合は `submittingRef` を巻き戻し、再度 Enter / Esc / blur を受け付けるよう
- * フォールバックする。これがないと、初回 submit 失敗で UI が固まる。
- */
-interface FileTreeInlineRowProps {
-  depth: number;
-  kind: 'file' | 'folder';
-  placeholder: string;
-  initialValue: string;
-  /** 確定処理。`true` = 確定成功 (この行は閉じてよい) / `false` = 失敗で行を残す。 */
-  onSubmit: (value: string) => Promise<boolean>;
-  onCancel: () => void;
-}
-
-function FileTreeInlineRow({
-  depth,
-  kind,
-  placeholder,
-  initialValue,
-  onSubmit,
-  onCancel
-}: FileTreeInlineRowProps): JSX.Element {
-  const inputRef = useRef<HTMLInputElement>(null);
-  // 多重 submit を防ぐ guard。submit が in-flight な間 true、決着したら結果に応じて
-  // 確定 (= 行ごと unmount) or 失敗で false に巻き戻して再 submit を許可する。
-  const submittingRef = useRef(false);
-  const [value, setValue] = useState(initialValue);
-
-  // Mount 直後に input にフォーカスし、リネーム時は拡張子を除いた stem 部分を選択する。
-  useEffect(() => {
-    const el = inputRef.current;
-    if (!el) return;
-    el.focus();
-    if (initialValue) {
-      const dotIdx = initialValue.lastIndexOf('.');
-      if (dotIdx > 0) {
-        el.setSelectionRange(0, dotIdx);
-      } else {
-        el.select();
-      }
-    }
-  }, [initialValue]);
-
-  const submit = (): void => {
-    if (submittingRef.current) return;
-    submittingRef.current = true;
-    // 失敗時は guard を巻き戻して再 submit を受け付ける。成功時は親が unmount するので
-    // ここでは何もしない (unmount 後の setState 抑止のため、ok=true でも巻き戻さない)。
-    void Promise.resolve(onSubmit(value))
-      .then((ok) => {
-        if (!ok) submittingRef.current = false;
-      })
-      .catch(() => {
-        submittingRef.current = false;
-      });
-  };
-
-  const cancel = (): void => {
-    if (submittingRef.current) return;
-    submittingRef.current = true;
-    onCancel();
-  };
-
-  const handleKey = (e: KeyboardEvent<HTMLInputElement>): void => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      submit();
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      cancel();
-    }
-  };
-
-  const guideStyle: React.CSSProperties =
-    depth > 0
-      ? {
-          paddingLeft: 4 + depth * 12,
-          backgroundImage:
-            'repeating-linear-gradient(to right, var(--filetree-guide, rgba(127,127,127,0.16)) 0 1px, transparent 1px 12px)',
-          backgroundSize: `${depth * 12}px 100%`,
-          backgroundRepeat: 'no-repeat',
-          backgroundPosition: '4px 0'
-        }
-      : { paddingLeft: 4 };
-
-  return (
-    <div className="filetree__row filetree__inline-input" style={guideStyle}>
-      {kind === 'folder' ? (
-        <>
-          <ChevronRight
-            size={13}
-            strokeWidth={2.25}
-            className="filetree__chevron"
-            aria-hidden
-          />
-          <FolderPlus
-            size={14}
-            strokeWidth={2}
-            className="filetree__icon"
-            aria-hidden
-          />
-        </>
-      ) : (
-        <>
-          <span className="filetree__chevron-spacer" />
-          <FilePlus
-            size={14}
-            strokeWidth={2}
-            className="filetree__file-icon"
-            aria-hidden
-          />
-        </>
-      )}
-      <input
-        ref={inputRef}
-        type="text"
-        className="filetree__inline-input-field"
-        value={value}
-        placeholder={placeholder}
-        onChange={(e) => setValue(e.target.value)}
-        onKeyDown={handleKey}
-        onBlur={submit}
-        spellCheck={false}
-        autoCapitalize="none"
-        autoCorrect="off"
-      />
     </div>
   );
 }
