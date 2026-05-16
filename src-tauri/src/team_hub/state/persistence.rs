@@ -4,6 +4,7 @@
 //! `record_handoff_lifecycle` と動的ロール復元ヘルパを切り出し。
 
 use crate::commands::team_state::{TeamOrchestrationState, TEAM_STATE_SCHEMA_VERSION};
+use crate::team_hub::protocol::consts::MAX_HANDOFF_EVENTS;
 use crate::team_hub::TeamHub;
 use anyhow::Result;
 
@@ -215,7 +216,7 @@ impl TeamHub {
                     note,
                     created_at: chrono::Utc::now().to_rfc3339(),
                 });
-            while team.handoff_events.len() > 50 {
+            while team.handoff_events.len() > MAX_HANDOFF_EVENTS {
                 let _ = team.handoff_events.pop_front();
             }
         }

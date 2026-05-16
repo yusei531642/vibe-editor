@@ -67,6 +67,24 @@ pub(crate) const MAX_MESSAGES_PER_TEAM: usize = 1000;
 /// Issue #107: チームごとに保持する task の上限。超過分は古い順に破棄。
 pub(crate) const MAX_TASKS_PER_TEAM: usize = 500;
 
+// ---------- Issue #738: TeamInfo の VecDeque backlog 上限 ----------
+//
+// `TeamInfo` が持つ各種 backlog (`team_reports` / `worker_reports` / `handoff_events` /
+// `next_actions`) の FIFO 件数上限。旧コードでは `50` / `20` という inline リテラルが
+// `report.rs` / `send.rs` / `update_task.rs` / `state/persistence.rs` の 4 ファイルに
+// 散在しており、`MAX_TEAM_REPORTS` だけが `report.rs` のローカル定数になっていて
+// 統一されていなかった。ここに 4 つまとめて集約し、全箇所をこの定数参照に置換する。
+
+/// `team_reports` backlog (= `team_report` 由来の構造化レポート) の FIFO 上限。
+pub(crate) const MAX_TEAM_REPORTS: usize = 50;
+/// `worker_reports` backlog (= worker→Leader の summary feed) の FIFO 上限。
+/// `team_reports` と同じ運用閾値で揃える。
+pub(crate) const MAX_WORKER_REPORTS: usize = 50;
+/// `handoff_events` backlog (= leader handoff のライフサイクルイベント) の FIFO 上限。
+pub(crate) const MAX_HANDOFF_EVENTS: usize = 50;
+/// `next_actions` backlog (= `team_update_task` で積まれる次アクション候補) の FIFO 上限。
+pub(crate) const MAX_NEXT_ACTIONS: usize = 20;
+
 // ---------- Issue #511: PTY inject (`team_hub::inject`) tunables ----------
 //
 // 旧 `inject.rs` 内の magic number を集約。「ConPTY バッファ事故を避けるための
