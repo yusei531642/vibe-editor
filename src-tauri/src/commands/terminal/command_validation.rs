@@ -199,21 +199,89 @@ pub fn is_allowed_terminal_command(command: &str) -> bool {
     configured_terminal_commands().contains(&trimmed.to_ascii_lowercase())
 }
 
-/// Issue #743: Claude / Codex の承認スキップ・サンドボックス回避フラグを spawn 前に拒否する。
+/// Issue #743 / #788: Claude / Codex の承認スキップ・サンドボックス回避フラグの扱い。
 ///
-/// settings.json (`claude_args` / `codex_args`) や起動コマンドの inline 引数経由で
-/// 以下フラグが投入されると外部 CLI が承認・サンドボックス無しで起動できてしまい、
-/// vibe-editor が前提とする「人間レビューア」の制御を回避する経路になる。
-/// normalize 後の args をスキャンして、いずれかが含まれていれば error 文を返す。
+/// 以下フラグは外部 CLI を承認・サンドボックス無しで起動できてしまうため、renderer
+/// から **動的に注入された** もの (prompt injection 等の経路) は spawn 前に拒否する。
+///
+/// 一方 vibe-editor は Claude Code / Codex 専用エディタであり、ユーザーが自分の
+/// マシンの `~/.vibe-editor/settings.json` (`claudeArgs` / `codexArgs` /
+/// `customAgents[].args`) に **明示的に書いた** フラグは信頼境界の内側にある正規の
+/// opt-in なので許可する。`reject_danger_flags` には settings 由来の sanction 集合
+/// ([`settings_sanctioned_danger_flags`]) を渡し、その集合に無いフラグだけを拒否する。
 const DENY_FLAGS: &[&str] = &[
     "--dangerously-skip-permissions",
     "--dangerously-bypass-approvals-and-sandbox",
 ];
 
-pub fn reject_danger_flags(args: &[String]) -> Option<String> {
-    args.iter()
-        .find(|a| DENY_FLAGS.contains(&a.trim()))
-        .map(|flag| format!("dangerous flag is not allowed: {flag}"))
+/// token 先頭の dash 類 (ASCII `-` / Unicode ダッシュ) を全て剥がした stem が
+/// `DENY_FLAGS` のいずれかと一致すれば、canonical な `--` 形のフラグを返す。
+///
+/// renderer 側 `parse-args.ts` の `normalizeLeadingDashes` (Issue #449) と同様に、
+/// autocorrect 由来の en dash や単一 `-` 等の dash 表記揺れを吸収する。これにより
+/// settings.json に表記揺れで保存された値も正しく sanction 集合へ取り込める。
+fn canonical_danger_flag(token: &str) -> Option<&'static str> {
+    let stem = token.trim().trim_start_matches(|c: char| {
+        c == '-'
+            || matches!(
+                c,
+                '\u{2010}'..='\u{2015}' | '\u{2212}' | '\u{FE58}' | '\u{FE63}' | '\u{FF0D}'
+            )
+    });
+    if stem.is_empty() {
+        return None;
+    }
+    DENY_FLAGS
+        .iter()
+        .copied()
+        .find(|flag| flag.trim_start_matches('-') == stem)
+}
+
+/// Issue #788: `~/.vibe-editor/settings.json` の `claudeArgs` / `codexArgs` /
+/// `customAgents[].args` にユーザーが明示的に書いた危険フラグを canonical 形で集める。
+/// ここに含まれるフラグは「ユーザー自身が opt-in したもの」として spawn を許可する。
+///
+/// settings.json が無い / parse 失敗の場合は空集合 (= 何も sanction しない) を返す。
+/// `terminal_create` / spawn 境界から spawn 直前にだけ呼ぶ想定 (1 spawn = 1 file read)。
+pub fn settings_sanctioned_danger_flags() -> HashSet<String> {
+    let mut out = HashSet::new();
+    let path = crate::util::config_paths::settings_path();
+    let Ok(bytes) = std::fs::read(path) else {
+        return out;
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return out;
+    };
+    let mut collect = |raw: Option<&str>| {
+        if let Some(s) = raw {
+            for token in split_command_line(s) {
+                if let Some(flag) = canonical_danger_flag(&token) {
+                    out.insert(flag.to_string());
+                }
+            }
+        }
+    };
+    collect(value.get("claudeArgs").and_then(|v| v.as_str()));
+    collect(value.get("codexArgs").and_then(|v| v.as_str()));
+    if let Some(custom) = value.get("customAgents").and_then(|v| v.as_array()) {
+        for agent in custom {
+            collect(agent.get("args").and_then(|v| v.as_str()));
+        }
+    }
+    out
+}
+
+/// `args` に含まれる危険フラグ (`DENY_FLAGS`) のうち、`sanctioned`
+/// (= ユーザーが settings.json に明示した集合 / [`settings_sanctioned_danger_flags`])
+/// に **無い** ものを 1 つでも見つけたら error 文を返す。sanction 済みフラグは許可する。
+pub fn reject_danger_flags(args: &[String], sanctioned: &HashSet<String>) -> Option<String> {
+    for arg in args {
+        let flag = arg.trim();
+        if DENY_FLAGS.contains(&flag) && !sanctioned.contains(flag) {
+            return Some(format!("dangerous flag is not allowed: {flag}"));
+        }
+    }
+    None
 }
 
 pub fn reject_immediate_exec_args(command: &str, args: &[String]) -> Option<&'static str> {
@@ -505,9 +573,10 @@ mod codex_command_tests {
 #[cfg(test)]
 mod command_normalization_tests {
     use super::{
-        normalize_terminal_command, reject_danger_flags, reject_immediate_exec_args,
-        split_command_line,
+        canonical_danger_flag, normalize_terminal_command, reject_danger_flags,
+        reject_immediate_exec_args, split_command_line,
     };
+    use std::collections::HashSet;
 
     #[test]
     fn splits_inline_codex_flags_from_command_field() {
@@ -619,7 +688,7 @@ mod command_normalization_tests {
     fn rejects_claude_skip_permissions_flag() {
         let args = vec!["--dangerously-skip-permissions".to_string()];
         assert_eq!(
-            reject_danger_flags(&args),
+            reject_danger_flags(&args, &HashSet::new()),
             Some("dangerous flag is not allowed: --dangerously-skip-permissions".to_string())
         );
     }
@@ -628,7 +697,7 @@ mod command_normalization_tests {
     fn rejects_codex_bypass_approvals_and_sandbox_flag() {
         let args = vec!["--dangerously-bypass-approvals-and-sandbox".to_string()];
         assert_eq!(
-            reject_danger_flags(&args),
+            reject_danger_flags(&args, &HashSet::new()),
             Some(
                 "dangerous flag is not allowed: --dangerously-bypass-approvals-and-sandbox"
                     .to_string()
@@ -645,7 +714,7 @@ mod command_normalization_tests {
             "--append-system-prompt".to_string(),
             "hi".to_string(),
         ];
-        assert!(reject_danger_flags(&args).is_some());
+        assert!(reject_danger_flags(&args, &HashSet::new()).is_some());
     }
 
     #[test]
@@ -658,7 +727,7 @@ mod command_normalization_tests {
         );
 
         assert_eq!(command, "claude");
-        assert!(reject_danger_flags(&args).is_some());
+        assert!(reject_danger_flags(&args, &HashSet::new()).is_some());
     }
 
     #[test]
@@ -674,7 +743,7 @@ mod command_normalization_tests {
         );
 
         assert_eq!(command, "codex");
-        assert!(reject_danger_flags(&args).is_some());
+        assert!(reject_danger_flags(&args, &HashSet::new()).is_some());
     }
 
     #[test]
@@ -685,18 +754,69 @@ mod command_normalization_tests {
             "--append-system-prompt".to_string(),
             "hi".to_string(),
         ];
-        assert_eq!(reject_danger_flags(&args), None);
+        assert_eq!(reject_danger_flags(&args, &HashSet::new()), None);
     }
 
     #[test]
     fn passes_empty_args() {
-        assert_eq!(reject_danger_flags(&[]), None);
+        assert_eq!(reject_danger_flags(&[], &HashSet::new()), None);
     }
 
     #[test]
     fn does_not_match_substring_of_dangerous_flag() {
         // 例えば --dangerously-skip-permissions-x のような未来の擬似フラグは別物として扱う
         let args = vec!["--dangerously-skip-permissions-extra".to_string()];
-        assert_eq!(reject_danger_flags(&args), None);
+        assert_eq!(reject_danger_flags(&args, &HashSet::new()), None);
+    }
+
+    // Issue #788: settings.json でユーザーが明示した危険フラグは許可する
+    #[test]
+    fn allows_sanctioned_flag_from_user_settings() {
+        // ユーザーが settings.json (claudeArgs 等) に明示したフラグは sanction 集合に
+        // 入るため許可される (vibe-editor の autonomous 起動の正規ユース)。
+        let args = vec!["--dangerously-skip-permissions".to_string()];
+        let sanctioned: HashSet<String> = ["--dangerously-skip-permissions".to_string()]
+            .into_iter()
+            .collect();
+        assert_eq!(reject_danger_flags(&args, &sanctioned), None);
+    }
+
+    #[test]
+    fn rejects_unsanctioned_flag_even_when_other_flag_is_sanctioned() {
+        // skip-permissions だけ sanction されていても、settings に無い
+        // bypass-approvals フラグ (renderer 動的注入相当) は別物として拒否する。
+        let args = vec!["--dangerously-bypass-approvals-and-sandbox".to_string()];
+        let sanctioned: HashSet<String> = ["--dangerously-skip-permissions".to_string()]
+            .into_iter()
+            .collect();
+        assert!(reject_danger_flags(&args, &sanctioned).is_some());
+    }
+
+    #[test]
+    fn canonical_danger_flag_normalizes_dash_variants() {
+        // ASCII `--` / 単一 `-` / en dash いずれの dash 表記でも canonical 形へ解決する。
+        assert_eq!(
+            canonical_danger_flag("--dangerously-skip-permissions"),
+            Some("--dangerously-skip-permissions")
+        );
+        assert_eq!(
+            canonical_danger_flag("-dangerously-skip-permissions"),
+            Some("--dangerously-skip-permissions")
+        );
+        assert_eq!(
+            canonical_danger_flag("\u{2013}dangerously-bypass-approvals-and-sandbox"),
+            Some("--dangerously-bypass-approvals-and-sandbox")
+        );
+    }
+
+    #[test]
+    fn canonical_danger_flag_ignores_non_danger_tokens() {
+        assert_eq!(canonical_danger_flag("--resume"), None);
+        assert_eq!(
+            canonical_danger_flag("--dangerously-skip-permissions-extra"),
+            None
+        );
+        assert_eq!(canonical_danger_flag(""), None);
+        assert_eq!(canonical_danger_flag("--"), None);
     }
 }

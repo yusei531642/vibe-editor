@@ -223,10 +223,10 @@ mod resolution_tests {
         let tmp = tempfile::tempdir().unwrap();
         let cli = tmp.path().join("codex.exe");
         std::fs::write(&cli, "").unwrap();
-        let command = format!(
-            r#""{}" --dangerously-bypass-approvals-and-sandbox"#,
-            cli.display()
-        );
+        // Issue #788: spawn 境界の inline command 再 normalize を検証する。危険フラグ
+        // 自体の拒否は command_validation 側のユニットテストでカバーするため、ここでは
+        // benign な inline フラグを使い settings 状態に依存しないようにする。
+        let command = format!(r#""{}" --foo"#, cli.display());
         let mut opts = base_spawn_options(
             command,
             vec![
@@ -240,11 +240,7 @@ mod resolution_tests {
         assert_eq!(PathBuf::from(&prepared.program), cli);
         assert_eq!(
             prepared.args,
-            vec![
-                "--dangerously-bypass-approvals-and-sandbox",
-                "--config",
-                "disable_paste_burst=true",
-            ]
+            vec!["--foo", "--config", "disable_paste_burst=true"]
         );
 
         opts.command = "cmd /c echo unsafe".to_string();
