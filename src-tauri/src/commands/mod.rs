@@ -4,6 +4,8 @@
 // camelCase JSON 互換のため、各 command struct/enum には #[serde(rename_all = "camelCase")] を付与する。
 
 pub mod app;
+// Issue #724 (Security): `asset://` protocol scope の動的許可ヘルパー。
+pub mod asset_scope;
 pub mod atomic_write;
 pub mod authz;
 pub mod dialog;

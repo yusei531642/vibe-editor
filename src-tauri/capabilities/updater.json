@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "updater",
+  "description": "Issue #744: 自動更新 (tauri-plugin-updater + tauri-plugin-process) 専用 capability。base の capabilities/default.json から process:default / updater:default を切り出し、ここに分離した。renderer 側で実際にこれらの command を呼ぶのは src/renderer/src/lib/updater-check.ts のみ (@tauri-apps/plugin-updater の check() / @tauri-apps/plugin-process の relaunch())。これらの plugin command は renderer (webview) から invoke 経由で呼ばれるため、capability 上 webview を対象とせざるを得ず、現状 webview は \"main\" 1 つだけなので windows も [\"main\"] になる。それでも base capability から分離して名前付きの専用ファイルにしておくことで、(1) updater 以外の権限と混ざらず付与意図が一目で分かる、(2) 将来 webview を追加したとき updater.json をその webview に付与しないだけで自動更新権限の影響半径を絞れる、という defense-in-depth を確保する。process:default は updater インストール後の relaunch でのみ必要。",
+  "windows": ["main"],
+  "permissions": ["process:default", "updater:default"]
+}

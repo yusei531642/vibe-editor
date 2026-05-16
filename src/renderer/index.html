@@ -8,11 +8,21 @@
       ここではより厳しい (= 許可範囲が狭い) 値を置く。
         - connect-src は dev (Vite HMR) 用に localhost:5173 のみ許可。任意の ws:/http://localhost:*
           を許す旧設定は内部スキャナ等の任意エンドポイントに繋ぎに行けるので外す。
-        - script-src 'self' のみ。inline スクリプトは禁止。
+        - script-src 'self' のみ。inline スクリプトも blob: script も禁止。
+      Issue #744: ビルド成果物 (vendor-monaco / index / editor.worker) を走査した結果
+      WebAssembly の参照は 0 件、かつ blob: を <script> としてロードする箇所も無いため、
+      script-src から 'wasm-unsafe-eval' と blob: を除去した (tauri.conf.json 側の csp /
+      devCsp も同様に script-src から両者を除去済み)。
+        - worker-src の blob: のみ維持する。Monaco の Web Worker 起動は実際には
+          `/assets/editor.worker-*.js` という静的パスを new Worker() に渡す経路
+          (monaco-setup.ts の getWorker) を使い blob: を生成しないが、Monaco 内部には
+          esmModuleLocation 経由で blob: worker を起動するフォールバック実装が同梱されて
+          いる。現構成では到達しない dead path だが、Monaco バージョンアップで worker
+          ロード方式が変わったときの regression を避けるため保守的に残す。
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; style-src-elem 'self' 'unsafe-inline'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://tauri.localhost https://tauri.localhost ws://localhost:5173 http://localhost:5173 https://github.com https://api.github.com; worker-src 'self' blob:; frame-src 'none'; object-src 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; style-src-elem 'self' 'unsafe-inline'; style-src-attr 'unsafe-inline'; img-src 'self' data: blob: asset: http://asset.localhost; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost http://tauri.localhost https://tauri.localhost ws://localhost:5173 http://localhost:5173 https://github.com https://api.github.com; worker-src 'self' blob:; frame-src 'none'; object-src 'none'"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/png" href="/vibe-editor.png" />
