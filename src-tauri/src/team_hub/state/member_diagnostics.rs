@@ -3,7 +3,6 @@
 //! Issue #736: 旧 `state.rs` から member 診断に関する型・メソッドを切り出し。
 
 use crate::team_hub::TeamHub;
-use std::collections::HashMap;
 
 use super::hub_state::extract_no_conversation_session_id;
 
@@ -115,11 +114,4 @@ impl TeamHub {
         }
     }
 
-    /// Issue #342 Phase 3 (3.3): MemberDiagnostics 全体のスナップショットを返す。
-    /// `team_diagnostics` MCP ツールは protocol.rs 側で state.lock を直接取るため、
-    /// この helper は外部 (テスト / 将来の機能拡張) からの read-only スナップショット用。
-    #[allow(dead_code)]
-    pub async fn snapshot_member_diagnostics(&self) -> HashMap<String, MemberDiagnostics> {
-        self.state.lock().await.member_diagnostics.clone()
-    }
 }

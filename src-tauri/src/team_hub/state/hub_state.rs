@@ -93,25 +93,6 @@ pub fn set_server_log_path(p: PathBuf) {
     let _ = SERVER_LOG_PATH.set(p);
 }
 
-/// home directory プレフィックスを `~` に reduce する。
-/// home が解決できない / s が home 配下でないときは原文を返す。
-fn reduce_home_prefix(s: &str) -> String {
-    let Some(home) = dirs::home_dir() else {
-        return s.to_string();
-    };
-    let home_s = home.to_string_lossy().to_string();
-    // Windows では `\` と `/` の混在があり得るので両形で試す
-    if let Some(rest) = s.strip_prefix(&home_s) {
-        return format!("~{rest}");
-    }
-    let home_alt = home_s.replace('\\', "/");
-    let s_alt = s.replace('\\', "/");
-    if let Some(rest) = s_alt.strip_prefix(&home_alt) {
-        return format!("~{rest}");
-    }
-    s.to_string()
-}
-
 /// `team_diagnostics` の `serverLogPath` 用に整形済み文字列を返す。
 ///   - env var `VIBE_TEAM_LOG_PATH` が空でなければそれを優先 (絶対パス想定、空白 trim)
 ///   - そうでなければ起動時に記録したファイルパス
@@ -119,6 +100,7 @@ fn reduce_home_prefix(s: &str) -> String {
 ///
 /// 戻り値は home prefix を `~` に reduce 済み (Reviewer D Major 反映)。
 pub fn server_log_path_for_diagnostics() -> String {
+    use crate::util::log_redact::reduce_home_prefix;
     if let Ok(v) = std::env::var("VIBE_TEAM_LOG_PATH") {
         let trimmed = v.trim();
         if !trimmed.is_empty() {
@@ -150,41 +132,11 @@ pub(super) fn extract_no_conversation_session_id(output_tail: &str) -> Option<St
 
 #[cfg(test)]
 mod path_tests {
-    use super::{extract_no_conversation_session_id, reduce_home_prefix};
+    use super::extract_no_conversation_session_id;
 
-    /// home prefix が正しく `~` に置換され、home 配下でないパスは原文のまま。
-    /// home 解決失敗環境を想定した静的テストではないので、CI 環境次第で home が
-    /// 存在しないと一部スキップされる点だけ承知 (Linux CI / Windows CI とも home はある)。
-    #[test]
-    fn reduces_home_prefix_when_under_home() {
-        let Some(home) = dirs::home_dir() else {
-            return; // home 取れない環境ではスキップ (CI 上は通常存在する)
-        };
-        let inside = crate::util::config_paths::vibe_root()
-            .join("logs")
-            .join("vibe-editor.log");
-        let inside_str = inside.to_string_lossy().to_string();
-        let reduced = reduce_home_prefix(&inside_str);
-        // `~/.vibe-editor/logs/vibe-editor.log` 形 (区切り文字は OS 依存だが prefix は `~`)
-        assert!(
-            reduced.starts_with('~'),
-            "expected '~' prefix, got: {reduced}"
-        );
-        assert!(reduced.contains(".vibe-editor"));
-    }
-
-    #[test]
-    fn keeps_path_as_is_when_outside_home() {
-        // home 配下でないパスは reduce されない。
-        // どの OS でも `/tmp/elsewhere.log` は home 配下にならない (Windows でも C:\Users\ 起点なので無関係)。
-        let outside = if cfg!(windows) {
-            r"D:\nowhere\elsewhere.log"
-        } else {
-            "/tmp/elsewhere.log"
-        };
-        let reduced = reduce_home_prefix(outside);
-        assert_eq!(reduced, outside);
-    }
+    // Issue #739: `reduce_home_prefix` は `util::log_redact` へ移設したため、
+    // 関連テストも `util::log_redact` 側に移った。ここでは
+    // `extract_no_conversation_session_id` のみ検証する。
 
     #[test]
     fn extracts_no_conversation_session_id_from_tail() {
@@ -319,13 +271,6 @@ impl EnginePolicy {
                 .clone()
                 .unwrap_or_else(|| role_default.to_string()),
         }
-    }
-
-    /// 「明示的な policy が設定されているか」を bool で返す (将来の info/UI 拡張で扱う)。
-    /// 現在は MCP API 経由の caller が居ないので `#[allow(dead_code)]`。
-    #[allow(dead_code)]
-    pub fn is_explicit(&self) -> bool {
-        !matches!(self.kind, EnginePolicyKind::MixedAllowed) || self.default_engine.is_some()
     }
 }
 
@@ -568,7 +513,8 @@ impl TeamHub {
         use rand::RngCore;
         let mut buf = [0u8; 24];
         rand::thread_rng().fill_bytes(&mut buf);
-        state.token = crate::team_hub::hex_encode(&buf);
+        // Issue #739: 旧 `team_hub::hex_encode` を `util::log_redact` に集約。
+        state.token = crate::util::log_redact::hex_encode(&buf);
 
         // bridge スクリプトを `~/.vibe-editor/team-bridge.js` に書き出し
         // Issue #143 (Security):

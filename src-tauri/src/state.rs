@@ -2,18 +2,21 @@
 
 use crate::pty::{InFlightTracker, SessionRegistry};
 use crate::team_hub::TeamHub;
-use std::sync::{Arc, Mutex, MutexGuard};
+use arc_swap::ArcSwapOption;
+use std::sync::Arc;
 
 pub struct AppState {
     /// 現在 UI で開いているプロジェクトルート。
     ///
-    /// Issue #56 / #147 注記:
-    ///   `std::sync::Mutex` を async コンテキスト (tokio task) から `.lock()` するのは
-    ///   通常アンチパターンだが、ここは `lock → clone → unlock` のみで重い処理は入れない。
-    ///   クリティカル区間を絶対に短く保つこと (canonicalize / fs I/O を lock 保持中に
-    ///   行ってはいけない)。lock 保持中に `.await` は絶対禁止。
-    ///   poison が発生しても `lock_project_root_recover` 経由で recovery できる。
-    pub project_root: Mutex<Option<String>>,
+    /// Issue #56 / #147 / #739 注記:
+    ///   旧実装は `std::sync::Mutex<Option<String>>` で、`lock → clone → unlock` のみとはいえ
+    ///   async コンテキスト (tokio task) から `.lock()` するアンチパターンを抱えていた。
+    ///   `arc_swap::ArcSwapOption<String>` に置換したことで lock 自体が存在しなくなり、
+    ///   load / store はいずれも lock-free atomic な操作になる。これにより
+    ///   「async task から lock を保持したまま `.await`」という deadlock 経路が
+    ///   **構造的に発生しえない** 状態になった。poison 概念も無くなる。
+    ///   読み出しは `current_project_root`、書き込みは `set_project_root` ヘルパを使う。
+    pub project_root: ArcSwapOption<String>,
     pub pty_registry: Arc<SessionRegistry>,
     pub team_hub: TeamHub,
     /// Issue #630: 進行中の PTY inject task (codex 初期 prompt 注入 / team_send 経由 inject /
@@ -23,21 +26,21 @@ pub struct AppState {
     pub pty_inflight: Arc<InFlightTracker>,
 }
 
-/// Issue #147: project_root の Mutex が poison しても、内部値は単純な Option<String> なので
-/// safe に取り出せる。poison_error.into_inner() で guard を取り出して使い続ける。
-/// 上位呼び出し側はこのヘルパを使うことで以降の root 切替が永続失敗する状態を避けられる。
-pub fn lock_project_root_recover<'a>(
-    m: &'a Mutex<Option<String>>,
-) -> MutexGuard<'a, Option<String>> {
-    match m.lock() {
-        Ok(g) => g,
-        Err(poisoned) => {
-            tracing::warn!("[state] project_root mutex poisoned — recovering");
-            poisoned.into_inner()
-        }
-    }
+/// Issue #739: `ArcSwapOption<String>` から現在の project_root を `Option<String>` として
+/// 取り出す。lock-free な atomic load なので async コンテキストから呼んでも安全。
+///
+/// 旧 `lock_project_root_recover` (poison recovery 付き `MutexGuard` 返却) の後継。
+/// 呼び出し側が `MutexGuard` ではなく値そのものを欲しがるパターン (`.clone()` /
+/// `.unwrap_or_default()`) しか存在しなかったため、値を直接返す形に簡素化している。
+pub fn current_project_root(slot: &ArcSwapOption<String>) -> Option<String> {
+    slot.load().as_deref().map(|s| s.clone())
 }
 
+/// Issue #739: project_root を更新する。`Some("")` のような空文字はそのまま保持する
+/// (空判定 / trim は呼び出し側の責務 — 旧 Mutex 実装と同じセマンティクス)。
+pub fn set_project_root(slot: &ArcSwapOption<String>, value: Option<String>) {
+    slot.store(value.map(Arc::new));
+}
 
 impl AppState {
     pub fn new() -> Self {
@@ -48,7 +51,7 @@ impl AppState {
         // 同一 counter で wait_idle できる。
         let team_hub = TeamHub::with_inflight(pty_registry.clone(), pty_inflight.clone());
         Self {
-            project_root: Mutex::new(None),
+            project_root: ArcSwapOption::from(None),
             pty_registry,
             team_hub,
             pty_inflight,

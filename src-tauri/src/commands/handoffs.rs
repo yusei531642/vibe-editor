@@ -62,6 +62,8 @@ pub struct HandoffCreateRequest {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct HandoffCheckpoint {
+    /// handoff checkpoint JSON の schema version。
+    /// Issue #739: 値は `commands::schema_version::HANDOFF_SCHEMA_VERSION` を SSOT とする。
     pub schema_version: u32,
     pub id: String,
     pub project_root: String,
@@ -320,7 +322,7 @@ pub async fn handoffs_create(
     let json_path = dir.join(format!("{id}.json"));
     let markdown_path = dir.join(format!("{id}.md"));
     let handoff = HandoffCheckpoint {
-        schema_version: 1,
+        schema_version: crate::commands::schema_version::HANDOFF_SCHEMA_VERSION,
         id,
         project_root: req.project_root,
         team_id: req.team_id,

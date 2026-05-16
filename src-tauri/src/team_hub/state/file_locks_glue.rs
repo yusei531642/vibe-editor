@@ -72,8 +72,14 @@ impl TeamHub {
         crate::team_hub::file_locks::peek(&s.file_locks, team_id, agent_id_filter, paths)
     }
 
-    /// team 内の全 lock 一覧 (将来の team_diagnostics 拡張 / UI 表示用)。
-    /// 現在は MCP API 経由の caller が居ないので `#[allow(dead_code)]`。
+    /// team 内の全 lock 一覧を返す。`file_locks::list_for_team` (pure 関数 + 単体テストあり) を
+    /// HubState の Mutex 越しに呼ぶ glue。
+    ///
+    /// Issue #739: 現状 production の呼び出し元は無いが、`#[allow(dead_code)]` を残す:
+    /// 依存先の `file_locks::list_for_team` は `file_locks` モジュールの公開 API 一覧に
+    /// 明記され単体テストも持つ「意図された primitive」であり、この glue が唯一の production
+    /// 配線ポイント。glue ごと削除すると `list_for_team` が連鎖的に dead code 化する。
+    /// team_diagnostics の lock 一覧 UI が実装され次第、本 method を配線して attr を外す。
     #[allow(dead_code)]
     pub async fn list_file_locks_for_team(
         &self,
@@ -110,16 +116,10 @@ impl TeamHub {
             .and_then(|m| m.get(role_id).cloned())
     }
 
-    /// renderer 側に dynamic_roles のスナップショットを渡せるようにする想定の hook。
-    /// 現状は未使用 (未来のチーム履歴永続化で使う)
-    #[allow(dead_code)]
-    pub async fn export_dynamic_roles(&self, team_id: &str) -> Vec<DynamicRole> {
-        self.get_dynamic_roles(team_id).await
-    }
-
     /// canvas 復元時に renderer 側 dynamic_roles をまとめて Hub に流し込むための入口。
     /// 既存をクリアしてから一括 insert する (team_id スコープ単位)。
-    #[allow(dead_code)]
+    /// Issue #513: `dynamic_role::replay_persisted_dynamic_roles_for_team` 経由で実際に
+    /// 呼ばれているため、Issue #739 で stale な `#[allow(dead_code)]` を除去した。
     pub async fn replace_dynamic_roles(&self, team_id: &str, roles: Vec<DynamicRole>) {
         let mut s = self.state.lock().await;
         let entry = s.dynamic_roles.entry(team_id.to_string()).or_default();

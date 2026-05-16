@@ -13,7 +13,11 @@ use tokio::fs;
 
 use crate::commands::team_history::HandoffReference;
 
-pub const TEAM_STATE_SCHEMA_VERSION: u32 = 1;
+/// TeamHub orchestration state JSON の現行 schema version。
+///
+/// Issue #739: 実体は `commands::schema_version` に集約した。本 re-export で旧 import パス
+/// (`commands::team_state::TEAM_STATE_SCHEMA_VERSION`) は維持される。
+pub use crate::commands::schema_version::TEAM_STATE_SCHEMA_VERSION;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]

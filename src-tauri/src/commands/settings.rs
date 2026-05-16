@@ -175,7 +175,10 @@ fn default_terminal_force_utf8() -> bool {
 // renderer 側 `DEFAULT_SETTINGS` と完全一致させる。新フィールド追加時は両方を同時に更新する。
 
 /// Issue #75 / #449 / #618: 現在のスキーマ版数。`shared.ts APP_SETTINGS_SCHEMA_VERSION` と同期。
-pub const APP_SETTINGS_SCHEMA_VERSION: u32 = 11;
+///
+/// Issue #739: 実体は `commands::schema_version` に集約した。本 re-export で旧 import パス
+/// (`commands::settings::APP_SETTINGS_SCHEMA_VERSION`) は維持される。
+pub use crate::commands::schema_version::SETTINGS_SCHEMA_VERSION as APP_SETTINGS_SCHEMA_VERSION;
 
 fn default_language() -> String {
     "ja".to_string()
@@ -291,39 +294,16 @@ pub async fn settings_load() -> Settings {
 ///   現行 schema へ前進させた後に save するので、通常 incoming は current と一致する。仮に
 ///   incoming のほうが古くても、disk のほうも同等以下であれば情報損失リスクは無い (= 同一バイナリ
 ///   の前進 migration として扱える)。
+///
+/// Issue #739: 上記の判定ロジックは `commands::schema_version::SchemaVersion::check_compat`
+/// に集約した。本関数は `settings.json` 用の `SchemaVersion` を渡す薄いラッパで、reject 条件
+/// (どの version 差で弾くか) は完全に共通 helper と一致する。
 pub(crate) fn check_schema_compat(
     disk_schema_version: Option<u32>,
     incoming_schema_version: Option<u32>,
 ) -> Result<(), CommandError> {
-    // case 1: 旧 build が新スキーマの disk を上書きしようとしている
-    if let Some(disk_v) = disk_schema_version {
-        if disk_v > APP_SETTINGS_SCHEMA_VERSION {
-            tracing::warn!(
-                disk_schema_version = disk_v,
-                current_schema_version = APP_SETTINGS_SCHEMA_VERSION,
-                "[settings_save] rejected: disk has newer schema than this build",
-            );
-            return Err(CommandError::validation(format!(
-                "settings.json was created by a newer vibe-editor (schema v{disk_v}, this build supports v{APP_SETTINGS_SCHEMA_VERSION}). \
-                 Update vibe-editor before saving settings to avoid losing newer fields."
-            )));
-        }
-    }
-    // case 2: renderer から未来バージョンが渡された
-    if let Some(incoming_v) = incoming_schema_version {
-        if incoming_v > APP_SETTINGS_SCHEMA_VERSION {
-            tracing::warn!(
-                incoming_schema_version = incoming_v,
-                current_schema_version = APP_SETTINGS_SCHEMA_VERSION,
-                "[settings_save] rejected: incoming settings declare future schema",
-            );
-            return Err(CommandError::validation(format!(
-                "Incoming settings declare a future schema (v{incoming_v}, this build supports v{APP_SETTINGS_SCHEMA_VERSION}). \
-                 Refusing to overwrite to avoid silent field loss."
-            )));
-        }
-    }
-    Ok(())
+    crate::commands::schema_version::SchemaVersion::SETTINGS
+        .check_compat(disk_schema_version, incoming_schema_version)
 }
 
 /// disk から既存 settings.json の `schema_version` だけを軽量に読み取る。

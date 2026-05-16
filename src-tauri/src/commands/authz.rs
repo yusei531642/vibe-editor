@@ -8,14 +8,19 @@
 //! cross-project leak が成立していた。
 //!
 //! 本 module は `app_install_vibe_team_skill` (#191 で実装済み) と同じ手順
-//! (`lock_project_root_recover` → `canonicalize` 両者比較) を `assert_active_project_root`
+//! (active project_root を読む → `canonicalize` 両者比較) を `assert_active_project_root`
 //! 1 関数に共通化し、A-2 / A-3 / A-8 で同じ防御を横展開できるようにする。
+//!
+//! Issue #739: active project_root の保持を `std::sync::Mutex<Option<String>>` から
+//! lock-free な `ArcSwapOption<String>` へ移したため、本 helper も `ArcSwapOption` を
+//! 受け取る形に追従する (deadlock 経路の構造的排除)。
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+
+use arc_swap::ArcSwapOption;
 
 use crate::commands::error::{CommandError, CommandResult};
-use crate::state::lock_project_root_recover;
+use crate::state::current_project_root;
 use crate::team_hub::TeamHub;
 
 /// 監査ログに raw path を出すときの clamp (制御文字を `?` に置換 + 240 文字で truncate)。
@@ -50,7 +55,7 @@ fn clamp_team_id_for_log(raw: &str) -> String {
 /// reject 時は `tracing::warn!` で active / 試行 path (clamp 済み) を audit log に残す。
 /// 戻り値は **canonicalize 後の active path** (caller が後続処理で使えるよう返す)。
 pub async fn assert_active_project_root(
-    project_root_lock: &Mutex<Option<String>>,
+    project_root_slot: &ArcSwapOption<String>,
     given: &str,
 ) -> CommandResult<PathBuf> {
     let trimmed = given.trim();
@@ -62,9 +67,7 @@ pub async fn assert_active_project_root(
         return Err(CommandError::authz("project_root is empty"));
     }
 
-    let active = lock_project_root_recover(project_root_lock)
-        .clone()
-        .unwrap_or_default();
+    let active = current_project_root(project_root_slot).unwrap_or_default();
     if active.trim().is_empty() {
         tracing::warn!(
             given = %clamp_for_log(given),
@@ -157,11 +160,11 @@ pub async fn assert_active_team(hub: &TeamHub, team_id: &str) -> CommandResult<(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
     use tempfile::tempdir;
 
-    fn make_lock(value: Option<String>) -> Mutex<Option<String>> {
-        Mutex::new(value)
+    /// Issue #739: テスト用の `ArcSwapOption<String>` を作る (旧 `Mutex<Option<String>>` の後継)。
+    fn make_lock(value: Option<String>) -> ArcSwapOption<String> {
+        ArcSwapOption::from(value.map(std::sync::Arc::new))
     }
 
     #[tokio::test]
