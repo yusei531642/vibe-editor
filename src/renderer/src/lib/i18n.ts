@@ -404,6 +404,9 @@ const ja: Dict = {
   'welcome.workspaceLabel': 'ワークスペース',
   'welcome.quickStart': 'クイックスタート',
   'welcome.quickStartTitle': 'よく使う操作',
+  // Issue #729: canvas-layout-helpers の language ベース hardcode を i18n.ts に移管
+  'canvas.agentCount': '{count} エージェント',
+  'canvas.orgAgentCount': '{organizationCount} 組織 / {agentCount} エージェント',
   // Issue #729: RoleProfilesSection の isJa 三項を i18n.ts に移管
   'settings.roles.title': 'ロール定義',
   'settings.roles.desc':
@@ -1118,6 +1121,9 @@ const en: Dict = {
   'welcome.workspaceLabel': 'Workspace',
   'welcome.quickStart': 'Quick start',
   'welcome.quickStartTitle': 'What you can do next',
+  // Issue #729: canvas-layout-helpers language-based hardcode moved into i18n.ts
+  'canvas.agentCount': '{count} agents',
+  'canvas.orgAgentCount': '{organizationCount} orgs / {agentCount} agents',
   // Issue #729: RoleProfilesSection inline isJa moved into i18n.ts
   'settings.roles.title': 'Role profiles',
   'settings.roles.desc':
