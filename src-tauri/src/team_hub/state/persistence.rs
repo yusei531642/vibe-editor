@@ -12,7 +12,13 @@ use super::hub_state::{TeamInfo, TeamTask};
 
 impl TeamHub {
     /// チームを active list に追加 (renderer の setupTeamMcp 経由)
-    pub async fn register_team(&self, team_id: &str, name: &str, project_root: Option<&str>) {
+    pub async fn register_team(
+        &self,
+        team_id: &str,
+        name: &str,
+        project_root: Option<&str>,
+        members: &[(String, String)],
+    ) {
         if team_id.is_empty() || team_id == "_init" {
             return;
         }
@@ -30,6 +36,20 @@ impl TeamHub {
 
         let mut s = self.state.lock().await;
         s.active_teams.insert(team_id.to_string());
+        // Issue #800: Canvas spawn 由来の初代 member (leader / worker) は
+        // `team_recruit` / `team_create_leader` の recruit grant 経路を通らないため、
+        // team 登録時に `(team_id, agent_id) -> role` の binding を事前 seed する。
+        // これで `resolve_pending_recruit` が既存 binding 経路でこれらの handshake を
+        // 許可する (#742 の binding 強制で初代 member が全 reject される回帰の修正)。
+        // `or_insert_with` で、handshake 成功や別経路で既に確立済みの binding は上書きしない。
+        for (agent_id, role) in members {
+            if agent_id.trim().is_empty() || role.trim().is_empty() {
+                continue;
+            }
+            s.agent_role_bindings
+                .entry((team_id.to_string(), agent_id.clone()))
+                .or_insert_with(|| role.clone());
+        }
         let team = s
             .teams
             .entry(team_id.to_string())
@@ -274,4 +294,46 @@ async fn load_persisted_dynamic_for_team(
         }
     }
     out
+}
+
+/// Issue #800: `register_team` が team member の `agent_role_bindings` を seed することの単体テスト。
+///
+/// PR #742 (Security) で handshake が「Hub 発行の recruit grant か既存 binding が必須」に
+/// 強化された結果、Canvas の team spawn で renderer が直接生成する初代 leader / worker
+/// (`leader-0-team-<id>` / `worker-N-team-<id>` 形式) が grant 経路を通らず全 reject される
+/// 回帰が発生した。`register_team` が member の binding を事前 seed することで、
+/// `resolve_pending_recruit` が既存 binding 経路でこれらを許可することを検証する。
+#[cfg(test)]
+mod register_team_binding_seed_tests {
+    use crate::pty::SessionRegistry;
+    use crate::team_hub::TeamHub;
+    use std::sync::Arc;
+
+    fn make_hub() -> TeamHub {
+        TeamHub::new(Arc::new(SessionRegistry::new()))
+    }
+
+    /// `register_team` で seed された team member は、recruit grant が無くても
+    /// handshake (`resolve_pending_recruit`) を通る。leader / worker いずれも対象。
+    #[tokio::test]
+    async fn register_team_seeds_member_bindings_so_handshake_passes_without_grant() {
+        let hub = make_hub();
+        let team_id = "team-800";
+        let members = [
+            ("leader-0-team-800".to_string(), "leader".to_string()),
+            ("worker-1-team-800".to_string(), "programmer".to_string()),
+        ];
+        hub.register_team(team_id, "Team 800", None, &members).await;
+
+        assert!(
+            hub.resolve_pending_recruit("leader-0-team-800", team_id, "leader")
+                .await,
+            "seeded leader should pass handshake without a recruit grant"
+        );
+        assert!(
+            hub.resolve_pending_recruit("worker-1-team-800", team_id, "programmer")
+                .await,
+            "seeded worker should pass handshake without a recruit grant"
+        );
+    }
 }
