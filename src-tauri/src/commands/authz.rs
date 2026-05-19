@@ -128,7 +128,7 @@ pub async fn assert_active_project_root(
 ///   区別しない recon 抑止の方針 (issue #601 案1)。
 /// - reject 時は clamp 済み team_id を log に残す。空 team_id は `warn!` (caller bug)、
 ///   active set 未登録は `debug!` — Issue #802: 復元された stale team の team-health
-///   poll 等で routine に発生するため WARN ノイズにしない。recon 抑止は generic message
+///   poll 等で routinely に発生するため WARN ノイズにしない。recon 抑止は generic message
 ///   側で担保しており log レベルとは独立。
 /// - 返却型は `()` (active 確認だけが目的、戻り値で team の詳細を返さない)。
 pub async fn assert_active_team(hub: &TeamHub, team_id: &str) -> CommandResult<()> {
@@ -149,7 +149,7 @@ pub async fn assert_active_team(hub: &TeamHub, team_id: &str) -> CommandResult<(
         let active_count = state.active_teams.len();
         drop(state);
         // Issue #802: active set 未登録は dismiss 済み / 復元された stale team を probe
-        // した想定内の結果で、起動時の team-health poll 等で routine に発生する。本物の
+        // した想定内の結果で、起動時の team-health poll 等で routinely に発生する。本物の
         // 異常用に WARN は温存し、ここは debug に下げて起動時ログのノイズを抑える。
         tracing::debug!(
             team_id = %clamp_team_id_for_log(team_id),
