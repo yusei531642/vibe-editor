@@ -466,6 +466,10 @@ pub struct CallContext {
 }
 
 impl TeamHub {
+    /// テスト専用コンストラクタ。production は in-flight tracker を共有する
+    /// `with_inflight` を使う (`AppState::new` 経由)。Issue #801: caller は
+    /// `#[cfg(test)]` モジュールのみのため test build 限定にし dead_code 警告を解消する。
+    #[cfg(test)]
     pub fn new(registry: Arc<SessionRegistry>) -> Self {
         Self::with_inflight(registry, crate::pty::InFlightTracker::new())
     }

@@ -109,6 +109,9 @@ pub struct LockResult {
 }
 
 impl LockResult {
+    /// `conflicts` が空でないかを返す partial-success 判定ヘルパー。Issue #801:
+    /// caller は `#[cfg(test)]` モジュールのみのため test build 限定にし dead_code 警告を解消する。
+    #[cfg(test)]
     pub fn has_conflicts(&self) -> bool {
         !self.conflicts.is_empty()
     }

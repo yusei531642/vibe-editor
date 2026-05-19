@@ -44,6 +44,12 @@ impl TemplateReport {
         self.findings.iter().any(|f| f.level == TemplateLevel::Deny)
     }
 
+    /// Warn レベル findings を抽出する (`warn_message` が使用)。`has_deny` / `deny_message`
+    /// (production 配線済み) の warn 版だが recruit 時の配線は未実装で、現状 caller は
+    /// `#[cfg(test)]` のみ。Issue #801: test build 限定にし dead_code 警告を解消する
+    /// (production で warn findings を通知する際は `warnings` / `warn_message` 双方の
+    /// `#[cfg(test)]` を外して配線する)。
+    #[cfg(test)]
     pub fn warnings(&self) -> Vec<&TemplateFinding> {
         self.findings
             .iter()
@@ -64,6 +70,9 @@ impl TemplateReport {
         )
     }
 
+    /// Warn レベル findings を 1 行メッセージに整形する。`warnings` と同じく現状は
+    /// `#[cfg(test)]` のみが使用 (Issue #801)。
+    #[cfg(test)]
     pub fn warn_message(&self) -> Option<String> {
         let parts: Vec<String> = self
             .warnings()
