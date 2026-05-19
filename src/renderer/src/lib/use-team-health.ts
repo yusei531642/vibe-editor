@@ -17,9 +17,17 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import type { TeamDiagnosticsMemberRow } from '../../../types/shared';
+import { CommandError } from './tauri-api/command-error';
 
 /** poll 間隔。CPU 負荷と "agent が止まったとき何秒以内に気づくか" のバランス。 */
 const POLL_INTERVAL_MS = 5_000;
+
+/**
+ * Issue #802: Rust 側 `assert_active_team` (`commands/authz.rs`) が非アクティブ team の
+ * reject に使う固定 message。recon 抑止のため存在/非存在を区別しない generic 文言で、
+ * authz テストでも pin されている安定値。team-health poll での想定内エラー判定に使う。
+ */
+const TEAM_NOT_ACTIVE_MESSAGE = 'team is not active or does not exist';
 
 interface Snapshot {
   /** agentId → 最新行 */
@@ -61,8 +69,15 @@ async function fetchOnce(teamId: string, entry: RegistryEntry): Promise<void> {
     entry.snapshot = { byAgentId, fetchedAt: Date.now() };
     notify(entry);
   } catch (err) {
-    // Hub 未起動など想定内エラーは warn にとどめる (UI は old snapshot で続行)。
-    console.warn('[team-health] diagnostics fetch failed:', err);
+    // Issue #802: "team is not active or does not exist" は、復元された stale team や
+    // dismiss 済み team を poll した想定内の結果。起動のたびに出る WARN ノイズを避ける
+    // ため debug 扱いにする。それ以外 (Hub 未起動・IPC 失敗等) は従来どおり warn。
+    // いずれの場合も UI は old snapshot で続行する。
+    if (err instanceof CommandError && err.message === TEAM_NOT_ACTIVE_MESSAGE) {
+      console.debug('[team-health] team not active, skipping poll:', teamId);
+    } else {
+      console.warn('[team-health] diagnostics fetch failed:', err);
+    }
   } finally {
     entry.inflight = false;
   }
