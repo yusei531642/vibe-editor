@@ -159,19 +159,20 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
      * 設計原則:
      *   1. surface 色相は #141823 系 (低彩度ダークブルーグレー)。Cyber Neon の
      *      ほぼ黒から青に少し振り、Acrylic 越しでも milky 化を防ぐ。
-     *   2. alpha は 0.22〜0.30 と低めに保つ。Glass の本質は「背景が透ける」こと
-     *      なので、白側 (rgba(255,255,255,0.2) 超) は明示的に禁止する。
+     *   2. surface alpha は ~0.50〜0.66。Acrylic 越しでも壁紙の白成分を覆える濃さを
+     *      保ちつつ「背景が透ける」ガラス感は残す。白側 (rgba(255,255,255,0.2) 超)
+     *      は明示的に禁止。値は tokens.css の [data-theme='glass'] と同期させる。
      *   3. accent は落ち着いたスカイブルー (#7AB8FF)。ネオン蛍光ではなく
      *      研磨ガラスのハイライト的な使い方。
      *   4. border / highlight は低 alpha の白系で控えめに。
      *   5. blur / saturate / brightness は tokens.css の `[data-theme='glass']`
-     *      で一元管理 (12px / 130% / 0.9)。
+     *      で一元管理 (12px / 120% / 0.7)。
      */
     bg: 'rgba(0, 0, 0, 0)',
-    bgPanel: 'rgba(20, 24, 35, 0.22)',
-    bgSidebar: 'rgba(18, 22, 32, 0.28)',
-    bgToolbar: 'rgba(16, 20, 28, 0.30)',
-    bgElev: 'rgba(28, 32, 44, 0.30)',
+    bgPanel: 'rgba(20, 24, 35, 0.52)',
+    bgSidebar: 'rgba(18, 22, 32, 0.55)',
+    bgToolbar: 'rgba(16, 20, 28, 0.55)',
+    bgElev: 'rgba(28, 32, 44, 0.66)',
     border: 'rgba(255, 255, 255, 0.10)',
     borderStrong: 'rgba(255, 255, 255, 0.16)',
     bgHover: 'rgba(255, 255, 255, 0.06)',
@@ -186,7 +187,7 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
     text: '#E6EAF5',
     textDim: '#A8B2C7',
     textMute: '#6B7587',
-    surfaceGlass: 'rgba(20, 24, 35, 0.22)',
+    surfaceGlass: 'rgba(20, 24, 35, 0.52)',
     focusRing: '0 0 0 2px rgba(122, 184, 255, 0.40)',
     monacoTheme: 'vs-dark'
   },

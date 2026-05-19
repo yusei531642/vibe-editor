@@ -508,17 +508,19 @@ samp,
    * 設計方針:
    *   - surface 色相は #141823 系 (低彩度のダークブルーグレー)。Cyber Neon の黒寄り
    *     から少し青に振り、Acrylic 越しでも milky 化しない。
-   *   - alpha は 0.22〜0.34 と低く保ち、壁紙 / 背後コンテンツが透けて「ガラス」
-   *     らしさが出るようにする。完全な白背景は使わない (rgba(255,255,255,0.2) 以上禁止)。
+   *   - surface alpha は ~0.50〜0.66。Acrylic 越しでも壁紙の白成分を覆い切れる濃さを
+   *     確保しつつ、壁紙が透けて「ガラス」らしさは残す。完全な白背景は使わない
+   *     (rgba(255,255,255,0.2) 以上禁止)。#709 で alpha を 0.22 系まで薄めた結果
+   *     milky 化が再発したため #803 で復元 (PR #445 の anti-milky 方針へ回帰)。
    *   - border / highlight は白系を低 alpha (0.10〜0.16) で。ネオン蛍光線ではなく
    *     研磨ガラス縁の控えめな反射として機能させる。
    *   - shadow は暗めに (rgba(0,0,0,0.18)) してパネルの浮きを足し腰高な印象に。
    */
   --bg: rgba(0, 0, 0, 0);
-  --bg-panel: rgba(20, 24, 35, 0.22);
-  --bg-sidebar: rgba(18, 22, 32, 0.28);
-  --bg-toolbar: rgba(16, 20, 28, 0.30);
-  --bg-elev: rgba(28, 32, 44, 0.30);
+  --bg-panel: rgba(20, 24, 35, 0.52);
+  --bg-sidebar: rgba(18, 22, 32, 0.55);
+  --bg-toolbar: rgba(16, 20, 28, 0.55);
+  --bg-elev: rgba(28, 32, 44, 0.66);
   --bg-hover: rgba(255, 255, 255, 0.06);
   --bg-active: rgba(255, 255, 255, 0.10);
   --border: rgba(255, 255, 255, 0.10);
@@ -546,7 +548,7 @@ samp,
   --surface-elev: var(--bg-elev);
   --surface-hover: var(--bg-hover);
   --surface-active: var(--bg-active);
-  --surface-glass: rgba(20, 24, 35, 0.22);
+  --surface-glass: rgba(20, 24, 35, 0.52);
   /* 半透明白 dot で acrylic 上でも視認可、暗めガラスでも視覚的に潰れない。 */
   --canvas-grid: rgba(255, 255, 255, 0.14);
   --focus-ring: 0 0 0 2px rgba(122, 184, 255, 0.40);
@@ -555,17 +557,18 @@ samp,
 
 /*
  * Glass テーマ専用オーバーライド。
- * - blur 12px / saturate 130% / brightness 0.9 で、過度なぼかしと壁紙の白成分増幅を避ける。
+ * - blur 12px / saturate 120% / brightness 0.7 で、Acrylic 越しの壁紙を暗化し
+ *   白成分の増幅を抑える (#803: #709 で 130% / 0.9 へ緩めた結果 milky 化したため復元)。
  * - glass-border / glass-highlight は白系の控えめ反射に統一 (旧シアン蛍光線を廃止)。
- * - layout tint も低 alpha のダークブルーグレーに揃え、card 等の半透明と二重で
+ * - layout tint はダークブルーグレーの中 alpha。card 等の半透明と二重で
  *   壁紙を暗化することで milky 化を防ぐ。
  */
 :root[data-theme='glass'] {
-  --glass-layout-tint: rgba(20, 24, 35, 0.32);
-  --glass-canvas-layout-tint: rgba(20, 24, 35, 0.22);
+  --glass-layout-tint: rgba(20, 24, 35, 0.58);
+  --glass-canvas-layout-tint: rgba(20, 24, 35, 0.44);
   --glass-blur: 12px;
-  --glass-saturate: 130%;
-  --glass-brightness: 0.9;
+  --glass-saturate: 120%;
+  --glass-brightness: 0.7;
   --glass-border: rgba(255, 255, 255, 0.10);
   --glass-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.06);
 }
