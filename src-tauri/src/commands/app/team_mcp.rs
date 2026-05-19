@@ -36,15 +36,15 @@ pub struct TeamHubInfo {
     pub bridge_path: String,
 }
 
-// Issue #336: 全フィールドが現状未参照だが、renderer から `app_setup_team_mcp` に
-// 渡される情報のシグネチャを保つため struct ごと保持する。将来 MCP 設定生成や
-// telemetry で読み出しを再開する想定。
+// Issue #336 / #800: `agent_id` と `role` は register_team の binding seed に使う。
+// `agent` フィールドは現状未参照だが、renderer から `app_setup_team_mcp` に渡される
+// 情報のシグネチャを保つため保持する (将来 MCP 設定生成や telemetry で読み出しを再開する想定)。
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub struct TeamMcpMember {
     pub agent_id: String,
     pub role: String,
+    #[allow(dead_code)]
     pub agent: String,
 }
 
@@ -146,7 +146,7 @@ pub async fn app_setup_team_mcp(
     project_root: String,
     team_id: String,
     team_name: String,
-    _members: Vec<TeamMcpMember>,
+    members: Vec<TeamMcpMember>,
 ) -> crate::commands::error::CommandResult<SetupTeamMcpResult> {
     let hub = state.team_hub.clone();
     // 念のため Hub を起動 (setup でも spawn 済み)
@@ -157,7 +157,15 @@ pub async fn app_setup_team_mcp(
             ..Default::default()
         });
     }
-    hub.register_team(&team_id, &team_name, Some(&project_root))
+    // Issue #800: Canvas spawn 由来の初代 leader / worker は recruit grant 経路を
+    // 通らないため、team setup 時に member の (agent_id, role) を binding として
+    // 事前 seed する。これにより handshake (resolve_pending_recruit) が既存 binding
+    // 経路でこれらを許可する。
+    let member_bindings: Vec<(String, String)> = members
+        .iter()
+        .map(|m| (m.agent_id.clone(), m.role.clone()))
+        .collect();
+    hub.register_team(&team_id, &team_name, Some(&project_root), &member_bindings)
         .await;
 
     // vibe-team Skill ファイルを best-effort で配置/同期する。

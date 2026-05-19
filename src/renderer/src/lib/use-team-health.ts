@@ -61,8 +61,11 @@ async function fetchOnce(teamId: string, entry: RegistryEntry): Promise<void> {
     entry.snapshot = { byAgentId, fetchedAt: Date.now() };
     notify(entry);
   } catch (err) {
-    // Hub 未起動など想定内エラーは warn にとどめる (UI は old snapshot で続行)。
-    console.warn('[team-health] diagnostics fetch failed:', err);
+    // Issue #802: team-health poll は best-effort。失敗 (Hub 未起動 / 復元された stale
+    // team の authz reject / IPC エラー等) はいずれも非致命的で、UI は old snapshot の
+    // まま継続する。起動のたびに復元 stale team の reject で WARN が出るノイズを避ける
+    // ため一律 debug にとどめる (devtools の debug レベルでは引き続き確認できる)。
+    console.debug('[team-health] diagnostics fetch failed:', err);
   } finally {
     entry.inflight = false;
   }

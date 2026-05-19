@@ -126,7 +126,10 @@ pub async fn assert_active_project_root(
 /// - 「空 team_id」「未登録 team_id」「正常な team_id」のうち最初の 2 つは同じ
 ///   `Authz("team is not active or does not exist")` で reject する。これは存在 / 非存在を
 ///   区別しない recon 抑止の方針 (issue #601 案1)。
-/// - reject 時は `tracing::warn!` で clamp 済み team_id を audit log に残す。
+/// - reject 時は clamp 済み team_id を log に残す。空 team_id は `warn!` (caller bug)、
+///   active set 未登録は `debug!` — Issue #802: 復元された stale team の team-health
+///   poll 等で 日常的に発生するため WARN ノイズにしない。recon 抑止は generic message
+///   側で担保しており log レベルとは独立。
 /// - 返却型は `()` (active 確認だけが目的、戻り値で team の詳細を返さない)。
 pub async fn assert_active_team(hub: &TeamHub, team_id: &str) -> CommandResult<()> {
     let trimmed = team_id.trim();
@@ -145,7 +148,10 @@ pub async fn assert_active_team(hub: &TeamHub, team_id: &str) -> CommandResult<(
         // `members` の中に過去の (= dismiss 済み) team_id が残っていても probe させない。
         let active_count = state.active_teams.len();
         drop(state);
-        tracing::warn!(
+        // Issue #802: active set 未登録は dismiss 済み / 復元された stale team を probe
+        // した想定内の結果で、起動時の team-health poll 等で 日常的に発生する。本物の
+        // 異常用に WARN は温存し、ここは debug に下げて起動時ログのノイズを抑える。
+        tracing::debug!(
             team_id = %clamp_team_id_for_log(team_id),
             active_count,
             "[authz] assert_active_team rejected: team_id not in active set"
