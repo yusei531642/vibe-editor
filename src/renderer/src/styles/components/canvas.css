@@ -183,7 +183,9 @@
 .canvas-btn--primary {
   background: var(--claude-brand, var(--accent));
   border-color: transparent;
-  color: var(--accent-foreground);
+  /* Issue #806: brand 背景は常に orange なので、`--accent-foreground` ではなく
+     brand 専用 foreground を使う。Glass テーマでも warm white が乗る。 */
+  color: var(--claude-brand-foreground, var(--accent-foreground));
 }
 .canvas-btn--primary:hover {
   background: var(--claude-brand-strong, var(--accent-hover));
@@ -308,7 +310,8 @@
   font-size: 9px;
   font-weight: 700;
   line-height: 1;
-  color: var(--accent-foreground);
+  /* Issue #806: brand 背景 (orange) に対する foreground は brand 専用を使う。 */
+  color: var(--claude-brand-foreground, var(--accent-foreground));
   background: var(--claude-brand, var(--accent));
   border-radius: 999px;
 }
