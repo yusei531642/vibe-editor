@@ -9,7 +9,7 @@
  * `deriveHealth` で算出して props で渡す。本コンポーネントは store も IPC も触らない。
  * 挙動・DOM・クラス名は元 `.canvas-agent-card__summary` ブロックと完全一致。
  */
-import { AlertTriangle, Clock, ClipboardList, Heart, HeartPulse, Inbox, Skull } from 'lucide-react';
+import { AlertTriangle, Clock, ClipboardList, Heart, HeartPulse, Skull } from 'lucide-react';
 import type { HealthState } from '../../../../lib/agent-health';
 import type { CardSummary as CardSummaryData } from '../../../../lib/agent-summary';
 
@@ -159,34 +159,12 @@ export function CardSummary({
           </span>
         </div>
       ) : null}
-      {/* Issue #509: 配送済みだが team_read で確認していない message の数。 */}
-      {/* 60s 超過で stalled クラスを追加して警告色に切り替える。 */}
-      {unreadInboxCount > 0
-        ? (() => {
-            const ageMs = hasHealthRow
-              ? health.oldestPendingInboxAgeMs ?? 0
-              : oldestUnreadDeliveredAt
-                ? Math.max(0, nowTick - new Date(oldestUnreadDeliveredAt).getTime())
-                : 0;
-            const stalled = hasHealthRow ? health.stalledInbound : ageMs >= 60_000;
-            const ageSec = Math.floor(ageMs / 1000);
-            return (
-              <div
-                className={
-                  'canvas-agent-card__summary-row canvas-agent-card__summary-row--unread' +
-                  (stalled ? ' canvas-agent-card__summary-row--unread-stalled' : '')
-                }
-                role="status"
-                title={t('inboxUnread.tooltip', { count: unreadInboxCount, ageSec })}
-              >
-                <Inbox size={11} strokeWidth={2} aria-hidden="true" />
-                <span className="canvas-agent-card__summary-text">
-                  {t('inboxUnread.label', { count: unreadInboxCount, ageSec })}
-                </span>
-              </div>
-            );
-          })()
-        : null}
+      {/*
+       * Issue #808: 配送済み未読 inbox の数を出していた行 (Issue #509) を撤去。
+       * 背後の `unreadInboxCount` / `oldestUnreadDeliveredAt` 追跡 (Issue #596 で
+       * race fix 済み) は store 側に残す: `stalledInbound` の警告色は health 行が
+       * 引き続き表示するため、tracking 自体は alive な観測情報として有効。
+       */}
     </div>
   );
 }
