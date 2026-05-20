@@ -172,6 +172,14 @@
   --claude-brand: #d97757;          /* terra cotta / Claude Orange */
   --claude-brand-strong: #c6613f;   /* hover / pressed */
   --claude-brand-glow: rgba(217, 119, 87, 0.12);
+  /*
+   * Issue #806: `--claude-brand` を background に使う CTA は、テーマに関わらず
+   * 同じ orange (#d97757) の上に乗る。`--accent-foreground` を文字色に流用すると、
+   * Glass テーマだけ `--accent` を青に振り替えている都合で foreground が暗色
+   * (`#0B0F1A`) になり、orange CTA に黒文字が乗って読みにくくなる。
+   * brand 専用 foreground を切り出して、CTA の文字色は常に warm white で固定する。
+   */
+  --claude-brand-foreground: #fffdf7;
   --claude-accent-blue: #3886e5;
   --claude-accent-violet: #7261e0;
 
