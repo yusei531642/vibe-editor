@@ -274,7 +274,7 @@ export function useRecruitListener(): void {
         // 追加されたばかりの worker が viewport の中央に来る。
         store.notifyRecruit(newNodeId);
         // Issue #342 Phase 1: addCard 完了 (= spawn 開始) 時点で Hub に受領通知を返す。
-        // handshake 完了は待たない (それは Hub 側 RECRUIT_TIMEOUT=30s 経路の責務)。
+        // handshake 完了は待たない (それは Hub 側 RECRUIT_TIMEOUT=60s 経路の責務、Issue #811)。
         // ack(true) だけでは MCP success にはならず、真の成功判定は handshake のみ。
         try {
           await ackRecruit(p.newAgentId, p.teamId, { ok: true });

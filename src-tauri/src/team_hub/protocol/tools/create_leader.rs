@@ -14,10 +14,10 @@ use std::time::Instant;
 use tauri::Emitter;
 use uuid::Uuid;
 
-use super::super::consts::RECRUIT_TIMEOUT;
+use super::super::consts::RECRUIT_HANDSHAKE_TIMEOUT_MAX_SECS;
 use super::super::permissions::{check_permission, Permission};
 use super::error::RecruitError;
-use super::recruit::recruit_ack_timeout;
+use super::recruit::{recruit_ack_timeout, recruit_handshake_timeout_duration};
 
 /// `team_create_leader` — 引き継ぎ用に同 teamId へ追加の leader カードを spawn する。
 ///
@@ -247,7 +247,9 @@ pub async fn team_create_leader(
     }
 
     // handshake 完了待機 (新 leader の MCP bridge が hub に繋いでくる)
-    match tokio::time::timeout(RECRUIT_TIMEOUT, rx).await {
+    // Issue #811: timeout 値は `recruit_handshake_timeout_duration()` (env override 込み、default 60s)。
+    let handshake_timeout = recruit_handshake_timeout_duration();
+    match tokio::time::timeout(handshake_timeout, rx).await {
         Ok(Ok(outcome)) => {
             let diag = hub.get_member_diagnostics(&outcome.agent_id).await;
             let recruited_at = diag
@@ -296,11 +298,14 @@ pub async fn team_create_leader(
                     json!({ "newAgentId": new_agent_id, "reason": "handshake_timeout" }),
                 );
             }
+            // Issue #811: env override で延長可能であることを message に明示する
+            // (運用者がログから即座に対処できるように)。
             Err(RecruitError {
                 code: "create_leader_handshake_timeout".into(),
                 message: format!(
-                    "new leader did not handshake within {}s",
-                    RECRUIT_TIMEOUT.as_secs()
+                    "new leader did not handshake within {}s (extend via VIBE_TEAM_RECRUIT_HANDSHAKE_TIMEOUT_SECS, max {}s)",
+                    handshake_timeout.as_secs(),
+                    RECRUIT_HANDSHAKE_TIMEOUT_MAX_SECS,
                 ),
                 phase: Some("handshake".into()),
                 elapsed_ms: Some(started.elapsed().as_millis() as u64),
