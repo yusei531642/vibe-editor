@@ -8,7 +8,25 @@
 
 use std::time::Duration;
 
-pub(crate) const RECRUIT_TIMEOUT: Duration = Duration::from_secs(30);
+/// Issue #811: spawn された agent の bridge.js が Hub に socket connect し
+/// `resolve_pending_recruit` で認証されるまで待つ上限時間。`team_recruit` /
+/// `team_create_leader` / `acquire_recruit_permit` で共有される。
+///
+/// 旧既定値は 30s だったが、Windows + Codex (npm shim 経由 codex.cmd → node 製
+/// bridge.js + ConPTY) の cold start で毎回 30s ギリギリ〜超過する観測があり
+/// (Claude は Rust 単体起動で十分高速、Codex は構造的に遅い)、`recruit_handshake_timeout`
+/// が 1 人目から再現するケースが報告されたため 60s に倍化した。`RECRUIT_ACK_TIMEOUT`
+/// が #574 で 5s → 15s に env override 化されたのと完全に対称な扱い。
+///
+/// 実行時値は環境変数 `VIBE_TEAM_RECRUIT_HANDSHAKE_TIMEOUT_SECS` で
+/// `1..=RECRUIT_HANDSHAKE_TIMEOUT_MAX_SECS` の範囲に上書き可能 (範囲外 / parse 失敗時は
+/// 本既定値にフォールバック)。参照は `protocol/tools/recruit.rs` の
+/// `recruit_handshake_timeout_duration()` ヘルパ経由。
+pub(crate) const RECRUIT_TIMEOUT: Duration = Duration::from_secs(60);
+/// Issue #811: `VIBE_TEAM_RECRUIT_HANDSHAKE_TIMEOUT_SECS` で受け付ける handshake timeout
+/// 秒数の上限。`RECRUIT_ACK_TIMEOUT_MAX_SECS` (= 600s = 10 分) と同値で揃え、
+/// 「ack 上限と handshake 上限は同じスケール」という不変式を維持する。
+pub(crate) const RECRUIT_HANDSHAKE_TIMEOUT_MAX_SECS: u64 = 600;
 /// Issue #576: 1 チームあたり「同時に renderer に投げる recruit 件数」の既定上限。
 /// `team_recruit` / `team_create_leader` の冒頭で `team_id` 単位 semaphore の permit を
 /// 取得し、permit 保持のまま emit → ack 受領 (or timeout) → cancel までを 1 クリティカル

@@ -23,10 +23,15 @@ const RECRUIT_GRACE_MAX_MS: u64 = 10_000;
 /// この時間内に来なければ「期限切れ token」として reject する。短い TTL により、
 /// `VIBE_TEAM_TOKEN` を盗んだ別プロセスが「子プロセスが起動に失敗して未 handshake のまま
 /// 放置された grant」を後から悪用できる窓を最小化する。
-/// recruit フロー自体の `RECRUIT_TIMEOUT` (30s) より長めの 60s を既定にして、
-/// recruit-timeout 側 cleanup の belt に対する suspenders として機能させる。
+///
+/// Issue #811: `RECRUIT_TIMEOUT` を 30s → 60s に倍化したのに伴い grant TTL も
+/// 60s → 120s に倍化し、「recruit-timeout 側 cleanup の belt に対する suspenders」
+/// 関係 (= TTL >= RECRUIT_TIMEOUT * 2) を維持する。grant が handshake 完了より先に
+/// 期限切れになると、agent が socket 接続しても `resolve_pending_recruit` で reject
+/// されて handshake が永遠に成立しなくなるため、TTL は常に RECRUIT_TIMEOUT より長く
+/// 保たなければならない。
 /// `VIBE_TEAM_HANDSHAKE_TTL_MS` で上書き可能 (parse 失敗 / 範囲外 / 未設定は既定値)。
-const HANDSHAKE_GRANT_TTL_DEFAULT_MS: u64 = 60_000;
+const HANDSHAKE_GRANT_TTL_DEFAULT_MS: u64 = 120_000;
 /// TTL の許容上限。これより大きい env 値は無効として既定値に丸める
 /// (TTL を実質無効化するような巨大値の誤設定 / 改ざんを防ぐ)。
 const HANDSHAKE_GRANT_TTL_MAX_MS: u64 = 300_000;
@@ -94,7 +99,7 @@ pub struct RecruitAckOutcome {
 ///
 /// - `ack`: renderer から `app_recruit_ack` invoke が来たら resolve される短期 (5s) 待機用
 /// - `handshake`: spawn された agent が socket / pipe で handshake を済ませると resolve される
-///   長期 (30s) 待機用 (既存 `resolve_pending_recruit` 経路)
+///   長期 (60s、Issue #811 で 30s → 60s) 待機用 (既存 `resolve_pending_recruit` 経路)
 pub struct PendingRecruitChannels {
     pub handshake: oneshot::Receiver<RecruitOutcome>,
     pub ack: oneshot::Receiver<RecruitAckOutcome>,
@@ -370,7 +375,7 @@ impl TeamHub {
     /// (= 起動時にのみ調整する想定)。
     ///
     /// permit 取得待ちが長引いて caller (MCP client) が timeout するのを避けるため、
-    /// 既存 `RECRUIT_TIMEOUT` (30s) と同水準の上限を取得側にも入れている。
+    /// 既存 `RECRUIT_TIMEOUT` (= 60s、Issue #811 で 30s → 60s に倍化) と同水準の上限を取得側にも入れている。
     ///
     /// 戻り値の `Err(String)` は **人間可読メッセージのみ** を含む (= `"recruit_permit_timeout"`
     /// 等の error code prefix は付けない)。caller 側で `RecruitError::new("recruit_permit_timeout",

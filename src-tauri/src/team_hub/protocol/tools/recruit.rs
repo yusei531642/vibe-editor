@@ -10,6 +10,7 @@ use uuid::Uuid;
 
 use super::super::consts::RECRUIT_ACK_TIMEOUT;
 use super::super::consts::RECRUIT_ACK_TIMEOUT_MAX_SECS;
+use super::super::consts::RECRUIT_HANDSHAKE_TIMEOUT_MAX_SECS;
 use super::super::consts::RECRUIT_POST_HANDSHAKE_LIVENESS_GRACE;
 use super::super::consts::RECRUIT_TIMEOUT;
 use super::super::dynamic_role::{validate_and_register_dynamic_role, DynamicRoleOutcome};
@@ -57,6 +58,46 @@ pub(super) fn recruit_ack_timeout() -> Duration {
             default = RECRUIT_ACK_TIMEOUT.as_secs(),
         );
         RECRUIT_ACK_TIMEOUT
+    }
+}
+
+/// Issue #811: `RECRUIT_TIMEOUT` の実行時値を env override 込みで返す。
+///
+/// `VIBE_TEAM_RECRUIT_HANDSHAKE_TIMEOUT_SECS` を u64 秒として読み出し、
+/// `1..=RECRUIT_HANDSHAKE_TIMEOUT_MAX_SECS` の範囲に収まっていればその Duration を返す。
+/// 未設定 / parse 失敗 / 0 / 上限超過のときは `RECRUIT_TIMEOUT` (= 60s) を返す。
+///
+/// 範囲外の値が渡された場合は `tracing::warn!` で notice する
+/// (= 「env を設定したのに反映されない」相談時に運用が即座に気付けるようにする)。
+///
+/// `team_recruit` / `team_create_leader` の双方の handshake 待機 (`tokio::time::timeout`)
+/// から参照される共通入口。`recruit_ack_timeout()` と完全に対称な実装。
+pub(super) fn recruit_handshake_timeout_duration() -> Duration {
+    let Ok(raw) = std::env::var("VIBE_TEAM_RECRUIT_HANDSHAKE_TIMEOUT_SECS") else {
+        return RECRUIT_TIMEOUT;
+    };
+    let trimmed = raw.trim();
+    let parsed = match trimmed.parse::<u64>() {
+        Ok(v) => v,
+        Err(_) => {
+            tracing::warn!(
+                "[teamhub] VIBE_TEAM_RECRUIT_HANDSHAKE_TIMEOUT_SECS={trimmed:?} could not be parsed as u64; \
+                 falling back to default {default}s",
+                default = RECRUIT_TIMEOUT.as_secs(),
+            );
+            return RECRUIT_TIMEOUT;
+        }
+    };
+    if (1..=RECRUIT_HANDSHAKE_TIMEOUT_MAX_SECS).contains(&parsed) {
+        Duration::from_secs(parsed)
+    } else {
+        tracing::warn!(
+            "[teamhub] VIBE_TEAM_RECRUIT_HANDSHAKE_TIMEOUT_SECS={parsed} is out of range \
+             (must be 1..={max}); falling back to default {default}s",
+            max = RECRUIT_HANDSHAKE_TIMEOUT_MAX_SECS,
+            default = RECRUIT_TIMEOUT.as_secs(),
+        );
+        RECRUIT_TIMEOUT
     }
 }
 
@@ -188,7 +229,8 @@ async fn verify_recruit_liveness(
 }
 
 /// team_recruit: 新メンバーをチームに追加する。Renderer に event::emit でカード生成を依頼し、
-/// その新 agentId が handshake してくるまで oneshot で待機 (timeout 30s)。
+/// その新 agentId が handshake してくるまで oneshot で待機 (timeout 60s、Issue #811 で 30s → 60s に倍化、
+/// `VIBE_TEAM_RECRUIT_HANDSHAKE_TIMEOUT_SECS` で 1..600s に調整可)。
 ///
 /// フラット引数の API:
 ///   - role_id (必須): snake_case 識別子。既存 (leader/hr/動的ロール) を再利用する場合はこれだけで OK。
@@ -209,7 +251,7 @@ pub async fn team_recruit(
     // permit 保持のまま emit → ack 受領 (or timeout) → cancel_pending_recruit までを
     // 1 クリティカルセクションに包むため、関数末尾まで `_permit` で束ねて Drop で自動解放。
     // 取得待ちが長引いて caller (MCP client) が timeout するのを避けるため、permit 取得側にも
-    // `RECRUIT_TIMEOUT` (30s) と同水準の上限が掛かっている。
+    // `RECRUIT_TIMEOUT` (= 60s、Issue #811 で 30s → 60s に倍化) と同水準の上限が掛かっている。
     let _permit = match hub.acquire_recruit_permit(&ctx.team_id).await {
         Ok(p) => p,
         Err(msg) => {
@@ -504,7 +546,7 @@ pub async fn team_recruit(
     }
 
     // Issue #342 Phase 1 (1.11): 環境変数 `VIBE_TEAM_DISABLE_RECRUIT_ACK=1` で旧 fire-and-forget
-    // 動作にフォールバック (ack 待ちをスキップしていきなり handshake 30s 待機)。緊急ロールバック用。
+    // 動作にフォールバック (ack 待ちをスキップしていきなり handshake 待機 = Issue #811 で 60s)。緊急ロールバック用。
     let disable_ack = std::env::var("VIBE_TEAM_DISABLE_RECRUIT_ACK").as_deref() == Ok("1");
 
     if !disable_ack {
@@ -592,7 +634,9 @@ pub async fn team_recruit(
     }
 
     // handshake 完了を待つ (Issue #342 Phase 1: ack 成功後のみ到達。disable_ack=1 では従来通り即座に到達)
-    match tokio::time::timeout(RECRUIT_TIMEOUT, rx).await {
+    // Issue #811: timeout 値は `recruit_handshake_timeout_duration()` (env override 込み、default 60s)。
+    let handshake_timeout = recruit_handshake_timeout_duration();
+    match tokio::time::timeout(handshake_timeout, rx).await {
         Ok(Ok(outcome)) => {
             verify_recruit_liveness(
                 hub,
@@ -676,11 +720,14 @@ pub async fn team_recruit(
                 );
             }
             // Issue #342 Phase 1: 構造化エラー化
+            // Issue #811: env override で延長可能であることを message に明示する
+            // (運用者がログから即座に対処できるように)。
             Err(RecruitError::new(
                 "recruit_handshake_timeout",
                 format!(
-                    "agent did not handshake within {}s",
-                    RECRUIT_TIMEOUT.as_secs()
+                    "agent did not handshake within {}s (extend via VIBE_TEAM_RECRUIT_HANDSHAKE_TIMEOUT_SECS, max {}s)",
+                    handshake_timeout.as_secs(),
+                    RECRUIT_HANDSHAKE_TIMEOUT_MAX_SECS,
                 ),
             )
             .with_phase("handshake")
@@ -692,17 +739,18 @@ pub async fn team_recruit(
 #[cfg(test)]
 mod tests {
     use super::{
-        parse_wait_policy, recruit_ack_timeout, DEFAULT_WAIT_POLICY, RECRUIT_ACK_TIMEOUT,
-        RECRUIT_ACK_TIMEOUT_MAX_SECS,
+        parse_wait_policy, recruit_ack_timeout, recruit_handshake_timeout_duration,
+        DEFAULT_WAIT_POLICY, RECRUIT_ACK_TIMEOUT, RECRUIT_ACK_TIMEOUT_MAX_SECS,
+        RECRUIT_HANDSHAKE_TIMEOUT_MAX_SECS, RECRUIT_TIMEOUT,
     };
     use serde_json::json;
     use std::sync::Mutex;
     use std::time::Duration;
 
-    /// `VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS` はプロセス global な env var なので、
+    /// `VIBE_TEAM_RECRUIT_*_TIMEOUT_SECS` はプロセス global な env var なので、
     /// 境界値テストを並列に走らせると set / unset が交差して flaky になる。
-    /// テスト間で直列化するための Mutex。`std::env::set_var` の unsafe 化に巻き込まれない
-    /// よう、テスト中は guard を必ず保持する。
+    /// ack / handshake どちらの境界値テストでも共通の Mutex で直列化する。
+    /// `std::env::set_var` の unsafe 化に巻き込まれないよう、テスト中は guard を必ず保持する。
     static ENV_GUARD: Mutex<()> = Mutex::new(());
 
     fn with_env<F: FnOnce()>(value: Option<&str>, f: F) {
@@ -713,6 +761,16 @@ mod tests {
         }
         f();
         std::env::remove_var("VIBE_TEAM_RECRUIT_ACK_TIMEOUT_SECS");
+    }
+
+    fn with_handshake_env<F: FnOnce()>(value: Option<&str>, f: F) {
+        let _g = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        match value {
+            Some(v) => std::env::set_var("VIBE_TEAM_RECRUIT_HANDSHAKE_TIMEOUT_SECS", v),
+            None => std::env::remove_var("VIBE_TEAM_RECRUIT_HANDSHAKE_TIMEOUT_SECS"),
+        }
+        f();
+        std::env::remove_var("VIBE_TEAM_RECRUIT_HANDSHAKE_TIMEOUT_SECS");
     }
 
     #[test]
@@ -797,5 +855,80 @@ mod tests {
         with_env(Some("not-a-number"), || {
             assert_eq!(recruit_ack_timeout(), RECRUIT_ACK_TIMEOUT);
         });
+    }
+
+    // ---------- Issue #811: handshake timeout env override 境界値テスト ----------
+    //
+    // `recruit_handshake_timeout_duration()` は `recruit_ack_timeout()` と完全に
+    // 対称な実装。同じ範囲・同じフォールバック挙動を持つことを 1:1 で確認する。
+
+    /// `VIBE_TEAM_RECRUIT_HANDSHAKE_TIMEOUT_SECS=0` は default にフォールバック。
+    #[test]
+    fn handshake_timeout_zero_falls_back_to_default() {
+        with_handshake_env(Some("0"), || {
+            assert_eq!(recruit_handshake_timeout_duration(), RECRUIT_TIMEOUT);
+        });
+    }
+
+    /// 下限 1 はそのまま採用される。
+    #[test]
+    fn handshake_timeout_lower_bound_one_is_accepted() {
+        with_handshake_env(Some("1"), || {
+            assert_eq!(
+                recruit_handshake_timeout_duration(),
+                Duration::from_secs(1)
+            );
+        });
+    }
+
+    /// 上限 600 はそのまま採用される。
+    #[test]
+    fn handshake_timeout_upper_bound_is_accepted() {
+        with_handshake_env(Some("600"), || {
+            assert_eq!(
+                recruit_handshake_timeout_duration(),
+                Duration::from_secs(RECRUIT_HANDSHAKE_TIMEOUT_MAX_SECS)
+            );
+        });
+    }
+
+    /// 上限 + 1 (= 601) は範囲外なので default にフォールバック。
+    #[test]
+    fn handshake_timeout_just_above_upper_bound_falls_back_to_default() {
+        with_handshake_env(Some("601"), || {
+            assert_eq!(recruit_handshake_timeout_duration(), RECRUIT_TIMEOUT);
+        });
+    }
+
+    /// 巨大値 (= 約 31 年) も範囲外なので default にフォールバック。
+    /// クランプを忘れると pending が事実上永久に残る事故になるため明示確認。
+    #[test]
+    fn handshake_timeout_extreme_value_falls_back_to_default() {
+        with_handshake_env(Some("999999999"), || {
+            assert_eq!(recruit_handshake_timeout_duration(), RECRUIT_TIMEOUT);
+        });
+    }
+
+    /// 未設定なら default (= `RECRUIT_TIMEOUT` = 60s)。
+    #[test]
+    fn handshake_timeout_unset_returns_default() {
+        with_handshake_env(None, || {
+            assert_eq!(recruit_handshake_timeout_duration(), RECRUIT_TIMEOUT);
+        });
+    }
+
+    /// parse 失敗 (非 u64 文字列) も default にフォールバック。
+    #[test]
+    fn handshake_timeout_garbage_value_falls_back_to_default() {
+        with_handshake_env(Some("not-a-number"), || {
+            assert_eq!(recruit_handshake_timeout_duration(), RECRUIT_TIMEOUT);
+        });
+    }
+
+    /// 新 default が想定どおり 60s であることを明示するピン留めテスト。
+    /// 値を別の数値に動かすときは Issue #811 のコメント / 通知メッセージも同時に更新する。
+    #[test]
+    fn handshake_timeout_default_is_60s() {
+        assert_eq!(RECRUIT_TIMEOUT, Duration::from_secs(60));
     }
 }
