@@ -75,7 +75,7 @@ The built-in editor, git diff, file tree, and session history exist to support t
 
 The fastest path: grab the latest Windows installer from the [Releases](https://github.com/yusei531642/vibe-editor/releases/latest) page.
 
-1. Download `vibe-editor-Setup-1.3.1.exe` (or the latest version listed there)
+1. Download `vibe-editor-Setup-1.6.3.exe` (or the latest version listed there)
 2. Run it. Install is **one-click silent** — no setup wizard — and auto-launches vibe-editor on finish.
 3. Future updates are **fully silent**: the built-in auto-updater pulls new releases from GitHub in the background and restarts the app without any dialogs.
 
@@ -165,7 +165,7 @@ Three-tab sidebar:
 
 ### Polish
 
-- 5 themes — `claude-dark` (default) / `claude-light` / `dark` / `midnight` / `light`
+- 6 themes — `claude-dark` (default) / `claude-light` / `dark` / `light` / `midnight` / `glass`
 - 3 density modes — `compact` / `normal` / `comfortable`
 - Japanese-first typography (Notion JP style — Yu Gothic stack, 1.75 line-height, kerning)
 - Acrylic / Mica window effects on Windows 11
