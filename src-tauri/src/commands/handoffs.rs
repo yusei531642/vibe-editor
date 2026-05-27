@@ -201,7 +201,7 @@ pub fn handoff_reference_of(handoff: &HandoffCheckpoint) -> HandoffReference {
 
 fn markdown_list(items: &[String]) -> String {
     if items.is_empty() {
-        "- 未記録\n".to_string()
+        "- (none)\n".to_string()
     } else {
         items
             .iter()
