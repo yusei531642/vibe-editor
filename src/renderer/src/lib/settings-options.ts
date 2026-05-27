@@ -77,7 +77,7 @@ export const TERMINAL_FONT_PRESETS: { label: string; value: string }[] = [
   {
     // Issue #346: 既定。Powerline / Devicons / Material Icons の glyph を持つ
     // Nerd Font 版を同梱しているため、Starship / oh-my-posh 系で icon が tofu にならない。
-    label: 'JetBrains Mono Nerd Font ★ (推奨)',
+    label: 'JetBrains Mono Nerd Font ★',
     value:
       "'JetBrainsMono Nerd Font Mono', 'JetBrains Mono Variable', 'Cascadia Mono', 'Cascadia Code', Consolas, 'Lucida Console', 'Segoe UI Symbol', monospace"
   },
