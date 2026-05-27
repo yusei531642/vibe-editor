@@ -1,4 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, useCallback } from 'react';
+import type { TerminalWarning } from '../../../types/shared';
 import { useSettings } from '../lib/settings-context';
 import { useT } from '../lib/i18n';
 import { useXtermInstance } from '../lib/use-xterm-instance';
@@ -214,6 +215,24 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     const initialMessageRef = useRef(initialMessage);
     initialMessageRef.current = initialMessage;
 
+    // Issue #818: Rust 側から structured (i18n key + params) で来る warning を
+    // 現在言語で評価して banner 文字列を返す。空 requested / 空 fallback は i18n の
+    // `terminal.cwd.unsetLabel` で言語に応じた placeholder (`(未設定)` / `(unset)`) に
+    // 置き換えてから本文 key へ展開する。
+    const formatTerminalWarning = useCallback(
+      (warning: TerminalWarning): string => {
+        const unsetLabel = t('terminal.cwd.unsetLabel');
+        const params: Record<string, string> = {};
+        for (const [k, v] of Object.entries(warning.params)) {
+          params[k] = v === '' ? unsetLabel : v;
+        }
+        const prefix = t('terminal.cwd.warningPrefix');
+        const body = t(warning.messageKey, params);
+        return body ? `${prefix} ${body}` : '';
+      },
+      [t]
+    );
+
     // callbacks は毎レンダー更新されるので ref で安定化
     const callbacksRef = useRef<PtySessionCallbacks>({
       onStatus,
@@ -221,7 +240,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       onExit,
       onSessionId,
       onUserInput,
-      onSpawnError
+      onSpawnError,
+      formatTerminalWarning
     });
     callbacksRef.current = {
       onStatus,
@@ -229,7 +249,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       onExit,
       onSessionId,
       onUserInput,
-      onSpawnError
+      onSpawnError,
+      formatTerminalWarning
     };
 
     // --- 共通の write ヘルパ (closure で ptyIdRef を読む) ---

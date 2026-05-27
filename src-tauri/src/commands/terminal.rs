@@ -7,6 +7,7 @@ mod codex_instructions;
 pub(crate) mod command_validation;
 mod paste_image;
 
+use crate::pty::session::TerminalWarning;
 use crate::pty::{spawn_session, SpawnOptions, UserWriteOutcome};
 use crate::state::AppState;
 use crate::team_hub::inject::build_chunks;
@@ -76,7 +77,9 @@ pub struct TerminalCreateResult {
     pub id: Option<String>,
     pub error: Option<String>,
     pub command: Option<String>,
-    pub warning: Option<String>,
+    /// Issue #818: warning を structured (i18n key + params) で返す。renderer 側で
+    /// `t(messageKey, params)` 評価。旧実装は日本語ハードコード String を返していた。
+    pub warning: Option<TerminalWarning>,
     /// Issue #271: attachIfExists により既存 PTY に接続した場合 true。新規 spawn 時は None。
     pub attached: Option<bool>,
     /// Issue #285 follow-up: attach 経路で renderer に渡す既存 PTY の直近出力 snapshot。
@@ -415,8 +418,14 @@ pub async fn terminal_create(
     );
     tracing::debug!("[IPC] terminal_create (verbose) args={args:?} cwd={cwd}");
 
+    // Issue #818: warning は構造化 (i18n key + params) で renderer に渡す。
+    // ログには日本語/英語に依存しない key + params をそのまま記録する。
     if let Some(w) = &warning {
-        tracing::warn!("[terminal] {w}");
+        tracing::warn!(
+            "[terminal] cwd warning key={} params={:?}",
+            w.message_key,
+            w.params
+        );
     }
 
     // Issue #285: renderer が指定した id があれば採用 (event 名 `terminal:data:{id}` に

@@ -13,6 +13,7 @@ use crate::pty::scrollback::{new_scrollback, WriteBudget};
 use crate::{commands::terminal::command_validation, util::log_redact::redact_home};
 use anyhow::{anyhow, Result};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -23,6 +24,36 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
 use super::handle::{SessionHandle, TerminalExitInfo};
+
+/// Issue #818: ターミナル spawn 時の警告 (cwd フォールバック等) を renderer 側に
+/// 言語非依存で渡すための構造体。`message_key` は `src/renderer/src/lib/i18n.ts`
+/// に定義された key、`params` は `{requested}` / `{fallback}` 等の placeholder に流す値。
+///
+/// 旧実装は `format!("指定された作業ディレクトリが無効です…")` のように日本語ハードコード
+/// した文字列を返しており、`Issue #729` で `isJa ?` 三項を `t()` に統一しても、Rust 側で
+/// 組み立てた文字列が JP のまま EN ユーザーへ届く取り残しになっていた。
+///
+/// `#[serde(rename_all = "camelCase")]` で TS 側 `TerminalWarning` (camelCase) と
+/// wire format を一致させる。`params` は `Display` 可能な値を `String` 化してから入れる
+/// (空文字 `""` は renderer 側で言語に応じた placeholder に置換する余地を残す)。
+#[derive(Serialize, Debug, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalWarning {
+    pub message_key: String,
+    pub params: std::collections::BTreeMap<String, String>,
+}
+
+impl TerminalWarning {
+    fn new(message_key: &str, params: &[(&str, &str)]) -> Self {
+        Self {
+            message_key: message_key.to_string(),
+            params: params
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                .collect(),
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct SpawnOptions {
@@ -42,8 +73,20 @@ pub struct SpawnOptions {
 }
 
 /// `cwd` の検証 (旧 resolveValidCwd と同等)。
-/// 無効なら fallback → カレントディレクトリ。warning メッセージも返す。
-pub fn resolve_valid_cwd(requested: &str, fallback: Option<&str>) -> (String, Option<String>) {
+/// 無効なら fallback → カレントディレクトリ。warning は structured (i18n key + params) で返す。
+///
+/// Issue #818: warning を `TerminalWarning { messageKey, params }` 形式で返すよう変更。
+/// 旧実装は `format!("指定された作業ディレクトリが無効です…")` の日本語ハードコードを
+/// 返しており Issue #729 取り残しになっていた。
+///
+/// 戻り値 `params.requested` は requested が空文字の場合も空文字のまま渡し、renderer の
+/// `t()` 評価時に i18n key 側で言語に応じた placeholder (例: "(未設定)" / "(unset)") を
+/// 持つ別キー (`*.unset` suffix) に切り替える設計。本関数では言語に依存する文字列を一切
+/// 生成しない。
+pub fn resolve_valid_cwd(
+    requested: &str,
+    fallback: Option<&str>,
+) -> (String, Option<TerminalWarning>) {
     let is_dir = |p: &str| !p.is_empty() && Path::new(p).is_dir();
     if is_dir(requested) {
         return (requested.to_string(), None);
@@ -52,14 +95,9 @@ pub fn resolve_valid_cwd(requested: &str, fallback: Option<&str>) -> (String, Op
         if is_dir(fb) {
             return (
                 fb.to_string(),
-                Some(format!(
-                    "指定された作業ディレクトリが無効です: {} → {} で起動します",
-                    if requested.is_empty() {
-                        "(未設定)"
-                    } else {
-                        requested
-                    },
-                    fb
+                Some(TerminalWarning::new(
+                    "terminal.cwd.invalidFallbackToHome",
+                    &[("requested", requested), ("fallback", fb)],
                 )),
             );
         }
@@ -67,18 +105,11 @@ pub fn resolve_valid_cwd(requested: &str, fallback: Option<&str>) -> (String, Op
     let cwd = std::env::current_dir()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| ".".to_string());
-    (
-        cwd.clone(),
-        Some(format!(
-            "作業ディレクトリが無効です: {} → プロセス既定の {} で起動します",
-            if requested.is_empty() {
-                "(未設定)"
-            } else {
-                requested
-            },
-            cwd
-        )),
-    )
+    let warning = TerminalWarning::new(
+        "terminal.cwd.invalidFallbackToProcessDefault",
+        &[("requested", requested), ("fallback", &cwd)],
+    );
+    (cwd, Some(warning))
 }
 
 #[derive(Debug, Clone)]
@@ -515,4 +546,88 @@ pub(crate) fn maybe_inject_windows_utf8_init(
     writer.write_all(init)?;
     writer.flush()?;
     Ok(Some(init))
+}
+
+#[cfg(test)]
+mod resolve_valid_cwd_tests {
+    //! Issue #818: warning が日本語ハードコード文字列ではなく structured な
+    //! `TerminalWarning` (i18n key + params) で返ることを保証するテスト。
+
+    use super::{resolve_valid_cwd, TerminalWarning};
+
+    fn tempdir() -> tempfile::TempDir {
+        tempfile::tempdir().expect("tempdir")
+    }
+
+    #[test]
+    fn returns_requested_when_valid_no_warning() {
+        let td = tempdir();
+        let path = td.path().to_string_lossy().into_owned();
+        let (cwd, warning) = resolve_valid_cwd(&path, None);
+        assert_eq!(cwd, path);
+        assert!(warning.is_none(), "valid cwd should not produce a warning");
+    }
+
+    #[test]
+    fn falls_back_to_fallback_and_returns_structured_warning() {
+        let td = tempdir();
+        let fb = td.path().to_string_lossy().into_owned();
+        let (cwd, warning) = resolve_valid_cwd("/definitely/does/not/exist/vibe", Some(&fb));
+        assert_eq!(cwd, fb);
+        let w: TerminalWarning = warning.expect("expected structured warning");
+        assert_eq!(w.message_key, "terminal.cwd.invalidFallbackToHome");
+        assert_eq!(
+            w.params.get("requested").map(String::as_str),
+            Some("/definitely/does/not/exist/vibe")
+        );
+        assert_eq!(w.params.get("fallback").map(String::as_str), Some(fb.as_str()));
+    }
+
+    #[test]
+    fn empty_requested_passes_through_as_empty_param() {
+        // Issue #818: Rust 側は "(未設定)" のような言語固定文字列を埋めない。
+        // 空文字 `""` を renderer に渡し、`terminal.cwd.unsetLabel` で言語側
+        // placeholder へ置換させる。
+        let td = tempdir();
+        let fb = td.path().to_string_lossy().into_owned();
+        let (_, warning) = resolve_valid_cwd("", Some(&fb));
+        let w = warning.expect("expected warning when requested empty + fallback used");
+        assert_eq!(w.params.get("requested").map(String::as_str), Some(""));
+    }
+
+    #[test]
+    fn invalid_requested_and_invalid_fallback_falls_back_to_process_default() {
+        let (cwd, warning) = resolve_valid_cwd(
+            "/definitely/does/not/exist/vibe",
+            Some("/also/not/exists/vibe"),
+        );
+        let w = warning.expect("expected warning when both invalid");
+        assert_eq!(w.message_key, "terminal.cwd.invalidFallbackToProcessDefault");
+        assert_eq!(
+            w.params.get("requested").map(String::as_str),
+            Some("/definitely/does/not/exist/vibe")
+        );
+        assert_eq!(w.params.get("fallback").map(String::as_str), Some(cwd.as_str()));
+    }
+
+    #[test]
+    fn warning_serializes_to_camel_case() {
+        // Issue #818: TS 側 `TerminalWarning` (camelCase) と wire format を一致させる。
+        let td = tempdir();
+        let fb = td.path().to_string_lossy().into_owned();
+        let (_, warning) = resolve_valid_cwd("/no/such/path", Some(&fb));
+        let w = warning.expect("warning");
+        let json = serde_json::to_string(&w).expect("serialize");
+        assert!(
+            json.contains("\"messageKey\""),
+            "expected camelCase messageKey, got {json}"
+        );
+        assert!(
+            json.contains("terminal.cwd.invalidFallbackToHome"),
+            "expected i18n key in payload, got {json}"
+        );
+        // params keys are passed as-is from Rust callsite (`requested` / `fallback`).
+        assert!(json.contains("\"requested\""), "params.requested missing in {json}");
+        assert!(json.contains("\"fallback\""), "params.fallback missing in {json}");
+    }
 }

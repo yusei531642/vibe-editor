@@ -12,7 +12,8 @@
 import { describe, it, expect } from 'vitest';
 import type {
   TerminalCreateOptions,
-  TerminalCreateResult
+  TerminalCreateResult,
+  TerminalWarning
 } from '../../../../types/shared';
 
 describe('Issue #271: TerminalCreateOptions HMR fields', () => {
@@ -103,5 +104,40 @@ describe('Issue #285 follow-up: TerminalCreateResult.replay (attach 経路 scrol
       replay: ''
     };
     expect(r.replay).toBe('');
+  });
+});
+
+describe('Issue #818: TerminalCreateResult.warning は structured (i18n key + params)', () => {
+  it('warning は messageKey + params の構造化型を受け取れる', () => {
+    const warning: TerminalWarning = {
+      messageKey: 'terminal.cwd.invalidFallbackToHome',
+      params: {
+        requested: '/tmp/missing',
+        fallback: '/Users/me/project'
+      }
+    };
+    const r: TerminalCreateResult = {
+      ok: true,
+      id: 'pty-warn',
+      warning
+    };
+    expect(r.warning?.messageKey).toBe('terminal.cwd.invalidFallbackToHome');
+    expect(r.warning?.params.requested).toBe('/tmp/missing');
+  });
+
+  it('warning は null も undefined も許容される', () => {
+    const r1: TerminalCreateResult = { ok: true, id: 'a' };
+    const r2: TerminalCreateResult = { ok: true, id: 'b', warning: null };
+    expect(r1.warning).toBeUndefined();
+    expect(r2.warning).toBeNull();
+  });
+
+  it('warning.params は任意の文字列 key を持てる', () => {
+    const warning: TerminalWarning = {
+      messageKey: 'terminal.cwd.invalidFallbackToProcessDefault',
+      params: { requested: '', fallback: '/tmp' }
+    };
+    expect(warning.params.requested).toBe('');
+    expect(warning.params.fallback).toBe('/tmp');
   });
 });

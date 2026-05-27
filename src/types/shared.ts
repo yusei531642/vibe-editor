@@ -968,16 +968,34 @@ export interface TerminalCreateOptions {
   codexInstructions?: string;
 }
 
+/**
+ * Issue #818: ターミナル spawn 時の警告 (cwd フォールバック等) を Rust 側で
+ * structured (i18n key + params) で返すための型。renderer の `t()` で評価して表示する。
+ * 旧実装は Rust 側で日本語ハードコードした文字列を返していたため、英語ユーザーにも
+ * JP 文字列が出る Issue #729 取り残しになっていた。
+ *
+ * - `messageKey`: `terminal.cwd.invalidFallbackToHome` 等の i18n.ts キー
+ * - `params`: `{requested}` / `{fallback}` 等の placeholder に流す値 (Rust 側で
+ *   "(未設定)" のようなフォールバック表現は使わず、空文字なら "" を渡して renderer
+ *   側で言語に応じた placeholder を選ぶ余地を残す)
+ */
+export interface TerminalWarning {
+  messageKey: string;
+  params: Record<string, string>;
+}
+
 export interface TerminalCreateResult {
   ok: boolean;
   id?: string;
   error?: string;
   command?: string;
   /**
-   * 致命的ではない警告メッセージ(例: 設定された cwd が無効でフォールバックした、等)。
-   * UI 側で status ライン / トースト / terminal に表示する用途。
+   * 致命的ではない警告(例: 設定された cwd が無効でフォールバックした、等)。
+   * Issue #818: Rust 側で日本語ハードコードしていた warning を i18n key + params
+   * の構造化に変更。UI 側で `t(messageKey, params)` で評価し、status ライン /
+   * トースト / terminal バナーに表示する。
    */
-  warning?: string;
+  warning?: TerminalWarning | null;
   /**
    * Issue #271: `attachIfExists` により既存 PTY に接続した場合 true。
    * 新規 spawn の場合は false / undefined。renderer は新規 spawn 時にだけ

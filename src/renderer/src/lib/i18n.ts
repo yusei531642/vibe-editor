@@ -566,6 +566,18 @@ const ja: Dict = {
   'terminal.pasteImageFailed': '画像保存失敗',
   'terminal.pasteException': 'ペースト例外',
 
+  // ---------- Terminal cwd warning (Issue #818) ----------
+  // Rust 側 `resolve_valid_cwd` が無効 cwd で fallback したとき、warning を
+  // 日本語ハードコードせず i18n key + params で renderer に渡す (#729 取り残し対応)。
+  // - `{requested}`: 指定された cwd (空文字なら下記 `*.unsetLabel` を埋める)
+  // - `{fallback}` : フォールバック先 (project root か process default)
+  'terminal.cwd.warningPrefix': '[警告]',
+  'terminal.cwd.unsetLabel': '(未設定)',
+  'terminal.cwd.invalidFallbackToHome':
+    '指定された作業ディレクトリが無効です: {requested} → {fallback} で起動します',
+  'terminal.cwd.invalidFallbackToProcessDefault':
+    '作業ディレクトリが無効です: {requested} → プロセス既定の {fallback} で起動します',
+
   // ---------- Terminal context menu (Issue #356) ----------
   'terminal.ctxMenu.paste': '貼り付け',
   'terminal.ctxMenu.copySelection': '選択範囲をコピー',
@@ -1287,6 +1299,20 @@ const en: Dict = {
   // ---------- Terminal (paste errors) ----------
   'terminal.pasteImageFailed': 'Paste image failed',
   'terminal.pasteException': 'Paste exception',
+
+  // ---------- Terminal cwd warning (Issue #818) ----------
+  // Rust side `resolve_valid_cwd` returns a structured warning (i18n key + params)
+  // when the requested cwd is invalid and falls back to project root / process cwd.
+  // Previously Rust hardcoded a Japanese string which leaked through to EN users
+  // (Issue #729 leftover).
+  // - `{requested}`: the originally requested cwd (empty → use `*.unsetLabel`)
+  // - `{fallback}` : where we actually started (project root or process default)
+  'terminal.cwd.warningPrefix': '[warning]',
+  'terminal.cwd.unsetLabel': '(unset)',
+  'terminal.cwd.invalidFallbackToHome':
+    'The requested working directory is invalid: {requested} → starting in {fallback} instead',
+  'terminal.cwd.invalidFallbackToProcessDefault':
+    'Working directory is invalid: {requested} → starting in the process default {fallback} instead',
 
   // ---------- Terminal context menu (Issue #356) ----------
   'terminal.ctxMenu.paste': 'Paste',

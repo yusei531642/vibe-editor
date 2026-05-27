@@ -31,6 +31,6 @@ pub(crate) mod windows_resolve;
 // `TerminalExitInfo` (emit payload) と `InjectingGuard` (`begin_injecting` の戻り値型) は
 // `pub` のまま各サブモジュールに置く — 外部はパス参照しないため再エクスポート不要。
 pub use handle::{SessionHandle, UserWriteOutcome};
-pub use spawn::{resolve_valid_cwd, spawn_session, SpawnOptions};
+pub use spawn::{resolve_valid_cwd, spawn_session, SpawnOptions, TerminalWarning};
 
 pub(crate) use spawn::resolve_terminal_command_path_for_check;

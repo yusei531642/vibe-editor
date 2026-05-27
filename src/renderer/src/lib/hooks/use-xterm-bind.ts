@@ -22,7 +22,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
-import type { TerminalExitInfo } from '../../../../types/shared';
+import type { TerminalExitInfo, TerminalWarning } from '../../../../types/shared';
 import { computeUnscaledGrid } from '../compute-unscaled-grid';
 import { getXtermRuntimeCellSize } from '../get-xterm-runtime-cell-size';
 import type { CellSize } from '../measure-cell-size';
@@ -65,6 +65,14 @@ export interface PtySessionCallbacks {
    * 通常タブ等 recruit に紐付かない経路では未指定で OK (no-op)。
    */
   onSpawnError?: (error: string) => void;
+  /**
+   * Issue #818: Rust 側から structured で返ってきた warning (cwd フォールバック等) を
+   * 現在言語で評価して banner 文字列を作るためのコールバック。本フックは i18n.ts に
+   * 直接依存せず、`t(messageKey, params)` の評価を呼び元 (`TerminalView`) に委譲する。
+   * 戻り値が空文字 / undefined のときは banner を出さない。
+   * 未指定の場合はフォールバックで messageKey をそのまま表示する (debug 用)。
+   */
+  formatTerminalWarning?: (warning: TerminalWarning) => string;
 }
 
 export interface UseXtermBindOptions {
@@ -638,8 +646,17 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         ptyIdRef.current = res.id;
         // Issue #271: HMR remount で再 attach できるよう ptyId と世代番号を退避。
         cacheUpsert(skey, res.id, myGeneration);
+        // Issue #818: warning は Rust 側から `{ messageKey, params }` で来る。
+        // 表示文字列の組み立ては i18n を持つ呼び元 (TerminalView) に委ねる。
+        // formatTerminalWarning 未指定の経路 (tests 等) では messageKey 表示で fallback。
         if (res.warning) {
-          term.writeln(`\x1b[33m[警告] ${res.warning}\x1b[0m`);
+          const formatter = callbacksRef.current.formatTerminalWarning;
+          const formatted = formatter
+            ? formatter(res.warning)
+            : `${res.warning.messageKey} ${JSON.stringify(res.warning.params)}`;
+          if (formatted) {
+            term.writeln(`\x1b[33m${formatted}\x1b[0m`);
+          }
         }
         const attached = res.attached === true;
 
