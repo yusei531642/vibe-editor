@@ -31,8 +31,8 @@ skill を起動せずにコードを書き始めない。
 
 ### 1-2. Issue には必ずラベルを付ける
 - **ラベル無しの Issue は作成禁止**。
-- 種別ラベル (`bug` / `enhancement` / `refactor` / `docs` / `chore` 等) を最低 1 つ。
-- 領域ラベル (`area:rust` / `area:renderer` / `area:canvas` / `area:terminal` / `area:ci` 等) を最低 1 つ。
+- 種別ラベル (`bug` / `enhancement` / `refactor` / `documentation` 等) を最低 1 つ。
+- 領域ラベル (`rust` / `javascript` / `canvas` / `ui` / `settings` / `backend` / `i18n` / `a11y` / `performance` / `security` / `persistence` 等) を最低 1 つ。
 - 既存ラベル一覧は `gh label list` で確認。該当が無ければユーザーに相談してからラベルを新設する。
 
 ### 1-3. `main` への直接 push は **絶対禁止**

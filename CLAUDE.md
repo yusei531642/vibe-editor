@@ -16,7 +16,7 @@ Tauri ベースの Claude Code / Codex 専用エディタ (v1.4.x)
 - その後ブランチを切って修正 → PR を提出する (`Closes #<issue>` を本文に含める)。
 
 ### 2. Issue には必ずラベルを付ける
-- ラベル無しの Issue は作らない。種類 (`bug` / `enhancement` / `refactor` / `docs` 等) と領域 (`area:rust` / `area:renderer` / `area:canvas` 等) を最低 1 つずつ付ける。
+- ラベル無しの Issue は作らない。種類 (`bug` / `enhancement` / `refactor` / `documentation` 等) と領域 (`rust` / `javascript` / `canvas` / `ui` / `settings` / `backend` / `i18n` / `a11y` / `performance` / `security` / `persistence` 等) を最低 1 つずつ付ける。
 - 既存ラベルが合わない場合は先にラベルを作るか、ユーザーに確認する。
 
 ### 3. `main` への直接 push 禁止
