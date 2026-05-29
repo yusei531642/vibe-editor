@@ -1242,7 +1242,7 @@ const en: Dict = {
   'settings.section.voice.desc':
     'Direct your Leader by talking to an AI assistant via OpenAI Realtime API.',
   'settings.voice.beta.warning':
-    'This feature is in beta and has not been tested. Unexpected behavior, unstable connections, or misrecognition may occur. Please file feedback on GitHub Issues.',
+    'This feature is in beta and has not been tested. Unexpected behavior, unstable connections, or misrecognition may occur. Please share feedback on GitHub Issues.',
   'settings.voice.enabled.label': 'Enable voice direction',
   'settings.voice.apiKey.label': 'API key',
   'settings.voice.apiKey.placeholder': 'sk-...',

@@ -602,7 +602,7 @@ export function CanvasLayout(): JSX.Element {
         <div className="canvas-layout__stage">
           <Canvas actions={canvasActions} />
           {/* Issue #825: 音声指揮モード (Beta) のトグルボタン。
-              内部で voice.enabled / hasApiKey の 3 条件を確認し、満たさない場合は null を返す。
+              内部で voice.enabled / hasApiKey の 2 条件を確認し、満たさない場合は null を返す。
               Settings で enable した直後にも反映できるよう常時マウントしておく。
               spawn_team_preset の実体は CanvasLayout の applyPreset を id 経由で呼ぶ薄ラッパ。 */}
           <VoiceControlButton onSpawnTeamPreset={spawnTeamPresetById} />
