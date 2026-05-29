@@ -110,6 +110,59 @@ pub struct Settings {
     /// 既存ユーザーは renderer 側 v10→v11 migration で `true` が入る。
     #[serde(default = "default_terminal_force_utf8")]
     pub terminal_force_utf8: bool,
+    /// Issue #825: 音声指揮モード (Voice Direction Mode, Beta) のユーザー設定。
+    /// `api_key` は **入れない** (OS keyring 経由で保管、`commands::voice` の
+    /// `voice_set_api_key` / `voice_has_api_key` / `voice_clear_api_key` 経由のみアクセス)。
+    /// optional なので旧 settings.json (このフィールドが無い) を load しても問題ない。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice: Option<VoiceSettings>,
+}
+
+/// Issue #825: 音声指揮モード (Beta) のユーザー設定 mirror。
+/// shared.ts の `VoiceSettings` と camelCase で完全一致 (`apiKey` は両側とも持たない)。
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VoiceSettings {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub voice_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_device_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_device_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub toggle_shortcut: Option<String>,
+    /// shared.ts の literal union `'always' | 'bypass'` を String で受ける
+    /// (列挙系は migration 互換性のため Rust 側で enum 化しない方針に統一)。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmation_mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub has_shown_disclaimer: Option<bool>,
+}
+
+// VoiceSettings に `api_key` を持たない不変条件を保つため、誤って derive(Debug) で値を露出
+// しないよう Debug を手書きで stub する (= 何もデバッグ情報を含まない)。将来 api_key 以外の
+// 機微情報 (例: org_id) を持たせるときは、ここを更新して該当フィールドを `<REDACTED>` 化する。
+impl std::fmt::Debug for VoiceSettings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VoiceSettings")
+            .field("enabled", &self.enabled)
+            .field("model", &self.model)
+            .field("language", &self.language)
+            .field("voice_name", &self.voice_name)
+            // device id は機微ではないが、ハードウェア identifier なのでログ出さない
+            .field("input_device_id", &self.input_device_id.as_ref().map(|_| "<set>"))
+            .field("output_device_id", &self.output_device_id.as_ref().map(|_| "<set>"))
+            .field("toggle_shortcut", &self.toggle_shortcut)
+            .field("confirmation_mode", &self.confirmation_mode)
+            .field("has_shown_disclaimer", &self.has_shown_disclaimer)
+            .finish()
+    }
 }
 
 /// shared.ts `AgentConfig` を mirror。`cwd` / `color` は optional。
@@ -161,6 +214,8 @@ impl Default for Settings {
             file_tree_expanded: Some(HashMap::new()),
             file_tree_collapsed_roots: Some(Vec::new()),
             terminal_force_utf8: default_terminal_force_utf8(),
+            // Issue #825: voice は Beta 機能で opt-in なので default は None。
+            voice: None,
         }
     }
 }

@@ -1,0 +1,648 @@
+/* ===========================================================================
+ * Voice Direction Mode (Beta) — Issue #825
+ *
+ * Claude 公式風の見た目に寄せたコンポーネント CSS。
+ * - 1px hairline border (var(--border)) を基調、影は overlay (modal) のみ
+ * - radius: input/toggle 10px, button 8px, card 12px, modal 14px
+ * - アクセントは terra cotta (var(--accent)) を少面積で
+ * - select/radio/toggle は appearance:none で OS デフォルトを潰してカスタム描画
+ *
+ * 階層: Settings の Voice セクション / Canvas 右下の Voice ボタン / Modal 系
+ * =========================================================================== */
+
+/* ───────────── Voice Section (Settings) ───────────── */
+
+/* セクションヘッダ + Beta バッジ */
+.voice-section__header {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+
+.voice-section__header h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  /* 既存 .modal--settings .modal__section h3 (uppercase + muted) と整合する */
+  margin: 0;
+}
+
+.voice-beta-badge {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 7px;
+  background: var(--accent-tint);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.voice-section__beta-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 !important;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--warning, #d4a27f) 12%, transparent);
+  border-left: 2px solid var(--warning, #d4a27f);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+/* Toggle は `.mcp-toggle` (modal.css 側 slider 実装、Issue #825 で共通化) を流用する。 */
+
+/* フィールド 1 つ分のラベル */
+.voice-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.voice-field__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.voice-field__hint {
+  margin: 0 !important;
+  font-size: 12px;
+  color: var(--text-mute);
+  line-height: 1.55;
+}
+
+/* テキスト入力 / API キー入力 */
+.voice-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 12px;
+  background: var(--bg-panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font: 400 13.5px/1 var(--ui-font);
+  transition:
+    border-color 140ms var(--ease-out, ease),
+    box-shadow 160ms var(--ease-out, ease),
+    background 140ms var(--ease-out, ease);
+}
+
+.voice-input::placeholder {
+  color: var(--text-mute);
+}
+
+.voice-input:hover {
+  border-color: var(--border-strong);
+}
+
+.voice-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+.voice-input:disabled {
+  cursor: not-allowed;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--bg-panel) 60%, transparent);
+}
+
+/* API key masked 表示時のドット幅 */
+.voice-input--masked {
+  letter-spacing: 0.25em;
+  font-family: var(--mono-font);
+}
+
+/* shortcut input (clickable + capturing 状態) */
+.voice-input--shortcut {
+  font-family: var(--mono-font);
+  font-size: 12.5px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.voice-input--shortcut[data-capturing='true'] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+/* row: input + 隣接ボタン */
+.voice-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.voice-input-row .voice-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ボタン */
+.voice-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  background: var(--bg-panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font: 500 13px/1 var(--ui-font);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 140ms var(--ease-out, ease),
+    border-color 140ms var(--ease-out, ease),
+    color 140ms var(--ease-out, ease);
+}
+
+.voice-btn:hover:not(:disabled) {
+  background: var(--bg-elev);
+  border-color: var(--border-strong);
+}
+
+.voice-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.voice-btn--primary {
+  background: var(--accent);
+  color: var(--accent-foreground, #fff);
+  border-color: var(--accent);
+}
+
+.voice-btn--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.voice-btn--icon {
+  width: 36px;
+  padding: 0;
+}
+
+/* Custom select (chevron 自前) */
+.voice-select {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 280px;
+  max-width: 100%;
+  height: 36px;
+  padding: 0 36px 0 12px;
+  background-color: var(--bg-panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font: 400 13.5px/1 var(--ui-font);
+  cursor: pointer;
+  transition:
+    border-color 140ms var(--ease-out, ease),
+    box-shadow 160ms var(--ease-out, ease),
+    background 140ms var(--ease-out, ease);
+
+  /* lucide ChevronDown SVG (currentColor は使えないので #97958c 固定 = --text-mute) */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2397958c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 14px;
+}
+
+.voice-select:hover {
+  border-color: var(--border-strong);
+  background-color: var(--bg-elev);
+}
+
+.voice-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+.voice-select option {
+  background: var(--bg-panel);
+  color: var(--text);
+}
+
+/* Radio (card 風、選択中は accent ボーダー) */
+.voice-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.voice-radio {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition:
+    border-color 140ms var(--ease-out, ease),
+    background 140ms var(--ease-out, ease);
+}
+
+.voice-radio:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-elev);
+}
+
+.voice-radio--selected {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.voice-radio input[type='radio'] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0 0;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 999px;
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+  transition:
+    border-color 140ms var(--ease-out, ease),
+    background 140ms var(--ease-out, ease);
+}
+
+.voice-radio input[type='radio']:checked {
+  border-color: var(--accent);
+  background: var(--bg-panel);
+}
+
+.voice-radio input[type='radio']:checked::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+}
+
+.voice-radio input[type='radio']:focus-visible {
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+.voice-radio__body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.voice-radio__title {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text);
+}
+
+.voice-radio__hint {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-mute);
+}
+
+.voice-section__bypass-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 0 0 0 !important;
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--warning, #d4a27f) 14%, transparent);
+  border-left: 2px solid var(--warning, #d4a27f);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+/* API キーが既に保存されているときの「encrypted」ステータスストライプ */
+.voice-keyring-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 10px !important;
+  padding: 12px 14px;
+  background: var(--bg-active);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--border));
+  border-radius: 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.voice-keyring-notice__icon {
+  flex-shrink: 0;
+  color: var(--accent);
+  margin-top: 1px;
+}
+
+.voice-keyring-notice strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ───────────── Disclaimer modal (初回 enable 時) ───────────── */
+
+.voice-disclaimer-backdrop,
+.voice-confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.48);
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+  padding: 24px;
+  animation: voice-overlay-in 160ms var(--ease-out, ease);
+}
+
+@keyframes voice-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.voice-disclaimer-modal,
+.voice-confirm-modal {
+  width: min(440px, 100%);
+  max-height: min(80vh, 540px);
+  overflow: auto;
+  padding: 22px 24px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.32);
+  color: var(--text);
+  animation: voice-overlay-pop 200ms var(--ease-out, ease);
+}
+
+@keyframes voice-overlay-pop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.voice-disclaimer-modal h3,
+.voice-confirm-modal__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.voice-disclaimer-modal__body {
+  margin: 0 0 20px 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-dim);
+}
+
+.voice-disclaimer-modal__body p {
+  margin: 0 0 6px 0;
+}
+
+.voice-disclaimer-modal__footer,
+.voice-confirm-modal__footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.voice-confirm-modal__body {
+  margin: 0 0 16px 0;
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: var(--text);
+  white-space: pre-wrap;
+}
+
+.voice-confirm-modal__send {
+  background: color-mix(in srgb, var(--warning, #d4a27f) 80%, var(--accent)) !important;
+  border-color: transparent !important;
+  color: #1a1a1f !important;
+}
+
+.voice-confirm-modal__send:hover:not(:disabled) {
+  background: var(--warning, #d4a27f) !important;
+}
+
+/* ───────────── Canvas Voice Control Button ───────────── */
+
+.voice-control-root {
+  position: absolute;
+  right: 1.5rem;
+  bottom: 1.5rem;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  pointer-events: none;
+}
+
+.voice-control-root > * {
+  pointer-events: auto;
+}
+
+.voice-control-button {
+  position: relative;
+  width: 64px;
+  height: 64px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition:
+    transform 120ms var(--ease-out, ease),
+    background 160ms var(--ease-out, ease),
+    border-color 160ms var(--ease-out, ease),
+    box-shadow 220ms var(--ease-out, ease);
+  z-index: 2;
+}
+
+.voice-control-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+}
+
+.voice-control-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.voice-control-button.is-listening {
+  background: var(--accent);
+  color: var(--accent-foreground, #fff);
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 4px var(--accent-tint),
+    0 10px 24px rgba(0, 0, 0, 0.32);
+}
+
+.voice-control-button[data-status='error'] {
+  border-color: var(--danger, #cf3a3a);
+  color: var(--danger, #cf3a3a);
+}
+
+.voice-control-button__beta {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  padding: 2px 7px;
+  background: var(--accent);
+  color: var(--accent-foreground, #fff);
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+}
+
+/* Visualizer rings (CSS keyframes) */
+.voice-visualizer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 64px;
+  height: 64px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.voice-visualizer__ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  opacity: 0;
+}
+
+.voice-visualizer[data-status='listening'] .voice-visualizer__ring {
+  animation: voice-pulse 1.8s ease-out infinite;
+}
+
+.voice-visualizer[data-status='listening'] .voice-visualizer__ring--2 {
+  animation-delay: 0.6s;
+}
+
+.voice-visualizer[data-status='listening'] .voice-visualizer__ring--3 {
+  animation-delay: 1.2s;
+}
+
+.voice-visualizer[data-status='connecting'] .voice-visualizer__ring {
+  animation: voice-spin 2.4s linear infinite;
+  border-style: dashed;
+  opacity: 0.4;
+}
+
+@keyframes voice-pulse {
+  0% {
+    transform: scale(1);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(2);
+    opacity: 0;
+  }
+}
+
+@keyframes voice-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Inline trail (3 秒 hold) */
+.voice-control-trail {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+}
+
+.voice-control-trail__bar {
+  width: 100px;
+  height: 4px;
+  background: var(--border-strong);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.voice-control-trail__fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 100ms linear;
+}
+
+.voice-control-trail__cancel {
+  height: 26px;
+  padding: 0 10px;
+  font-size: 11.5px;
+  border-radius: 7px;
+}
+
+/* Error banner */
+.voice-control-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 280px;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--danger, #cf3a3a) 14%, transparent);
+  border-left: 2px solid var(--danger, #cf3a3a);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}

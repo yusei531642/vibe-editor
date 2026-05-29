@@ -20,6 +20,7 @@ import { CommandOptionsSection } from './settings/CommandOptionsSection';
 import { CustomAgentEditor } from './settings/CustomAgentEditor';
 import { McpSection } from './settings/McpSection';
 import { LogsSection } from './settings/LogsSection';
+import { VoiceSection } from './settings/VoiceSection';
 
 interface SettingsModalProps {
   open: boolean;
@@ -279,6 +280,8 @@ export function SettingsModal({
         return <RoleProfilesSection />;
       case 'mcp':
         return <McpSection draft={draft} update={update} />;
+      case 'voice':
+        return <VoiceSection draft={draft} update={update} />;
       case 'logs':
         return <LogsSection />;
       default:

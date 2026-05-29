@@ -395,25 +395,142 @@
   background: color-mix(in srgb, var(--warning, #d4a27f) 16%, transparent);
 }
 
-/* ---------- MCP タブ ---------- */
+/* ---------- 共通 slider toggle (Issue #825) ----------
+   `.mcp-toggle` は MCP セクション初出だが現在は共通利用。
+   構造 (caller 側 HTML):
+     <label class="mcp-toggle">
+       <input type="checkbox" />     ← visually-hidden、状態の source
+       <span class="mcp-toggle__track">     ← track (背景ピル)
+         <span class="mcp-toggle__thumb"/>  ← thumb (丸)
+       </span>
+       <span class="mcp-toggle__label">テキスト</span>
+     </label>
+   旧 caller (テキストだけの span を直書きしているもの) と互換させるため、
+   `.mcp-toggle__track` が存在しない場合は擬似要素 fallback に切り替える。 */
 .mcp-toggle {
-  display: flex;
+  position: relative;
+  display: inline-flex;
   align-items: center;
   gap: 10px;
   cursor: pointer;
-  padding: 10px 12px;
-  background: var(--bg-active);
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  padding: 8px 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
   border-radius: 10px;
   font-size: 13.5px;
   color: var(--text);
   width: fit-content;
+  user-select: none;
+  transition:
+    background-color 140ms cubic-bezier(0.25, 1, 0.5, 1),
+    border-color 140ms cubic-bezier(0.25, 1, 0.5, 1);
 }
+
+.mcp-toggle:hover {
+  background: var(--bg-elev);
+  border-color: var(--border-strong);
+}
+
 .mcp-toggle input[type='checkbox'] {
+  /* visually-hidden: a11y のため tabbable は残し、見た目は完全 hide。 */
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+  margin: 0;
+}
+
+/* 明示構造版: span.mcp-toggle__track + span.mcp-toggle__thumb */
+.mcp-toggle__track {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  background: var(--border-strong);
+  border-radius: 999px;
+  flex-shrink: 0;
+  transition: background-color 160ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.mcp-toggle__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
   width: 16px;
   height: 16px;
-  cursor: pointer;
-  accent-color: var(--accent);
+  background: var(--text);
+  border-radius: 999px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition:
+    transform 200ms cubic-bezier(0.25, 1, 0.5, 1),
+    background-color 160ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.mcp-toggle input[type='checkbox']:checked ~ .mcp-toggle__track {
+  background: var(--accent);
+}
+
+.mcp-toggle input[type='checkbox']:checked ~ .mcp-toggle__track .mcp-toggle__thumb {
+  transform: translateX(16px);
+  background: var(--accent-foreground, #fff);
+}
+
+.mcp-toggle input[type='checkbox']:focus-visible ~ .mcp-toggle__track {
+  box-shadow: 0 0 0 3px var(--accent-tint);
+}
+
+.mcp-toggle input[type='checkbox']:disabled ~ .mcp-toggle__track {
+  opacity: 0.5;
+}
+
+.mcp-toggle:has(input[type='checkbox']:disabled) {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+/* 旧 caller 互換 fallback: .mcp-toggle 直下に input + (text only span) しかない場合、
+   擬似要素で track/thumb を描画する。新しい構造の caller が混じっても二重描画にならないよう、
+   .mcp-toggle__track が存在する場合は fallback を抑制する (:has() で判定)。 */
+.mcp-toggle:not(:has(.mcp-toggle__track))::before {
+  content: '';
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  width: 36px;
+  height: 20px;
+  background: var(--border-strong);
+  border-radius: 999px;
+  transition: background-color 160ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.mcp-toggle:not(:has(.mcp-toggle__track))::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: calc(14px + 2px); /* padding-left 14px + thumb の内側余白 2px */
+  width: 16px;
+  height: 16px;
+  margin-top: -8px;
+  background: var(--text);
+  border-radius: 999px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition:
+    transform 200ms cubic-bezier(0.25, 1, 0.5, 1),
+    background-color 160ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.mcp-toggle:not(:has(.mcp-toggle__track)):has(input[type='checkbox']:checked)::before {
+  background: var(--accent);
+}
+
+.mcp-toggle:not(:has(.mcp-toggle__track)):has(input[type='checkbox']:checked)::after {
+  transform: translateX(16px);
+  background: var(--accent-foreground, #fff);
+}
+
+.mcp-toggle:not(:has(.mcp-toggle__track)):has(input[type='checkbox']:focus-visible)::before {
+  box-shadow: 0 0 0 3px var(--accent-tint);
 }
 
 .mcp-steps {
@@ -584,6 +701,24 @@
     box-shadow 180ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Issue #825: select の chevron は OS デフォルトを潰してカスタム SVG にする。
+   全テーマ共通の `--text-mute` 系グレー (#97958c) でハードコード (currentColor は SVG data: URI で扱えない)。 */
+.modal--settings .modal__label select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 36px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2397958c' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 14px;
+  cursor: pointer;
+}
+
+.modal--settings .modal__label select option {
+  background: var(--bg-panel);
+  color: var(--text);
+}
+
 .modal--settings .modal__label input[type='text']:focus-visible,
 .modal--settings .modal__label input[type='number']:focus-visible,
 .modal--settings .modal__label select:focus-visible {
@@ -726,8 +861,18 @@
   cursor: pointer;
 }
 
-.modal--settings .mascot-card input[type='radio'] {
-  display: none;
+.modal--settings .mascot-card input[type='radio'],
+.modal--settings .theme-card input[type='radio'],
+.modal--settings .lang-card input[type='radio'],
+.modal--settings .density-card input[type='radio'] {
+  /* Issue #825: カード全体が click target になり accent dot が選択を示すので、
+     ネイティブ radio は visually-hidden する (a11y のため完全 hide ではなく不可視位置に保持)。 */
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+  width: 0;
+  height: 0;
+  margin: 0;
 }
 
 .modal--settings .mascot-card__preview {

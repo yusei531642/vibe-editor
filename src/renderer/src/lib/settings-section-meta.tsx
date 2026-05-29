@@ -1,6 +1,7 @@
 import {
   Bot,
   Code2,
+  Mic,
   Palette,
   Plug,
   ScrollText,
@@ -38,6 +39,7 @@ export const SECTION_ICON_TYPES: Record<string, LucideIcon> = {
   codex: Code2,
   roles: Users,
   mcp: Plug,
+  voice: Mic,
   logs: ScrollText
 };
 export function iconFor(id: SectionId): JSX.Element {
@@ -58,6 +60,7 @@ export const FIXED_SECTION_IDS = [
   'codex',
   'roles',
   'mcp',
+  'voice',
   'logs'
 ] as const;
 
