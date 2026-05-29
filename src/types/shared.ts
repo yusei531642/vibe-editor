@@ -151,6 +151,113 @@ export interface AppSettings {
    * 設定で false に opt-out できる。
    */
   terminalForceUtf8?: boolean;
+  /**
+   * Issue #825: 音声指揮モード (Voice Direction Mode, Beta) の設定。
+   * `apiKey` は OS keyring (Windows Credential Manager / macOS Keychain /
+   * Linux secret-service) に保管されるため **このオブジェクトには含めない**。
+   * Renderer は `voice_has_api_key` で存在のみ確認する。
+   */
+  voice?: VoiceSettings;
+}
+
+/** Issue #825: 音声指揮モードで「送信時の確認」を 2 段に分けるためのモード。 */
+export type VoiceConfirmationMode = 'always' | 'bypass';
+
+/**
+ * Issue #825: 音声指揮モード (Beta) のユーザー設定。
+ *
+ * `apiKey` は **入れない** (OS keyring 経由で保管、IPC で値を返さない)。
+ * すべて optional で、未設定なら Rust / Renderer 側のデフォルトを使う。
+ */
+export interface VoiceSettings {
+  /** voice 機能の opt-in トグル。default false (Beta 機能のため明示的に有効化が必要)。 */
+  enabled?: boolean;
+  /** OpenAI Realtime モデル ID。default 'gpt-realtime-2'。 */
+  model?: string;
+  /** transcription / 応答の主要言語。default 'ja'。 */
+  language?: string;
+  /** AI が話す声のプリセット (OpenAI Realtime の `voice` 値)。default 'alloy'。 */
+  voiceName?: string;
+  /** マイク `enumerateDevices()` の deviceId。空文字 / undefined はシステム既定。 */
+  inputDeviceId?: string;
+  /** スピーカー `enumerateDevices()` の deviceId。setSinkId 非対応環境では無視。 */
+  outputDeviceId?: string;
+  /** トグルショートカット (例: `'Ctrl+Shift+V'`)。空 / undefined ならボタンクリックのみ。 */
+  toggleShortcut?: string;
+  /** 送信時の確認モード。default 'always'。 */
+  confirmationMode?: VoiceConfirmationMode;
+  /** 初回 enable 時の disclaimer modal を表示済みかどうか。 */
+  hasShownDisclaimer?: boolean;
+}
+
+/** Issue #825: VoiceControlButton の status state machine。 */
+export type VoiceCommandStatus = 'idle' | 'connecting' | 'listening' | 'error';
+
+/**
+ * Issue #825: AI が `response.function_call_arguments.done` で発火した tool call。
+ * Renderer の最終 fail-safe (confirmation modal / inline trail) で参照する。
+ */
+/**
+ * Issue #825: Realtime API の function call が renderer で確定したときに pending 状態として
+ * 積む値。`name` で discriminated union にしてあり、TypeScript の narrowing で
+ * `arguments` の形を name から決定できる。`safetyLevel` は send_to_leader でのみ 'confirm'
+ * になる (= UI が confirmation modal を出す)。spawn_team_preset は常に 'safe'。
+ */
+export type VoicePendingFunctionCall =
+  | {
+      name: 'send_to_leader';
+      arguments: { text: string };
+      safetyLevel: 'safe' | 'confirm';
+    }
+  | {
+      name: 'spawn_team_preset';
+      arguments: { presetId: string };
+      safetyLevel: 'safe';
+    };
+
+/**
+ * Issue #825: `voice_realtime_create_session` の戻り値。
+ * Renderer はこの `ephemeralKey` を WebRTC SDP exchange の Bearer に乗せる。
+ * 永続化はせず、`useRef` で 1 session 限定で保持する。
+ */
+export interface VoiceRealtimeSession {
+  /** OpenAI 短寿命 client secret (ek_xxx)。~60s 有効。 */
+  ephemeralKey: string;
+  /** epoch ms。期限切れ後の toggle で自動再発行される。 */
+  expiresAt: number;
+  /** 実使用 model 名 (`gpt-realtime-2` 等)。 */
+  model: string;
+  /** OpenAI session id (sess_xxx)。debug / 監査用。 */
+  sessionId: string;
+  /** Rust 側で組み立てた system prompt。confirmationMode で内容が切り替わる。 */
+  instructions: string;
+}
+
+/**
+ * Issue #825: `voice_get_active_target` の戻り値 (該当無しは null)。
+ * Draft UI と AI への announcement に使う。
+ */
+export interface VoiceTarget {
+  teamId: string;
+  agentId: string;
+  /** UI 表示用ラベル (例: `"Leader (Claude / abcdef01)"`)。 */
+  displayName: string;
+  /** 通常 `"leader"`。`agent_role_bindings` から取得。 */
+  role: string;
+}
+
+/**
+ * Issue #825: `voice_send_to_leader` の戻り値。
+ * 失敗は `Err` ではなく `ok: false` で返す (UI 分岐用、`team_send_retry_inject` と同流儀)。
+ */
+export interface VoiceSendResult {
+  ok: boolean;
+  /** RFC3339 配達時刻 (= inject 成功時刻)。失敗時は undefined。 */
+  deliveredAt?: string;
+  /** `InjectError::code()` の安定 code 名前空間 (`inject_no_session` 等)。 */
+  reasonCode?: string;
+  /** 人間可読のエラーメッセージ。 */
+  error?: string;
 }
 
 export interface ClaudeCheckResult {

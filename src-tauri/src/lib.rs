@@ -263,6 +263,13 @@ pub fn run() {
             commands::terminal_tabs::terminal_tabs_clear,
             // ---- vibe-team Skill ----
             commands::vibe_team_skill::app_install_vibe_team_skill,
+            // ---- voice direction mode (Issue #825) ----
+            commands::voice::voice_set_api_key,
+            commands::voice::voice_clear_api_key,
+            commands::voice::voice_has_api_key,
+            commands::voice::voice_realtime_create_session,
+            commands::voice::voice_get_active_target,
+            commands::voice::voice_send_to_leader,
         ])
         .setup(|app| {
             info!(

@@ -44,6 +44,7 @@ import './styles/components/shell.css';
 import './styles/components/glass.css';
 import './styles/components/drag-region.css';
 import './styles/components/image-preview.css';
+import './styles/components/voice.css';
 
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('#root が見つかりません');

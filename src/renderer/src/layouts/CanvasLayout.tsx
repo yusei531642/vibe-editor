@@ -33,6 +33,7 @@ import type {
 } from '../../../types/shared';
 import { Canvas, type CanvasActions } from '../components/canvas/Canvas';
 import { CanvasSidebar } from '../components/canvas/CanvasSidebar';
+import { VoiceControlButton } from '../components/canvas/VoiceControlButton';
 import { Rail } from '../components/shell/Rail';
 import { Topbar } from '../components/shell/Topbar';
 import { AppMenuBar } from '../components/shell/AppMenuBar';
@@ -460,6 +461,41 @@ export function CanvasLayout(): JSX.Element {
     if (await confirm(message)) clear();
   };
 
+  /**
+   * Issue #825: 音声指揮の `spawn_team_preset` から呼ばれる薄ラッパ。
+   * BUILTIN_PRESETS を id で lookup して applyPreset へ転送する。
+   * AI から渡される id を信頼せず、見つからなければ `ok: false` を返して AI に feedback する。
+   */
+  const spawnTeamPresetById = useCallback(
+    async (presetId: string): Promise<{ ok: boolean; message?: string }> => {
+      const preset = BUILTIN_PRESETS.find((p) => p.id === presetId);
+      if (!preset) {
+        return {
+          ok: false,
+          message: `Unknown preset id: ${presetId}`
+        };
+      }
+      try {
+        await applyPreset(preset);
+        return {
+          ok: true,
+          message: `Team preset '${presetId}' spawned on the Canvas.`
+        };
+      } catch (err) {
+        return {
+          ok: false,
+          message: err instanceof Error ? err.message : String(err)
+        };
+      }
+    },
+    // applyPreset は closure で projectRoot / settings を参照するが、変わるたびに再生成すると
+    // VoiceControlButton 側で hook の deps が変わり session を切ってしまうので、依存は最小に保つ。
+    // applyPreset 自体は CanvasLayout 内のローカル関数で hook 化されていないため、本 useCallback
+    // からは現在の closure 経由でアクセスする (eslint-disable で intentional に依存を絞る)。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
   const canvasActions = useMemo<CanvasActions>(
     () => ({
       addClaude: () => addAgent('claude'),
@@ -559,6 +595,11 @@ export function CanvasLayout(): JSX.Element {
         )}
         <div className="canvas-layout__stage">
           <Canvas actions={canvasActions} />
+          {/* Issue #825: 音声指揮モード (Beta) のトグルボタン。
+              内部で voice.enabled / hasApiKey の 3 条件を確認し、満たさない場合は null を返す。
+              Settings で enable した直後にも反映できるよう常時マウントしておく。
+              spawn_team_preset の実体は CanvasLayout の applyPreset を id 経由で呼ぶ薄ラッパ。 */}
+          <VoiceControlButton onSpawnTeamPreset={spawnTeamPresetById} />
           {/* Canvas 右上に固定で配置するチーム起動 FAB。split button: 本体クリックで
               既定プリセットを 1-click 起動、caret でプリセット/最近使ったチームの
               popover を開く。canvas-header 撤廃 (#709) で消えていたのを復活。 */}

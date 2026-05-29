@@ -56,7 +56,8 @@ export function useSettingsNav(opts: UseSettingsNavOptions): UseSettingsNavResul
         // vibe-team MCP のセットアップ手順は「チーム」機能の一部なので同グループに収める。
         // 旧構成では MCP を独立グループにしていたが、グループラベル "MCP" と唯一の項目 "MCP" が
         // 同名で並び、サイドバー上で MCP が 2 行重複しているように見える UI バグを生んでいた。
-        { label: t('settings.section.group.team'), items: ['roles', 'mcp'] },
+        // Issue #825: 音声指揮 (Beta) は「チームを声で指揮する」機能なので team グループに置く。
+        { label: t('settings.section.group.team'), items: ['roles', 'mcp', 'voice'] },
         // Issue #326: 「その他」グループにログビューアを置く。リリース後の bug 報告で
         // 開発者ツールを開かずにユーザー側でエラーログを確認できるようにする。
         { label: t('settings.section.group.other'), items: ['logs'] }
