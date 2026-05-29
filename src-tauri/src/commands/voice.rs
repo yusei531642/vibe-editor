@@ -133,7 +133,8 @@ pub struct CreateSessionArgs {
 #[serde(rename_all = "camelCase")]
 pub struct VoiceRealtimeSession {
     pub ephemeral_key: String,
-    /// epoch seconds (OpenAI 仕様)。Renderer は ms に変換して表示する。
+    /// epoch ms (Renderer 契約)。OpenAI が返す epoch seconds を `create_session`
+    /// 内で ×1000 して詰める。JS の Date / Number と整合させるため。
     pub expires_at: i64,
     pub model: String,
     pub session_id: String,
@@ -226,12 +227,15 @@ pub async fn voice_realtime_create_session(
         })?
         .to_string();
 
-    let expires_at = parsed
+    // OpenAI は epoch seconds で返すので Renderer 契約 (epoch ms) に揃えるため ×1000。
+    // 0 / 取得失敗時はそのまま 0 を返す (UI 側は 0 を「不明」扱いにする想定)。
+    let expires_at_sec = parsed
         .get("client_secret")
         .and_then(|cs| cs.get("expires_at"))
         .and_then(|v| v.as_i64())
         .or_else(|| parsed.get("expires_at").and_then(|v| v.as_i64()))
         .unwrap_or(0);
+    let expires_at = expires_at_sec.saturating_mul(1000);
 
     let session_id = parsed
         .get("session")

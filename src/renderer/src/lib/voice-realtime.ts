@@ -70,6 +70,7 @@ export interface ToolResult {
 
 interface CreateSessionResponse {
   ephemeralKey: string;
+  /** epoch ms。Rust 側で OpenAI の epoch seconds を ×1000 して返す (`VoiceRealtimeSession`)。 */
   expiresAt: number;
   model: string;
   sessionId: string;
