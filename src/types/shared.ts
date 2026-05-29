@@ -194,10 +194,6 @@ export interface VoiceSettings {
 export type VoiceCommandStatus = 'idle' | 'connecting' | 'listening' | 'error';
 
 /**
- * Issue #825: AI が `response.function_call_arguments.done` で発火した tool call。
- * Renderer の最終 fail-safe (confirmation modal / inline trail) で参照する。
- */
-/**
  * Issue #825: Realtime API の function call が renderer で確定したときに pending 状態として
  * 積む値。`name` で discriminated union にしてあり、TypeScript の narrowing で
  * `arguments` の形を name から決定できる。`safetyLevel` は send_to_leader でのみ 'confirm'

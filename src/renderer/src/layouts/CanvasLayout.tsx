@@ -465,7 +465,18 @@ export function CanvasLayout(): JSX.Element {
    * Issue #825: 音声指揮の `spawn_team_preset` から呼ばれる薄ラッパ。
    * BUILTIN_PRESETS を id で lookup して applyPreset へ転送する。
    * AI から渡される id を信頼せず、見つからなければ `ok: false` を返して AI に feedback する。
+   *
+   * applyPreset は closure で projectRoot / settings を参照しているため、
+   * 直接 deps に入れると毎 render で identity が変わる。一方で
+   * useVoiceRealtime 側は ioRef.current 経由で callback を読むため identity 安定は
+   * 不要 (use-voice-realtime.ts の `ioRef.current = io` 参照)。
+   * stale closure を避けつつ session の lifecycle を乱さないため、
+   * ref で最新の applyPreset をブリッジする。
    */
+  const applyPresetRef = useRef(applyPreset);
+  useEffect(() => {
+    applyPresetRef.current = applyPreset;
+  });
   const spawnTeamPresetById = useCallback(
     async (presetId: string): Promise<{ ok: boolean; message?: string }> => {
       const preset = BUILTIN_PRESETS.find((p) => p.id === presetId);
@@ -476,7 +487,7 @@ export function CanvasLayout(): JSX.Element {
         };
       }
       try {
-        await applyPreset(preset);
+        await applyPresetRef.current(preset);
         return {
           ok: true,
           message: `Team preset '${presetId}' spawned on the Canvas.`
@@ -488,11 +499,6 @@ export function CanvasLayout(): JSX.Element {
         };
       }
     },
-    // applyPreset は closure で projectRoot / settings を参照するが、変わるたびに再生成すると
-    // VoiceControlButton 側で hook の deps が変わり session を切ってしまうので、依存は最小に保つ。
-    // applyPreset 自体は CanvasLayout 内のローカル関数で hook 化されていないため、本 useCallback
-    // からは現在の closure 経由でアクセスする (eslint-disable で intentional に依存を絞る)。
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
 
