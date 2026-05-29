@@ -76,7 +76,7 @@ trash = "5"
 # 越境に閉じ込めるため、Unix では SO_PEERCRED / getpeereid、Windows では
 # GetNamedPipeClientProcessId + OpenProcessToken + GetTokenInformation で peer SID を比較する。
 [target.'cfg(unix)'.dependencies]
-nix = { version = "0.29", features = ["socket", "user"] }
+nix = { version = "0.31", features = ["socket", "user"] }
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
