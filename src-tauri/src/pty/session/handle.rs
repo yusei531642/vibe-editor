@@ -17,7 +17,7 @@ use serde::Serialize;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use super::injecting_guard::InjectingGuard;
 use super::lock::{lock_poisoned, LockResult};
@@ -170,15 +170,25 @@ impl SessionHandle {
         }
     }
 
+    /// Issue #834: codex PTY を kill した後の broker stale state 掃除。
+    ///
+    /// `cleanup_stale_for_cwd` は `git rev-parse` / `tasklist` (Windows) / `kill` (Unix) の
+    /// 子プロセス spawn を伴い、broker プロセスがまだ生きている (`skipped_live > 0`) ときは
+    /// その終了を待つために 250ms sleep + 再 cleanup まで行う。これを呼び出し元
+    /// (exit watcher thread / `terminal_kill` async command / 旧 `kill_all`) で同期実行すると、
+    /// codex タブを閉じるたび caller が子プロセス spawn + 最大 250ms ぶんブロックされ、特に
+    /// 複数 codex タブを開いた状態でのアプリ終了が PTY 数ぶん直列に遅延していた (#834)。
+    ///
+    /// 掃除自体は best-effort (state file の後始末) なので、処理全体を detached background
+    /// thread に逃がして呼び出し元は即座に返す。スレッドの完了は待たない。
     pub fn cleanup_codex_broker_after_kill(&self) {
         if !self.is_codex {
             return;
         }
-        let summary = crate::pty::codex_broker::cleanup_stale_for_cwd(&self.cwd);
-        if summary.skipped_live > 0 {
-            std::thread::sleep(Duration::from_millis(250));
-            crate::pty::codex_broker::cleanup_stale_for_cwd(&self.cwd);
-        }
+        let cwd = self.cwd.clone();
+        std::thread::spawn(move || {
+            crate::pty::codex_broker::cleanup_stale_for_cwd_with_retry(&cwd);
+        });
     }
 }
 

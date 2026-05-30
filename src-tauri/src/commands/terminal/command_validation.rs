@@ -648,6 +648,37 @@ mod command_normalization_tests {
         assert_eq!(args, vec!["--foo", "bar baz"]);
     }
 
+    /// Issue #827: `normalize_terminal_command` を 2 回適用すると、1 回目で quote が剥がれた
+    /// 「スペースを含む実行ファイルパス」が 2 回目に空白で再分割されてしまう (= 非冪等)。
+    /// この性質が「spawn 境界で再 normalize してはいけない」根拠になっている。退行で
+    /// `prepare_spawn_command` に再 normalize が復活した場合に気付けるよう、根本原因を固定する。
+    #[test]
+    fn double_normalize_breaks_spaced_executable_path() {
+        // 1 回目: quote 付き inline command → quote 除去済みのスペース入りパス + args。
+        let (cmd1, args1) = normalize_terminal_command(
+            Some(r#""C:\Program Files\Codex\codex.exe" --foo "bar baz""#.to_string()),
+            None,
+        );
+        assert_eq!(cmd1, r"C:\Program Files\Codex\codex.exe");
+        assert_eq!(args1, vec!["--foo", "bar baz"]);
+
+        // 2 回目: 1 回目の出力をそのまま再投入すると、quote の無いスペース入りパスが
+        // 空白で割れて command が `C:\Program` に壊れる (allowlist basename が `program` になり
+        // spawn 境界で弾かれる = #827 の発生機序)。
+        let (cmd2, args2) =
+            normalize_terminal_command(Some(cmd1.clone()), Some(args1.clone()));
+        assert_eq!(cmd2, r"C:\Program", "二重 normalize は spaced path を壊す");
+        assert_eq!(
+            args2,
+            vec![r"Files\Codex\codex.exe", "--foo", "bar baz"],
+            "残りのパス断片が args 先頭に紛れ込む"
+        );
+        assert_ne!(
+            cmd2, cmd1,
+            "normalize は spaced path に対して非冪等 (= 二重適用してはならない)"
+        );
+    }
+
     #[test]
     fn defaults_to_claude_when_command_is_blank() {
         let (command, args) =
