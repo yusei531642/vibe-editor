@@ -55,19 +55,28 @@ pub struct ShouldWarnResult {
     pub last_warning_at: Option<String>,
 }
 
-/// 現在の UTC 時刻を ISO 8601 (ms 精度, 末尾 "Z") で返す。
+/// 現在の UTC 時刻を UNIX epoch からの ms で返す。
 ///
 /// `chrono` 等の追加依存を避けるため `std::time::SystemTime` のみで実装する。
-fn now_iso8601_ms() -> String {
-    // `SystemTime::now()` が UNIX_EPOCH より前になるのは時刻巻き戻しの異常時のみ。
-    // その場合は固定文字列を返してもよいが、cooldown 上は「未通知扱い」になるので問題ない。
+/// `SystemTime::now()` が UNIX_EPOCH より前になるのは時刻巻き戻しの異常時のみで、
+/// その場合は 0 を sentinel として返す。`decide_should_warn` はこの `now_ms <= 0` を
+/// 「clock 信頼不能」とみなし無条件に警告するため fail-safe に倒れる (Issue #832)。
+fn now_unix_ms() -> i64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     let dur = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default();
-    let secs = dur.as_secs() as i64;
-    let ms = dur.subsec_millis();
-    format_iso8601_utc(secs, ms)
+    // ~2.9 億年まで i64 ms はオーバーフローしないので as でよい。
+    dur.as_millis() as i64
+}
+
+/// 現在の UTC 時刻を ISO 8601 (ms 精度, 末尾 "Z") で返す。
+///
+/// 永続化ファイル (`updater-warned.json`) に書く human-readable 表現。
+/// 判定ロジックは round-trip を挟まず `now_unix_ms` を直接使うこと (Issue #832)。
+fn now_iso8601_ms() -> String {
+    let ms = now_unix_ms();
+    format_iso8601_utc(ms / 1000, (ms % 1000) as u32)
 }
 
 /// UNIX 秒 + ミリ秒から `YYYY-MM-DDTHH:MM:SS.sssZ` を組み立てる。
@@ -195,6 +204,43 @@ async fn read_warned_file() -> UpdaterWarnedFile {
     }
 }
 
+/// cooldown 判定の純粋ロジック。現在時刻 `now_ms` と直近警告 `last_ms` (どちらも UNIX ms)
+/// から「今 toast を出すべきか」を返す。I/O から切り離してテスト可能にするため分離している。
+///
+/// ## fail-safe 方針 (Issue #609 / #832)
+/// この警告は CDN 改竄 / 中間者攻撃の兆候をユーザーに気付かせるセキュリティ通知であり、
+/// 「疑わしければ警告」(fail-open) に倒すのが原則。判定は以下の OR:
+/// - `now_ms <= 0` → **実時刻が UNIX epoch 以前 = wall clock が信頼できない**。
+///   `now_unix_ms` は epoch より前のとき 0 を返す sentinel になっている。この値で
+///   cooldown を評価すると、一度 epoch 時刻 (`1970-01-01T00:00:00.000Z`, parse 後 `Some(0)`)
+///   が記録された後 `now_ms == prev == 0` の不動点に陥り警告が恒久抑止される。
+///   epoch 以前の時刻はそもそも改竄通知を抑止して良い根拠にならないので無条件に警告する。
+/// - `last_ms = None` (未通知 / ファイル破損) → 警告
+/// - `now_ms < prev` → **時刻逆転を検知**。system clock 巻き戻し、または
+///   `updater-warned.json` が未来 timestamp を持つ (破損 / 改竄) ケース。
+///   旧実装はここで `now_ms - prev` が負になり cooldown 内と誤判定して警告を恒久抑止していた。
+///   時刻が信頼できない以上 cooldown は無効とみなし、毎回警告する (改竄通知を抑止しない)。
+/// - 経過が `COOLDOWN_MS` 以上 → 通常の cooldown 満了で警告
+///
+/// 時刻が逆転している間は毎起動で警告が出るが、これは「clock が壊れている / 操作されている」
+/// 異常時の正しい挙動であり、セキュリティ (改竄通知) を anti-spam より優先する。
+/// clock が追いついて `now_ms >= prev` に戻れば通常の 24h cooldown に復帰する。
+///
+/// なお monotonic clock (`Instant`) は epoch を持たずプロセス再起動を跨げないため、
+/// 永続化される本 cooldown には使えない。wall-clock の異常検知が唯一の堅牢策。
+///
+/// オーバーフロー安全のため減算は `saturating_sub` を使う (旧 `now_ms - prev` は
+/// 極端な値で panic し得た)。
+fn decide_should_warn(now_ms: i64, last_ms: Option<i64>) -> bool {
+    // epoch 以前 (= now_unix_ms の sentinel 0、または巻き戻しで負) は clock 信頼不能 → 警告。
+    if now_ms <= 0 {
+        return true;
+    }
+    last_ms.map_or(true, |prev| {
+        now_ms < prev || now_ms.saturating_sub(prev) >= COOLDOWN_MS
+    })
+}
+
 /// renderer から「signature 系 error を検出したけど toast を出して良いか?」を問い合わせる IPC。
 ///
 /// `should_warn = true` のときだけ renderer は toast を表示する。
@@ -206,11 +252,9 @@ pub async fn app_updater_should_warn_signature() -> CommandResult<ShouldWarnResu
         .last_signature_warning_at
         .as_deref()
         .and_then(parse_iso8601_to_ms);
-    let now_ms = parse_iso8601_to_ms(&now_iso8601_ms()).unwrap_or(0);
-    let should_warn = match last_ms {
-        Some(prev) => now_ms - prev >= COOLDOWN_MS,
-        None => true,
-    };
+    // 文字列化 → 再パースの round-trip を挟まず現在 ms を直接取得する (Issue #832)。
+    let now_ms = now_unix_ms();
+    let should_warn = decide_should_warn(now_ms, last_ms);
     Ok(ShouldWarnResult {
         should_warn,
         last_warning_at: file.last_signature_warning_at,
@@ -277,5 +321,130 @@ mod tests {
         // 3 桁を超える精度は 3 桁に丸められる (parse 側だけで切り詰める)
         let parsed = parse_iso8601_to_ms("2026-05-10T00:00:00.123456789Z").unwrap();
         assert_eq!(parsed % 1000, 123);
+    }
+
+    // --- Issue #832: cooldown 判定の clock 異常ケース回帰テスト ---
+
+    /// 警告履歴がない (未通知 / ファイル破損) ときは必ず警告する。
+    #[test]
+    fn decide_warns_when_never_warned() {
+        assert!(decide_should_warn(1_000, None));
+    }
+
+    /// 通常: cooldown 満了前は抑止、満了後は警告。
+    #[test]
+    fn decide_respects_normal_cooldown() {
+        let prev = parse_iso8601_to_ms("2026-05-10T00:00:00.000Z").unwrap();
+        // 満了 1ms 前 → 抑止
+        assert!(!decide_should_warn(prev + COOLDOWN_MS - 1, Some(prev)));
+        // ちょうど満了 → 警告
+        assert!(decide_should_warn(prev + COOLDOWN_MS, Some(prev)));
+        // 満了後 → 警告
+        assert!(decide_should_warn(prev + COOLDOWN_MS * 2, Some(prev)));
+    }
+
+    /// 同一時刻 (now == prev) は cooldown 内なので抑止 (時刻逆転ではない)。
+    #[test]
+    fn decide_suppresses_when_now_equals_prev() {
+        let prev = parse_iso8601_to_ms("2026-05-10T00:00:00.000Z").unwrap();
+        assert!(!decide_should_warn(prev, Some(prev)));
+    }
+
+    /// Issue #832: system clock 巻き戻しで now < prev のとき、旧実装は
+    /// `now - prev` が負になり警告を恒久抑止していた。fail-safe で必ず警告する。
+    #[test]
+    fn decide_warns_on_clock_rollback() {
+        let prev = parse_iso8601_to_ms("2026-05-10T00:00:00.000Z").unwrap();
+        // 1 分巻き戻し
+        assert!(decide_should_warn(prev - 60_000, Some(prev)));
+        // 大幅巻き戻し (cooldown 1 個分より大きく過去)
+        assert!(decide_should_warn(prev - COOLDOWN_MS * 3, Some(prev)));
+    }
+
+    /// Issue #832: `updater-warned.json` が未来 timestamp を持つ (破損 / 改竄) と
+    /// now < prev になる。これも fail-safe で警告する。
+    #[test]
+    fn decide_warns_on_future_timestamp() {
+        let now = parse_iso8601_to_ms("2026-05-10T00:00:00.000Z").unwrap();
+        // 1 年先の未来 timestamp
+        assert!(decide_should_warn(now, Some(now + COOLDOWN_MS * 365)));
+        // 1ms だけ未来でも逆転扱いで警告 (fail-open 方向)
+        assert!(decide_should_warn(now, Some(now + 1)));
+    }
+
+    /// Issue #832: 未来時刻で記録された後、clock が正常に戻っても now < prev の間は
+    /// 抑止が長期化しないこと (= 毎回警告) を保証する。
+    #[test]
+    fn decide_does_not_persist_suppression_after_future_record() {
+        let now = parse_iso8601_to_ms("2026-05-10T00:00:00.000Z").unwrap();
+        let future_prev = now + 10 * COOLDOWN_MS; // 10 日先に記録された
+        // clock が追いつくまで (now < future_prev) は毎回警告
+        assert!(decide_should_warn(now, Some(future_prev)));
+        assert!(decide_should_warn(now + COOLDOWN_MS, Some(future_prev)));
+        // clock が prev を追い越したら通常 cooldown に復帰 (満了前は抑止)
+        assert!(!decide_should_warn(future_prev + 1, Some(future_prev)));
+        assert!(decide_should_warn(future_prev + COOLDOWN_MS, Some(future_prev)));
+    }
+
+    /// 極端な値でも saturating_sub によりオーバーフロー panic しないこと。
+    /// 旧実装の `now_ms - prev` は debug build で panic し得た。
+    #[test]
+    fn decide_no_overflow_on_extreme_values() {
+        // now=0, prev=i64::MIN: now_ms<=0 ガードで警告 (旧来は saturating_sub で MAX → 警告)
+        assert!(decide_should_warn(0, Some(i64::MIN)));
+        // now=MAX, prev=0: 経過 = MAX → 警告
+        assert!(decide_should_warn(i64::MAX, Some(0)));
+        // now=i64::MIN, prev=MAX: now_ms<=0 ガードで警告 (減算は評価されず短絡)
+        assert!(decide_should_warn(i64::MIN, Some(i64::MAX)));
+    }
+
+    /// Issue #832 (Vector 5): wall clock が UNIX epoch 以前で `now_unix_ms` が sentinel 0 を
+    /// 返すとき、cooldown を評価せず必ず警告する。これがないと `now == prev == 0` の不動点で
+    /// 改竄通知が恒久抑止され、モジュール doc が約束する fail-open に反する。
+    #[test]
+    fn decide_warns_when_clock_at_or_before_epoch() {
+        // 未通知でも警告 (map_or の true 側にも届くが、ガードが先に効く)
+        assert!(decide_should_warn(0, None));
+        // 不動点: epoch 時刻が記録済みでも now が epoch なら警告
+        assert!(decide_should_warn(0, Some(0)));
+        // epoch で未来 timestamp が記録されていても警告
+        assert!(decide_should_warn(0, Some(COOLDOWN_MS * 365)));
+        // 負値 (理論上の巻き戻し) も警告
+        assert!(decide_should_warn(-1, Some(1_000)));
+    }
+
+    /// Issue #832 (Vector 5): record → read の epoch round-trip 不動点を end-to-end で検証。
+    /// sub-epoch clock 下では `now_iso8601_ms()` が "1970-01-01T00:00:00.000Z" を書き、
+    /// それを読み戻すと `Some(0)` になる。この prev と now=0 (sentinel) の組で必ず警告すること。
+    #[test]
+    fn decide_breaks_epoch_record_read_fixed_point() {
+        let recorded = "1970-01-01T00:00:00.000Z"; // sub-epoch clock 下で record が書く文字列
+        let prev = parse_iso8601_to_ms(recorded);
+        assert_eq!(prev, Some(0), "epoch 文字列は Some(0) に round-trip する");
+        let now_ms = 0; // now_unix_ms() の sentinel
+        assert!(
+            decide_should_warn(now_ms, prev),
+            "sub-epoch clock では毎回警告し恒久抑止に陥らないこと"
+        );
+    }
+
+    /// Issue #832: 破損 / pre-epoch な prev (年 < 1970 が小さい ms に parse される) でも、
+    /// 正常な now では経過が cooldown を超えるため警告に倒れる (新たな抑止経路を作らない)。
+    #[test]
+    fn decide_warns_on_pre_epoch_prev_with_normal_now() {
+        // 年 0000 等は下限 year 検証が無いため小さな非負 ms に parse される
+        let prev = parse_iso8601_to_ms("0000-01-01T00:00:00.000Z");
+        assert_eq!(prev, Some(0));
+        let now = parse_iso8601_to_ms("2026-05-10T00:00:00.000Z").unwrap();
+        assert!(decide_should_warn(now, prev));
+    }
+
+    /// now_unix_ms は単調に進む実時刻 (>= 0) を返す。1970 より後であること。
+    #[test]
+    fn now_unix_ms_is_positive_and_recent() {
+        let now = now_unix_ms();
+        assert!(now > 0);
+        // 2020-01-01 (1_577_836_800_000 ms) より後であること。
+        assert!(now > 1_577_836_800_000);
     }
 }
