@@ -208,7 +208,8 @@ async fn read_warned_file() -> UpdaterWarnedFile {
 /// から「今 toast を出すべきか」を返す。I/O から切り離してテスト可能にするため分離している。
 ///
 /// ## fail-safe 方針 (Issue #609 / #832)
-/// この警告は CDN 改竄 / 中間者攻撃の兆候をユーザーに気付かせるセキュリティ通知であり、
+/// この警告は CDN 改竄 / 中間者攻撃 (man-in-the-middle) の兆候をユーザーに気付かせる
+/// セキュリティ通知であり、
 /// 「疑わしければ警告」(fail-open) に倒すのが原則。判定は以下の OR:
 /// - `now_ms <= 0` → **実時刻が UNIX epoch 以前 = wall clock が信頼できない**。
 ///   `now_unix_ms` は epoch より前のとき 0 を返す sentinel になっている。この値で
