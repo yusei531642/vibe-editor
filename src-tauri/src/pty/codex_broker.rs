@@ -10,6 +10,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 use crate::util::log_redact::redact_home;
 
@@ -18,6 +19,11 @@ const CODEX_PLUGIN_DATA_DIR: &str = "codex-openai-codex";
 const BROKER_STATE_FILE: &str = "broker.json";
 const FALLBACK_STATE_ROOT_DIR: &str = "codex-companion";
 const BROKER_SESSION_PREFIX: &str = "cxc-";
+
+/// Issue #834: broker プロセスがまだ生きている (`skipped_live > 0`) とき、その終了を待って
+/// もう一度 stale state を掃除するまでの猶予。旧実装は `Duration::from_millis(250)` の
+/// 直書きだった。ここで kill した codex の broker が落ちるのにかかる実測の目安。
+const BROKER_RECLEANUP_DELAY: Duration = Duration::from_millis(250);
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct CleanupSummary {
@@ -57,6 +63,33 @@ pub fn cleanup_stale_for_cwd(cwd: &str) -> CleanupSummary {
         );
     }
     summary
+}
+
+/// Issue #834: codex PTY を kill した後の broker 掃除を「最初の cleanup → broker がまだ
+/// 生きていれば (`skipped_live > 0`) 終了猶予を置いて 1 度だけ再 cleanup」という手順で
+/// 実行する。実 sleep / 実 fs 操作を行う同期版で、**ブロックして良い文脈** (detached
+/// background thread / 次回起動前の spawn 準備) からのみ呼ぶこと。
+///
+/// 呼び出し元 (exit watcher / `terminal_kill`) を直接ブロックしないために
+/// `SessionHandle::cleanup_codex_broker_after_kill` 側で background thread に逃がしている。
+pub fn cleanup_stale_for_cwd_with_retry(cwd: &str) {
+    run_cleanup_with_retry(|| cleanup_stale_for_cwd(cwd), std::thread::sleep);
+}
+
+/// `cleanup_stale_for_cwd_with_retry` の手順 (cleanup → 条件付き sleep + 再 cleanup) を、
+/// `cleanup` / `sleep` を注入可能にした pure な orchestration として切り出したもの。
+/// これにより「skipped_live > 0 のときだけ 2 回目の cleanup が走り、その前に sleep が入る」
+/// という分岐を、子プロセス spawn や実 sleep 無しで決定的にテストできる。
+fn run_cleanup_with_retry<C, S>(mut cleanup: C, sleep: S)
+where
+    C: FnMut() -> CleanupSummary,
+    S: FnOnce(Duration),
+{
+    let summary = cleanup();
+    if summary.skipped_live > 0 {
+        sleep(BROKER_RECLEANUP_DELAY);
+        cleanup();
+    }
 }
 
 fn cleanup_stale_in_state_dir(state_dir: &Path, is_alive: impl Fn(u32) -> bool) -> CleanupSummary {
@@ -424,5 +457,47 @@ mod tests {
         assert!(!state_dir.join(BROKER_STATE_FILE).exists());
         assert!(unsafe_dir.join("broker.pid").exists());
         let _ = fs::remove_dir_all(state_dir);
+    }
+
+    /// Issue #834: broker がまだ生きている (`skipped_live > 0`) ときだけ、sleep を挟んで
+    /// 2 回目の cleanup が走ることを、子プロセス spawn や実 sleep 無しで決定的に検証する。
+    #[test]
+    fn retry_runs_second_cleanup_with_sleep_when_broker_live() {
+        use std::cell::Cell;
+        let calls = Cell::new(0usize);
+        let slept = Cell::new(false);
+        run_cleanup_with_retry(
+            || {
+                calls.set(calls.get() + 1);
+                CleanupSummary {
+                    skipped_live: 1,
+                    ..Default::default()
+                }
+            },
+            |d| {
+                slept.set(true);
+                assert_eq!(d, BROKER_RECLEANUP_DELAY, "再 cleanup 前の sleep 量を固定");
+            },
+        );
+        assert_eq!(calls.get(), 2, "skipped_live>0 のとき cleanup は 2 回呼ばれる");
+        assert!(slept.get(), "2 回目の前に sleep が入る");
+    }
+
+    /// Issue #834: broker が生存していない (`skipped_live == 0`) ときは 1 回で終わり、
+    /// sleep も再 cleanup も走らないこと (= 終了処理を無駄にブロックしない)。
+    #[test]
+    fn retry_skips_second_cleanup_when_nothing_live() {
+        use std::cell::Cell;
+        let calls = Cell::new(0usize);
+        let slept = Cell::new(false);
+        run_cleanup_with_retry(
+            || {
+                calls.set(calls.get() + 1);
+                CleanupSummary::default()
+            },
+            |_| slept.set(true),
+        );
+        assert_eq!(calls.get(), 1, "skipped_live==0 のとき再 cleanup しない");
+        assert!(!slept.get(), "sleep も入らない");
     }
 }

@@ -350,6 +350,17 @@ impl SessionRegistry {
         removed
     }
 
+    /// アプリ終了 (window CloseRequested → `app.exit(0)` 直前) に全 PTY を kill する。
+    ///
+    /// Issue #834: 旧実装は各 session で `cleanup_codex_broker_after_kill()` を**同期直列**に
+    /// 呼んでおり、これが `git`/`tasklist` 子プロセス spawn + (broker 生存時) 250ms sleep を
+    /// 伴うため、codex タブ数ぶんアプリ終了がブロックされていた (#630 で inject drain を
+    /// 非同期化した狙いが相殺されていた)。
+    ///
+    /// 終了経路では broker の stale state 掃除を**スキップ**する。掃除は best-effort な
+    /// state file の後始末に過ぎず、残っても次回起動時の spawn 前 cleanup
+    /// (`cleanup_codex_broker_if_stale`) で確実に回収できる。ここでは `s.kill()` による
+    /// 子プロセス停止だけを直列で確実に行い (これは速い)、即座に呼び出し元へ返す。
     pub fn kill_all(&self) {
         let sessions: Vec<Arc<SessionHandle>> = {
             let mut g = recover(self.inner.lock());
@@ -359,7 +370,6 @@ impl SessionRegistry {
         };
         for s in sessions {
             let _ = s.kill();
-            s.cleanup_codex_broker_after_kill();
         }
     }
 }
