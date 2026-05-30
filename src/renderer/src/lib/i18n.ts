@@ -1168,7 +1168,7 @@ const en: Dict = {
   // ---------- Sessions ----------
   'sessions.resume': 'Resume session {id}',
   'sessions.messages': '{count} msgs',
-  // Issue #837: "N+" rendering when messageCount hit the scan limit.
+  // Issue #837: "N+" rendering when messageCount reaches the scan limit.
   'sessions.messagesCapped': '{count}+ msgs',
   'sessions.loadMore': 'Load {remaining} more',
 
