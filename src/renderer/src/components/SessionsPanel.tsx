@@ -211,7 +211,9 @@ export function SessionsPanel({
                     {relativeTime(sessionTimes[i] ?? 0, rtf, dateFormatter)}
                   </span>
                   <span className="session__count">
-                    {t('sessions.messages', { count: s.messageCount })}
+                    {s.messageCountCapped
+                      ? t('sessions.messagesCapped', { count: s.messageCount })
+                      : t('sessions.messages', { count: s.messageCount })}
                   </span>
                 </div>
                 <div className="session__title">{s.title}</div>
