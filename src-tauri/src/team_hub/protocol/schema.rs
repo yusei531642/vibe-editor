@@ -216,7 +216,12 @@ pub(super) fn tool_defs() -> Value {
             "inputSchema": {
                 "type": "object",
                 "properties": {
-                    "task_id": { "type": "number" },
+                    "task_id": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 4294967295u32,
+                        "description": "Numeric task id from team_assign_task (must fit in a u32; missing or out-of-range values are rejected with update_task_invalid_args)."
+                    },
                     "status": { "type": "string" },
                     "summary": { "type": "string" },
                     "blocked_reason": { "type": "string" },

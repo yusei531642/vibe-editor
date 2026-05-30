@@ -159,12 +159,50 @@ fn looks_like_human_gate(text: &str) -> bool {
         || text.contains("判断")
 }
 
+/// Issue #833: `task_id` を厳格に `u32` へ解釈する。
+///
+/// 旧実装は `args.get("task_id").and_then(|v| v.as_u64()).unwrap_or(0) as u32` で、
+/// (a) `task_id` 欠落時に黙って `0` になり `invalid_args` で弾けず、(b) `u32::MAX` を超える
+/// 数値が下位 32bit へ wrap して **別の既存タスク id に誤マッチ** しうる穴があった
+/// (例: `4294967297` = 2^32 + 1 → `1`)。ヒットしたタスクの `assigned_to` で assignee/leader
+/// ガードを判定するため、巨大値経由で意図しない別タスクを done 化し done_evidence を誤適用する
+/// 事故が成立しえた。`report.rs` の `parse_task_id` と同じ厳格度に揃え、欠落 / 範囲外 / 非整数を
+/// `update_task_invalid_args` で明示的に拒否する。
+fn parse_task_id(args: &Value) -> Result<u32, ToolError> {
+    let value = args
+        .get("task_id")
+        .or_else(|| args.get("taskId"))
+        .ok_or_else(|| ToolError::invalid_args("update_task", "task_id is required"))?;
+    // JSON number はそのまま、整数表現の文字列も許容する (LLM が "2" を送るケース)。
+    // いずれも u32 の範囲に収まらなければ拒否し、暗黙の切り詰めや 0 fallback を排除する。
+    if let Some(n) = value.as_u64() {
+        u32::try_from(n).map_err(|_| {
+            ToolError::invalid_args(
+                "update_task",
+                format!("task_id {n} is out of range (must be 0..={})", u32::MAX),
+            )
+        })
+    } else if let Some(s) = value.as_str() {
+        s.trim().parse::<u32>().map_err(|_| {
+            ToolError::invalid_args(
+                "update_task",
+                "task_id must be a non-negative integer that fits in u32",
+            )
+        })
+    } else {
+        Err(ToolError::invalid_args(
+            "update_task",
+            "task_id must be a non-negative integer",
+        ))
+    }
+}
+
 pub async fn team_update_task(
     hub: &TeamHub,
     ctx: &CallContext,
     args: &Value,
 ) -> Result<Value, ToolError> {
-    let task_id = args.get("task_id").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+    let task_id = parse_task_id(args)?;
     let status = args.get("status").and_then(|v| v.as_str()).unwrap_or("");
     let done_evidence = parse_done_evidence(args)?;
     let summary = optional_string(args, "summary", "summary");
@@ -923,5 +961,139 @@ mod tests {
         assert_eq!(task.status, "done");
         assert_eq!(task.done_evidence.len(), 2);
         assert_eq!(team.worker_reports.len(), 1);
+    }
+
+    /// Issue #833: `task_id` 欠落時は黙って `0` にフォールバックせず
+    /// `update_task_invalid_args` で明示的に拒否する (report.rs / assign_task.rs と対称)。
+    #[tokio::test]
+    async fn update_task_rejects_missing_task_id() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let team_id = "team-833-missing".to_string();
+        {
+            let mut state = hub.state.lock().await;
+            state
+                .teams
+                .entry(team_id.clone())
+                .or_insert_with(TeamInfo::default);
+        }
+        let ctx = CallContext {
+            team_id,
+            role: "worker".into(),
+            agent_id: "vc-833-a".into(),
+        };
+        let err = team_update_task(&hub, &ctx, &json!({ "status": "in_progress" }))
+            .await
+            .unwrap_err();
+        assert_eq!(err.code, "update_task_invalid_args");
+    }
+
+    /// Issue #833 (core): `u32::MAX` を超える task_id (例 `2^32 + 1`) を渡しても、下位 32bit へ
+    /// wrap して別の既存タスク (id=1) に誤マッチしてはならない。`update_task_invalid_args` で
+    /// 拒否され、id=1 のタスクは status / updated_at とも一切 mutate されないことを検証する。
+    #[tokio::test]
+    async fn update_task_rejects_out_of_range_task_id_without_truncation() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let team_id = "team-833-wrap".to_string();
+        {
+            let mut state = hub.state.lock().await;
+            let team = state
+                .teams
+                .entry(team_id.clone())
+                .or_insert_with(TeamInfo::default);
+            // 旧実装では task_id=2^32+1 が `1` に切り詰められ、この id=1 タスクへ誤マッチした。
+            team.tasks.push_back(TeamTask {
+                id: 1,
+                assigned_to: "worker".into(),
+                description: "victim task".into(),
+                status: "in_progress".into(),
+                created_by: "leader".into(),
+                created_at: "2026-05-30T10:00:00Z".into(),
+                updated_at: None,
+                summary: None,
+                blocked_reason: None,
+                next_action: None,
+                artifact_path: None,
+                blocked_by_human_gate: false,
+                required_human_decision: None,
+                target_paths: Vec::new(),
+                lock_conflicts: Vec::new(),
+                pre_approval: None,
+                done_criteria: Vec::new(),
+                done_evidence: Vec::new(),
+            });
+        }
+        let ctx = CallContext {
+            team_id: team_id.clone(),
+            role: "worker".into(),
+            agent_id: "vc-833-b".into(),
+        };
+        // 4294967297 = 2^32 + 1。`as u32` だと 1 に wrap してしまう値。
+        let err = team_update_task(
+            &hub,
+            &ctx,
+            &json!({ "task_id": 4_294_967_297u64, "status": "done" }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.code, "update_task_invalid_args");
+
+        // id=1 のタスクは誤マッチされず完全に元のまま。
+        let state = hub.state.lock().await;
+        let team = state.teams.get(&team_id).unwrap();
+        let task = team.tasks.iter().find(|t| t.id == 1).unwrap();
+        assert_eq!(task.status, "in_progress");
+        assert!(task.updated_at.is_none());
+    }
+
+    /// Issue #833: 整数表現の文字列 task_id ("3") も u32 として受理される (LLM 互換)。
+    /// 旧実装の `as_u64()` 経路では文字列は `0` fallback に落ちて task_not_found になっていた。
+    #[tokio::test]
+    async fn update_task_accepts_integer_string_task_id() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let team_id = "team-833-str".to_string();
+        {
+            let mut state = hub.state.lock().await;
+            let team = state
+                .teams
+                .entry(team_id.clone())
+                .or_insert_with(TeamInfo::default);
+            team.tasks.push_back(TeamTask {
+                id: 3,
+                assigned_to: "worker".into(),
+                description: "string id".into(),
+                status: "pending".into(),
+                created_by: "leader".into(),
+                created_at: "2026-05-30T10:00:00Z".into(),
+                updated_at: None,
+                summary: None,
+                blocked_reason: None,
+                next_action: None,
+                artifact_path: None,
+                blocked_by_human_gate: false,
+                required_human_decision: None,
+                target_paths: Vec::new(),
+                lock_conflicts: Vec::new(),
+                pre_approval: None,
+                done_criteria: Vec::new(),
+                done_evidence: Vec::new(),
+            });
+        }
+        let ctx = CallContext {
+            team_id: team_id.clone(),
+            role: "worker".into(),
+            agent_id: "vc-833-c".into(),
+        };
+        team_update_task(
+            &hub,
+            &ctx,
+            &json!({ "task_id": "3", "status": "in_progress", "summary": "ack via string id" }),
+        )
+        .await
+        .expect("integer-string task_id should be accepted");
+        let state = hub.state.lock().await;
+        let team = state.teams.get(&team_id).unwrap();
+        let task = team.tasks.iter().find(|t| t.id == 3).unwrap();
+        assert_eq!(task.status, "in_progress");
+        assert_eq!(task.summary.as_deref(), Some("ack via string id"));
     }
 }
