@@ -16,6 +16,13 @@ use hash::{mtime_ms_of, sha256_hex};
 // safe_join は外部 (commands/git.rs) からも呼ばれるので pub use で再 export する。
 pub use path_safety::safe_join;
 
+/// open / ハッシュ検証で一括メモリ読込してよい最大ファイルサイズ (50 MiB)。
+/// Issue #207: `files_read` はこれを超えるファイルの open を拒否する。
+/// Issue #828: `files_write` の content-hash 衝突検出 (#119) も同じ上限を尊重させるため
+/// モジュールスコープに昇格した。これを超えるサイズのファイルは全読込せず conflict 扱いに
+/// する (`tokio::fs::read` での GB 級一括読込による OOM/フリーズを防ぐ)。
+pub(crate) const MAX_READ_BYTES: u64 = 50 * 1024 * 1024;
+
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct FileNode {
@@ -140,7 +147,6 @@ pub async fn files_list(project_root: String, rel_path: String) -> FileListResul
 
 #[tauri::command]
 pub async fn files_read(project_root: String, rel_path: String) -> FileReadResult {
-    const MAX_READ_BYTES: u64 = 50 * 1024 * 1024;
     let Some(abs) = safe_join(&project_root, &rel_path) else {
         return FileReadResult {
             ok: false,
@@ -286,6 +292,26 @@ pub async fn files_write(
         // Issue #119: 同サイズかつ 1 秒以内の編集は mtime/size 両方で見逃すため、
         // 期待ハッシュが渡ってきていれば現在ファイル内容とハッシュ比較する。
         if let Some(expected_hash) = expected_content_hash.as_deref() {
+            // Issue #828: `files_read` は MAX_READ_BYTES (50MB) 超を open 拒否するため、
+            // open 時の `content_hash` は ≤50MB のファイルに対してのみ計算されている。
+            // save 直前にディスク上のファイルが上限を超えている場合、(1) open 以降に肥大化した
+            // = 内容が変わったことが確定し、かつ (2) `tokio::fs::read` で GB 級を一括メモリ読込
+            // すると OOM/フリーズしうる。そのため hash 全読込はせず conflict として早期 return し、
+            // read 側の上限 (#207) と対称にする。
+            if meta.len() > MAX_READ_BYTES {
+                return FileWriteResult {
+                    ok: false,
+                    error: Some(format!(
+                        "file grew too large to verify safely ({} bytes > {} bytes limit); it changed on disk since it was opened",
+                        meta.len(),
+                        MAX_READ_BYTES
+                    )),
+                    mtime_ms: mtime_ms_of(&meta),
+                    size_bytes: Some(meta.len()),
+                    conflict: true,
+                    ..Default::default()
+                };
+            }
             if let Ok(current_bytes) = tokio::fs::read(&abs).await {
                 let current_hash = sha256_hex(&current_bytes);
                 if current_hash != expected_hash {
@@ -981,5 +1007,106 @@ mod issue_592_tests {
         let root = root_str(&td);
         let res = files_delete(root, "".into(), Some(true)).await;
         assert!(!res.ok);
+    }
+}
+
+/// Issue #828: `files_write` の content-hash 衝突検出 (#119) が MAX_READ_BYTES を尊重し、
+/// 巨大ファイルを一括メモリ読込せず conflict 扱いにすることを保証する回帰テスト。
+#[cfg(test)]
+mod issue_828_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn root_str(td: &tempfile::TempDir) -> String {
+        td.path()
+            .canonicalize()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// save 直前にディスク上のファイルが 50MB を超えている場合、hash 全読込せず
+    /// conflict として早期 return する (OOM/フリーズ防止)。sparse file (`set_len`) を使い
+    /// 実バイトを書かずに 50MB+1 のメタデータを作る。
+    #[tokio::test]
+    async fn files_write_skips_hash_check_for_oversized_file() {
+        let td = tempdir().unwrap();
+        let root = root_str(&td);
+        let path = td.path().join("huge.txt");
+        let f = std::fs::File::create(&path).unwrap();
+        // sparse に 50MB+1 へ拡張 (実データは書かないので高速)。
+        f.set_len(MAX_READ_BYTES + 1).unwrap();
+        drop(f);
+
+        // expected_content_hash のみ渡し、mtime/size 検証はスキップさせて hash 経路に入れる。
+        let res = files_write(
+            root,
+            "huge.txt".into(),
+            "new content".into(),
+            None,                      // expected_mtime_ms
+            None,                      // expected_size_bytes
+            None,                      // encoding
+            Some("deadbeef".into()),   // expected_content_hash
+        )
+        .await;
+
+        assert!(!res.ok, "oversized file must not be written via hash-check path");
+        assert!(
+            res.conflict,
+            "oversized-at-save file must be reported as conflict"
+        );
+        assert_eq!(res.size_bytes, Some(MAX_READ_BYTES + 1));
+        // 巨大ファイルが上書きされていない (= save が拒否された) ことを確認。
+        let meta = std::fs::metadata(td.path().join("huge.txt")).unwrap();
+        assert_eq!(meta.len(), MAX_READ_BYTES + 1);
+    }
+
+    /// ≤50MB の通常ファイルでは従来通り hash 不一致を conflict 検出し、原本を保持する。
+    #[tokio::test]
+    async fn files_write_detects_hash_conflict_for_small_file() {
+        let td = tempdir().unwrap();
+        let root = root_str(&td);
+        let path = td.path().join("s.txt");
+        std::fs::write(&path, b"original").unwrap();
+
+        let res = files_write(
+            root,
+            "s.txt".into(),
+            "updated".into(),
+            None,
+            None,
+            None,
+            Some("0000".into()), // 故意に不一致な hash
+        )
+        .await;
+
+        assert!(!res.ok);
+        assert!(res.conflict);
+        // 原本は保持される。
+        assert_eq!(std::fs::read(&path).unwrap(), b"original");
+    }
+
+    /// ≤50MB の通常ファイルで hash が一致すれば従来通り保存に成功する (回帰防止)。
+    #[tokio::test]
+    async fn files_write_succeeds_when_hash_matches() {
+        let td = tempdir().unwrap();
+        let root = root_str(&td);
+        let path = td.path().join("s.txt");
+        std::fs::write(&path, b"original").unwrap();
+        let expected = sha256_hex(b"original");
+
+        let res = files_write(
+            root,
+            "s.txt".into(),
+            "updated".into(),
+            None,
+            None,
+            None,
+            Some(expected),
+        )
+        .await;
+
+        assert!(res.ok, "{:?}", res.error);
+        assert_eq!(std::fs::read(&path).unwrap(), b"updated");
     }
 }
