@@ -379,6 +379,8 @@ const ja: Dict = {
   // ---------- Sessions ----------
   'sessions.resume': 'セッション {id} に戻る',
   'sessions.messages': '{count} 件',
+  // Issue #837: messageCount が走査上限で打ち切られたときの "N+" 表示。
+  'sessions.messagesCapped': '{count}+ 件',
   'sessions.loadMore': '残り {remaining} 件を表示',
 
   // ---------- Tab ----------
@@ -1166,6 +1168,8 @@ const en: Dict = {
   // ---------- Sessions ----------
   'sessions.resume': 'Resume session {id}',
   'sessions.messages': '{count} msgs',
+  // Issue #837: "N+" rendering when messageCount reaches the scan limit.
+  'sessions.messagesCapped': '{count}+ msgs',
   'sessions.loadMore': 'Load {remaining} more',
 
   // ---------- Tab ----------

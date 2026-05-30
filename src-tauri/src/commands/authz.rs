@@ -76,7 +76,15 @@ pub async fn assert_active_project_root(
         return Err(CommandError::authz("no active project_root configured"));
     }
 
-    let req_canon = match std::fs::canonicalize(trimmed) {
+    // Issue #831: canonicalize は同期 blocking I/O。本 helper は handoffs_* / team_state_read
+    // から高頻度に呼ばれ、network mount / 低速 FS では `std::fs::canonicalize` が Tokio worker
+    // スレッドを完了まで塞ぐ (#620 と同種のアンチパターン)。`tokio::fs::canonicalize` に置換し、
+    // req と active は独立なので `tokio::join!` で並列実行する (team_mcp.rs と同形)。
+    let (req_res, active_res) = tokio::join!(
+        tokio::fs::canonicalize(trimmed),
+        tokio::fs::canonicalize(active.trim())
+    );
+    let req_canon = match req_res {
         Ok(p) => p,
         Err(e) => {
             tracing::warn!(
@@ -89,7 +97,7 @@ pub async fn assert_active_project_root(
             )));
         }
     };
-    let active_canon = match std::fs::canonicalize(active.trim()) {
+    let active_canon = match active_res {
         Ok(p) => p,
         Err(e) => {
             tracing::warn!(

@@ -384,7 +384,13 @@ export interface SessionInfo {
   id: string;
   path: string;
   title: string;
+  /**
+   * 会話メッセージ (type === "user" | "assistant") の件数 (Issue #837)。
+   * `messageCountCapped === true` のときは先頭 2000 行で打ち切った下限値 (= "N+" 表示用)。
+   */
   messageCount: number;
+  /** Issue #837: messageCount が走査上限 (2000 行) に達して打ち切られたか。true で UI は "N+" を描画する。 */
+  messageCountCapped: boolean;
   lastModifiedAt: string;
   /** Rust 側で事前計算した epoch ms。SessionsPanel の再描画ごとの Date.parse を避ける。 */
   lastModifiedMs?: number;

@@ -14,7 +14,13 @@ pub struct SessionInfo {
     pub id: String,
     pub path: String,
     pub title: String,
+    /// Issue #837: 会話メッセージ (type == "user" | "assistant") の件数。
+    /// `message_count_capped == true` のとき、先頭 HEAD_LIMIT_LINES 行で打ち切った
+    /// 下限値 (= "N+" 表示用) であり、正確な総数ではない。
     pub message_count: u32,
+    /// Issue #837: `message_count` が先頭 HEAD_LIMIT_LINES (2000) 行の走査上限に達して
+    /// 打ち切られたかどうか。true のとき UI は "N+" を描画する。
+    pub message_count_capped: bool,
     pub last_modified_at: String,
     pub last_modified_ms: i64,
 }
@@ -86,14 +92,13 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
     const CONCURRENCY: usize = 8;
     let mut sessions: Vec<SessionInfo> = Vec::with_capacity(candidates.len());
     let mut iter = candidates.into_iter();
-    let mut in_flight: tokio::task::JoinSet<(Candidate, String, u32, Option<String>)> =
+    let mut in_flight: tokio::task::JoinSet<(Candidate, JsonlSummary)> =
         tokio::task::JoinSet::new();
 
-    let spawn_one = |set: &mut tokio::task::JoinSet<(Candidate, String, u32, Option<String>)>,
-                     cand: Candidate| {
+    let spawn_one = |set: &mut tokio::task::JoinSet<(Candidate, JsonlSummary)>, cand: Candidate| {
         set.spawn(async move {
-            let (title, count, cwd) = read_jsonl_summary(&cand.path).await;
-            (cand, title, count, cwd)
+            let summary = read_jsonl_summary(&cand.path).await;
+            (cand, summary)
         });
     };
 
@@ -103,13 +108,13 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
         }
     }
     while let Some(joined) = in_flight.join_next().await {
-        if let Ok((cand, title, count, cwd)) = joined {
+        if let Ok((cand, summary)) = joined {
             // 後続を 1 件 spawn して並列度を維持
             if let Some(next) = iter.next() {
                 spawn_one(&mut in_flight, next);
             }
             // cwd が jsonl から取れたときだけ厳密チェック (取れないものは fail-open)
-            if let Some(ref c) = cwd {
+            if let Some(ref c) = summary.cwd {
                 if !c.trim().is_empty() && normalize_project_root(c) != requested_norm {
                     tracing::debug!(
                         "[sessions] skipping colliding session {}: cwd={} != requested={}",
@@ -123,8 +128,9 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
             sessions.push(SessionInfo {
                 id: cand.id,
                 path: cand.path.to_string_lossy().into_owned(),
-                title,
-                message_count: count,
+                title: summary.title,
+                message_count: summary.message_count,
+                message_count_capped: summary.capped,
                 last_modified_at: cand.last_modified_at,
                 last_modified_ms: cand.last_modified_ms,
             });
@@ -135,34 +141,93 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
     sessions
 }
 
-/// jsonl から (title, count, cwd) を抽出。cwd は最初に見つかった `cwd` フィールド。
+/// `read_jsonl_summary` の戻り値。
 ///
-/// Issue #43: 大きなセッション (数百 MB) の jsonl を毎回全行読みすると list API が
+/// Issue #837: 旧実装は `(title, count, cwd)` の tuple を返し、`count` は **行種別を問わない
+/// 非空行数 (上限付き)** だった。これを (1) 会話メッセージ件数に限定し、(2) 走査上限に達したかを
+/// 表す `capped` を加えた struct に置き換える。フィールド名で意味が自明になり、UI 側が "N+" を
+/// 描画できるようになる。
+pub(crate) struct JsonlSummary {
+    /// 最初のユーザーメッセージ先頭行 (最大 80 文字)。
+    pub title: String,
+    /// 会話メッセージ (type == "user" | "assistant") の件数。
+    /// `capped == true` のときは走査上限内で数えた下限値。
+    pub message_count: u32,
+    /// jsonl 内で最初に見つかった `cwd` フィールド。
+    pub cwd: Option<String>,
+    /// `message_count` が先頭 HEAD_LIMIT_LINES 行で打ち切られたか。
+    pub capped: bool,
+}
+
+/// 行が会話メッセージ (`type == "user" | "assistant"`) かを、全文 JSON パースを避けて
+/// 安価に判定する (Issue #837 / PR #851 review)。
+///
+/// Claude Code の JSONL は compact JSON (`serde_json::to_string` 相当) で 1 行 1 オブジェクトを
+/// 書き、JSON 文字列値の中の `"` は必ず `\"` にエスケープされる。したがって **未エスケープの
+/// `"type":"user"` / `"type":"assistant"` という並びは実際のキー:値ペアにしか出現しない**
+/// (content 文字列の中身には現れない)。これにより、大きな content を含む行でも全文を
+/// `serde_json` でトークナイズ/アロケートせず、SIMD 化された substring 検索だけで判定できる
+/// (旧実装は最大 2000 行に対し毎行 `from_str` していて large-content セッションで CPU を浪費していた)。
+///
+/// 末尾の閉じ `"` まで含めて照合するので `"type":"user_cancelled"` のような前方一致型では
+/// 誤検出しない。compact 形と「コロン後 1 スペース」形の両方を許容する。
+fn line_is_conversation_message(line: &str) -> bool {
+    const PATTERNS: [&str; 4] = [
+        r#""type":"user""#,
+        r#""type":"assistant""#,
+        r#""type": "user""#,
+        r#""type": "assistant""#,
+    ];
+    PATTERNS.iter().any(|p| line.contains(p))
+}
+
+/// jsonl から title / message_count / cwd / capped を抽出する。
+///
+/// Issue #43 / #106: 大きなセッション (数百 MB) の jsonl を毎回全行読みすると list API が
 /// 数秒〜十数秒ブロックする。
-///   - title / cwd は先頭付近 (1〜8 行目) にしか出ないので早期 break する
-///   - message_count の「正確な数」は UI で "500+" 等と見せれば十分なので、
-///     先頭 HEAD_LIMIT_LINES = 2000 行まで数え、超えたら上限値を返す
-///     (正確な行数は fs::metadata の行数相当だと OS 依存で取れないので割り切る)
+///   - title / cwd は先頭付近 (1〜8 行目) にしか出ないので先頭 8 行だけ full parse する
+///   - I/O 量は「走査した非空行数」を先頭 HEAD_LIMIT_LINES = 2000 行で打ち切って bound する
+///
+/// Issue #837: 旧実装は行種別を問わず数え、2000 行で無告知に頭打ちしていた。本実装では
+///   - 会話メッセージ (type == "user" | "assistant") のみを `message_count` に数える
+///     (summary / system / tool_result / file-history-snapshot 等は除外)
+///   - 走査上限に達し、かつさらに行が残っていれば `capped = true` を立てて UI が "N+" を
+///     描画できるようにする
 ///
 /// Issue #494: integration test (`commands/tests/sessions.rs`) から fixture jsonl に対して
 /// 直接呼べるよう `pub(crate)` で expose。Tauri command 経由ではないので AppHandle / State 不要。
-pub(crate) async fn read_jsonl_summary(path: &std::path::Path) -> (String, u32, Option<String>) {
+pub(crate) async fn read_jsonl_summary(path: &std::path::Path) -> JsonlSummary {
     const HEAD_LIMIT_LINES: u32 = 2000;
     let Ok(f) = tokio::fs::File::open(path).await else {
-        return (String::new(), 0, None);
+        return JsonlSummary {
+            title: String::new(),
+            message_count: 0,
+            cwd: None,
+            capped: false,
+        };
     };
     let reader = tokio::io::BufReader::new(f);
     let mut lines = reader.lines();
     let mut title = String::new();
-    let mut count = 0u32;
+    let mut message_count = 0u32;
     let mut cwd: Option<String> = None;
+    // I/O 量は「走査した非空行数」で bound する (message_count ではなく行数で打ち切る)。
+    let mut lines_scanned = 0u32;
+    let mut capped = false;
     while let Ok(Some(line)) = lines.next_line().await {
         if line.trim().is_empty() {
             continue;
         }
-        count += 1;
-        // 先頭 8 行だけ serde_json で parse (title / cwd 抽出用)
-        if count <= 8 && (title.is_empty() || cwd.is_none()) {
+        lines_scanned += 1;
+
+        // Issue #837: 会話メッセージ (type == user|assistant) だけを数える。
+        // 全文 JSON パースを避けるため substring 検索で判定する (PR #851 review / perf)。
+        if line_is_conversation_message(&line) {
+            message_count += 1;
+        }
+
+        // 先頭 8 行だけ serde_json で full parse (title / cwd 抽出用)
+        if lines_scanned <= 8 && (title.is_empty() || cwd.is_none()) {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                 if cwd.is_none() {
                     if let Some(c) = v.get("cwd").and_then(|c| c.as_str()) {
@@ -187,9 +252,18 @@ pub(crate) async fn read_jsonl_summary(path: &std::path::Path) -> (String, u32, 
         // 旧実装は break 条件に `!title.is_empty() && cwd.is_some()` を含めていたため、
         // それらが欠けた jsonl (壊れている / 古い形式) では数百 MB を最後まで読み続け、
         // セッション履歴表示が数秒〜十数秒ブロックしていた。
-        if count >= HEAD_LIMIT_LINES {
+        if lines_scanned >= HEAD_LIMIT_LINES {
+            // Issue #837: 上限到達。さらに非空行が残っているかを 1 行だけ覗いて capped を確定する
+            // (ちょうど HEAD_LIMIT_LINES 行のセッションを誤って "N+" と表示しないため。
+            //  追加読込は 1 行のみなので I/O bound は維持される)。
+            capped = matches!(lines.next_line().await, Ok(Some(_)));
             break;
         }
     }
-    (title, count, cwd)
+    JsonlSummary {
+        title,
+        message_count,
+        cwd,
+        capped,
+    }
 }

@@ -51,9 +51,8 @@ pub async fn role_profiles_load() -> Value {
 pub async fn role_profiles_save(file: Value) -> crate::commands::error::CommandResult<()> {
     let _g = SAVE_LOCK.lock().await;
     let path = crate::util::config_paths::role_profiles_path();
-    if let Some(dir) = path.parent() {
-        let _ = fs::create_dir_all(dir).await;
-    }
+    // Issue #838: 親ディレクトリ作成は `atomic_write_with_mode` 冒頭で行われるため、
+    // ここでの明示的な create_dir_all は冗長 (settings_save も手動 create はしない)。削除した。
     let json = serde_json::to_vec_pretty(&file).map_err(|e| e.to_string())?;
     // Issue #608 (Security): instructions が機密扱いなので 0o600 で永続化。
     Ok(atomic_write_with_mode(&path, &json, Some(0o600))
