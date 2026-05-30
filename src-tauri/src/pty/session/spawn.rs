@@ -123,10 +123,19 @@ pub(crate) struct PreparedSpawnCommand {
 }
 
 pub(crate) fn prepare_spawn_command(opts: &SpawnOptions) -> Result<PreparedSpawnCommand> {
-    let (command, args) = command_validation::normalize_terminal_command(
-        Some(opts.command.clone()),
-        Some(opts.args.clone()),
-    );
+    // Issue #827: `terminal_create` は SpawnOptions を組む前に
+    // `command_validation::normalize_terminal_command` で既に command/args を 1 度
+    // split + quote 除去済みにしている。ここで再び normalize_terminal_command を通すと、
+    // `split_command_line` が非冪等なため、1 回目で quote が剥がれた「スペースを含む実行
+    // ファイルパス」(例 `C:\Program Files\Codex\codex.exe`) を 2 回目で空白再分割してしまい、
+    // command=`C:\Program` / args=[`Files\Codex\codex.exe`, ...] に壊れて spawn 境界の
+    // allowlist (`is_allowed_terminal_command("C:\Program")` = false) で起動失敗する。
+    //
+    // よって spawn 境界では再 split せず、正規化済みの command/args をそのまま信頼する。
+    // ただし allowlist / immediate-exec / danger-flag の再チェックは defense-in-depth として
+    // 維持する (SpawnOptions が将来別経路から組まれても spawn 直前に弾けるようにする)。
+    let command = opts.command.clone();
+    let args = opts.args.clone();
     if !command_validation::is_allowed_terminal_command(&command) {
         return Err(anyhow!(
             "command is not allowed at spawn boundary: {command}"
@@ -629,5 +638,86 @@ mod resolve_valid_cwd_tests {
         // params keys are passed as-is from Rust callsite (`requested` / `fallback`).
         assert!(json.contains("\"requested\""), "params.requested missing in {json}");
         assert!(json.contains("\"fallback\""), "params.fallback missing in {json}");
+    }
+}
+
+#[cfg(test)]
+mod prepare_spawn_command_boundary_tests {
+    //! Issue #827: spawn 境界 (`prepare_spawn_command`) が `terminal_create` で既に
+    //! normalize 済みの command/args を **再 split しない** ことを保証する cross-platform
+    //! テスト。Windows 実パス解決込みの検証は `pty::tests::session_windows` 側にあるが、
+    //! bot CI (Linux) でも退行を捕まえられるよう、ここでは platform 非依存の不変式
+    //! (allowlist 通過 + args 非分割 + defense-in-depth 再チェック維持) を固定する。
+
+    use super::{prepare_spawn_command, SpawnOptions};
+    use std::collections::HashMap;
+
+    fn opts(command: String, args: &[&str]) -> SpawnOptions {
+        SpawnOptions {
+            command,
+            args: args.iter().map(|s| s.to_string()).collect(),
+            cwd: ".".to_string(),
+            is_codex: false,
+            cols: 80,
+            rows: 24,
+            env: HashMap::new(),
+            agent_id: None,
+            session_key: None,
+            team_id: None,
+            role: None,
+        }
+    }
+
+    #[test]
+    fn preserves_spaced_executable_path_without_resplit() {
+        // 旧実装は spawn 境界で再度 normalize_terminal_command を通し、quote 除去済みの
+        // スペース入りパス (`...\Program Files\...\codex.exe`) を空白で再分割し、command を
+        // `...\Program` に壊して allowlist (basename=`program`) で弾いていた (#827)。
+        // 新契約では再 split せず、basename `codex` で allowlist を通過し、args も保持する。
+        //
+        // Windows の spawn 境界は実パス解決まで行い、存在しないパスは
+        // "command executable was not found" を返す (これは allowlist 通過後の別段階)。
+        // cross-platform に「allowlist で弾かれない + args 非分割」を決定的に検証するため、
+        // スペースを含む実ディレクトリに実ファイルを置いて program に渡す。
+        let tmp = tempfile::tempdir().unwrap();
+        let spaced_dir = tmp.path().join("Program Files");
+        std::fs::create_dir_all(&spaced_dir).unwrap();
+        let cli = spaced_dir.join("codex.exe");
+        std::fs::write(&cli, "").unwrap();
+        let cli_s = cli.to_string_lossy().into_owned();
+
+        let o = opts(cli_s.clone(), &["--foo", "bar baz"]);
+        let prepared =
+            prepare_spawn_command(&o).expect("spaced executable path must pass spawn boundary");
+        // args は再分割されず、スペース入り引数 "bar baz" も 1 要素として保たれる。
+        assert_eq!(prepared.args, vec!["--foo", "bar baz"]);
+        // requested_command は渡したスペース入りパスのまま (空白で割れていない)。
+        assert_eq!(prepared.requested_command, cli_s);
+    }
+
+    #[test]
+    fn rejects_non_allowlisted_command_at_boundary() {
+        // Issue #827: 再 normalize を廃止しても spawn 境界の allowlist は basename で判定し、
+        // 許可外コマンドを弾く (defense-in-depth)。spaced path でも basename ベースで評価される。
+        let o = opts(r"C:\Program Files\Evil\evilbin.exe".to_string(), &["--foo"]);
+        let err = prepare_spawn_command(&o)
+            .expect_err("non-allowlisted basename must be rejected at boundary");
+        assert!(
+            err.to_string().contains("not allowed at spawn boundary"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn still_rejects_immediate_exec_flags_at_boundary() {
+        // Issue #827: 再 normalize を廃止しても defense-in-depth の再チェックは維持する。
+        // 正規化済み形 (command=cmd, args=[/c, ...]) を渡し /c が弾かれることを確認する。
+        let o = opts("cmd".to_string(), &["/c", "echo", "unsafe"]);
+        let err = prepare_spawn_command(&o)
+            .expect_err("cmd immediate-exec must be rejected at boundary");
+        assert!(
+            err.to_string().contains("cmd immediate-exec flags"),
+            "unexpected error: {err}"
+        );
     }
 }

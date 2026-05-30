@@ -219,32 +219,45 @@ mod resolution_tests {
     }
 
     #[test]
-    fn normalizes_inline_command_again_at_spawn_boundary() {
+    fn preserves_normalized_spaced_path_at_spawn_boundary() {
+        // Issue #827: `terminal_create` は SpawnOptions を組む前に
+        // `normalize_terminal_command` で command/args を 1 度 split + quote 除去済みに
+        // している。spawn 境界 (`prepare_spawn_command`) はそれを **再 split せず** そのまま
+        // 信頼する契約に変わった。スペースを含むディレクトリ配下の実行ファイルを直接
+        // program として渡しても、空白で再分割されず正しく resolve されることを Windows の
+        // 実パス解決込みで検証する。旧実装は spawn 境界で normalize_terminal_command を
+        // 二重適用し、`...\Program Files\...\codex.exe` を `...\Program` に割って allowlist で
+        // 弾いていた (= #827 の退行)。
         let tmp = tempfile::tempdir().unwrap();
-        let cli = tmp.path().join("codex.exe");
+        let spaced_dir = tmp.path().join("Program Files");
+        std::fs::create_dir_all(&spaced_dir).unwrap();
+        let cli = spaced_dir.join("codex.exe");
         std::fs::write(&cli, "").unwrap();
-        // Issue #788: spawn 境界の inline command 再 normalize を検証する。危険フラグ
-        // 自体の拒否は command_validation 側のユニットテストでカバーするため、ここでは
-        // benign な inline フラグを使い settings 状態に依存しないようにする。
-        let command = format!(r#""{}" --foo"#, cli.display());
-        let mut opts = base_spawn_options(
-            command,
-            vec![
-                "--config".to_string(),
-                "disable_paste_burst=true".to_string(),
-            ],
+
+        let opts = base_spawn_options(
+            cli.to_string_lossy().into_owned(),
+            vec!["--foo".to_string(), "bar baz".to_string()],
         );
 
         let prepared = prepare_spawn_command(&opts).unwrap();
 
+        // .exe は cmd.exe ラッパ無しで直接 program になり、args は再分割されず保持される。
         assert_eq!(PathBuf::from(&prepared.program), cli);
-        assert_eq!(
-            prepared.args,
-            vec!["--foo", "--config", "disable_paste_burst=true"]
-        );
+        assert_eq!(prepared.args, vec!["--foo", "bar baz"]);
+    }
 
-        opts.command = "cmd /c echo unsafe".to_string();
-        opts.args.clear();
+    #[test]
+    fn spawn_boundary_still_rejects_immediate_exec_flags() {
+        // Issue #827: 再 normalize を廃止しても spawn 境界の defense-in-depth 再チェックは
+        // 維持する。正規化済み形 (command=cmd, args=[/c, ...]) を渡し /c が弾かれること。
+        let opts = base_spawn_options(
+            "cmd".to_string(),
+            vec![
+                "/c".to_string(),
+                "echo".to_string(),
+                "unsafe".to_string(),
+            ],
+        );
         let err = prepare_spawn_command(&opts).unwrap_err().to_string();
         assert!(err.contains("cmd immediate-exec flags"));
     }
