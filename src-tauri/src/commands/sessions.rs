@@ -159,12 +159,26 @@ pub(crate) struct JsonlSummary {
     pub capped: bool,
 }
 
-/// 各行の `type` だけを安価に取り出すための最小デシリアライズ型。
-/// 全行を `serde_json::Value` ツリーに起こすより軽く、会話メッセージ判定にだけ使う。
-#[derive(serde::Deserialize)]
-struct JsonlLineType {
-    #[serde(rename = "type", default)]
-    ty: Option<String>,
+/// 行が会話メッセージ (`type == "user" | "assistant"`) かを、全文 JSON パースを避けて
+/// 安価に判定する (Issue #837 / PR #851 review)。
+///
+/// Claude Code の JSONL は compact JSON (`serde_json::to_string` 相当) で 1 行 1 オブジェクトを
+/// 書き、JSON 文字列値の中の `"` は必ず `\"` にエスケープされる。したがって **未エスケープの
+/// `"type":"user"` / `"type":"assistant"` という並びは実際のキー:値ペアにしか出現しない**
+/// (content 文字列の中身には現れない)。これにより、大きな content を含む行でも全文を
+/// `serde_json` でトークナイズ/アロケートせず、SIMD 化された substring 検索だけで判定できる
+/// (旧実装は最大 2000 行に対し毎行 `from_str` していて large-content セッションで CPU を浪費していた)。
+///
+/// 末尾の閉じ `"` まで含めて照合するので `"type":"user_cancelled"` のような前方一致型では
+/// 誤検出しない。compact 形と「コロン後 1 スペース」形の両方を許容する。
+fn line_is_conversation_message(line: &str) -> bool {
+    const PATTERNS: [&str; 4] = [
+        r#""type":"user""#,
+        r#""type":"assistant""#,
+        r#""type": "user""#,
+        r#""type": "assistant""#,
+    ];
+    PATTERNS.iter().any(|p| line.contains(p))
 }
 
 /// jsonl から title / message_count / cwd / capped を抽出する。
@@ -207,10 +221,9 @@ pub(crate) async fn read_jsonl_summary(path: &std::path::Path) -> JsonlSummary {
         lines_scanned += 1;
 
         // Issue #837: 会話メッセージ (type == user|assistant) だけを数える。
-        if let Ok(parsed) = serde_json::from_str::<JsonlLineType>(&line) {
-            if matches!(parsed.ty.as_deref(), Some("user") | Some("assistant")) {
-                message_count += 1;
-            }
+        // 全文 JSON パースを避けるため substring 検索で判定する (PR #851 review / perf)。
+        if line_is_conversation_message(&line) {
+            message_count += 1;
         }
 
         // 先頭 8 行だけ serde_json で full parse (title / cwd 抽出用)

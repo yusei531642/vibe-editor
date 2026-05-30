@@ -173,6 +173,38 @@ async fn only_user_and_assistant_lines_are_counted() {
     assert!(!s.capped);
 }
 
+/// PR #851 review (perf 対応): 会話メッセージ判定を substring 検索に変えても、
+/// content 文字列内に `"type":"assistant"` 等のリテラルを含む行を二重カウントしない
+/// (JSON エスケープにより未エスケープの並びはキー:値にしか出ないことの回帰ガード)。
+#[tokio::test]
+async fn content_containing_type_literal_is_not_double_counted() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("session-tricky.jsonl");
+    write_jsonl(
+        &path,
+        &[
+            // content にまぎらわしいリテラルを含む user メッセージ 1 件。
+            json!({
+                "type": "user",
+                "cwd": "/x",
+                "message": { "content": "JSON の {\"type\":\"assistant\"} について教えて" }
+            }),
+            json!({
+                "type": "assistant",
+                "message": { "content": "はい、それは {\"type\":\"user\"} とは別物です" }
+            }),
+        ],
+    )
+    .await;
+
+    let s = read_jsonl_summary(&path).await;
+    // user 1 + assistant 1 = 2。content 内のリテラルは数に影響しない。
+    assert_eq!(
+        s.message_count, 2,
+        "literals inside content must not inflate the count"
+    );
+}
+
 /// HEAD_LIMIT_LINES (= 2000) を超えるセッションは message_count が打ち切られ、capped=true。
 /// 2500 行書いて count == 2000 / capped == true を確認する。
 #[tokio::test]
