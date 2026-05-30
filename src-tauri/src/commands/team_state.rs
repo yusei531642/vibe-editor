@@ -338,9 +338,113 @@ pub async fn load_orchestration_state(
     team_id: &str,
 ) -> Option<TeamOrchestrationState> {
     let path = team_state_path(project_root, team_id);
-    let bytes = fs::read(&path).await.ok()?;
-    let state = serde_json::from_slice::<TeamOrchestrationState>(&bytes).ok()?;
-    Some(normalize(state))
+    load_orchestration_state_from_path(&path).await
+}
+
+/// Issue #830: orchestration state を 1 ファイルから読み込む内部実装。
+///
+/// 旧 `load_orchestration_state` は read 失敗と parse 失敗を両方 `.ok()?` で `None` に
+/// 丸め込み、ログを一切出さなかった。`register_team` はこの `None` を「永続化が無い」と
+/// 等価に扱うため、`<team>.json` が部分書き込みや手編集で 1 byte でも壊れていると、leader
+/// handoff・open task・human gate 状態がすべて **silent に消失** していた (最も発見が難しい
+/// 類の障害)。fail-safe にするため:
+///   - read 失敗は NotFound (= 未保存 / 初回起動) を silent に、それ以外の IO エラーは warn。
+///   - parse 失敗は warn + 破損ファイルを `.corrupt` へ best-effort 退避する (後から調査・
+///     手動復旧でき、退避後の原本は次回 save で健全な状態に上書きされる)。
+///   - 読み込んだ schema_version が現行と異なる場合は warn (`normalize` が無条件で上書きする
+///     前に検知する。将来の migration 判定の足場)。
+async fn load_orchestration_state_from_path(path: &Path) -> Option<TeamOrchestrationState> {
+    let bytes = match fs::read(path).await {
+        Ok(b) => b,
+        Err(e) => {
+            // NotFound は通常状態 (team-state 未保存 / 初回起動) なので silent。
+            // それ以外の IO エラー (権限 / I/O 障害) は痕跡を残す。
+            if e.kind() != std::io::ErrorKind::NotFound {
+                tracing::warn!(
+                    "[team_state] failed to read orchestration state at {}: {e}",
+                    path.display()
+                );
+            }
+            return None;
+        }
+    };
+    match serde_json::from_slice::<TeamOrchestrationState>(&bytes) {
+        Ok(state) => {
+            if state.schema_version != TEAM_STATE_SCHEMA_VERSION {
+                tracing::warn!(
+                    "[team_state] orchestration state at {} has schema_version {} (expected {}); \
+                     loading as-is",
+                    path.display(),
+                    state.schema_version,
+                    TEAM_STATE_SCHEMA_VERSION
+                );
+            }
+            Some(normalize(state))
+        }
+        Err(e) => {
+            tracing::warn!(
+                "[team_state] failed to parse orchestration state at {}: {e}; backing up corrupt \
+                 file and skipping restore (task/handoff/human-gate state will be recreated on next save)",
+                path.display()
+            );
+            backup_corrupt_state_file(path).await;
+            None
+        }
+    }
+}
+
+/// Issue #830: 破損した team-state JSON を `<file>.corrupt` (衝突時は `.corrupt.1` ..
+/// `.corrupt.9`) に best-effort で退避する。退避できれば原本は消えるので、次回
+/// `save_orchestration_state` が健全な状態で上書きできる。退避失敗 (rename 不可 / backup
+/// が増え過ぎ) は warn に留め、load 自体は失敗させない。
+async fn backup_corrupt_state_file(path: &Path) {
+    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+        tracing::warn!(
+            "[team_state] cannot derive file name for corrupt backup of {}",
+            path.display()
+        );
+        return;
+    };
+    let Some(parent) = path.parent() else {
+        tracing::warn!(
+            "[team_state] cannot derive parent dir for corrupt backup of {}",
+            path.display()
+        );
+        return;
+    };
+    // 既存 backup を上書きしない (forensic 情報を保持する) ため、空きスロットを探す。
+    for idx in 0..=9u32 {
+        let candidate_name = if idx == 0 {
+            format!("{file_name}.corrupt")
+        } else {
+            format!("{file_name}.corrupt.{idx}")
+        };
+        let candidate = parent.join(&candidate_name);
+        if fs::metadata(&candidate).await.is_ok() {
+            continue;
+        }
+        match fs::rename(path, &candidate).await {
+            Ok(()) => {
+                tracing::warn!(
+                    "[team_state] moved corrupt orchestration state to {}",
+                    candidate.display()
+                );
+                return;
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[team_state] failed to move corrupt state {} -> {}: {e}",
+                    path.display(),
+                    candidate.display()
+                );
+                return;
+            }
+        }
+    }
+    tracing::warn!(
+        "[team_state] too many corrupt backups already exist for {}; leaving file in place",
+        path.display()
+    );
 }
 
 pub async fn save_orchestration_state(
@@ -461,5 +565,94 @@ mod tests {
         });
         assert_eq!(state.pending_tasks.len(), 1);
         assert_eq!(state.pending_tasks[0].id, 2);
+    }
+
+    /// Issue #830: 未保存 (ファイル不在) は silent に None を返し、退避ファイルも作らない。
+    #[tokio::test]
+    async fn load_from_path_returns_none_for_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("missing.json");
+        assert!(load_orchestration_state_from_path(&path).await.is_none());
+        assert!(
+            fs::metadata(dir.path().join("missing.json.corrupt"))
+                .await
+                .is_err(),
+            "missing file must not produce a corrupt backup"
+        );
+    }
+
+    /// Issue #830: 正常な JSON はこれまで通り読み込めて normalize される (回帰防止)。
+    #[tokio::test]
+    async fn load_from_path_parses_valid_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("team.json");
+        let state = TeamOrchestrationState {
+            project_root: "C:/repo".into(),
+            team_id: "team-x".into(),
+            tasks: vec![TeamTaskSnapshot {
+                id: 5,
+                status: "in_progress".into(),
+                ..TeamTaskSnapshot::default()
+            }],
+            ..TeamOrchestrationState::default()
+        };
+        let json = serde_json::to_vec_pretty(&state).unwrap();
+        fs::write(&path, &json).await.unwrap();
+
+        let loaded = load_orchestration_state_from_path(&path)
+            .await
+            .expect("valid state should load");
+        assert_eq!(loaded.team_id, "team-x");
+        assert_eq!(loaded.pending_tasks.len(), 1);
+    }
+
+    /// Issue #830 (core): 破損 JSON は silent に捨てず、`.corrupt` に退避してから None を返す。
+    /// 退避後は原本が消えるので、次回 save が健全な状態で上書きできる。
+    #[tokio::test]
+    async fn load_from_path_backs_up_corrupt_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("team.json");
+        let corrupt = b"{ this is not valid json ]";
+        fs::write(&path, corrupt).await.unwrap();
+
+        let loaded = load_orchestration_state_from_path(&path).await;
+        assert!(loaded.is_none(), "corrupt JSON must not silently load");
+
+        // 原本は退避されて消え、`.corrupt` に同じ内容が残っている。
+        assert!(
+            fs::metadata(&path).await.is_err(),
+            "corrupt original should be moved away"
+        );
+        let backup = dir.path().join("team.json.corrupt");
+        let backup_bytes = fs::read(&backup).await.expect("corrupt backup must exist");
+        assert_eq!(backup_bytes, corrupt);
+    }
+
+    /// Issue #830: 既に `.corrupt` がある場合は上書きせず `.corrupt.1` に退避する (forensic 保持)。
+    #[tokio::test]
+    async fn backup_corrupt_state_file_does_not_clobber_existing_backup() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("team.json");
+        fs::write(&path, b"corrupt-2").await.unwrap();
+        fs::write(dir.path().join("team.json.corrupt"), b"corrupt-1")
+            .await
+            .unwrap();
+
+        backup_corrupt_state_file(&path).await;
+
+        // 既存 backup は不変、新 backup は `.corrupt.1` に置かれる。
+        assert_eq!(
+            fs::read(dir.path().join("team.json.corrupt"))
+                .await
+                .unwrap(),
+            b"corrupt-1"
+        );
+        assert_eq!(
+            fs::read(dir.path().join("team.json.corrupt.1"))
+                .await
+                .unwrap(),
+            b"corrupt-2"
+        );
+        assert!(fs::metadata(&path).await.is_err());
     }
 }
