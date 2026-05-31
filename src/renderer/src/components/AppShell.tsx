@@ -18,6 +18,7 @@
  * 振る舞いは旧 App.tsx と完全一致 (純粋リファクタ)。state 宣言順・effect・
  * useMemo deps・JSX 構造はすべて旧コードを保持している。
  */
+import type { JSX } from 'react';
 import {
   useCallback,
   useEffect,

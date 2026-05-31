@@ -9,6 +9,7 @@
  * `deriveHealth` で算出して props で渡す。本コンポーネントは store も IPC も触らない。
  * 挙動・DOM・クラス名は元 `.canvas-agent-card__summary` ブロックと完全一致。
  */
+import type { JSX } from 'react';
 import { AlertTriangle, Clock, ClipboardList, Heart, HeartPulse, Skull } from 'lucide-react';
 import type { HealthState } from '../../../../lib/agent-health';
 import type { CardSummary as CardSummaryData } from '../../../../lib/agent-summary';

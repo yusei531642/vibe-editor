@@ -7,6 +7,7 @@
 // status='listening': リングが脈打つ (intensity が高い)
 // その他: 何も描かない (mount しない想定)
 
+import type { JSX } from 'react';
 import type { VoiceCommandStatus } from '../../../../types/shared';
 
 interface Props {

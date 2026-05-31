@@ -6,6 +6,7 @@
  * `getCurrentWindow()` API を呼んでウィンドウ操作を行う。`-webkit-app-region: drag`
  * のドラッグ可能領域に置かれるので、ボタン側は `no-drag` を CSS で当てる。
  */
+import type { JSX } from 'react';
 import { useEffect, useState } from 'react';
 import { Minus, Square, Copy, X } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';

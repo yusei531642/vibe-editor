@@ -8,6 +8,7 @@
  *
  * Monaco を使うほどの分量ではないので textarea でシンプルに開始 (将来差し替え可能)
  */
+import type { JSX } from 'react';
 import { useState } from 'react';
 import { ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import type { RoleProfile } from '../../../../types/shared';

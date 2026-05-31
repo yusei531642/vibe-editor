@@ -8,6 +8,7 @@
  *   4. Reset ボタンは draft を DEFAULT_SETTINGS に戻すが、永続化は行わない
  *      (= onApply 未押下なので外部 onApply は呼ばれない)
  */
+import type { JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';

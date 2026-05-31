@@ -29,6 +29,7 @@
  * Provider を跨がせず 1 箇所に閉じるため (3 Provider に割ると ref ブリッジが
  * Provider 間に移るだけになる)。
  */
+import type { JSX } from 'react';
 import {
   createContext,
   useCallback,

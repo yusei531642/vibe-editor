@@ -14,6 +14,7 @@
  * 同様にスタブ化する (テスト対象は CardFrame の振る舞いに絞る)。
  * RoleProfiles / Settings / Toast はテスト用のプロバイダ最小実装をモックして提供する。
  */
+import type { JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 

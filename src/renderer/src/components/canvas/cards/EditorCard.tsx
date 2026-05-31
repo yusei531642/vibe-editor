@@ -9,6 +9,7 @@
  * を登録する。これにより `useConfirmRemoveCard` / Canvas Clear が削除前に
  * dirty card 一覧を覗いて confirm dialog を出せる。
  */
+import type { JSX } from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { CardFrame } from '../CardFrame';

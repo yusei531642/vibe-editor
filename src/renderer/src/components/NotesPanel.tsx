@@ -7,6 +7,7 @@
  * - クリップボードにコピー / クリアの簡易操作
  * - 永続化先は AppSettings.notepad
  */
+import type { JSX } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { Copy, Eraser } from 'lucide-react';
 import { useSettings } from '../lib/settings-context';

@@ -13,6 +13,7 @@
  * Leader 以外のカードでは描画されない (`null` を返す)。
  * 挙動・DOM・クラス名・トーストは元 `CardFrame.tsx` の handoff ボタンと完全一致。
  */
+import type { JSX } from 'react';
 import { useCallback, useState, type RefObject } from 'react';
 import { ClipboardCheck } from 'lucide-react';
 import type { useToast } from '../../../../lib/toast-context';

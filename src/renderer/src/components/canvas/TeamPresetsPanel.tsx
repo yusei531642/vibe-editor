@@ -12,6 +12,7 @@
  * Apply は canvasStore.addCards で agent カードを順次配置するだけの最小実装。
  * Leader の team_recruit を自動で叩くフロー (plan の Step 4) は別 issue で扱う。
  */
+import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Hand, Plus, Save, Trash2 } from 'lucide-react';
 import { useT } from '../../lib/i18n';

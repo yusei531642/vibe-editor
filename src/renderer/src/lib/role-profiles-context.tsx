@@ -7,6 +7,7 @@
  *   2. file.overrides[id] でフィールド単位マージ (label / color / prompt 等を user が部分上書き)
  *   3. file.custom[] を追加 (id 衝突は user 側採用 + console.warn)
  */
+import type { JSX } from 'react';
 import {
   createContext,
   useCallback,

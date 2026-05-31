@@ -9,6 +9,7 @@
  * Issue #733: window.confirm から useNativeConfirm (@tauri-apps/plugin-dialog の ask)
  *   へ移行したため、確認ダイアログのモックは ask に対して行い、hook は async になった。
  */
+import type { JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import type { ReactNode } from 'react';

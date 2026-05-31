@@ -5,6 +5,7 @@
  * payload で渡される {agent, role, teamId, command, args, cwd, agentId, resumeSessionId} を
  * TerminalView に伝える。Phase 3 で AgentNodeCard (ロール色) に派生させる。
  */
+import type { JSX } from 'react';
 import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { CardFrame } from '../CardFrame';

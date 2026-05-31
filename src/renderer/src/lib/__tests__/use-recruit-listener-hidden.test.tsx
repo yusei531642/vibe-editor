@@ -7,6 +7,7 @@
  *   stub し、recruit handler の async 経路 (requester not found) は早期 return させる。
  * - visibility は singleton state を直接 toggle して観測する。
  */
+import type { JSX } from 'react';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import {
   afterEach,

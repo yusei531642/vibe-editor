@@ -11,6 +11,7 @@
 //   それ以外の pendingFunctionCall (safe) → 3 秒 hold の inline trail (キャンセル可能)
 //   bypass モードでは pendingFunctionCall が立たない (即実行) のでここでの分岐は走らない
 
+import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Mic, MicOff } from 'lucide-react';
 import { useT } from '../../lib/i18n';

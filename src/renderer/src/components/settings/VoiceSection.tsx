@@ -19,6 +19,7 @@
 //   - 入出力デバイスは初回マウントで `getUserMedia({audio:true})` を一瞬走らせて
 //     label を解放してから enumerateDevices() を呼ぶ。
 
+import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Eye, EyeOff, Lock, Mic, RotateCcw, Volume2 } from 'lucide-react';
 import type { AppSettings, VoiceSettings } from '../../../../types/shared';

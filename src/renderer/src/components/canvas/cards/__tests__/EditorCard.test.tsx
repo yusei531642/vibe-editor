@@ -6,6 +6,7 @@
  * スタブ化し、「mount 時に window.api.files.read が projectRoot/relPath で呼ばれる」
  * 「タイトルが描画される」を最小限固定する。
  */
+import type { JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 

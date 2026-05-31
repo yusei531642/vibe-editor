@@ -14,6 +14,7 @@
  * inject 失敗 event の購読 (useTeamInjectFailed) も含めて本コンポーネントに閉じる
  * (payload.lastInjectFailure が無いときは何も render しない)。
  */
+import type { JSX } from 'react';
 import { useCallback, useState } from 'react';
 import { AlertTriangle, RotateCcw } from 'lucide-react';
 import { useTeamInjectFailed } from '../../../../lib/use-team-inject-failed';

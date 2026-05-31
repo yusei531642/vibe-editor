@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { useCallback, useMemo } from 'react';
 import { Files, GitBranch, History, LayoutGrid, Settings as SettingsIcon, StickyNote } from 'lucide-react';
 import type { SidebarView } from '../Sidebar';

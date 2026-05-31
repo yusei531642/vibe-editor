@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { memo, useEffect, useMemo, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import type { StatusMascotVariant } from '../../../../types/shared';

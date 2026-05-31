@@ -11,6 +11,7 @@
  * `@testing-library/react` は `useXtermScrollToBottomOnResize.test.tsx` で使われている
  * のと同じパターン。jsdom 環境で renderHook を使う。
  */
+import type { JSX } from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { act, renderHook, cleanup } from '@testing-library/react';
 import {

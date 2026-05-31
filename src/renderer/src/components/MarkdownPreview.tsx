@@ -5,6 +5,7 @@
  * - sanitize: `dompurify` で XSS 防止 (md 内に <script> や onclick="..." を書かれても無効化)
  * - スタイル: index.css の `.md-preview` 配下
  */
+import type { JSX } from 'react';
 import { useEffect, useMemo, useRef } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';

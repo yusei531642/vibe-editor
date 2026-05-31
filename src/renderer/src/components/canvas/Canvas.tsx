@@ -5,6 +5,7 @@
  * Rust 側 TeamHub から `team:handoff` event が来たら、from→to エッジを
  * 一時的に追加して 10 秒で自動 fade (#379)。
  */
+import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 // Controls (zoom/+/-、fit、lock 4 ボタン) はデフォルトで白くアプリのテーマと合わないため import しない。
 import {

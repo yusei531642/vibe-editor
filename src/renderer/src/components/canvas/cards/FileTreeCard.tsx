@@ -4,6 +4,7 @@
  *
  * payload: { projectRoot, extraRoots? }
  */
+import type { JSX } from 'react';
 import { memo, useCallback } from 'react';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { CardFrame } from '../CardFrame';

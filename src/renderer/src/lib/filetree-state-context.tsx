@@ -23,6 +23,7 @@
  *   - Canvas FileTreeCard が limited extraRoots を持つと sidebar の expanded が prune される
  *     問題 → registerRoots ではなく settings の workspace truth で prune する。
  */
+import type { JSX } from 'react';
 import {
   createContext,
   useCallback,

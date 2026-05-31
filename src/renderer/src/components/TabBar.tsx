@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { Circle, Pin, X } from 'lucide-react';
 import { useT } from '../lib/i18n';
 

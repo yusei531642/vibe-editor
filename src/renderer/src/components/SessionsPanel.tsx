@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { useMemo, useState } from 'react';
 import { RefreshCw, Users, X } from 'lucide-react';
 import type { SessionInfo, TeamHistoryEntry } from '../../../types/shared';

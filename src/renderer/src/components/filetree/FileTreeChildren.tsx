@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import type { FileNode } from '../../../../types/shared';
 import {
   KEY_SEP,

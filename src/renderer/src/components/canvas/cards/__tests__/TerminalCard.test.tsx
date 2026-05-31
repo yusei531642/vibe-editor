@@ -8,6 +8,7 @@
  *   2. mount しても例外を投げない (CardFrame + 子の渡し先が壊れていない)
  * を最小限で固定する。NodeResizer / Handle / TerminalView は重いので vi.mock で全置換。
  */
+import type { JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';

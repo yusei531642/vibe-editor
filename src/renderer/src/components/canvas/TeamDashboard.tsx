@@ -14,6 +14,7 @@
  *   - 複数 team が active のときは team ごとに section を分けて表示し、片方の team の
  *     dead/stale/blocked 行が誤って隠れないようにする。
  */
+import type { JSX } from 'react';
 import { useMemo } from 'react';
 import { AlertTriangle, CheckCircle2, CircleDot, Hourglass, MoonStar } from 'lucide-react';
 import { useT } from '../../lib/i18n';

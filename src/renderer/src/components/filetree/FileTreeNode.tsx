@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { memo } from 'react';
 import { ChevronRight, File as DefaultFileIcon } from 'lucide-react';
 import type { FileNode } from '../../../../types/shared';

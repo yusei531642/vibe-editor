@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { CheckCircle2, GitBranch, RefreshCw } from 'lucide-react';
 import type { GitStatus, GitFileChange } from '../../../types/shared';
 import { useT } from '../lib/i18n';

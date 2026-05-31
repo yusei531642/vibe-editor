@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import type { AppSettings, Language } from '../../../../types/shared';
 import { useT } from '../../lib/i18n';
 import type { UpdateSetting } from './types';

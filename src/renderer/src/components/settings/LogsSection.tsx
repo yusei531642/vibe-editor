@@ -12,6 +12,7 @@
  *
  * 自動 tail / 全文検索 / 行番号表示は Phase 2 に分離する。
  */
+import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FolderOpen, RefreshCw } from 'lucide-react';
 import type { ReadLogTailResponse } from '../../../../types/shared';

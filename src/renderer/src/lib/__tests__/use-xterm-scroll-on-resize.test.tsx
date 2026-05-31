@@ -8,6 +8,7 @@
  *      scrollTop が scrollHeight に補正されること
  *   2. `.xterm-viewport` が存在しないコンテナでも例外を投げないこと
  */
+import type { JSX } from 'react';
 import { useRef } from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render, cleanup } from '@testing-library/react';

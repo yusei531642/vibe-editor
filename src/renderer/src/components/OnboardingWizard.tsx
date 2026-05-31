@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowRight, Check, ChevronLeft, Folder, FolderOpen } from 'lucide-react';
 import type { AppSettings, Language, ThemeName } from '../../../types/shared';

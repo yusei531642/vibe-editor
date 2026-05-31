@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ArrowDownToLine } from 'lucide-react';
 import { useT } from '../../lib/i18n';

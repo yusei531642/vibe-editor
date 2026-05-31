@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { DiffEditor } from '@monaco-editor/react';
 import { Columns3, Rows3 } from 'lucide-react';
 import '../lib/monaco-setup';

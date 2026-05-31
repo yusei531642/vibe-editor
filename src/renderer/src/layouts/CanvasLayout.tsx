@@ -10,6 +10,7 @@
  *   - Preset 起動時に teamHistory に自動保存 (canvasState 込み)
  *   - "Recent Teams" タブで過去チームを再開 (Card 配置完全復元)
  */
+import type { JSX } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Node } from '@xyflow/react';
 import {

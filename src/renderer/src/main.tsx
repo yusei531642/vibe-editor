@@ -1,4 +1,5 @@
 // Tauri 環境では window.api をシム実装にバインド (Electron preload の代替)
+import type { JSX } from 'react';
 import './lib/tauri-api';
 
 // ---------- Bundled Fonts (variable, full weight range) ----------

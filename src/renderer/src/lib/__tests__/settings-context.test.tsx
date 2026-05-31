@@ -13,6 +13,7 @@
  * このファイルでは fake timers は使わず、200ms debounce は実時間経過を
  * `await waitFor()` で待つ方針にする。
  */
+import type { JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';

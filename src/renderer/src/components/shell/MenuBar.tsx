@@ -9,6 +9,7 @@
  *   - 別の項目を hover (どこかが既に開いている場合のみ) → そちらに開け替え
  *   - 外クリック / Esc / 項目選択 → 全閉じ
  */
+import type { JSX } from 'react';
 import { memo, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 

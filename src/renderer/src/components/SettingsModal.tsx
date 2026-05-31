@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, Plus, Search, X } from 'lucide-react';
 import type { AgentConfig, AppSettings } from '../../../types/shared';

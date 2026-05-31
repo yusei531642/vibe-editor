@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { useMemo } from 'react';
 import { useT } from '../lib/i18n';
 import { useSettings } from '../lib/settings-context';

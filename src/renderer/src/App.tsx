@@ -16,6 +16,7 @@
  * 完全に AppStateProvider 内部へ閉じ込められ、ここからは見えない (callbacks-down /
  * events-up の依存性逆転)。
  */
+import type { JSX } from 'react';
 import { useCallback, useState } from 'react';
 import type { SessionInfo } from '../../types/shared';
 import { useWindowFrameInsets } from './lib/use-window-frame-insets';

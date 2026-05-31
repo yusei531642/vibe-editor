@@ -12,6 +12,7 @@
  *   - recruit 経路の spawn 失敗 ack (useRecruitSpawnAck)
  * を担当する。挙動は元 AgentNodeCard.tsx と完全一致。構造のみ整理。
  */
+import type { JSX } from 'react';
 import { useCallback, useEffect, useRef } from 'react';
 import { TerminalView, type TerminalViewHandle } from '../../../TerminalView';
 import { useSettings } from '../../../../lib/settings-context';

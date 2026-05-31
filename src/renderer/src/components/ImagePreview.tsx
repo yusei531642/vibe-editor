@@ -8,6 +8,7 @@
  * dev:vite 直接アクセス (Tauri ランタイム不在) では convertFileSrc が機能しないため、
  * その場合は静的なフォールバックメッセージを出す。
  */
+import type { JSX } from 'react';
 import { useMemo, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
 import { isTauri } from '../lib/tauri-api';

@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { DEFAULT_SETTINGS, type AppSettings } from '../../../../types/shared';
 import { useT } from '../../lib/i18n';
 import { STATUS_MASCOT_OPTIONS } from '../../lib/settings-options';

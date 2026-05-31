@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import type { AppSettings } from '../../../../types/shared';
 import { useT } from '../../lib/i18n';
 import { TERMINAL_FONT_PRESETS } from '../../lib/settings-options';

@@ -10,6 +10,7 @@
  *   - 点線アニメで粒子が「流れる」エフェクト (stroke-dasharray + animation)
  *   - メッセージ preview を edge label として中央に表示 (短縮)
  */
+import type { JSX } from 'react';
 import { memo } from 'react';
 import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from '@xyflow/react';
 

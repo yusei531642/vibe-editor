@@ -3,6 +3,7 @@
  *
  * payload: { projectRoot }
  */
+import type { JSX } from 'react';
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import type { GitStatus } from '../../../../../types/shared';

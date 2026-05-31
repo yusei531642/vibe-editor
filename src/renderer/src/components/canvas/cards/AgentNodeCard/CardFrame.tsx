@@ -23,6 +23,7 @@
  *
  * 挙動は元 AgentNodeCard.tsx と完全一致。構造のみ整理。
  */
+import type { JSX } from 'react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Handle,

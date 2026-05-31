@@ -2,6 +2,7 @@
  * CanvasSidebar — Canvas モードでも IDE と同じ <Sidebar> を表示する。
  * クリックハンドラだけ Canvas Card 追加に差し替え、見た目とタブ構造は完全共通。
  */
+import type { JSX } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import type {
   GitStatus,

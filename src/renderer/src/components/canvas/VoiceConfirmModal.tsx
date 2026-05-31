@@ -1,6 +1,7 @@
 // Issue #825: 危険キーワード hit 時に「Leader に送信しますか?」を UI で明示確認させる
 // 最終 fail-safe modal。`confirmationMode === 'always'` で safetyLevel === 'confirm' のみ表示。
 
+import type { JSX } from 'react';
 import { AlertTriangle } from 'lucide-react';
 import { useT } from '../../lib/i18n';
 

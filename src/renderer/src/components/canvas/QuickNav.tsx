@@ -4,6 +4,7 @@
  * Phase 4 のキー UX。CommandPalette とは別に Canvas 専用の軽量パレットとして実装。
  * Phase 4 後半で CommandPalette 側に統合検討。
  */
+import type { JSX } from 'react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import { useCanvasNodes } from '../../stores/canvas-selectors';

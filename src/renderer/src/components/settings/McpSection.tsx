@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import type { AppSettings } from '../../../../types/shared';
 import { useT } from '../../lib/i18n';

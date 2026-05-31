@@ -4,6 +4,7 @@
  * - ボディ: 子要素 (TerminalView 等を直接埋める)
  * - リサイズハンドルは React Flow の NodeResizer を使う想定 (Phase 4)
  */
+import type { JSX } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { NodeResizer } from '@xyflow/react';
 import { useConfirmRemoveCard } from '../../lib/use-confirm-remove-card';

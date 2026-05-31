@@ -5,6 +5,7 @@
  * worker の起動に失敗するため、`DiffView` 全体を vi.mock でスタブ化し
  * 「props 経由で window.api.git.diff が呼ばれる」「タイトルが描画される」だけを固定する。
  */
+import type { JSX } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 

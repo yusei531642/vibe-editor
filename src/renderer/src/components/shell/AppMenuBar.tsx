@@ -4,6 +4,7 @@
  * App.tsx (IDE) と CanvasLayout.tsx (Canvas) で同一の項目を出すために抽出した。
  * 各レイアウトはハンドラだけ供給する。表示順・アイコン・shortcut はここで集約。
  */
+import type { JSX } from 'react';
 import {
   Clock,
   Command as CommandIcon,

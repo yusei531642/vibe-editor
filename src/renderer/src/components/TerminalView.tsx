@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState, useCallback } from 'react';
 import type { TerminalWarning } from '../../../types/shared';
 import { useSettings } from '../lib/settings-context';

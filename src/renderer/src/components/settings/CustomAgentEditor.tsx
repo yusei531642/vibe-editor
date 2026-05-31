@@ -1,3 +1,4 @@
+import type { JSX } from 'react';
 import type { AgentConfig, AppSettings } from '../../../../types/shared';
 import { useT } from '../../lib/i18n';
 import { useNativeConfirm } from '../../lib/use-native-confirm';

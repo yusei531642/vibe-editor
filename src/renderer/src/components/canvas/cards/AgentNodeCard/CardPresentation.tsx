@@ -10,6 +10,7 @@
  * その配置だけを担う (handoff ロジックは CardHandoff.tsx)。
  * 挙動・DOM・クラス名は元 `.canvas-agent-card__header` と完全一致。
  */
+import type { JSX } from 'react';
 import type { ReactNode } from 'react';
 import type { AgentStatus } from './types';
 
