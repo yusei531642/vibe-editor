@@ -154,6 +154,15 @@ impl TeamHub {
                 ..MemberDiagnostics::default()
             },
         );
+        // Issue #829: agent-keyed な member_diagnostics / last_status_call_at を後で漏れなく
+        // 解放できるよう、binding とは独立した team 在籍記録に agent_id を登録する。
+        // recruit grant は member_diagnostics を挿入する最上流なので、ここで roster に入れて
+        // おけば dismiss / record_agent_process_exit / recruit timeout で binding が先に消えても
+        // clear_team が当該 team の agent を網羅して両 map を reclaim できる。
+        s.team_agent_roster
+            .entry(team_id.clone())
+            .or_default()
+            .insert(agent_id.clone());
         s.pending_recruits.insert(
             agent_id,
             PendingRecruit {
@@ -307,6 +316,13 @@ impl TeamHub {
         }
         entry.last_handshake_at = Some(now_iso.clone());
         entry.last_seen_at = Some(now_iso);
+        // Issue #829: 再接続 handshake (binding 経由 / 旧 context 残骸) のように recruit grant を
+        // 経ずに member_diagnostics の entry が生える経路でも team 在籍記録を残す。これにより
+        // clear_team が当該 team の全 agent を網羅できる。
+        s.team_agent_roster
+            .entry(team_id.to_string())
+            .or_default()
+            .insert(agent_id.to_string());
         true
     }
 
