@@ -76,6 +76,18 @@ pub(crate) struct HubState {
     /// `last_status_at` / `last_seen_at` も更新しない (autoStale 偽装防止)。
     /// in-memory only (Hub 再起動で clear)。
     pub(crate) last_status_call_at: HashMap<String, std::time::Instant>,
+    /// Issue #829: team_id → その team で recruit / handshake された agent_id 集合。
+    ///
+    /// `member_diagnostics` / `last_status_call_at` は agent_id 単体キーで team 次元を持たない。
+    /// これらの解放を `agent_role_bindings` の逆引きに頼ると、binding が
+    /// dismiss / record_agent_process_exit / recruit timeout で先に消えた agent は
+    /// `clear_team` 到達時に逆引きで届かず、両 map が Hub 再起動まで leak する
+    /// (本 issue の支配的経路)。binding と独立した「team の在籍記録」をここに持ち、
+    /// binding が消えた後でも `clear_team` が当該 team の agent を網羅して両 map を
+    /// reclaim できるようにする。team-keyed なので `clear_team` の team prefix retain で
+    /// 一括解放でき、cross-team 共有 agent の防御 (他 team がまだ参照するなら残す) も維持する。
+    /// in-memory only (Hub 再起動で clear)。
+    pub(crate) team_agent_roster: HashMap<String, std::collections::HashSet<String>>,
 }
 
 /// Issue #342 Phase 3 (3.11): tracing-appender が書き出すログファイルの絶対パスを
@@ -496,6 +508,7 @@ impl TeamHub {
                 file_locks: HashMap::new(),
                 recruit_semaphores: HashMap::new(),
                 last_status_call_at: HashMap::new(),
+                team_agent_roster: HashMap::new(),
             })),
             app_handle: Arc::new(Mutex::new(None)),
             inflight,
