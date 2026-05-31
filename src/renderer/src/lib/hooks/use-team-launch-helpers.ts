@@ -55,6 +55,14 @@ export function useTeamLaunchHelpers(
         } else {
           base.push('--resume', tab.resumeSessionId);
         }
+      } else if (tab.resumeSessionId && isCodex) {
+        // Issue #856: Codex は `--session-id` 事前注入に非対応なので capture-then-resume。
+        // 初回は素の codex 起動 → watcher が emit した session id を捕捉・永続化 → 次回起動で
+        // `codex resume <id>` サブコマンドで前回会話を復元する。Claude の `--resume <id>` フラグ
+        // 形式とは異なり Codex は `resume <uuid>` を **第 1 引数 (サブコマンド)** に要求するため、
+        // base の先頭へ unshift する。後続の `-c disable_paste_burst=true` や main 側が付ける
+        // `-c model_instructions_file=<path>` は `codex resume` が受理するので順序を壊さない。
+        base.unshift('resume', tab.resumeSessionId);
       }
       // Claude のチーム指示は --append-system-prompt で直接渡す。
       if (!isCodex && tab.teamId) {

@@ -52,11 +52,18 @@ function TerminalCardImpl({ id, data }: NodeProps<Node<CardDataOf<'terminal'>>>)
   const command = payload.command ?? (isCodex ? settings.codexCommand : settings.claudeCommand);
 
   // Issue #22: resumeSessionId があり Claude 側なら --resume <id> を付与して起動。
-  // Codex は `--resume` 非対応なので付けない (IDE 側 App.tsx:1396 と同じ条件)。
+  // Issue #856: Codex は `--resume` フラグ非対応だが `codex resume <id>` サブコマンドで
+  // 復元できる。capture-then-resume で payload.resumeSessionId に session id が
+  // 永続化されていれば、`resume <id>` を base 先頭へ unshift する (Codex は resume を
+  // 第 1 引数に要求するため)。後続の codexInstructions (model_instructions_file) は
+  // `codex resume` が受理するので順序を壊さない。
   const args = useMemo<string[] | undefined>(() => {
     const base = payload.args ? [...payload.args] : [];
     if (payload.resumeSessionId && !isCodex) {
       base.push('--resume', payload.resumeSessionId);
+    }
+    if (payload.resumeSessionId && isCodex) {
+      base.unshift('resume', payload.resumeSessionId);
     }
     return base.length > 0 ? base : undefined;
   }, [payload.args, payload.resumeSessionId, isCodex]);

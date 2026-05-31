@@ -224,7 +224,7 @@ function AgentNodeCardImpl({
         base.push('-c', 'disable_paste_burst=true');
       }
     }
-    // Issue #660 / #752 / #753: Claude のみ session 制御フラグを付与 (Codex は両方とも非対応)。
+    // Issue #660 / #752 / #753: Claude の session 制御フラグ (--session-id / --resume) を付与。
     //   - payload.resumeSessionId 既存 → 永続化済みなので `--resume` で前回会話を継続
     //   - payload.resumeSessionId 空 → 採番した UUID を `--session-id` で強制注入
     // 新規 UUID は jsonl 検出後にだけ payload へ保存する。初回 spawn 前に保存すると
@@ -235,6 +235,15 @@ function AgentNodeCardImpl({
       } else {
         base.push('--session-id', ensuredSessionId);
       }
+    }
+    // Issue #856: Codex は capture-then-resume。`--session-id` 事前注入は非対応なので
+    // 初回は素の codex 起動。watcher が捕捉した session id が onSessionId 経由で
+    // payload.resumeSessionId に永続化された後の再起動でのみ、`codex resume <id>`
+    // サブコマンドを base の先頭へ unshift して前回会話を復元する (第 1 引数要求のため)。
+    // 後続の `-c disable_paste_burst=true` / `-c model_instructions_file=<path>` は
+    // `codex resume` が受理するので順序を壊さない。
+    if (isCodex && payload.resumeSessionId) {
+      base.unshift('resume', payload.resumeSessionId);
     }
     return base.length > 0 ? base : undefined;
   }, [
