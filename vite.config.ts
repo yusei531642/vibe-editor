@@ -7,8 +7,10 @@ import { resolve } from 'path';
 
 const host = process.env.TAURI_DEV_HOST;
 
-export default defineConfig(async () => ({
-  plugins: [react()],
+export default defineConfig(() => ({
+  // @vitejs/plugin-react v6 の react() は Plugin[] を返すため、ネスト配列
+  // (Plugin[][]) にならないよう spread で平坦化して PluginOption[] に揃える。
+  plugins: [...react()],
   root: resolve(__dirname, 'src/renderer'),
   resolve: {
     alias: {
@@ -37,7 +39,7 @@ export default defineConfig(async () => ({
     outDir: resolve(__dirname, 'dist'),
     emptyOutDir: true,
     target: 'chrome120',
-    minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
+    minify: !process.env.TAURI_ENV_DEBUG ? ('esbuild' as const) : false,
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
     // Monaco is intentionally isolated below; app-owned JS stays below 500 kB.
     chunkSizeWarningLimit: 4000,
@@ -52,7 +54,7 @@ export default defineConfig(async () => ({
       output: {
         // Issue #110: main chunk が 4.7MB あり起動時間と WebView メモリに響くため、
         // 重い vendor を別 chunk に分離する。Monaco / xyflow / xterm が大物。
-        manualChunks(id) {
+        manualChunks(id: string) {
           if (!id.includes('node_modules')) return;
           if (id.includes('monaco-editor') || id.includes('@monaco-editor/react')) {
             return 'vendor-monaco';

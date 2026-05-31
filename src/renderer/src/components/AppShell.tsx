@@ -57,7 +57,8 @@ import { useMascotOrchestrator } from '../lib/hooks/use-mascot-orchestrator';
 import { useT } from '../lib/i18n';
 import {
   useSettingsActions,
-  useSettingsLoading
+  useSettingsLoading,
+  useSettingsSelector
 } from '../lib/settings-context';
 import { useToast } from '../lib/toast-context';
 import { useUiStore } from '../stores/ui';
@@ -101,6 +102,9 @@ export function AppShell({
   // Phase 2 (Issue #487): App.tsx 冒頭の `useSettingsValue` 17 連発合成は
   // `useAppShellState` hook に外出し済み。再描画粒度は変えていない。
   const settings = useAppShellState();
+  // SettingsModal は font 系を含む完全な AppSettings を `initial` に要求するため、
+  // narrow な AppShellSettings ではなく snapshot の全 settings を渡す。
+  const fullSettings = useSettingsSelector((s) => s.settings);
   const { showToast, dismissToast } = useToast();
   const t = useT();
   const viewMode = useUiStore((s) => s.viewMode);
@@ -924,7 +928,7 @@ export function AppShell({
 
       <SettingsModal
         open={settingsOpen}
-        initial={settings}
+        initial={fullSettings}
         onClose={() => setSettingsOpen(false)}
         onApply={(next) => {
           void updateSettings(next);

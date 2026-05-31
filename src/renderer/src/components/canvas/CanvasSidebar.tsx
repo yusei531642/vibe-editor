@@ -5,6 +5,7 @@
 import type { JSX } from 'react';
 import { useCallback, useEffect, useState } from 'react';
 import type {
+  GitFileChange,
   GitStatus,
   SessionInfo,
   TeamHistoryEntry
@@ -17,7 +18,11 @@ import { useNativeConfirm } from '../../lib/use-native-confirm';
 import { useUiStore } from '../../stores/ui';
 import { ROLE_META } from '../../lib/team-roles';
 import { useFilesChanged } from '../../lib/use-files-changed';
-import { spawnTeam, type SpawnTeamMember } from '../../lib/canvas-team-spawn';
+import {
+  spawnTeam,
+  normalizeSpawnAgent,
+  type SpawnTeamMember
+} from '../../lib/canvas-team-spawn';
 
 interface CanvasSidebarProps {
   /** 外部 (CanvasLayout の Rail) から制御したい場合に渡す。省略時はローカル state */
@@ -121,7 +126,7 @@ export function CanvasSidebar({
   );
 
   const handleOpenDiff = useCallback(
-    (file: { path: string }): void => {
+    (file: GitFileChange): void => {
       addCard({
         type: 'diff',
         title: `Δ ${file.path.split(/[\\/]/).pop() ?? file.path}`,
@@ -164,7 +169,7 @@ export function CanvasSidebar({
           savedX !== null && savedY !== null ? { x: savedX, y: savedY } : { x: 0, y: 0 };
         return {
           role: m.role,
-          agent: m.agent,
+          agent: normalizeSpawnAgent(m.agent),
           position,
           // Issue #69: 未知 role (旧バージョン / 手編集の team-history) でもクラッシュさせない
           title: ROLE_META[m.role]?.label ?? m.role ?? 'Agent',
@@ -280,6 +285,8 @@ export function CanvasSidebar({
       onRemoveWorkspaceFolder={(p) => void handleRemoveWorkspaceFolder(p)}
       onAddWorkspaceFolder={() => void handleAddWorkspaceFolder()}
       activeFilePath={null}
+      // Canvas モードでは最近ファイル履歴を持たないため空配列を渡す。
+      recentFiles={[]}
       onOpenFile={handleOpenFile}
       gitStatus={gitStatus}
       gitLoading={gitLoading}

@@ -128,7 +128,7 @@ export function AppStateProvider({
   // discardEditorTabsForRoot は use-file-tabs / use-terminal-tabs /
   // use-team-management の戻り値に依存するため、それらが宣言される前に
   // useProjectLoader へ渡すには ref 経由のブリッジが必要。
-  const confirmDiscardRef = useRef<() => boolean>(() => true);
+  const confirmDiscardRef = useRef<() => boolean | Promise<boolean>>(() => true);
   const projectSwitchedRef = useRef<(root: string) => void>(() => {});
   const projectLoadedRef = useRef<
     (snapshot: { gitStatus: GitStatus; sessions: SessionInfo[] }) => void

@@ -12,9 +12,8 @@
     "isolatedModules": true,
     "noEmit": true,
     "types": ["node"],
-    "baseUrl": ".",
     "paths": {
-      "@shared/*": ["src/types/*"]
+      "@shared/*": ["./src/types/*"]
     }
   },
   "include": ["vite.config.ts"]

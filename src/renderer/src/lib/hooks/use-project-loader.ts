@@ -17,8 +17,9 @@ type ToastFn = (
 
 export interface UseProjectLoaderOptions {
   /** 既存タブの discard 確認。返り値が false ならプロジェクト切替を中止する。
-   *  Phase 1-2 (use-file-tabs) 抽出までの一時的注入。 */
-  confirmDiscardEditorTabs: () => boolean;
+   *  実体は confirm ダイアログを伴う非同期処理なので Promise<boolean> も許容する
+   *  (loadProject 側で await する)。 */
+  confirmDiscardEditorTabs: () => boolean | Promise<boolean>;
   /** loadProject によりプロジェクトが切り替わった直後に呼ばれる。
    *  App.tsx 側で editor tabs / sessions / teams / terminal tabs を初期化するために使う。
    *  Phase 1-2 〜 1-4 で各 hook に分散したら順次 opts から削る。 */
@@ -84,7 +85,11 @@ export function useProjectLoader(
       root: string,
       options: { addToRecent?: boolean } = { addToRecent: true }
     ): Promise<boolean> => {
-      if (projectRoot && projectRoot !== root && !optsRef.current.confirmDiscardEditorTabs()) {
+      if (
+        projectRoot &&
+        projectRoot !== root &&
+        !(await optsRef.current.confirmDiscardEditorTabs())
+      ) {
         return false;
       }
       setProjectRoot(root);

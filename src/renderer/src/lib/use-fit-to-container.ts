@@ -25,7 +25,8 @@ const ZOOM_DEBOUNCE_MS = 100;
  * `unscaledFit=false` のままなら IDE モードと同じ挙動 (regression ゼロ)。
  */
 export interface UseFitToContainerOptions {
-  containerRef: RefObject<HTMLDivElement>;
+  // React 19 の useRef<T>(null) は RefObject<T | null> を返す。
+  containerRef: RefObject<HTMLDivElement | null>;
   termRef: MutableRefObject<Terminal | null>;
   fitRef: MutableRefObject<FitAddon | null>;
   ptyIdRef: MutableRefObject<string | null>;

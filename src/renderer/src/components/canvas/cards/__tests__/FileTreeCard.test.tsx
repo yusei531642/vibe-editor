@@ -28,7 +28,7 @@ import { SettingsProvider } from '../../../../lib/settings-context';
 import { ToastProvider } from '../../../../lib/toast-context';
 import { DEFAULT_SETTINGS } from '../../../../../../types/shared';
 
-type TestWindow = Window &
+type TestWindow = Omit<Window, 'api'> &
   typeof globalThis & {
     api?: unknown;
   };
@@ -94,7 +94,7 @@ describe('FileTreeCard (smoke)', () => {
   afterEach(() => {
     cleanup();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
       (window as TestWindow).api = originalApi;
     }

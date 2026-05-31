@@ -91,6 +91,12 @@ export function useTeamState(opts: UseTeamStateOptions): UseTeamStateResult {
             status: '',
             exited: false,
             resumeSessionId: null,
+            // resumeSessionId が null の fallback タブなので session 注入はしない。
+            freshSessionId: false,
+            // cwd / 初回 size は App.tsx 側 fallback (settings.claudeCwd ?? projectRoot / fit) に委ねる。
+            cwd: null,
+            initialCols: null,
+            initialRows: null,
             teamHistoryMemberIdx: null,
             label: 'Claude #1',
             customLabel: null

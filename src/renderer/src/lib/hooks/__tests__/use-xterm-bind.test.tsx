@@ -24,7 +24,7 @@ import {
   type PtySpawnSnapshot
 } from '../use-xterm-bind';
 
-type TestWindow = Window &
+type TestWindow = Omit<Window, 'api'> &
   typeof globalThis & {
     api?: unknown;
   };
@@ -62,7 +62,7 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
     // 待たずに spawn まで進める)。
     Object.defineProperty(document, 'fonts', {
       configurable: true,
-      value: { ready: Promise.resolve() } as Partial<FontFaceSet>
+      value: { ready: Promise.resolve() }
     });
   });
 
@@ -70,14 +70,14 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
     cleanup();
     vi.restoreAllMocks();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
       (window as TestWindow).api = originalApi;
     }
     if (originalFontsDescriptor) {
       Object.defineProperty(document, 'fonts', originalFontsDescriptor);
     } else {
-      delete (document as Document & { fonts?: unknown }).fonts;
+      Reflect.deleteProperty(document, 'fonts');
     }
   });
 

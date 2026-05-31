@@ -20,7 +20,8 @@ import type { Language } from '../../../types/shared';
  */
 export function useTerminalClipboard(options: {
   termRef: MutableRefObject<Terminal | null>;
-  containerRef: RefObject<HTMLDivElement>;
+  // React 19 の useRef<T>(null) は RefObject<T | null> を返す。
+  containerRef: RefObject<HTMLDivElement | null>;
   /** 文字列を pty に書き込むコールバック (pty id が無ければ no-op) */
   writeToPty: (text: string) => void | Promise<void>;
   /** Issue #338: 言語の current を ref 経由で受け取る。

@@ -37,7 +37,7 @@ import {
 } from '../hooks/use-xterm-bind';
 import type { CellSize } from '../measure-cell-size';
 
-type TestWindow = Window &
+type TestWindow = Omit<Window, 'api'> &
   typeof globalThis & {
     api?: unknown;
   };
@@ -112,7 +112,7 @@ describe('useXtermBind: 初回 spawn の runtime cell 優先 (Issue #503 Fix 1)'
     // fonts.ready を即時 resolve させて loadInitialMetrics の 300ms timeout 経路を回避。
     Object.defineProperty(document, 'fonts', {
       configurable: true,
-      value: { ready: Promise.resolve() } as Partial<FontFaceSet>
+      value: { ready: Promise.resolve() }
     });
     getXtermRuntimeCellSizeMock.mockReset();
   });
@@ -121,14 +121,14 @@ describe('useXtermBind: 初回 spawn の runtime cell 優先 (Issue #503 Fix 1)'
     cleanup();
     vi.restoreAllMocks();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
       (window as TestWindow).api = originalApi;
     }
     if (originalFontsDescriptor) {
       Object.defineProperty(document, 'fonts', originalFontsDescriptor);
     } else {
-      delete (document as Document & { fonts?: unknown }).fonts;
+      Reflect.deleteProperty(document, 'fonts');
     }
   });
 

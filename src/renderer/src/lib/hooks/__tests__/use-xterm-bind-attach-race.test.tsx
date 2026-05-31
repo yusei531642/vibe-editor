@@ -35,7 +35,7 @@ import {
   type PtySpawnSnapshot
 } from '../use-xterm-bind';
 
-type TestWindow = Window &
+type TestWindow = Omit<Window, 'api'> &
   typeof globalThis & {
     api?: unknown;
   };
@@ -71,7 +71,7 @@ describe('useXtermBind: Issue #633 attach 経路 pre-subscribe race fix', () => 
     originalFontsDescriptor = Object.getOwnPropertyDescriptor(document, 'fonts');
     Object.defineProperty(document, 'fonts', {
       configurable: true,
-      value: { ready: Promise.resolve() } as Partial<FontFaceSet>
+      value: { ready: Promise.resolve() }
     });
   });
 
@@ -79,14 +79,14 @@ describe('useXtermBind: Issue #633 attach 経路 pre-subscribe race fix', () => 
     cleanup();
     vi.restoreAllMocks();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
       (window as TestWindow).api = originalApi;
     }
     if (originalFontsDescriptor) {
       Object.defineProperty(document, 'fonts', originalFontsDescriptor);
     } else {
-      delete (document as Document & { fonts?: unknown }).fonts;
+      Reflect.deleteProperty(document, 'fonts');
     }
   });
 

@@ -27,7 +27,7 @@ import { ToastProvider } from '../../../../lib/toast-context';
 import { DEFAULT_SETTINGS } from '../../../../../../types/shared';
 import type { ReactNode } from 'react';
 
-type TestWindow = Window &
+type TestWindow = Omit<Window, 'api'> &
   typeof globalThis & {
     api?: unknown;
   };
@@ -99,7 +99,7 @@ describe('EditorCard (smoke)', () => {
   afterEach(() => {
     cleanup();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
       (window as TestWindow).api = originalApi;
     }

@@ -28,14 +28,14 @@ import type { CellSize } from '../measure-cell-size';
 
 // getXtermRuntimeCellSize は xterm 内部 _core を読む helper。jsdom では runtime cell が
 // 取れないので null を返してもらい、fallback (getCellSize) を使う経路に乗せる。
-const getXtermRuntimeCellSizeMock = vi.fn((): CellSize | null => null);
+const getXtermRuntimeCellSizeMock = vi.fn((..._args: unknown[]): CellSize | null => null);
 vi.mock('../get-xterm-runtime-cell-size', () => ({
   getXtermRuntimeCellSize: (...args: unknown[]) => getXtermRuntimeCellSizeMock(...args)
 }));
 
 import { useFitToContainer } from '../use-fit-to-container';
 
-type TestWindow = Window &
+type TestWindow = Omit<Window, 'api'> &
   typeof globalThis & {
     api?: unknown;
   };
@@ -111,7 +111,7 @@ describe('useFitToContainer: zoom 単独 refit で xterm 全行 refresh を skip
     cleanup();
     vi.useRealTimers();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
       (window as TestWindow).api = originalApi;
     }

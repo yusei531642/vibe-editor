@@ -12,7 +12,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { TeamInjectFailedEvent } from '../../../../types/shared';
+import type { TeamInjectFailedEvent } from '../../../types/shared';
 
 type Listener = (p: TeamInjectFailedEvent) => void;
 const listeners = new Set<Listener>();

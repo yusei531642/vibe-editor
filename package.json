@@ -11,7 +11,7 @@
     "build": "cargo tauri build",
     "dev:vite": "vite",
     "build:vite": "vite build",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc -b",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
