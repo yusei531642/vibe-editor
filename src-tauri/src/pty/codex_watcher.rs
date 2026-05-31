@@ -111,7 +111,13 @@ fn is_rollout_file(path: &Path) -> bool {
 
 /// `~/.codex/sessions/` を再帰走査して rollout ファイルの絶対パスを集める。
 /// (日付サブディレクトリ YYYY/MM/DD 配下に置かれるため再帰が必須)
-fn collect_rollout_paths(dir: &Path, out: &mut Vec<PathBuf>) {
+///
+/// Issue #859 (perf): `cutoff` が `Some(t)` のとき、mtime が `t` より古いサブディレクトリには
+/// 降りない。codex は当日の `YYYY/MM/DD` にしか書かないため、過去日付のディレクトリは新規 rollout
+/// を持たず、watcher (60 秒・1s ごとの保険走査) が長い codex 履歴を毎回フル走査するのを防ぐ。
+/// `None` なら全走査 (履歴全体を 1 度だけ見たい sanitize 等の用途)。mtime が読めない場合は安全側で
+/// 降りる。
+fn collect_rollout_paths(dir: &Path, cutoff: Option<SystemTime>, out: &mut Vec<PathBuf>) {
     let read = match std::fs::read_dir(dir) {
         Ok(r) => r,
         Err(_) => return,
@@ -119,11 +125,30 @@ fn collect_rollout_paths(dir: &Path, out: &mut Vec<PathBuf>) {
     for entry in read.flatten() {
         let path = entry.path();
         match entry.file_type() {
-            Ok(ft) if ft.is_dir() => collect_rollout_paths(&path, out),
+            Ok(ft) if ft.is_dir() => {
+                if let Some(c) = cutoff {
+                    let stale = entry
+                        .metadata()
+                        .ok()
+                        .and_then(|m| m.modified().ok())
+                        .map(|m| m < c)
+                        .unwrap_or(false);
+                    if stale {
+                        continue;
+                    }
+                }
+                collect_rollout_paths(&path, cutoff, out);
+            }
             Ok(_) if is_rollout_file(&path) => out.push(path),
             _ => {}
         }
     }
+}
+
+/// watcher 用の日付ディレクトリ pruning 閾値。`since` (= spawn 時刻) から 2 日前を cutoff にして、
+/// 当日 + 直近 (深夜跨ぎや時計ずれの余裕) の日付ディレクトリだけを走査対象にする。
+fn watcher_dir_cutoff(since: SystemTime) -> Option<SystemTime> {
+    since.checked_sub(Duration::from_secs(2 * 24 * 60 * 60))
 }
 
 /// watcher 起動時点ですでに rollout が作られている race を救済するため、
@@ -131,7 +156,8 @@ fn collect_rollout_paths(dir: &Path, out: &mut Vec<PathBuf>) {
 /// (claude の list_recent_session_candidates 相当)。
 fn list_recent_rollout_candidates(dir: &Path, since: SystemTime) -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    collect_rollout_paths(dir, &mut paths);
+    // recent 候補も日付ディレクトリ pruning して、過去日付の全走査を避ける。
+    collect_rollout_paths(dir, watcher_dir_cutoff(since), &mut paths);
     let mut recent: Vec<(PathBuf, SystemTime)> = paths
         .into_iter()
         .filter_map(|p| {
@@ -291,12 +317,15 @@ fn run_watcher_loop(
     }
 
     let expected_norm = super::path_norm::normalize_project_root(&project_root);
+    // Issue #859 (perf): 走査は spawn 時刻から直近 (~2 日) の日付ディレクトリだけに絞る。
+    // 新規 session の rollout は当日に書かれるため、過去日付を毎回走らせる必要はない。
+    let scan_cutoff = watcher_dir_cutoff(spawned_at);
 
     // 初期 snapshot: 既存の rollout はすべて「この spawn 以前のもの」として除外対象 (seen)。
     let mut seen: HashSet<PathBuf> = HashSet::new();
     {
         let mut snap = Vec::new();
-        collect_rollout_paths(&dir, &mut snap);
+        collect_rollout_paths(&dir, scan_cutoff, &mut snap);
         for p in snap {
             seen.insert(p);
         }
@@ -370,7 +399,7 @@ fn run_watcher_loop(
         }
         last_full_scan = Some(Instant::now());
         let mut current = Vec::new();
-        collect_rollout_paths(&dir, &mut current);
+        collect_rollout_paths(&dir, scan_cutoff, &mut current);
         // パス順を安定化 (どの watcher が先に claim してもデテルミニスティックに)。
         current.sort();
         for path in current {
@@ -524,8 +553,29 @@ mod tests {
         fs::write(day_dir.join("history.jsonl"), "x").expect("write non-rollout jsonl");
 
         let mut out = Vec::new();
-        collect_rollout_paths(&dir, &mut out);
+        collect_rollout_paths(&dir, None, &mut out);
         assert_eq!(out, vec![rollout]);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    /// Issue #859 (perf): cutoff より古い mtime の日付ディレクトリには降りないこと。
+    #[test]
+    fn collect_rollout_paths_prunes_stale_dirs_by_cutoff() {
+        let dir = unique_temp_dir("codex-watcher-prune");
+        let id = "eeeeeeee-ffff-0000-1111-222222222222";
+        write_rollout(&dir, "2026-05-31T00-00-00", id, &session_meta_line(id, "/tmp/r"));
+
+        // 未来時刻を cutoff にすれば、現在 mtime の日付ディレクトリは全て stale 扱いで pruning される。
+        let future = SystemTime::now() + Duration::from_secs(3600);
+        let mut pruned = Vec::new();
+        collect_rollout_paths(&dir, Some(future), &mut pruned);
+        assert!(pruned.is_empty(), "stale dirs should be pruned, got {pruned:?}");
+
+        // 過去時刻 cutoff なら通常どおり拾える。
+        let past = SystemTime::now() - Duration::from_secs(3600);
+        let mut kept = Vec::new();
+        collect_rollout_paths(&dir, Some(past), &mut kept);
+        assert_eq!(kept.len(), 1, "recent dirs within cutoff are walked");
         let _ = fs::remove_dir_all(dir);
     }
 

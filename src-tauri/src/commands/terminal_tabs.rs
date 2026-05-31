@@ -72,11 +72,15 @@ pub struct DroppedSessionInfo {
     pub kind: String,
     /// drop 理由。現状は transcript / rollout 不在を表す "transcript-missing" のみ。
     pub reason: String,
+    /// この tab が属する project root (= by_project の key)。Issue #859 review: renderer は
+    /// 現在開いている project の drop 件数だけを toast に出す必要があるため、全 project 横断の
+    /// 総数で誤った件数を表示しないよう project ごとに絞り込めるようにする。
+    pub project_root: String,
 }
 
 /// Issue #857: `terminal_tabs_load` の戻り値 contract。
 /// `PersistedTerminalTabsFile` を `#[serde(flatten)]` で展開しつつ `droppedSessions` を追加する。
-/// JSON 形: `{ schemaVersion, lastSavedAt, byProject, droppedSessions: [{tabId, kind, reason}] }`
+/// JSON 形: `{ schemaVersion, lastSavedAt, byProject, droppedSessions: [{tabId, kind, reason, projectRoot}] }`
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalTabsLoadResult {
@@ -136,43 +140,53 @@ fn claude_jsonl_path(home: &Path, cwd: &str, session_id: &str) -> PathBuf {
         .join(format!("{session_id}.jsonl"))
 }
 
-/// Issue #857: codex の rollout が `<sessions_root>` 配下に存在するか再帰走査で確認する。
-/// ファイル名 stem が `rollout-<ts>-<session_id>` (= prefix `rollout-` かつ `-<session_id>` で
-/// 終わる) の `.jsonl` を探す。見つかれば true。startup load 時のみ・最初の一致で early-exit
-/// するので再帰走査コストは許容する。
-fn codex_rollout_exists_sync(sessions_root: &Path, session_id: &str) -> bool {
-    fn walk(dir: &Path, suffix: &str) -> bool {
+/// Issue #857 / #859 (perf): `<sessions_root>` 配下の `rollout-*.jsonl` の file_stem を
+/// **1 回の再帰走査で** すべて集める。codex tab が複数あっても walk は 1 度だけにして、起動時
+/// sanitize の「tab ごとに full 再帰走査 = O(N×M)」を「O(M) walk + O(N×M) の in-memory 突合」
+/// に落とす。
+fn collect_codex_rollout_stems(sessions_root: &Path) -> Vec<String> {
+    fn walk(dir: &Path, out: &mut Vec<String>) {
         let read = match std::fs::read_dir(dir) {
             Ok(r) => r,
-            Err(_) => return false,
+            Err(_) => return,
         };
         for entry in read.flatten() {
             let path = entry.path();
             match entry.file_type() {
-                Ok(ft) if ft.is_dir() => {
-                    if walk(&path, suffix) {
-                        return true;
-                    }
-                }
+                Ok(ft) if ft.is_dir() => walk(&path, out),
                 Ok(_) => {
                     if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
                         continue;
                     }
                     if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                        if stem.starts_with("rollout-") && stem.ends_with(suffix) {
-                            return true;
+                        if stem.starts_with("rollout-") {
+                            out.push(stem.to_string());
                         }
                     }
                 }
                 _ => {}
             }
         }
-        false
     }
+    let mut out = Vec::new();
+    walk(sessions_root, &mut out);
+    out
+}
+
+/// 収集済み stem 群から session_id 一致 (stem 末尾が `-<session_id>` = `rollout-<ts>-<sid>`) を
+/// 判定する in-memory ヘルパー。空 id は常に false。
+fn codex_rollout_stem_matches(stems: &[String], session_id: &str) -> bool {
     if session_id.is_empty() {
         return false;
     }
-    walk(sessions_root, &format!("-{session_id}"))
+    let suffix = format!("-{session_id}");
+    stems.iter().any(|s| s.ends_with(&suffix))
+}
+
+/// 単発の存在確認 (主に test 用)。1 度 walk して suffix 一致を見る。
+#[cfg(test)]
+fn codex_rollout_exists_sync(sessions_root: &Path, session_id: &str) -> bool {
+    codex_rollout_stem_matches(&collect_codex_rollout_stems(sessions_root), session_id)
 }
 
 /// Issue #702 / #857: 復元データ内の sessionId を sanitize する。
@@ -197,7 +211,25 @@ async fn sanitize_missing_jsonl(
     codex_sessions_root: &Path,
 ) -> Vec<DroppedSessionInfo> {
     let mut dropped = Vec::new();
-    for slot in file.by_project.values_mut() {
+
+    // Issue #859 (perf): codex tab が 1 つでも存在するなら rollout stem を **1 回だけ** 収集する。
+    // 以前は tab ごとに full 再帰走査して O(N×M) だったが、1 回 walk + in-memory 突合に落とす。
+    // 再帰走査は blocking なので spawn_blocking で executor を塞がない。
+    let has_codex_session = file.by_project.values().any(|slot| {
+        slot.tabs
+            .iter()
+            .any(|t| t.kind == "codex" && t.session_id.is_some())
+    });
+    let codex_stems: Vec<String> = if has_codex_session {
+        let root = codex_sessions_root.to_path_buf();
+        tokio::task::spawn_blocking(move || collect_codex_rollout_stems(&root))
+            .await
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    for (project_root, slot) in file.by_project.iter_mut() {
         for tab in slot.tabs.iter_mut() {
             let Some(sid) = tab.session_id.as_deref() else {
                 continue;
@@ -207,16 +239,7 @@ async fn sanitize_missing_jsonl(
                     let path = claude_jsonl_path(home, &tab.cwd, sid);
                     fs::metadata(&path).await.is_err()
                 }
-                "codex" => {
-                    // 再帰走査は blocking。spawn_blocking で executor を塞がない。
-                    let root = codex_sessions_root.to_path_buf();
-                    let sid_owned = sid.to_string();
-                    !tokio::task::spawn_blocking(move || {
-                        codex_rollout_exists_sync(&root, &sid_owned)
-                    })
-                    .await
-                    .unwrap_or(false)
-                }
+                "codex" => !codex_rollout_stem_matches(&codex_stems, sid),
                 // 未知 kind は sanitize 対象外 (session_id 温存)。
                 _ => continue,
             };
@@ -232,6 +255,7 @@ async fn sanitize_missing_jsonl(
                     tab_id: tab.tab_id.clone(),
                     kind: tab.kind.clone(),
                     reason: "transcript-missing".to_string(),
+                    project_root: project_root.clone(),
                 });
                 tab.session_id = None;
             }
@@ -603,6 +627,7 @@ mod tests {
                 tab_id: "tab-1".to_string(),
                 kind: "codex".to_string(),
                 reason: "transcript-missing".to_string(),
+                project_root: "/tmp/proj".to_string(),
             }],
         };
         let json = serde_json::to_string(&result).unwrap();
@@ -613,9 +638,11 @@ mod tests {
         assert!(json.contains("\"droppedSessions\""));
         assert!(json.contains("\"tabId\":\"tab-1\""));
         assert!(json.contains("\"reason\":\"transcript-missing\""));
+        assert!(json.contains("\"projectRoot\":\"/tmp/proj\""));
         // snake_case が漏れていないこと
         assert!(!json.contains("dropped_sessions"));
         assert!(!json.contains("tab_id"));
+        assert!(!json.contains("project_root"));
 
         // round-trip
         let restored: TerminalTabsLoadResult = serde_json::from_str(&json).unwrap();

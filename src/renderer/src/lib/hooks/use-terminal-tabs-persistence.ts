@@ -123,8 +123,11 @@ export function useTerminalTabsPersistence(
       if (disposed) return;
       fileCacheRef.current = file;
       // Issue #857: Rust 側が transcript 不在で新規会話に倒したタブ数を warning で通知する。
-      // load() の結果に含まれる droppedSessions が 1 件以上なら 1 回だけトーストを出す。
-      const droppedCount = file?.droppedSessions?.length ?? 0;
+      // Issue #859 review: droppedSessions は全 project 横断で返るため、いま開いている
+      // projectRoot に属する drop だけを数える (別 project のタブ数まで count に含めない)。
+      const droppedCount = (file?.droppedSessions ?? []).filter(
+        (d) => d.projectRoot === projectRoot
+      ).length;
       if (droppedCount > 0) {
         showToastRef.current(
           tRef.current('terminalTabs.restore.transcriptMissing', {

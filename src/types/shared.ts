@@ -1190,6 +1190,9 @@ export interface DroppedSessionInfo {
   kind: string;
   /** drop した理由 code。現状 `"transcript-missing"` のみ */
   reason: string;
+  /** この tab が属する project root (= byProject の key)。Issue #859 review: renderer は
+   *  現在開いている project の drop 件数だけを toast に出すために使う (全 project 横断集計の誤り回避)。 */
+  projectRoot: string;
 }
 
 /**
