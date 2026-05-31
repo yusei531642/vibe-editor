@@ -1183,13 +1183,19 @@ export interface PersistedTerminalTabsFile {
  * `TerminalTabsLoadResult.droppedSessions` に詰めて返す。renderer は件数 > 0 で
  * warning トーストを 1 度出してユーザーに「過去の履歴が復元できなかった」ことを知らせる。
  */
+/**
+ * Issue #857 / #859: session を drop した理由 code。Rust 側 `terminal_tabs.rs` が emit する
+ * 値と 1:1 で対応させる (両側を同時に拡張する契約)。現状は transcript / rollout 不在のみ。
+ */
+export type DroppedSessionReason = 'transcript-missing';
+
 export interface DroppedSessionInfo {
   /** 永続化されていた renderer 側 tabId (= `String(numericId)`) */
   tabId: string;
   /** agent 種別 (`claude` / `codex` 等。`TerminalAgent` と同じ string namespace) */
   kind: string;
-  /** drop した理由 code。現状 `"transcript-missing"` のみ */
-  reason: string;
+  /** drop した理由 code (Rust 側 reason と 1:1)。 */
+  reason: DroppedSessionReason;
   /** この tab が属する project root (= byProject の key)。Issue #859 review: renderer は
    *  現在開いている project の drop 件数だけを toast に出すために使う (全 project 横断集計の誤り回避)。 */
   projectRoot: string;
