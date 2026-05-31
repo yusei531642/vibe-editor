@@ -211,7 +211,8 @@ export function AppStateProvider({
     terminalTabs,
     activeTerminalTabId,
     setActiveTerminalTabId,
-    addTerminalTab
+    addTerminalTab,
+    showToast
   });
 
   // ----- teams / team-history / launch helpers -----

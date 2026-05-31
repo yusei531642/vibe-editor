@@ -760,6 +760,10 @@ const ja: Dict = {
   'toast.tone.warning': '注意',
   'toast.tone.error': 'エラー',
 
+  // ---------- Terminal タブ復元 (Issue #857) ----------
+  'terminalTabs.restore.transcriptMissing':
+    '過去の会話履歴が見つからず {count} 件のタブを新規会話で再起動しました',
+
   // ---------- Status ----------
   'status.noProject': 'プロジェクトが選択されていません',
 
@@ -1555,6 +1559,10 @@ const en: Dict = {
   'toast.tone.success': 'Success',
   'toast.tone.warning': 'Warning',
   'toast.tone.error': 'Error',
+
+  // ---------- Terminal tab restore (Issue #857) ----------
+  'terminalTabs.restore.transcriptMissing':
+    "Couldn't find past transcripts; restarted {count} tab(s) as new conversations.",
 
   'status.noProject': 'No project selected',
 

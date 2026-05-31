@@ -866,6 +866,20 @@ export function AppShell({
                       // Issue #660: 初回 spawn の `--session-id` 注入 → jsonl 永続化が
                       // 確認できたので freshSessionId を倒す。次回以降は --resume 経路。
                       markSessionPersisted(tab.id);
+                      // Issue #856: Codex は `--session-id` 事前注入ができず capture-then-resume。
+                      // 初回起動時 resumeSessionId は null のままなので、watcher が捕捉した
+                      // session id をここで terminalTabs に書き戻す。これが terminal-tabs.json
+                      // へ永続化され、次回起動で getTerminalArgs が `codex resume <id>` を組む。
+                      // Claude は addTerminalTab 時点の事前注入 UUID と一致するので no-op。
+                      if (tab.agent === 'codex' && sid) {
+                        setTerminalTabs((prev) =>
+                          prev.map((t) =>
+                            t.id === tab.id && t.resumeSessionId !== sid
+                              ? { ...t, resumeSessionId: sid }
+                              : t
+                          )
+                        );
+                      }
                     }}
                     onResize={(cols, rows) => reportTerminalSize(tab.id, cols, rows)}
                     initialCols={tab.initialCols ?? undefined}

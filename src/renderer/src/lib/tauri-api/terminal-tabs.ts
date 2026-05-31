@@ -5,7 +5,10 @@
 // フォールバックする)。
 
 import { invoke } from '@tauri-apps/api/core';
-import type { PersistedTerminalTabsFile } from '../../../../types/shared';
+import type {
+  PersistedTerminalTabsFile,
+  TerminalTabsLoadResult
+} from '../../../../types/shared';
 
 interface MutationResult {
   ok: boolean;
@@ -13,9 +16,14 @@ interface MutationResult {
 }
 
 export const terminalTabs = {
-  /** 永続化ファイルを読む。未存在 / schemaVersion mismatch / parse 失敗で null。 */
-  load: async (): Promise<PersistedTerminalTabsFile | null> => {
-    const result = await invoke<PersistedTerminalTabsFile | null>('terminal_tabs_load');
+  /**
+   * 永続化ファイルを読む。未存在 / schemaVersion mismatch / parse 失敗で null。
+   *
+   * Issue #857: 戻り値が `TerminalTabsLoadResult` (= `PersistedTerminalTabsFile` +
+   * `droppedSessions`) になった。invoke 名は不変。
+   */
+  load: async (): Promise<TerminalTabsLoadResult | null> => {
+    const result = await invoke<TerminalTabsLoadResult | null>('terminal_tabs_load');
     return result ?? null;
   },
   /** 全体を atomic 上書き。read-modify-write は呼び出し側責務。 */

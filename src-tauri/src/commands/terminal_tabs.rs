@@ -63,6 +63,32 @@ impl Default for PersistedTerminalTabsFile {
     }
 }
 
+/// Issue #857: sanitize で drop した session の記録。renderer 側はこれを使って
+/// 「復元できなかった tab」をユーザーに通知する。
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct DroppedSessionInfo {
+    pub tab_id: String,
+    pub kind: String,
+    /// drop 理由。現状は transcript / rollout 不在を表す "transcript-missing" のみ。
+    pub reason: String,
+    /// この tab が属する project root (= by_project の key)。Issue #859 review: renderer は
+    /// 現在開いている project の drop 件数だけを toast に出す必要があるため、全 project 横断の
+    /// 総数で誤った件数を表示しないよう project ごとに絞り込めるようにする。
+    pub project_root: String,
+}
+
+/// Issue #857: `terminal_tabs_load` の戻り値 contract。
+/// `PersistedTerminalTabsFile` を `#[serde(flatten)]` で展開しつつ `droppedSessions` を追加する。
+/// JSON 形: `{ schemaVersion, lastSavedAt, byProject, droppedSessions: [{tabId, kind, reason, projectRoot}] }`
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalTabsLoadResult {
+    #[serde(flatten)]
+    pub file: PersistedTerminalTabsFile,
+    pub dropped_sessions: Vec<DroppedSessionInfo>,
+}
+
 /// in-memory cache。`None` = 未ロード、`Some(...)` = ディスクと同期済み。
 static CACHE: once_cell::sync::Lazy<Mutex<Option<PersistedTerminalTabsFile>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(None));
@@ -114,40 +140,128 @@ fn claude_jsonl_path(home: &Path, cwd: &str, session_id: &str) -> PathBuf {
         .join(format!("{session_id}.jsonl"))
 }
 
-/// Issue #702: 復元データ内の sessionId を sanitize する。
-/// `kind == "claude"` かつ jsonl 不在の sessionId を None に倒す。
+/// Issue #857 / #859 (perf): `<sessions_root>` 配下の `rollout-*.jsonl` の file_stem を
+/// **1 回の再帰走査で** すべて集める。codex tab が複数あっても walk は 1 度だけにして、起動時
+/// sanitize の「tab ごとに full 再帰走査 = O(N×M)」を「O(M) walk + O(N×M) の in-memory 突合」
+/// に落とす。
+fn collect_codex_rollout_stems(sessions_root: &Path) -> Vec<String> {
+    fn walk(dir: &Path, out: &mut Vec<String>) {
+        let read = match std::fs::read_dir(dir) {
+            Ok(r) => r,
+            Err(_) => return,
+        };
+        for entry in read.flatten() {
+            let path = entry.path();
+            match entry.file_type() {
+                Ok(ft) if ft.is_dir() => walk(&path, out),
+                Ok(_) => {
+                    if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
+                        continue;
+                    }
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        if stem.starts_with("rollout-") {
+                            out.push(stem.to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(sessions_root, &mut out);
+    out
+}
+
+/// 収集済み stem 群から session_id 一致 (stem 末尾が `-<session_id>` = `rollout-<ts>-<sid>`) を
+/// 判定する in-memory ヘルパー。空 id は常に false。
+fn codex_rollout_stem_matches(stems: &[String], session_id: &str) -> bool {
+    if session_id.is_empty() {
+        return false;
+    }
+    let suffix = format!("-{session_id}");
+    stems.iter().any(|s| s.ends_with(&suffix))
+}
+
+/// 単発の存在確認 (主に test 用)。1 度 walk して suffix 一致を見る。
+#[cfg(test)]
+fn codex_rollout_exists_sync(sessions_root: &Path, session_id: &str) -> bool {
+    codex_rollout_stem_matches(&collect_codex_rollout_stems(sessions_root), session_id)
+}
+
+/// Issue #702 / #857: 復元データ内の sessionId を sanitize する。
+/// transcript / rollout が存在しない sessionId を None に倒し、drop した tab を
+/// `Vec<DroppedSessionInfo>` (reason="transcript-missing") に収集して返す。
+///
+/// - `kind == "claude"`: `~/.claude/projects/<encoded(cwd)>/<sid>.jsonl` 不在で drop。
+/// - `kind == "codex"` (#857): `<codex_sessions_root>` 配下に `rollout-*-<sid>.jsonl` 不在で drop。
 ///
 /// 背景: PR #663 (Issue #660/#661/#662) で IDE モードの terminal タブを永続化したが、
-/// `terminal-tabs.json` に記録された sessionId に対応する jsonl が無いケースがある:
-///   - ユーザーが prompt を 1 件も送らずに閉じた → claude が jsonl を作らないまま終了
-///   - `~/.claude/projects/` を手動削除 / 別マシン環境移行 / Claude Code クリーンアップ
-///   - cwd が変わって encoded path が別ディレクトリを指す
+/// 記録された sessionId に対応する transcript が無いケースがある:
+///   - ユーザーが prompt を 1 件も送らずに閉じた → transcript が作られないまま終了
+///   - `~/.claude/projects/` や `~/.codex/sessions/` を手動削除 / 別マシン環境移行
+///   - cwd が変わって encoded path が別ディレクトリを指す (claude)
 ///
-/// このまま `--resume <存在しない uuid>` で起動すると claude CLI が
-/// `No conversation found with session ID: ...` を出して exitCode=1 で死ぬ。
-/// renderer 側 `use-terminal-tabs-persistence.ts` は sessionId が None なら resumeSessionId を
-/// 渡さず addTerminalTab を呼び、新規 UUID 採番 → `--session-id <new-uuid>` 経路に倒す。
-async fn sanitize_missing_jsonl(file: &mut PersistedTerminalTabsFile, home: &Path) {
-    for slot in file.by_project.values_mut() {
+/// このまま `--resume <存在しない id>` で起動すると CLI が
+/// `No conversation found ...` を出して exitCode=1 で死ぬ。renderer 側は sessionId が None なら
+/// resume を渡さず新規 id 採番経路に倒す。`droppedSessions` は UI 通知用。
+async fn sanitize_missing_jsonl(
+    file: &mut PersistedTerminalTabsFile,
+    home: &Path,
+    codex_sessions_root: &Path,
+) -> Vec<DroppedSessionInfo> {
+    let mut dropped = Vec::new();
+
+    // Issue #859 (perf): codex tab が 1 つでも存在するなら rollout stem を **1 回だけ** 収集する。
+    // 以前は tab ごとに full 再帰走査して O(N×M) だったが、1 回 walk + in-memory 突合に落とす。
+    // 再帰走査は blocking なので spawn_blocking で executor を塞がない。
+    let has_codex_session = file.by_project.values().any(|slot| {
+        slot.tabs
+            .iter()
+            .any(|t| t.kind == "codex" && t.session_id.is_some())
+    });
+    let codex_stems: Vec<String> = if has_codex_session {
+        let root = codex_sessions_root.to_path_buf();
+        tokio::task::spawn_blocking(move || collect_codex_rollout_stems(&root))
+            .await
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    for (project_root, slot) in file.by_project.iter_mut() {
         for tab in slot.tabs.iter_mut() {
-            if tab.kind != "claude" {
-                continue;
-            }
             let Some(sid) = tab.session_id.as_deref() else {
                 continue;
             };
-            let path = claude_jsonl_path(home, &tab.cwd, sid);
-            if fs::metadata(&path).await.is_err() {
+            let missing = match tab.kind.as_str() {
+                "claude" => {
+                    let path = claude_jsonl_path(home, &tab.cwd, sid);
+                    fs::metadata(&path).await.is_err()
+                }
+                "codex" => !codex_rollout_stem_matches(&codex_stems, sid),
+                // 未知 kind は sanitize 対象外 (session_id 温存)。
+                _ => continue,
+            };
+            if missing {
                 tracing::info!(
-                    "[terminal_tabs] session jsonl missing for tab={} sid={} cwd={}, dropping sessionId",
+                    "[terminal_tabs] session transcript missing for tab={} kind={} sid={} cwd={}, dropping sessionId",
                     tab.tab_id,
+                    tab.kind,
                     sid,
                     tab.cwd
                 );
+                dropped.push(DroppedSessionInfo {
+                    tab_id: tab.tab_id.clone(),
+                    kind: tab.kind.clone(),
+                    reason: "transcript-missing".to_string(),
+                    project_root: project_root.clone(),
+                });
                 tab.session_id = None;
             }
         }
     }
+    dropped
 }
 
 async fn save_to_disk(file: &PersistedTerminalTabsFile) -> Result<(), String> {
@@ -165,13 +279,13 @@ async fn save_to_disk(file: &PersistedTerminalTabsFile) -> Result<(), String> {
 /// load: 永続化ファイルが空 / 未存在 / schemaVersion 不一致なら `None` 返却。
 /// renderer 側はこれで「素の IDE モード起動」と判定して順序復元をスキップする。
 ///
-/// Issue #702: 戻り値は `sanitize_missing_jsonl` で post-process し、jsonl 不在の
-/// sessionId を None に倒す。cache 自体には触らない (= 次回 load でも同じ check が走る、
-/// idempotent。renderer 側 save が走るまで disk 上の sessionId はそのまま温存され、
-/// 例えばユーザーが claude を直接起動して同じ sessionId の jsonl を作れば次回 load で
-/// 復活できる)。
+/// Issue #702 / #857: 戻り値は `sanitize_missing_jsonl` で post-process し、transcript 不在の
+/// sessionId を None に倒したうえで `droppedSessions` に drop 一覧を載せて返す。cache 自体には
+/// 触らない (= 次回 load でも同じ check が走る、idempotent。renderer 側 save が走るまで disk 上の
+/// sessionId はそのまま温存され、例えばユーザーが claude/codex を直接起動して同じ sessionId の
+/// transcript を作れば次回 load で復活できる)。
 #[tauri::command]
-pub async fn terminal_tabs_load() -> Option<PersistedTerminalTabsFile> {
+pub async fn terminal_tabs_load() -> Option<TerminalTabsLoadResult> {
     let _g = LOCK.lock().await;
     let mut cache = CACHE.lock().await;
     ensure_loaded(&mut cache).await;
@@ -181,8 +295,13 @@ pub async fn terminal_tabs_load() -> Option<PersistedTerminalTabsFile> {
     }
     let mut sanitized = file.clone();
     let home = dirs::home_dir().unwrap_or_default();
-    sanitize_missing_jsonl(&mut sanitized, &home).await;
-    Some(sanitized)
+    let codex_sessions_root = crate::pty::codex_watcher::codex_sessions_dir();
+    let dropped_sessions =
+        sanitize_missing_jsonl(&mut sanitized, &home, &codex_sessions_root).await;
+    Some(TerminalTabsLoadResult {
+        file: sanitized,
+        dropped_sessions,
+    })
 }
 
 /// save: renderer から渡された全体を atomic 上書き。
@@ -368,6 +487,23 @@ mod tests {
         std::fs::write(dir.join(format!("{sid}.jsonl")), "{}\n").expect("write jsonl");
     }
 
+    /// テスト用の codex sessions root (`<base>/.codex/sessions`)。本番の
+    /// `codex_watcher::codex_sessions_dir()` と同じレイアウトを temp 配下に再現する。
+    fn codex_sessions_root_in(base: &Path) -> PathBuf {
+        base.join(".codex").join("sessions")
+    }
+
+    /// 日付サブディレクトリ配下に `rollout-<ts>-<sid>.jsonl` を作る。
+    fn write_codex_rollout(sessions_root: &Path, sid: &str) {
+        let day = sessions_root.join("2026").join("05").join("31");
+        std::fs::create_dir_all(&day).expect("create codex day dir");
+        std::fs::write(
+            day.join(format!("rollout-2026-05-31T00-00-00-{sid}.jsonl")),
+            "{\"type\":\"session_meta\"}\n",
+        )
+        .expect("write codex rollout");
+    }
+
     #[tokio::test]
     async fn sanitize_drops_session_id_when_jsonl_missing() {
         let tmp = unique_temp_dir("terminal-tabs-sanitize-missing");
@@ -375,11 +511,15 @@ mod tests {
         let sid = "11111111-2222-3333-4444-555555555555";
         // jsonl は意図的に作らない
         let mut file = make_file_with_tab("claude", cwd, Some(sid));
-        sanitize_missing_jsonl(&mut file, &tmp).await;
+        let dropped = sanitize_missing_jsonl(&mut file, &tmp, &codex_sessions_root_in(&tmp)).await;
         assert!(
             file.by_project[cwd].tabs[0].session_id.is_none(),
             "missing jsonl should drop sessionId"
         );
+        assert_eq!(dropped.len(), 1, "dropped session should be recorded");
+        assert_eq!(dropped[0].tab_id, "1");
+        assert_eq!(dropped[0].kind, "claude");
+        assert_eq!(dropped[0].reason, "transcript-missing");
         let _ = std::fs::remove_dir_all(tmp);
     }
 
@@ -391,28 +531,55 @@ mod tests {
         write_jsonl(&tmp, cwd, sid);
 
         let mut file = make_file_with_tab("claude", cwd, Some(sid));
-        sanitize_missing_jsonl(&mut file, &tmp).await;
+        let dropped = sanitize_missing_jsonl(&mut file, &tmp, &codex_sessions_root_in(&tmp)).await;
         assert_eq!(
             file.by_project[cwd].tabs[0].session_id.as_deref(),
             Some(sid),
             "existing jsonl should keep sessionId"
         );
+        assert!(dropped.is_empty(), "no drop when jsonl exists");
         let _ = std::fs::remove_dir_all(tmp);
     }
 
+    /// Issue #857: codex tab の rollout が存在すれば sessionId は維持される。
+    /// (旧 `sanitize_skips_non_claude_tabs` の置き換え — codex は skip ではなく rollout 検証対象)
     #[tokio::test]
-    async fn sanitize_skips_non_claude_tabs() {
-        let tmp = unique_temp_dir("terminal-tabs-sanitize-codex");
+    async fn sanitize_keeps_codex_session_id_when_rollout_exists() {
+        let tmp = unique_temp_dir("terminal-tabs-sanitize-codex-exists");
         let cwd = "/tmp/repo-codex";
-        let sid = "yyy-codex-id";
-        // codex は jsonl を作らないので存在チェック対象外。session_id は維持されるべき。
+        let sid = "cccccccc-dddd-eeee-ffff-000000000000";
+        let codex_root = codex_sessions_root_in(&tmp);
+        write_codex_rollout(&codex_root, sid);
+
         let mut file = make_file_with_tab("codex", cwd, Some(sid));
-        sanitize_missing_jsonl(&mut file, &tmp).await;
+        let dropped = sanitize_missing_jsonl(&mut file, &tmp, &codex_root).await;
         assert_eq!(
             file.by_project[cwd].tabs[0].session_id.as_deref(),
             Some(sid),
-            "non-claude kind should skip jsonl check"
+            "codex sessionId kept when rollout exists"
         );
+        assert!(dropped.is_empty(), "no drop when rollout exists");
+        let _ = std::fs::remove_dir_all(tmp);
+    }
+
+    /// Issue #857: codex tab の rollout が不在なら sessionId を drop し記録する。
+    #[tokio::test]
+    async fn sanitize_drops_codex_session_id_when_rollout_missing() {
+        let tmp = unique_temp_dir("terminal-tabs-sanitize-codex-missing");
+        let cwd = "/tmp/repo-codex-missing";
+        let sid = "deadbeef-dddd-eeee-ffff-000000000000";
+        // rollout は意図的に作らない (codex sessions root も存在しない)
+        let codex_root = codex_sessions_root_in(&tmp);
+
+        let mut file = make_file_with_tab("codex", cwd, Some(sid));
+        let dropped = sanitize_missing_jsonl(&mut file, &tmp, &codex_root).await;
+        assert!(
+            file.by_project[cwd].tabs[0].session_id.is_none(),
+            "missing codex rollout should drop sessionId"
+        );
+        assert_eq!(dropped.len(), 1);
+        assert_eq!(dropped[0].kind, "codex");
+        assert_eq!(dropped[0].reason, "transcript-missing");
         let _ = std::fs::remove_dir_all(tmp);
     }
 
@@ -421,9 +588,67 @@ mod tests {
         let tmp = unique_temp_dir("terminal-tabs-sanitize-null");
         let cwd = "/tmp/repo-null";
         let mut file = make_file_with_tab("claude", cwd, None);
-        sanitize_missing_jsonl(&mut file, &tmp).await;
+        let dropped = sanitize_missing_jsonl(&mut file, &tmp, &codex_sessions_root_in(&tmp)).await;
         assert!(file.by_project[cwd].tabs[0].session_id.is_none());
+        assert!(dropped.is_empty());
         let _ = std::fs::remove_dir_all(tmp);
+    }
+
+    /// `codex_rollout_exists_sync` の最小単体: stem 末尾が `-<sid>` の rollout を見つける/弾く。
+    #[test]
+    fn codex_rollout_exists_matches_by_session_id_suffix() {
+        let tmp = unique_temp_dir("terminal-tabs-codex-rollout-lookup");
+        let root = codex_sessions_root_in(&tmp);
+        let sid = "11112222-3333-4444-5555-666677778888";
+        write_codex_rollout(&root, sid);
+
+        assert!(codex_rollout_exists_sync(&root, sid), "should find rollout by sid suffix");
+        assert!(
+            !codex_rollout_exists_sync(&root, "no-such-id"),
+            "unknown sid must not match"
+        );
+        assert!(
+            !codex_rollout_exists_sync(&root, ""),
+            "empty sid never matches"
+        );
+        let _ = std::fs::remove_dir_all(tmp);
+    }
+
+    /// Issue #857: 戻り値 contract (camelCase + droppedSessions) を固定する。
+    #[test]
+    fn load_result_serializes_to_expected_camelcase_contract() {
+        let result = TerminalTabsLoadResult {
+            file: PersistedTerminalTabsFile {
+                schema_version: TERMINAL_TABS_SCHEMA_VERSION,
+                last_saved_at: "2026-05-31T00:00:00Z".to_string(),
+                by_project: HashMap::new(),
+            },
+            dropped_sessions: vec![DroppedSessionInfo {
+                tab_id: "tab-1".to_string(),
+                kind: "codex".to_string(),
+                reason: "transcript-missing".to_string(),
+                project_root: "/tmp/proj".to_string(),
+            }],
+        };
+        let json = serde_json::to_string(&result).unwrap();
+        // flatten で従来フィールドはそのまま + droppedSessions 追加
+        assert!(json.contains("\"schemaVersion\""));
+        assert!(json.contains("\"lastSavedAt\""));
+        assert!(json.contains("\"byProject\""));
+        assert!(json.contains("\"droppedSessions\""));
+        assert!(json.contains("\"tabId\":\"tab-1\""));
+        assert!(json.contains("\"reason\":\"transcript-missing\""));
+        assert!(json.contains("\"projectRoot\":\"/tmp/proj\""));
+        // snake_case が漏れていないこと
+        assert!(!json.contains("dropped_sessions"));
+        assert!(!json.contains("tab_id"));
+        assert!(!json.contains("project_root"));
+
+        // round-trip
+        let restored: TerminalTabsLoadResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.dropped_sessions.len(), 1);
+        assert_eq!(restored.dropped_sessions[0].tab_id, "tab-1");
+        assert_eq!(restored.file.schema_version, TERMINAL_TABS_SCHEMA_VERSION);
     }
 
     #[tokio::test]
@@ -472,11 +697,13 @@ mod tests {
             last_saved_at: "2026-05-10T00:00:00Z".to_string(),
             by_project,
         };
-        sanitize_missing_jsonl(&mut file, &tmp).await;
+        let dropped = sanitize_missing_jsonl(&mut file, &tmp, &codex_sessions_root_in(&tmp)).await;
 
         let tabs = &file.by_project[cwd].tabs;
         assert_eq!(tabs[0].session_id.as_deref(), Some(sid_alive), "alive sid kept");
         assert!(tabs[1].session_id.is_none(), "dead sid dropped");
+        assert_eq!(dropped.len(), 1, "only the dead tab is recorded");
+        assert_eq!(dropped[0].tab_id, "2");
 
         let _ = std::fs::remove_dir_all(tmp);
     }
