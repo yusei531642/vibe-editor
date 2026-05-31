@@ -340,7 +340,14 @@ fn run_watcher_loop(
         return;
     }
 
+    // Windows の native backend (ReadDirectoryChangesW) は notify の `with_poll_interval` を
+    // 無視するため、イベント取りこぼし (特に watch 開始後に新規作成される YYYY/MM/DD サブ
+    // ディレクトリ配下の rollout 作成) を救う polling fallback が存在しない。そこで event 到着時
+    // に加えて最低 1 秒ごとに full rescan を回し、取りこぼしを構造的に補償する。`seen` で dedup
+    // 済みなので二重処理は起きず、rescan を 1s に throttle することで walk コストも抑える。
+    // (fs_watch.rs が同じ Windows 事情で Recursive を避けて手動展開しているのと同趣旨の保険)
     let watcher_started_at = Instant::now();
+    let mut last_full_scan = watcher_started_at;
     while watcher_started_at.elapsed() < WATCHER_MAX_LIFETIME {
         if is_cancelled() {
             tracing::debug!(
@@ -349,32 +356,35 @@ fn run_watcher_loop(
             );
             return;
         }
-        match rx.recv_timeout(WATCHER_POLL_INTERVAL) {
-            Ok(Ok(event)) => {
-                if !matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)) {
-                    continue;
+        // poll interval 単位で待ちつつ event の有無を見る。channel 切断時のみ break。
+        let got_event = match rx.recv_timeout(WATCHER_POLL_INTERVAL) {
+            Ok(Ok(event)) => matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)),
+            Ok(Err(_)) => false,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => false,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+        // event 到着、または前回 full rescan から 1 秒以上経過したときだけ走査する。
+        if !got_event && last_full_scan.elapsed() < Duration::from_secs(1) {
+            continue;
+        }
+        last_full_scan = Instant::now();
+        let mut current = Vec::new();
+        collect_rollout_paths(&dir, &mut current);
+        // パス順を安定化 (どの watcher が先に claim してもデテルミニスティックに)。
+        current.sort();
+        for path in current {
+            if seen.contains(&path) {
+                continue;
+            }
+            match process_candidate(&app, &terminal_id, &path, &expected_norm) {
+                CandidateOutcome::Emitted => return,
+                CandidateOutcome::Consumed => {
+                    seen.insert(path);
                 }
-                let mut current = Vec::new();
-                collect_rollout_paths(&dir, &mut current);
-                // パス順を安定化 (どの watcher が先に claim してもデテルミニスティックに)。
-                current.sort();
-                for path in current {
-                    if seen.contains(&path) {
-                        continue;
-                    }
-                    match process_candidate(&app, &terminal_id, &path, &expected_norm) {
-                        CandidateOutcome::Emitted => return,
-                        CandidateOutcome::Consumed => {
-                            seen.insert(path);
-                        }
-                        CandidateOutcome::Retry => {
-                            // 1 行目がまだ書かれていない → seen に入れず次イベントで再 check。
-                        }
-                    }
+                CandidateOutcome::Retry => {
+                    // 1 行目がまだ書かれていない → seen に入れず次ループで再 check。
                 }
             }
-            Ok(Err(_)) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(_) => break,
         }
     }
     tracing::debug!(
