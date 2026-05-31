@@ -538,8 +538,12 @@ pub async fn terminal_create(
                     inject_codex_prompt_to_pty(registry, term_id, instr).await;
                 });
             }
-            // Claude Code 起動時のみ session watcher を仕掛ける (codex は jsonl を作らない)
-            if command.to_lowercase().contains("claude") {
+            // Claude Code / Codex 起動時に session watcher を仕掛ける。
+            //   - Claude: `~/.claude/projects/<encoded>/<uuid>.jsonl` を監視 (claude_watcher)
+            //   - Codex (#855): `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` を監視 (codex_watcher)
+            // どちらも session id を後追いで検出し `terminal:sessionId:{id}` を emit する。
+            let is_claude_command = command.to_lowercase().contains("claude");
+            if is_claude_command || is_codex_command {
                 let watcher_id = id.clone();
                 // Issue #739: ArcSwapOption の lock-free load で現在値を読む。
                 let watcher_root =
@@ -558,17 +562,27 @@ pub async fn terminal_create(
                 // polling していた旧実装より反応が早く、cleanup の遅延を解消する。
                 if let Some(handle) = state.pty_registry.get(&watcher_id) {
                     let cancel = handle.watcher_cancel_token();
-                    crate::pty::claude_watcher::spawn_watcher(
-                        app.clone(),
-                        watcher_id,
-                        actual_root,
-                        spawned_at,
-                        cancel,
-                    );
+                    if is_codex_command {
+                        crate::pty::codex_watcher::spawn_watcher(
+                            app.clone(),
+                            watcher_id,
+                            actual_root,
+                            spawned_at,
+                            cancel,
+                        );
+                    } else {
+                        crate::pty::claude_watcher::spawn_watcher(
+                            app.clone(),
+                            watcher_id,
+                            actual_root,
+                            spawned_at,
+                            cancel,
+                        );
+                    }
                 } else {
                     // insert 直後に外部から remove されるレース。watcher を起こす意味は無い。
                     tracing::debug!(
-                        "[terminal] session {watcher_id} disappeared before claude_watcher spawn"
+                        "[terminal] session {watcher_id} disappeared before session watcher spawn"
                     );
                 }
             }
