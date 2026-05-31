@@ -28,7 +28,8 @@ interface NormalizedMouseEvent extends MouseEvent {
 }
 
 interface PointerNormalizerOptions {
-  containerRef: RefObject<HTMLElement>;
+  // React 19 の useRef<T>(null) は RefObject<T | null> を返す。
+  containerRef: RefObject<HTMLElement | null>;
   unscaledFit: boolean | undefined;
   getZoom: (() => number) | undefined;
 }

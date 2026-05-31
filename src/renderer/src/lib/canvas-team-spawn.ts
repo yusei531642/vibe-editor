@@ -30,6 +30,15 @@ import { placeBatchAwayFromNodes } from './canvas-placement';
 import type { CardData } from '../stores/canvas';
 import type { AgentPayload } from '../components/canvas/cards/AgentNodeCard/types';
 
+/**
+ * `TerminalAgent` (= string) で持っている team-history / preset の agent 値を
+ * spawn モデルが要求する `'claude' | 'codex'` リテラルへ正規化する。
+ * 'codex' 以外はすべて既定の 'claude' 扱い (既存 UI の `?? 'claude'` 規約に合わせる)。
+ */
+export function normalizeSpawnAgent(agent: string): 'claude' | 'codex' {
+  return agent === 'codex' ? 'codex' : 'claude';
+}
+
 export interface SpawnTeamMember {
   /** roleProfileId / role 兼用 (新スキーマ + 旧コード互換)。 */
   role: string;

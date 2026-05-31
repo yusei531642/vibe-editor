@@ -100,7 +100,7 @@ describe('useXtermInstance settings fit guard (Issue #897)', () => {
     if (originalFontsDescriptor) {
       Object.defineProperty(document, 'fonts', originalFontsDescriptor);
     } else {
-      delete (document as Document & { fonts?: FontFaceSet }).fonts;
+      Reflect.deleteProperty(document, 'fonts');
     }
     vi.restoreAllMocks();
   });

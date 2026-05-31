@@ -220,8 +220,10 @@ export function useRecruitListener(): void {
             label: p.dynamicRole.label,
             description: p.dynamicRole.description,
             instructions: p.dynamicRole.instructions,
-            instructionsJa: p.dynamicRole.instructionsJa,
-            teamId: p.teamId
+            instructionsJa: p.dynamicRole.instructionsJa ?? undefined,
+            teamId: p.teamId,
+            // DynamicRoleEntry.createdByRole は必須。採用要求元 (Leader 等) の role を記録する。
+            createdByRole: p.requesterRole
           });
         }
         const store = useCanvasStore.getState();

@@ -3,7 +3,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { TeamHistoryEntry } from '../../../../types/shared';
 
-interface MutationResult {
+// composite (declaration emit) では `api` の推論型から参照されるため export 必須。
+export interface MutationResult {
   ok: boolean;
   error?: string;
   /**

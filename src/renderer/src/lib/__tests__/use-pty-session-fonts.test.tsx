@@ -6,12 +6,16 @@ import type { FitAddon } from '@xterm/addon-fit';
 import { usePtySession } from '../use-pty-session';
 import type { PtySessionCallbacks, PtySpawnSnapshot } from '../use-pty-session';
 
-type TestWindow = Window &
+type TestWindow = Omit<Window, 'api'> &
   typeof globalThis & {
     api?: unknown;
   };
 
-type TestTerminal = Terminal & {
+// xterm v6 では Terminal.cols / rows が readonly。テスト mock は resize/fit で
+// 書き換えるため、当該 2 つだけ Omit して writable に再宣言する。
+type TestTerminal = Omit<Terminal, 'cols' | 'rows'> & {
+  cols: number;
+  rows: number;
   textarea: HTMLTextAreaElement;
 };
 
@@ -63,14 +67,14 @@ describe('usePtySession font readiness', () => {
     cleanup();
     vi.restoreAllMocks();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
       (window as TestWindow).api = originalApi;
     }
     if (originalFontsDescriptor) {
       Object.defineProperty(document, 'fonts', originalFontsDescriptor);
     } else {
-      delete (document as Document & { fonts?: unknown }).fonts;
+      Reflect.deleteProperty(document, 'fonts');
     }
   });
 
@@ -78,7 +82,7 @@ describe('usePtySession font readiness', () => {
     const fontsReady = deferred();
     Object.defineProperty(document, 'fonts', {
       configurable: true,
-      value: { ready: fontsReady.promise } as Partial<FontFaceSet>
+      value: { ready: fontsReady.promise }
     });
 
     const term = makeTerminal();

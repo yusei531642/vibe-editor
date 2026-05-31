@@ -558,8 +558,11 @@ export const useCanvasStore = create<CanvasState>()(
       // ここでは「fromVersion → 最新」を 1 行で進めるだけ。最後に必ず normalize を通すので
       // 同 version の rehydrate でも runtime に紛れ込んだ NaN viewport / 範囲外 zoom /
       // 壊れた node が掃除され、Canvas 真っ黒の症状を防ぐ。
+      // runCanvasMigration は partialize と同形の NormalizedCanvasState を返す。
+      // zustand v5 の migrate は「永続化(partialize)後の形」を返す契約なので、
+      // 旧 `as Partial<CanvasState>` の過大なキャストは不要 (むしろ型不一致を招く)。
       migrate: (persisted, fromVersion) =>
-        runCanvasMigration(persisted, fromVersion) as Partial<CanvasState>,
+        runCanvasMigration(persisted, fromVersion),
       // Issue #385: 同 version でも rehydrate のたびに normalize を走らせる。
       // 旧実装は migrate 経由の正規化だけだったため、現バージョンで保存された
       // 不正値 (極端な viewport 等) を起動時に拾えず、Canvas 真っ黒の症状を引き起こしていた。

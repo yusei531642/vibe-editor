@@ -6,14 +6,11 @@ import { useCanvasAutoSave } from '../use-canvas-auto-save';
 import type { CardData } from '../../../stores/canvas';
 import type { TeamHistoryEntry } from '../../../../../types/shared';
 
-type TestWindow = Window &
+// Issue #841: window.api の実型 (Api) と部分 mock は構造的に重ならないため、
+// 他テスト (DiffCard.test.tsx 等) と同じく `api?: unknown` で受ける。
+type TestWindow = Omit<Window, 'api'> &
   typeof globalThis & {
-    api?: {
-      teamHistory: {
-        saveBatch: ReturnType<typeof vi.fn>;
-        list: ReturnType<typeof vi.fn>;
-      };
-    };
+    api?: unknown;
   };
 
 function makeAgentNode(): Node<CardData> {
@@ -57,7 +54,7 @@ describe('useCanvasAutoSave (Issue #894)', () => {
     cleanup();
     vi.useRealTimers();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
       (window as TestWindow).api = originalApi as TestWindow['api'];
     }

@@ -23,7 +23,7 @@ import {
   Sparkles,
   History
 } from 'lucide-react';
-import type { CardData, CardType } from '../stores/canvas';
+import type { CardData, CardType, CardSpec } from '../stores/canvas';
 import { NODE_H, NODE_W } from '../stores/canvas';
 import type {
   TeamHistoryEntry,
@@ -67,6 +67,7 @@ import { getDirtyEditorCardSnapshots } from '../lib/editor-card-dirty-registry';
 import {
   spawnTeam,
   spawnTeams,
+  normalizeSpawnAgent,
   type SpawnTeamMember,
   type SpawnTeamSpec
 } from '../lib/canvas-team-spawn';
@@ -147,7 +148,9 @@ export function CanvasLayout(): JSX.Element {
   useEffect(() => {
     if (!addCardOpen && !spawnOpen) return;
     const handlePointerDown = (event: MouseEvent): void => {
-      const target = event.target as Node;
+      // `Node` 識別子は @xyflow/react の Node で shadow されているため、
+      // DOM の Node.contains に渡せるよう globalThis.Node | null へキャストする。
+      const target = event.target as globalThis.Node | null;
       if (addCardOpen && addPopoverRef.current && !addPopoverRef.current.contains(target)) {
         setAddCardOpen(false);
       }
@@ -209,7 +212,7 @@ export function CanvasLayout(): JSX.Element {
       const organization: TeamOrganizationMeta = { id: teamId, ...org.meta };
       const members: SpawnTeamMember[] = org.members.map((m) => ({
         role: m.role,
-        agent: m.agent,
+        agent: normalizeSpawnAgent(m.agent),
         position: presetPosition(m.col, m.row),
         // Issue #69: 未知 role でもクラッシュしないよう fallback
         title: ROLE_META[m.role]?.label ?? m.role ?? 'Agent'
@@ -258,7 +261,7 @@ export function CanvasLayout(): JSX.Element {
           : presetPosition(i % 3, Math.floor(i / 3));
       return {
         role: m.role,
-        agent: m.agent,
+        agent: normalizeSpawnAgent(m.agent),
         position,
         // Issue #69: 未知 role でも落ちないよう optional chain
         title: ROLE_META[m.role]?.label ?? m.role ?? 'Agent',
@@ -360,11 +363,16 @@ export function CanvasLayout(): JSX.Element {
       fileTree: t('sidebar.files'),
       changes: t('sidebar.changes')
     };
-    const payload =
+    // type と payload を相関させて 1 件の CardSpec を組む。`type` を union のまま
+    // payload 別構築すると判別可能 union のどの arm にも一致せず TS2322 になるため、
+    // fileTree/changes (projectRoot のみ) と editor/diff (projectRoot+relPath) で分岐する。
+    const title = titles[type];
+    const position = stagger(type);
+    const spec: CardSpec =
       type === 'fileTree' || type === 'changes'
-        ? { projectRoot: cwd }
-        : { projectRoot: cwd, relPath: '' };
-    addCards([{ type, title: titles[type], position: stagger(type), payload }]);
+        ? { type, title, position, payload: { projectRoot: cwd } }
+        : { type, title, position, payload: { projectRoot: cwd, relPath: '' } };
+    addCards([spec]);
     setAddCardOpen(false);
   };
 

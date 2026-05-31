@@ -197,7 +197,8 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
   // mascot 表示のためだけに 60Hz で App を回すのは IDE モード xterm の初期化と
   // 衝突するので、activity フラグは別 Set state として TerminalView の props と
   // 完全に切り離す (Set 更新は mascot の StatusBar 経路のみに伝搬)。
-  const terminalActivityTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  // value は `window.setTimeout` の戻り (browser timer = number)。
+  const terminalActivityTimers = useRef(new Map<number, number>());
   const [activeTerminalIds, setActiveTerminalIds] = useState<ReadonlySet<number>>(
     () => new Set()
   );

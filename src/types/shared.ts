@@ -384,7 +384,7 @@ export function resetPreferencesToDefaults(current: AppSettings): AppSettings {
   for (const key of RESETTABLE_SETTING_KEYS) {
     // キーごとに値型が異なる union への代入は TS が静的検証できないため
     // ここだけ Record 経由で書き込む (キー自体は keyof AppSettings に束縛済み)。
-    (next as Record<string, unknown>)[key] = DEFAULT_SETTINGS[key];
+    (next as unknown as Record<string, unknown>)[key] = DEFAULT_SETTINGS[key];
   }
   return next;
 }

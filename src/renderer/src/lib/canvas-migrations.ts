@@ -141,12 +141,15 @@ export function normalizeCanvasState(input: unknown): NormalizedCanvasState {
             id: typeof raw.id === 'string' && raw.id ? raw.id : newId(type),
             type,
             position: { x: safeX, y: safeY },
+            // 永続化由来の data は unknown payload を含む。cardType が動的なため
+            // 判別可能 union へ直接代入できず、production の addCard と同じく
+            // `as CardData` で構築する (payload は merge/normalize 後にカード側で再検証)。
             data: {
               ...data,
               cardType: type,
               title,
               payload: data.payload
-            },
+            } as CardData,
             style: {
               ...styleRaw,
               width: finiteOr(styleRaw.width, NODE_W),
@@ -175,9 +178,11 @@ export function normalizeCanvasState(input: unknown): NormalizedCanvasState {
     vpX = 0;
     vpY = 0;
   }
-  const teamLocks = isRecord(p.teamLocks)
+  const teamLocks: Record<string, boolean> = isRecord(p.teamLocks)
     ? Object.fromEntries(
-        Object.entries(p.teamLocks).filter(([, v]) => typeof v === 'boolean')
+        Object.entries(p.teamLocks).filter(
+          (entry): entry is [string, boolean] => typeof entry[1] === 'boolean'
+        )
       )
     : {};
   const stageView = STAGE_VIEWS.includes(p.stageView as StageView)

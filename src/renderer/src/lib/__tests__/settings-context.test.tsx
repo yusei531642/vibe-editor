@@ -20,7 +20,7 @@ import { SettingsProvider, useSettings } from '../settings-context';
 import { ToastProvider } from '../toast-context';
 import { DEFAULT_SETTINGS, type AppSettings } from '../../../../types/shared';
 
-type TestWindow = Window &
+type TestWindow = Omit<Window, 'api'> &
   typeof globalThis & {
     api?: unknown;
   };
@@ -73,7 +73,7 @@ describe('settings-context', () => {
   afterEach(() => {
     cleanup();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
       (window as TestWindow).api = originalApi;
     }

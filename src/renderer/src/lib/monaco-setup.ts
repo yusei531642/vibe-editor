@@ -6,7 +6,7 @@
 
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import { loader } from '@monaco-editor/react';
-// @ts-expect-error ?worker import は Vite 固有
+// ?worker import は Vite 固有。vite/client の `*?worker` 宣言で型解決される。
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 
 // basic-languages: 軽量シンタックスハイライトのみ (language worker なし)
@@ -211,5 +211,8 @@ function defineMonacoThemes(): void {
 
 defineMonacoThemes();
 
-// 初期化を確実に完了させる
-export const monacoReady = loader.init();
+// 初期化を確実に完了させる。
+// loader.init() の戻りは @monaco-editor/loader 内部の CancelablePromise だが、
+// composite の declaration emit では external な非 export 型を名前解決できず TS4023 に
+// なるため、利用側で参照しない `.cancel()` を捨てて素の Promise<typeof monaco> へ widening する。
+export const monacoReady: Promise<typeof monaco> = loader.init();

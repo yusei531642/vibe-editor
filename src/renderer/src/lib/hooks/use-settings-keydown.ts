@@ -2,7 +2,8 @@ import { useCallback } from 'react';
 import type { KeyboardEvent, RefObject } from 'react';
 
 interface UseSettingsKeydownOptions {
-  dialogRef: RefObject<HTMLDivElement>;
+  // React 19 の useRef<T>(null) は RefObject<T | null> を返すため `| null` を許容する。
+  dialogRef: RefObject<HTMLDivElement | null>;
   onClose: () => void;
 }
 

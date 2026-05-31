@@ -75,6 +75,10 @@ export interface UseTeamManagementResult {
 
   // ---- terminal launch helpers (TerminalView props にそのまま渡せる形) ----
   getTerminalArgs: (tab: TerminalTab) => string[];
+  /** Issue #841: 露出漏れ。AppShell が claudeInstructions={getClaudeInstructions(tab)} で
+   *  消費しており、欠落すると IDE モードの terminal 描画で実行時 TypeError になる。
+   *  typecheck が 0 ファイル検査だった間は検出されなかった。 */
+  getClaudeInstructions: (tab: TerminalTab) => string | undefined;
   getCodexInstructions: (tab: TerminalTab) => string | undefined;
   getRolePrompt: (tab: TerminalTab) => string | undefined;
   getTerminalEnv: (tab: TerminalTab) => Record<string, string> | undefined;
@@ -123,6 +127,7 @@ export function useTeamManagement(
     handleTerminalSessionId: history.handleTerminalSessionId,
     persistTerminalCustomLabel: history.persistTerminalCustomLabel,
     getTerminalArgs: launch.getTerminalArgs,
+    getClaudeInstructions: launch.getClaudeInstructions,
     getCodexInstructions: launch.getCodexInstructions,
     getRolePrompt: launch.getRolePrompt,
     getTerminalEnv: launch.getTerminalEnv,

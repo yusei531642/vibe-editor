@@ -8,7 +8,8 @@ import type {
   TerminalExitInfo
 } from '../../../../types/shared';
 
-interface SavePastedImageResult {
+// composite (declaration emit) では `api` の推論型から参照されるため export 必須。
+export interface SavePastedImageResult {
   ok: boolean;
   path?: string;
   error?: string;

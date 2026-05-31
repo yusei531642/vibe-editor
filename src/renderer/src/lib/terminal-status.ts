@@ -10,7 +10,8 @@ export interface TerminalRuntimeStatus {
   kind: TerminalRuntimeStatusKind;
   command?: string;
   exitCode?: number | null;
-  signal?: string | null;
+  /** Issue #841: Rust 側 TerminalExitInfo.signal (Option<i32>) に合わせて number。 */
+  signal?: number | null;
   error?: string;
   restored?: boolean;
 }

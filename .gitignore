@@ -38,6 +38,9 @@ tasks/issue-*/
 tasks/refactor-*/
 # 実験用 POC / スクラッチ (ADR 本体は tasks/ に置いてある)
 experiments/
+# Issue #841: tsc -b (composite build) の差分キャッシュ。環境依存のパスや
+# タイムスタンプを含み、コミットすると無駄な diff を生むため追跡しない。
+*.tsbuildinfo
 # Tauri のビルド中間生成物
 src-tauri/target/
 src-tauri/gen/schemas/

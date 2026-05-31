@@ -16,7 +16,7 @@ export async function insertPastedImageToPty(
   // Issue #160: 旧実装は 32KB チャンクで Array.from(Uint8Array) → String.fromCharCode.apply
   // を回しており、20MB クラスのスクショで Array.from が 20M 要素配列を作成 → UI ハング。
   // FileReader.readAsDataURL で base64 をネイティブ実装一発で取得する方が圧倒的に速い。
-  const dataUrl: string = await new Promise((resolve, reject) => {
+  const dataUrl: string = await new Promise<string>((resolve, reject) => {
     const fr = new FileReader();
     fr.onerror = () => reject(fr.error ?? new Error('FileReader failed'));
     fr.onload = () => resolve(typeof fr.result === 'string' ? fr.result : '');

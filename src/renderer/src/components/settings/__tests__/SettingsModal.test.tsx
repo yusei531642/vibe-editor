@@ -24,7 +24,7 @@ import {
   type AppSettings
 } from '../../../../../types/shared';
 
-type TestWindow = Window &
+type TestWindow = Omit<Window, 'api'> &
   typeof globalThis & {
     api?: unknown;
   };
@@ -69,7 +69,7 @@ describe('SettingsModal', () => {
     cleanup();
     vi.useRealTimers();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
       (window as TestWindow).api = originalApi;
     }

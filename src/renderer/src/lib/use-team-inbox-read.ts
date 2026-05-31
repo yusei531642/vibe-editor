@@ -12,7 +12,7 @@
  */
 import { useEffect, useRef } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { TeamInboxReadEvent } from '../../../../types/shared';
+import type { TeamInboxReadEvent } from '../../../types/shared';
 
 type Listener = (p: TeamInboxReadEvent) => void;
 const listeners = new Set<Listener>();

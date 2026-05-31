@@ -34,7 +34,7 @@ import { ToastProvider } from '../../../../lib/toast-context';
 import { useUiStore } from '../../../../stores/ui';
 import { DEFAULT_SETTINGS } from '../../../../../../types/shared';
 
-type TestWindow = Window &
+type TestWindow = Omit<Window, 'api'> &
   typeof globalThis & {
     api?: unknown;
   };
@@ -97,7 +97,7 @@ describe('TerminalCard (smoke)', () => {
   afterEach(() => {
     cleanup();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
       (window as TestWindow).api = originalApi;
     }

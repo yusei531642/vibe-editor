@@ -19,7 +19,9 @@ function makeNode(
     id,
     type,
     position,
-    data: { cardType: type, title: id, payload: { kept: true } },
+    // cardType が動的 (CardType) なため判別可能 union へ直接代入できない。
+    // production の addCard (stores/canvas.ts) と同じ `as CardData` で構築する。
+    data: { cardType: type, title: id, payload: { teamName: 'kept' } } as CardData,
     style: {
       width: size?.width ?? NODE_W,
       height: size?.height ?? NODE_H
@@ -89,12 +91,12 @@ describe('canvas-arrange / tidyTerminals', () => {
     const nodes: Node<CardData>[] = [
       makeNode('keep-id', 'terminal', { x: 0, y: 0 })
     ];
-    nodes[0].data.payload = { sessionId: 'sess-xyz', teamId: 'team-1' };
+    nodes[0].data.payload = { resumeSessionId: 'sess-xyz', teamId: 'team-1' };
 
     const out = tidyTerminals(nodes);
     expect(out[0].id).toBe('keep-id');
     expect(out[0].data.title).toBe('keep-id');
-    expect(out[0].data.payload).toEqual({ sessionId: 'sess-xyz', teamId: 'team-1' });
+    expect(out[0].data.payload).toEqual({ resumeSessionId: 'sess-xyz', teamId: 'team-1' });
   });
 
   it('honors gap option (tight / wide)', () => {
