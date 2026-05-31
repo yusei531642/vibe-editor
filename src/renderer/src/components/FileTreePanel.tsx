@@ -86,7 +86,7 @@ export function FileTreePanel({
   const [contextMenu, setContextMenu] = useState<
     { x: number; y: number; items: ContextMenuItem[] } | null
   >(null);
-  const showToast = useToast();
+  const { showToast } = useToast();
   // Issue #273: 当該 instance を Provider に登録する一意 id。Sidebar と FileTreeCard が
   // 同居しても useId で生成された値は重複しない (React 18 の機能)。
   const instanceId = useId();
