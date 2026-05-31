@@ -28,7 +28,7 @@
 // spawn_watcher のシグネチャ・deadline(60s)・poll(100ms)・cancel(AtomicBool) 設計は
 // claude_watcher と完全に揃えてある。
 
-use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use once_cell::sync::Lazy;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -342,12 +342,14 @@ fn run_watcher_loop(
 
     // Windows の native backend (ReadDirectoryChangesW) は notify の `with_poll_interval` を
     // 無視するため、イベント取りこぼし (特に watch 開始後に新規作成される YYYY/MM/DD サブ
-    // ディレクトリ配下の rollout 作成) を救う polling fallback が存在しない。そこで event 到着時
-    // に加えて最低 1 秒ごとに full rescan を回し、取りこぼしを構造的に補償する。`seen` で dedup
-    // 済みなので二重処理は起きず、rescan を 1s に throttle することで walk コストも抑える。
-    // (fs_watch.rs が同じ Windows 事情で Recursive を避けて手動展開しているのと同趣旨の保険)
+    // ディレクトリ配下の rollout 作成) を救う polling fallback が存在しない。そこで event の有無に
+    // 依らず最低 1 秒ごとに full rescan を回し、取りこぼしを構造的に補償する。`seen` で dedup 済み
+    // かつ rescan を 1s に throttle するので、Codex 起動直後に連続 fs イベントが来ても全再帰走査が
+    // 100ms ごとに繰り返されることはない (event は recv の待ちを短縮するだけで、walk 頻度は throttle
+    // が決める)。(fs_watch.rs が同じ Windows 事情で Recursive を避けて手動展開しているのと同趣旨の保険)
+    const RESCAN_INTERVAL: Duration = Duration::from_secs(1);
     let watcher_started_at = Instant::now();
-    let mut last_full_scan = watcher_started_at;
+    let mut last_full_scan: Option<Instant> = None;
     while watcher_started_at.elapsed() < WATCHER_MAX_LIFETIME {
         if is_cancelled() {
             tracing::debug!(
@@ -356,18 +358,17 @@ fn run_watcher_loop(
             );
             return;
         }
-        // poll interval 単位で待ちつつ event の有無を見る。channel 切断時のみ break。
-        let got_event = match rx.recv_timeout(WATCHER_POLL_INTERVAL) {
-            Ok(Ok(event)) => matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_)),
-            Ok(Err(_)) => false,
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => false,
+        // poll interval 単位で待つ。event は recv を早く返すだけで、走査頻度は下の throttle が決める。
+        // channel 切断時のみ break。
+        match rx.recv_timeout(WATCHER_POLL_INTERVAL) {
+            Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-        };
-        // event 到着、または前回 full rescan から 1 秒以上経過したときだけ走査する。
-        if !got_event && last_full_scan.elapsed() < Duration::from_secs(1) {
+        }
+        // 連続イベントでも walk は最低 1s 間隔に coalesce する (初回 = None のときだけ即時走査)。
+        if last_full_scan.is_some_and(|t| t.elapsed() < RESCAN_INTERVAL) {
             continue;
         }
-        last_full_scan = Instant::now();
+        last_full_scan = Some(Instant::now());
         let mut current = Vec::new();
         collect_rollout_paths(&dir, &mut current);
         // パス順を安定化 (どの watcher が先に claim してもデテルミニスティックに)。

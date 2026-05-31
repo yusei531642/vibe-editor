@@ -155,6 +155,45 @@ fn filter_resume_args_in_place(args: Vec<String>) -> Vec<String> {
     out
 }
 
+/// Issue #607 / #855 (security): Codex の `resume <id>` サブコマンド経路にも #607 と同じ
+/// session id バリデーションを適用する defense-in-depth ヘルパー。
+///
+/// renderer (use-team-launch-helpers / CardFrame / TerminalCard) は capture-then-resume で
+/// args 先頭に `resume <id>` を積む。この id は Codex rollout の payload.id
+/// (`~/.codex/sessions/**/rollout-*.jsonl`) や `terminal-tabs.json` の sessionId 由来で信頼境界の
+/// 外にあるため、`^[A-Za-z0-9_-]{8,64}$` を満たさない id を含む `resume <id>` ペアは strip + warn
+/// して新規 Codex 起動にフォールバックする (`--resume` 用 `filter_resume_args_in_place` と同方針)。
+///
+/// Codex の `resume` は **先頭 positional サブコマンド** なので `args[0] == "resume"` のときだけ
+/// `args[1]` を検証する。renderer の capture-then-resume が積むのは常に valid な session id
+/// なので、それ以外 (信頼境界外の不正 id / `--print=...` 等のフラグ風文字列) は `resume <id>` を
+/// strip して新規 Codex 起動にフォールバックする。`is_codex == false` なら no-op。
+fn filter_codex_resume_id_in_place(is_codex: bool, args: Vec<String>) -> Vec<String> {
+    if !is_codex || args.first().map(String::as_str) != Some("resume") {
+        return args;
+    }
+    match args.get(1) {
+        // 正常な session id (= 我々が積む値) はそのまま通す。
+        Some(id) if command_validation::is_valid_resume_session_id(id) => args,
+        // それ以外 (不正 id / フラグ風文字列) は `resume <bad>` を strip して新規起動に倒す
+        // (#607 の `--resume` strip と同方針の defense-in-depth)。
+        Some(bad) => {
+            let preview: String = bad.chars().take(16).collect();
+            tracing::warn!(
+                "[terminal] codex `resume <id>` rejected by validator (len={}, preview={:?}), stripping subcommand",
+                bad.len(),
+                preview
+            );
+            args.into_iter().skip(2).collect()
+        }
+        // `resume` のみで id 無し → strip。
+        None => {
+            tracing::warn!("[terminal] codex `resume` with no following id, stripping subcommand");
+            args.into_iter().skip(1).collect()
+        }
+    }
+}
+
 /// Codex の system prompt を、PTY (TUI) に直接「最初の入力」として注入する fallback 経路。
 ///
 /// 動作:
@@ -297,6 +336,11 @@ pub async fn terminal_create(
     // 残す (新規起動にフォールバック / UX 維持)。`--resume=<id>` の単一要素形式は
     // 2 要素分離原則を破るため id 内容に関わらず常に strip。
     args = filter_resume_args_in_place(args);
+
+    // Issue #855 (security): Codex の `resume <id>` サブコマンド経路 (renderer の capture-then-resume)
+    // にも #607 と同じ `^[A-Za-z0-9_-]{8,64}$` 検証を適用し、信頼境界外の id (rollout payload.id /
+    // terminal-tabs.json) を strip + warn する。不正時は新規 Codex 起動にフォールバック。
+    args = filter_codex_resume_id_in_place(is_codex_command, args);
 
     // Issue #271: HMR remount 経路では renderer 側 hook が `attachIfExists: true` を立て、
     // 既存 PTY に bind し直したいシグナルを送る。allowlist / immediate-exec チェックを通った
@@ -825,5 +869,78 @@ mod resume_args_filter_tests {
                 "second-valid-uuid-5678",
             ])
         );
+    }
+}
+
+#[cfg(test)]
+mod codex_resume_filter_tests {
+    use super::filter_codex_resume_id_in_place;
+
+    fn s(v: &[&str]) -> Vec<String> {
+        v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn keeps_valid_codex_resume_id() {
+        let input = s(&["resume", "019b6cec-e0fc-7d32-a4d0-a59cb61ae601"]);
+        let out = filter_codex_resume_id_in_place(true, input.clone());
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn keeps_valid_codex_resume_id_with_trailing_flags() {
+        let input = s(&[
+            "resume",
+            "019b6cec-e0fc-7d32-a4d0-a59cb61ae601",
+            "-c",
+            "disable_paste_burst=true",
+        ]);
+        let out = filter_codex_resume_id_in_place(true, input.clone());
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn strips_flagish_injection_id_and_keeps_trailing_args() {
+        // 信頼境界外の `--print=...` 等のフラグ風 id は strip し、後続 codexArgs を残して新規起動。
+        let input = s(&["resume", "--print=/etc/passwd", "-c", "k=v"]);
+        let out = filter_codex_resume_id_in_place(true, input);
+        assert_eq!(out, s(&["-c", "k=v"]));
+    }
+
+    #[test]
+    fn strips_shell_metachar_codex_resume_id() {
+        let input = s(&["resume", "abc;rm -rf /", "-c", "k=v"]);
+        let out = filter_codex_resume_id_in_place(true, input);
+        assert_eq!(out, s(&["-c", "k=v"]));
+    }
+
+    #[test]
+    fn strips_too_short_positional_codex_resume_id() {
+        let input = s(&["resume", "abc"]);
+        let out = filter_codex_resume_id_in_place(true, input);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn strips_bare_resume_with_no_id() {
+        let input = s(&["resume"]);
+        let out = filter_codex_resume_id_in_place(true, input);
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn noop_when_not_codex() {
+        // claude 側は --resume を filter_resume_args_in_place が見るので、ここでは触らない。
+        let input = s(&["resume", "abc;rm -rf /"]);
+        let out = filter_codex_resume_id_in_place(false, input.clone());
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn noop_when_resume_not_first() {
+        // 先頭 positional でない "resume" 文字列は subcommand ではないので対象外。
+        let input = s(&["-c", "k=v", "resume", "abc;rm -rf /"]);
+        let out = filter_codex_resume_id_in_place(true, input.clone());
+        assert_eq!(out, input);
     }
 }
