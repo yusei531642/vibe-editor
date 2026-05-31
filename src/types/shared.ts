@@ -1177,6 +1177,31 @@ export interface PersistedTerminalTabsFile {
   byProject: Record<string, PersistedTerminalTabsByProject>;
 }
 
+/**
+ * Issue #857: 復元時に session の transcript (jsonl rollout) が見つからず、
+ * 新規会話として起動し直したタブの情報。`terminal_tabs_load` が
+ * `TerminalTabsLoadResult.droppedSessions` に詰めて返す。renderer は件数 > 0 で
+ * warning トーストを 1 度出してユーザーに「過去の履歴が復元できなかった」ことを知らせる。
+ */
+export interface DroppedSessionInfo {
+  /** 永続化されていた renderer 側 tabId (= `String(numericId)`) */
+  tabId: string;
+  /** agent 種別 (`claude` / `codex` 等。`TerminalAgent` と同じ string namespace) */
+  kind: string;
+  /** drop した理由 code。現状 `"transcript-missing"` のみ */
+  reason: string;
+}
+
+/**
+ * Issue #857: `terminal_tabs_load` の戻り値。従来の `PersistedTerminalTabsFile` を
+ * そのまま flatten し、`droppedSessions` だけを追加した拡張形。`byProject` 等の
+ * 既存フィールドへのアクセスは不変 (file が本型になるだけ)。
+ */
+export interface TerminalTabsLoadResult extends PersistedTerminalTabsFile {
+  /** transcript 不在等で新規会話に倒したタブの一覧。空配列なら drop なし。 */
+  droppedSessions: DroppedSessionInfo[];
+}
+
 // ---------- TeamHub inject failure (Issue #511) ----------
 
 /**

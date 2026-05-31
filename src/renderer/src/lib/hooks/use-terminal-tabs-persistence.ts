@@ -17,11 +17,13 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../tauri-api';
+import { useT } from '../i18n';
 import {
   TERMINAL_TABS_SCHEMA_VERSION,
   type PersistedTerminalTab,
   type PersistedTerminalTabsByProject,
-  type PersistedTerminalTabsFile
+  type PersistedTerminalTabsFile,
+  type TerminalTabsLoadResult
 } from '../../../../types/shared';
 import type {
   AddTerminalTabOptions,
@@ -57,6 +59,14 @@ export interface UseTerminalTabsPersistenceOptions {
   activeTerminalTabId: number;
   setActiveTerminalTabId: React.Dispatch<React.SetStateAction<number>>;
   addTerminalTab: (opts?: AddTerminalTabOptions) => number | null;
+  /**
+   * Issue #857: 復元時に transcript 不在で新規会話へ倒したタブがあったとき、
+   * warning トーストで知らせるために使う。
+   */
+  showToast: (
+    msg: string,
+    opts?: { tone?: 'info' | 'success' | 'warning' | 'error' }
+  ) => void;
 }
 
 export interface UseTerminalTabsPersistenceResult {
@@ -74,8 +84,17 @@ export function useTerminalTabsPersistence(
     terminalTabs,
     activeTerminalTabId,
     addTerminalTab,
-    setActiveTerminalTabId
+    setActiveTerminalTabId,
+    showToast
   } = opts;
+
+  const t = useT();
+  // 復元 effect の deps から外しても最新値を読めるよう ref 経由で参照する
+  // (effect は projectRoot 確定 1 回限りで再実行させない方針のため)。
+  const showToastRef = useRef(showToast);
+  showToastRef.current = showToast;
+  const tRef = useRef(t);
+  tRef.current = t;
 
   const [isReady, setIsReady] = useState(false);
   /** 復元中に save loop が走らないようガードするフラグ */
@@ -95,7 +114,7 @@ export function useTerminalTabsPersistence(
     if (!projectRoot) return;
     let disposed = false;
     void (async () => {
-      let file: PersistedTerminalTabsFile | null = null;
+      let file: TerminalTabsLoadResult | null = null;
       try {
         file = await api.terminalTabs.load();
       } catch (err) {
@@ -103,6 +122,17 @@ export function useTerminalTabsPersistence(
       }
       if (disposed) return;
       fileCacheRef.current = file;
+      // Issue #857: Rust 側が transcript 不在で新規会話に倒したタブ数を warning で通知する。
+      // load() の結果に含まれる droppedSessions が 1 件以上なら 1 回だけトーストを出す。
+      const droppedCount = file?.droppedSessions?.length ?? 0;
+      if (droppedCount > 0) {
+        showToastRef.current(
+          tRef.current('terminalTabs.restore.transcriptMissing', {
+            count: droppedCount
+          }),
+          { tone: 'warning' }
+        );
+      }
       const slot = file?.byProject?.[projectRoot];
       if (slot && slot.tabs.length > 0 && terminalTabs.length === 0) {
         restoringRef.current = true;
