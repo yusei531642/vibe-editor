@@ -3,6 +3,7 @@ import type {
   TerminalAgent,
   TeamRole
 } from '../../../../types/shared';
+import type { TerminalRuntimeStatus } from '../terminal-status';
 
 /** 同時に立てられるターミナルの上限。メモリ/レイアウト保護の安全弁 */
 export const MAX_TERMINALS = 30;
@@ -17,7 +18,7 @@ export interface TerminalTab {
   teamId: string | null;
   /** MCP チーム通信用のエージェント識別子 */
   agentId: string;
-  status: string;
+  status: TerminalRuntimeStatus | null;
   exited: boolean;
   resumeSessionId: string | null;
   /**
@@ -306,7 +307,7 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
           role: addOpts?.role ?? null,
           teamId: addOpts?.teamId ?? null,
           agentId: addOpts?.agentId ?? `agent-${id}`,
-          status: '',
+          status: null,
           exited: false,
           resumeSessionId,
           freshSessionId,
@@ -375,7 +376,7 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
     setTerminalTabs((prev) =>
       prev.map((t) =>
         t.id === tabId
-          ? { ...t, version: t.version + 1, exited: false, status: '' }
+          ? { ...t, version: t.version + 1, exited: false, status: null }
           : t
       )
     );
