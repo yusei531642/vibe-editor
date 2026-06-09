@@ -23,6 +23,7 @@ export function MascotSection({ draft, update }: Props): JSX.Element {
 
   const clearCustomImage = (): void => {
     update('statusMascotCustomPath', '');
+    update('statusMascotVariant', DEFAULT_SETTINGS.statusMascotVariant);
   };
 
   return (
