@@ -61,6 +61,45 @@ describe('migrateSettings', () => {
     });
   });
 
+  // ---------- Issue #821: customAgents.id の built-in 予約語衝突を修復 ----------
+  describe('custom agent reserved id migration (Issue #821)', () => {
+    it('claude / codex と衝突する customAgents.id を user namespace に改名する', () => {
+      const migrated = migrateSettings({
+        schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
+        language: 'ja',
+        theme: 'claude-dark',
+        customAgents: [
+          { id: 'claude', name: 'Shadow Claude', command: 'shadow', args: '' },
+          { id: 'codex', name: 'Shadow Codex', command: 'shadow', args: '' },
+          { id: 'aider', name: 'Aider', command: 'aider', args: '' }
+        ]
+      });
+
+      expect(migrated.customAgents?.map((agent) => agent.id)).toEqual([
+        '_user_claude',
+        '_user_codex',
+        'aider'
+      ]);
+    });
+
+    it('改名先が既に存在する場合は suffix を付けて重複を避ける', () => {
+      const migrated = migrateSettings({
+        schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
+        language: 'ja',
+        theme: 'claude-dark',
+        customAgents: [
+          { id: '_user_claude', name: 'Existing', command: 'existing', args: '' },
+          { id: 'claude', name: 'Shadow Claude', command: 'shadow', args: '' }
+        ]
+      });
+
+      expect(migrated.customAgents?.map((agent) => agent.id)).toEqual([
+        '_user_claude',
+        '_user_claude_2'
+      ]);
+    });
+  });
+
   // ---------- Issue #449: v9 → v10 Unicode dash 正規化 ----------
   describe('v9 → v10 Unicode dash normalization (Issue #449)', () => {
     it('normalizes leading Unicode dash in codexArgs to ASCII "--"', () => {
