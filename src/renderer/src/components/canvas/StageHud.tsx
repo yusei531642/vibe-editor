@@ -199,6 +199,12 @@ export function StageHud(): JSX.Element {
     return Array.from(seen);
   }, [agentNodes]);
   const healthSnapshot = useTeamHealthMulti(aggregatedTeamIds);
+  const [healthNowTick, setHealthNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (aggregatedTeamIds.length === 0) return;
+    const timer = window.setInterval(() => setHealthNowTick(Date.now()), 15_000);
+    return () => window.clearInterval(timer);
+  }, [aggregatedTeamIds.length]);
   const deadCount = useMemo(() => {
     let n = 0;
     for (const node of agentNodes) {
@@ -206,11 +212,11 @@ export function StageHud(): JSX.Element {
       const payload = agentPayloadOf(node.data);
       if (!payload?.agentId) continue;
       const row = healthSnapshot.byAgentId[payload.agentId];
-      const h = deriveHealth(row);
+      const h = deriveHealth(row, healthNowTick);
       if (h.state === 'dead') n += 1;
     }
     return n;
-  }, [agentNodes, healthSnapshot]);
+  }, [agentNodes, healthSnapshot, healthNowTick]);
 
   // Issue #514 / #615: dashboard に渡す teamId / projectRoot を canvas state + settings から導出。
   // dual preset で 2 team が並ぶケースに対応するため、active な全 teamId を array で渡す。
