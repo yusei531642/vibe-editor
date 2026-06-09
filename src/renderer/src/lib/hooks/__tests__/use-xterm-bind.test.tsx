@@ -116,7 +116,8 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
         snapRef: makeRef<PtySpawnSnapshot>({
           args: ['--print'],
           teamId: 'team-1',
-          agentId: 'leader-1'
+          agentId: 'leader-1',
+          claudeInstructions: 'long claude system prompt'
         }),
         callbacksRef: makeRef<PtySessionCallbacks>({}),
         ptyIdRef,
@@ -134,7 +135,8 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
       command: 'claude',
       args: ['--print'],
       teamId: 'team-1',
-      agentId: 'leader-1'
+      agentId: 'leader-1',
+      claudeInstructions: 'long claude system prompt'
     });
     // pre-subscribe 経路では client-generated id が使われる (UUID)。
     // ptyIdRef にも同じ id が伝播する。

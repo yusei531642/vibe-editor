@@ -141,3 +141,31 @@ describe('Issue #818: TerminalCreateResult.warning は structured (i18n key + pa
     expect(warning.params.fallback).toBe('/tmp');
   });
 });
+
+describe('Issue #858: TerminalCreateOptions prompt file fields', () => {
+  it('Claude system prompt は args ではなく claudeInstructions に載せられる', () => {
+    const opts: TerminalCreateOptions = {
+      cwd: '/tmp',
+      command: 'claude',
+      args: ['--session-id', '550e8400-e29b-41d4-a716-446655440000'],
+      cols: 80,
+      rows: 24,
+      claudeInstructions: 'long system prompt'
+    };
+
+    expect(opts.args).not.toContain('--append-system-prompt');
+    expect(opts.claudeInstructions).toBe('long system prompt');
+  });
+
+  it('Codex system prompt も従来通り codexInstructions に載せられる', () => {
+    const opts: TerminalCreateOptions = {
+      cwd: '/tmp',
+      command: 'codex',
+      cols: 80,
+      rows: 24,
+      codexInstructions: 'codex prompt'
+    };
+
+    expect(opts.codexInstructions).toBe('codex prompt');
+  });
+});

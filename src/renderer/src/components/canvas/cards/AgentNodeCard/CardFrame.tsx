@@ -190,7 +190,7 @@ function AgentNodeCardImpl({
     customInstructionsRaw
   ]);
 
-  // Claude: --append-system-prompt でシステム指示を渡す
+  // Claude: claudeInstructions (一時ファイル化されて --append-system-prompt-file へ)
   // Codex: codexInstructions (一時ファイル化されて model_instructions_file へ)
   // Custom: resolved.args をそのまま使い、system prompt 連携は行わない (カスタム CLI は
   //          プロンプト注入方法が不明のため、チーム役割分担の注入はスキップ)
@@ -215,9 +215,6 @@ function AgentNodeCardImpl({
         ? settings.codexArgs || ''
         : resolved.args;
     const base = parseShellArgs(rawArgs);
-    if (isClaude && sysPrompt) {
-      base.push('--append-system-prompt', sysPrompt);
-    }
     if (isCodex && payload.teamId) {
       const userCodex = settings.codexArgs || '';
       if (!userCodex.includes('disable_paste_burst')) {
@@ -250,7 +247,6 @@ function AgentNodeCardImpl({
     isClaude,
     isCodex,
     resolved.args,
-    sysPrompt,
     payload.teamId,
     ensuredSessionId,
     payload.resumeSessionId,
@@ -258,6 +254,7 @@ function AgentNodeCardImpl({
     settings.codexArgs
   ]);
 
+  const claudeInstructions = isClaude ? sysPrompt : undefined;
   const codexInstructions = isCodex ? sysPrompt : undefined;
 
   // ---------- Issue #509: 未読 inbox 数の event-driven 集計 ----------
@@ -423,6 +420,7 @@ function AgentNodeCardImpl({
           cwd={cwd}
           command={command}
           args={args}
+          claudeInstructions={claudeInstructions}
           codexInstructions={codexInstructions}
           initialMessage={payload.initialMessage}
           onStatus={setStatus}

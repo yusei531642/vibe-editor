@@ -56,6 +56,8 @@ interface TerminalViewProps {
   agentId?: string;
   /** TeamHub のメッセージ注入時に from として表示されるロール */
   role?: string;
+  /** Claude 起動時にシステム指示として渡す文字列（main で一時ファイル化） */
+  claudeInstructions?: string;
   /** Codex 起動時にシステム指示として渡す文字列（main で一時ファイル化） */
   codexInstructions?: string;
   /** 起動中 / エラー表示用のコールバック */
@@ -142,6 +144,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       initialMessage,
       agentId,
       role,
+      claudeInstructions,
       codexInstructions,
       onStatus,
       onActivity,
@@ -199,6 +202,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       agentId,
       role,
       initialMessage,
+      claudeInstructions,
       codexInstructions
     });
     snapRef.current = {
@@ -208,6 +212,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       agentId,
       role,
       initialMessage,
+      claudeInstructions,
       codexInstructions
     };
 

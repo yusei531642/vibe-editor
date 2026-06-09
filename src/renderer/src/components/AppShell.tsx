@@ -176,6 +176,7 @@ export function AppShell({
     handleTerminalSessionId,
     persistTerminalCustomLabel,
     getTerminalArgs,
+    getClaudeInstructions,
     getCodexInstructions,
     getRolePrompt,
     getTerminalEnv,
@@ -844,6 +845,7 @@ export function AppShell({
                     }
                     args={getTerminalArgs(tab)}
                     env={getTerminalEnv(tab)}
+                    claudeInstructions={getClaudeInstructions(tab)}
                     codexInstructions={getCodexInstructions(tab)}
                     teamId={tab.teamId ?? undefined}
                     visible={true}

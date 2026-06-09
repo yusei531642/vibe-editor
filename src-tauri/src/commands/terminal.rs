@@ -3,9 +3,9 @@
 // portable-pty 経由で PTY を spawn、SessionRegistry に登録、
 // terminal:data:{id} / terminal:exit:{id} イベントを emit する。
 
-mod codex_instructions;
 pub(crate) mod command_validation;
 mod paste_image;
+mod prompt_files;
 
 use crate::pty::session::TerminalWarning;
 use crate::pty::{spawn_session, SpawnOptions, UserWriteOutcome};
@@ -66,6 +66,8 @@ pub struct TerminalCreateOptions {
     /// spawn せず既存 id を返す。デフォルトは false (従来通り常に新規 spawn)。
     #[serde(default)]
     pub attach_if_exists: bool,
+    #[serde(default)]
+    pub claude_instructions: Option<String>,
     #[serde(default)]
     pub codex_instructions: Option<String>,
 }
@@ -413,6 +415,36 @@ pub async fn terminal_create(
         crate::pty::codex_broker::cleanup_stale_for_cwd(&cwd);
     }
 
+    if !is_codex_command {
+        if let Some(prompt) = opts
+            .claude_instructions
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            match prompt_files::prepare_claude_append_system_prompt_file(prompt).await {
+                Some(path) => {
+                    let path_str = path.to_string_lossy().into_owned();
+                    tracing::info!(
+                        "[terminal] claude system prompt route=cli_file path={}",
+                        redact_home(&path_str)
+                    );
+                    args.push("--append-system-prompt-file".to_string());
+                    args.push(path_str);
+                }
+                None => {
+                    return Ok(TerminalCreateResult {
+                        ok: false,
+                        error: Some(
+                            "failed to prepare Claude system prompt file".to_string(),
+                        ),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+    }
+
     // Issue #413: codex かつ instructions ありの場合は、
     // (A) 一時ファイル化して `--config model_instructions_file=<path>` を args に追加する経路を最優先で使う。
     //     最新 Codex CLI はこれだけで system prompt が反映される。
@@ -428,7 +460,7 @@ pub async fn terminal_create(
             .map(str::trim)
             .filter(|s| !s.is_empty())
         {
-            match codex_instructions::prepare_codex_instructions_file(instr).await {
+            match prompt_files::prepare_codex_instructions_file(instr).await {
                 Some(path) => {
                     let path_str = path.to_string_lossy().into_owned();
                     tracing::info!("[terminal] codex system prompt route=cli_args path={path_str}");

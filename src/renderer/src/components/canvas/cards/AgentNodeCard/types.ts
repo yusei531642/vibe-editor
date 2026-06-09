@@ -28,7 +28,7 @@ export interface AgentPayload {
   /**
    * Issue #117: team_recruit の custom_instructions が新規エージェントに渡るように、
    * use-recruit-listener.ts が payload に積んでくる「役職追加指示の生テキスト」。
-   *   - Claude  : sysPrompt の末尾に追記して --append-system-prompt に流す。
+   *   - Claude  : sysPrompt の末尾に追記し、一時ファイル化して --append-system-prompt-file に流す。
    *   - Codex   : codex_instructions として一時ファイル化し、起動時に PTY 注入される。
    *   - 動的ロール (instructions ベース) と併用された場合は両方をブレンドする。
    * undefined / 空文字なら「指定なし」と同じ扱い。

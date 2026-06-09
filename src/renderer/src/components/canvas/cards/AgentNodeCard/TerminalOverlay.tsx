@@ -58,6 +58,7 @@ export interface TerminalOverlayProps {
   cwd: string;
   command: string;
   args?: string[];
+  claudeInstructions?: string;
   codexInstructions?: string;
   /** Issue #359: 新セッション起動時に初手で送るプロンプト */
   initialMessage?: string;
@@ -78,6 +79,7 @@ export function TerminalOverlay({
   cwd,
   command,
   args,
+  claudeInstructions,
   codexInstructions,
   initialMessage,
   onStatus,
@@ -202,6 +204,7 @@ export function TerminalOverlay({
         // Issue #341: payload.args が空配列で永続化された場合に settings 由来の args が
         // 潰れないようガード (`?? args` だと `[]` でも truthy 扱いで args が無視される)。
         args={payload.args && payload.args.length > 0 ? payload.args : args}
+        claudeInstructions={claudeInstructions}
         codexInstructions={codexInstructions}
         // Issue #564: IDE 初期表示では Canvas 側 AgentNode を非表示保持するだけなので、
         // 裏で Leader/Codex の PTY を起動しない。

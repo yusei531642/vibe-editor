@@ -1070,6 +1070,15 @@ export interface TerminalCreateOptions {
    */
   attachIfExists?: boolean;
   /**
+   * Claude 用のシステム指示文。main プロセス側で一時ファイルに書き出して
+   * `--append-system-prompt-file <path>` を args に差し込む。
+   *
+   * Issue #858: `--append-system-prompt <長文>` を renderer 側で argv に直接積むと、
+   * Windows で "コマンド ラインが長すぎます" に当たるため、長文は IPC payload
+   * として渡して main 側で短い file path に変換する。
+   */
+  claudeInstructions?: string;
+  /**
    * Codex 用のシステム指示文。Claude の --append-system-prompt と同等の役割を
    * 果たし、main プロセス側で一時ファイルに書き出して
    * `-c model_instructions_file=<path>` を args に差し込む。

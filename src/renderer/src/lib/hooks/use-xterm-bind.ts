@@ -46,6 +46,7 @@ export interface PtySpawnSnapshot {
   agentId?: string;
   role?: string;
   initialMessage?: string | string[];
+  claudeInstructions?: string;
   codexInstructions?: string;
 }
 
@@ -592,6 +593,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           role: snap.role,
           sessionKey: skey,
           attachIfExists: wantAttach,
+          claudeInstructions: snap.claudeInstructions,
           codexInstructions: snap.codexInstructions
         });
 

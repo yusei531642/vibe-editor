@@ -1,7 +1,8 @@
 /**
  * use-team-launch-helpers — 旧 `use-team-management.ts` (524 行) のうち
  * TerminalView の props として渡される起動引数 / 環境変数 / 初期メッセージ生成関数群:
- *   - `getTerminalArgs` (Claude `--append-system-prompt` / Codex paste burst 対策)
+ *   - `getTerminalArgs` (resume / Codex paste burst 対策)
+ *   - `getClaudeInstructions` (Claude 専用の system 指示テキスト)
  *   - `getCodexInstructions` (Codex 専用の system 指示テキスト)
  *   - `getRolePrompt` (タブのロールに対応する初期メッセージ)
  *   - `getTerminalEnv` (TeamHub socket / token / 役割識別子)
@@ -28,6 +29,7 @@ export interface UseTeamLaunchHelpersOptions {
 
 export interface UseTeamLaunchHelpersResult {
   getTerminalArgs: (tab: TerminalTab) => string[];
+  getClaudeInstructions: (tab: TerminalTab) => string | undefined;
   getCodexInstructions: (tab: TerminalTab) => string | undefined;
   getRolePrompt: (tab: TerminalTab) => string | undefined;
   getTerminalEnv: (tab: TerminalTab) => Record<string, string> | undefined;
@@ -64,19 +66,6 @@ export function useTeamLaunchHelpers(
         // `-c model_instructions_file=<path>` は `codex resume` が受理するので順序を壊さない。
         base.unshift('resume', tab.resumeSessionId);
       }
-      // Claude のチーム指示は --append-system-prompt で直接渡す。
-      if (!isCodex && tab.teamId) {
-        const team =
-          optsRef.current.teams.find((x) => x.id === tab.teamId) ?? null;
-        const sysPrompt = generateTeamSystemPrompt(
-          tab,
-          optsRef.current.terminalTabs,
-          team
-        );
-        if (sysPrompt) {
-          base.push('--append-system-prompt', sysPrompt);
-        }
-      }
       // Codex の paste_burst 検出を無効化する。
       // チーム通信では team_send が chat_composer に文字列を直接流し込むが、
       // Codex は高速連続入力を「ペースト扱い」にバッファしてしまい、
@@ -89,6 +78,20 @@ export function useTeamLaunchHelpers(
       return base;
     },
     [claudeArgs, codexArgs]
+  );
+
+  /**
+   * Claude 向けのシステム指示。main 側で一時ファイルに書き出されて
+   * `--append-system-prompt-file <path>` として渡される。
+   */
+  const getClaudeInstructions = useCallback(
+    (tab: TerminalTab): string | undefined => {
+      if (tab.agent === 'codex' || !tab.teamId) return undefined;
+      const team =
+        optsRef.current.teams.find((x) => x.id === tab.teamId) ?? null;
+      return generateTeamSystemPrompt(tab, optsRef.current.terminalTabs, team);
+    },
+    []
   );
 
   /**
@@ -134,6 +137,7 @@ export function useTeamLaunchHelpers(
 
   return {
     getTerminalArgs,
+    getClaudeInstructions,
     getCodexInstructions,
     getRolePrompt,
     getTerminalEnv
