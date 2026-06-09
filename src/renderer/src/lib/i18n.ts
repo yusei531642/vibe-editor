@@ -153,6 +153,15 @@ const ja: Dict = {
 
   // ---------- File tree / Editor ----------
   'filetree.refresh': '再読込',
+  'diff.loading': 'diff を読み込み中…',
+  'diff.selectFile': '差分を表示するファイルを選択してください',
+  'diff.error': 'エラー: {error}',
+  'diff.binary': 'バイナリファイルは diff 表示できません: {path}',
+  'diff.new': '(新規追加)',
+  'diff.deleted': '(削除)',
+  'diff.toggleMode': '差分表示モード切替',
+  'diff.toggleInline': 'インラインに切替',
+  'diff.toggleSideBySide': 'サイドバイサイドに切替',
   'editor.loading': 'ファイルを読み込み中…',
   'editor.save': '保存 (Ctrl+S)',
   'editor.save.ariaLabel': '保存',
@@ -950,6 +959,15 @@ const en: Dict = {
 
   // ---------- File tree / Editor ----------
   'filetree.refresh': 'Reload',
+  'diff.loading': 'Loading diff…',
+  'diff.selectFile': 'Select a file to view its diff',
+  'diff.error': 'Error: {error}',
+  'diff.binary': 'Binary files cannot be shown as diffs: {path}',
+  'diff.new': '(new)',
+  'diff.deleted': '(deleted)',
+  'diff.toggleMode': 'Toggle diff display mode',
+  'diff.toggleInline': 'Switch to inline',
+  'diff.toggleSideBySide': 'Switch to side by side',
   'editor.loading': 'Loading file…',
   'editor.save': 'Save (Ctrl+S)',
   'editor.save.ariaLabel': 'Save',

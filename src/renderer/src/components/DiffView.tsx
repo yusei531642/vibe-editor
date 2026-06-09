@@ -3,6 +3,7 @@ import { Columns3, Rows3 } from 'lucide-react';
 import '../lib/monaco-setup';
 import type { GitDiffResult } from '../../../types/shared';
 import { detectLanguage } from '../lib/language';
+import { useT } from '../lib/i18n';
 import { useMonacoTheme, useSettings } from '../lib/settings-context';
 
 interface DiffViewProps {
@@ -20,6 +21,7 @@ export function DiffView({
 }: DiffViewProps): JSX.Element {
   const { settings } = useSettings();
   const theme = useMonacoTheme();
+  const t = useT();
 
   if (loading || !result) {
     return (
@@ -28,10 +30,10 @@ export function DiffView({
           {loading ? (
             <>
               <span className="cc-spinner" aria-hidden="true" />
-              <span>diff を読み込み中…</span>
+              <span>{t('diff.loading')}</span>
             </>
           ) : (
-            '差分を表示するファイルを選択してください'
+            t('diff.selectFile')
           )}
         </div>
       </div>
@@ -42,7 +44,7 @@ export function DiffView({
     return (
       <div className="diffview">
         <div className="diffview__placeholder diffview__placeholder--error">
-          エラー: {result.error}
+          {t('diff.error', { error: result.error })}
         </div>
       </div>
     );
@@ -52,7 +54,7 @@ export function DiffView({
     return (
       <div className="diffview">
         <div className="diffview__placeholder">
-          バイナリファイルは diff 表示できません: {result.path}
+          {t('diff.binary', { path: result.path })}
         </div>
       </div>
     );
@@ -60,8 +62,8 @@ export function DiffView({
 
   const language = detectLanguage(result.path);
   const header: string[] = [result.path];
-  if (result.isNew) header.push('(新規追加)');
-  else if (result.isDeleted) header.push('(削除)');
+  if (result.isNew) header.push(t('diff.new'));
+  else if (result.isDeleted) header.push(t('diff.deleted'));
 
   return (
     <div className="diffview">
@@ -71,8 +73,8 @@ export function DiffView({
           type="button"
           className="toolbar__btn toolbar__btn--icon"
           onClick={onToggleSideBySide}
-          title={sideBySide ? 'インラインに切替' : 'サイドバイサイドに切替'}
-          aria-label="差分表示モード切替"
+          title={sideBySide ? t('diff.toggleInline') : t('diff.toggleSideBySide')}
+          aria-label={t('diff.toggleMode')}
         >
           {sideBySide ? (
             <Rows3 size={15} strokeWidth={1.75} />
