@@ -67,12 +67,14 @@ export function deriveHealth(
   const lastPtyActivityAgeMs =
     ageFromRfc3339(row.lastPtyOutputAt, now) ?? row.lastPtyActivityAgeMs;
   const ageMs = lastPtyActivityAgeMs ?? lastStatusAgeMs;
+  const hasObservation =
+    lastPtyActivityAgeMs !== null || lastStatusAgeMs !== null;
 
   const statusIsStale =
     lastStatusAgeMs === null || lastStatusAgeMs >= row.stalenessThresholdMs;
   const ptyIsRecentlyActive =
     lastPtyActivityAgeMs !== null && lastPtyActivityAgeMs < row.stalenessThresholdMs;
-  const autoStale = statusIsStale && !ptyIsRecentlyActive;
+  const autoStale = hasObservation && statusIsStale && !ptyIsRecentlyActive;
 
   let state: HealthState;
   if (lastPtyActivityAgeMs !== null && lastPtyActivityAgeMs >= DEAD_THRESHOLD_MS) {
@@ -81,7 +83,7 @@ export function deriveHealth(
     state = 'dead';
   } else if (row.autoStale || autoStale) {
     state = 'stale';
-  } else if (lastPtyActivityAgeMs !== null || lastStatusAgeMs !== null) {
+  } else if (hasObservation) {
     state = 'alive';
   } else {
     // 1 度も観測されていない (= recruit 直後の handshake 前) は unknown 扱い。
