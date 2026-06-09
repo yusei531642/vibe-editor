@@ -106,6 +106,35 @@ describe('settings-context', () => {
     expect(api.settings.save.mock.calls[0][0]).toMatchObject({ editorFontSize: 18 });
   });
 
+  it('reset() は DEFAULT_SETTINGS を clone して live state と保存値に使う', async () => {
+    const api = installApi({
+      recentProjects: ['F:/tmp/project'],
+      workspaceFolders: ['F:/tmp/workspace'],
+      fileTreeExpanded: { 'F:/tmp/project': ['src'] }
+    });
+    const { result } = renderHook(() => useSettings(), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    api.settings.save.mockClear();
+
+    await act(async () => {
+      await result.current.reset();
+    });
+
+    const saved = api.settings.save.mock.calls[0][0] as AppSettings;
+    expect(result.current.settings).toEqual(DEFAULT_SETTINGS);
+    expect(result.current.settings).not.toBe(DEFAULT_SETTINGS);
+    expect(result.current.settings.recentProjects).not.toBe(DEFAULT_SETTINGS.recentProjects);
+    expect(result.current.settings.workspaceFolders).not.toBe(DEFAULT_SETTINGS.workspaceFolders);
+    expect(result.current.settings.fileTreeExpanded).not.toBe(DEFAULT_SETTINGS.fileTreeExpanded);
+
+    expect(saved).toEqual(DEFAULT_SETTINGS);
+    expect(saved).not.toBe(DEFAULT_SETTINGS);
+    expect(saved.recentProjects).not.toBe(DEFAULT_SETTINGS.recentProjects);
+    expect(saved.workspaceFolders).not.toBe(DEFAULT_SETTINGS.workspaceFolders);
+    expect(saved.fileTreeExpanded).not.toBe(DEFAULT_SETTINGS.fileTreeExpanded);
+  });
+
   it('save が reject すると Toast が表示される (Issue #490 の昇格挙動)', async () => {
     const api = installApi(undefined, async () => {
       throw new Error('disk full');
