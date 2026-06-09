@@ -66,24 +66,27 @@ export function migrateSettings(raw: unknown): AppSettings {
     if (!Array.isArray(data.workspaceFolders)) {
       data.workspaceFolders = [];
     }
-    // language/theme が unknown 値 → デフォルトに戻す
-    const validLanguages: Language[] = ['ja', 'en'];
-    if (!validLanguages.includes(data.language as Language)) {
-      data.language = DEFAULT_SETTINGS.language;
-    }
-    // Issue #109: 'glass' を validThemes に追加 (UI/ThemeName には既に存在するが、
-    // ここに無いと migration で claude-dark に戻されてしまう)。
-    const validThemes: ThemeName[] = [
-      'claude-dark',
-      'claude-light',
-      'dark',
-      'light',
-      'midnight',
-      'glass'
-    ];
-    if (!validThemes.includes(data.theme as ThemeName)) {
-      data.theme = DEFAULT_SETTINGS.theme;
-    }
+  }
+
+  // Issue #836: theme/language は schemaVersion に関係なく毎ロード検証する。
+  // 新旧バージョン差分だけでなく、改竄・削除済みテーマ・将来バージョン由来の未知値も
+  // renderer の各 consumer に届く前に default へ戻す。
+  const validLanguages: Language[] = ['ja', 'en'];
+  if (!validLanguages.includes(data.language as Language)) {
+    data.language = DEFAULT_SETTINGS.language;
+  }
+  // Issue #109: 'glass' を validThemes に追加 (UI/ThemeName には既に存在するが、
+  // ここに無いと migration で claude-dark に戻されてしまう)。
+  const validThemes: ThemeName[] = [
+    'claude-dark',
+    'claude-light',
+    'dark',
+    'light',
+    'midnight',
+    'glass'
+  ];
+  if (!validThemes.includes(data.theme as ThemeName)) {
+    data.theme = DEFAULT_SETTINGS.theme;
   }
 
   // --- Version 1 → 2: 初回オンボーディングフラグの導入 ---

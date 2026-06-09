@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { APP_SETTINGS_SCHEMA_VERSION } from '../../../../types/shared';
+import { APP_SETTINGS_SCHEMA_VERSION, DEFAULT_SETTINGS } from '../../../../types/shared';
 import { migrateSettings } from '../settings-migrate';
 
 describe('migrateSettings', () => {
@@ -34,6 +34,31 @@ describe('migrateSettings', () => {
     });
 
     expect(migrated.statusMascotVariant).toBe('vibe');
+  });
+
+  // ---------- Issue #836: schemaVersion >= 1 でも theme / language を毎ロード検証 ----------
+  describe('theme / language validation (Issue #836)', () => {
+    it('current schema でも未知 theme / language を default に戻す', () => {
+      const migrated = migrateSettings({
+        schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
+        language: 'xx',
+        theme: 'removed-theme'
+      });
+
+      expect(migrated.language).toBe(DEFAULT_SETTINGS.language);
+      expect(migrated.theme).toBe(DEFAULT_SETTINGS.theme);
+    });
+
+    it('current schema の有効な theme / language は維持する', () => {
+      const migrated = migrateSettings({
+        schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
+        language: 'en',
+        theme: 'glass'
+      });
+
+      expect(migrated.language).toBe('en');
+      expect(migrated.theme).toBe('glass');
+    });
   });
 
   // ---------- Issue #449: v9 → v10 Unicode dash 正規化 ----------
