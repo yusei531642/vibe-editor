@@ -1,7 +1,7 @@
 // PTY 出力バッチャ (旧 lib/pty-data-batcher.ts 等価)
 //
-// 16ms or 32KB で flush し、ターミナル出力を tauri::Emitter で送る。
-// 大量出力時に renderer 側のレンダリングを 60fps 以下に保つため必須。
+// 32ms or 64KB で flush し、ターミナル出力を tauri::Emitter で送る。
+// 大量出力時に renderer 側のレンダリングを 30fps 程度に保つため必須。
 
 use crate::pty::scrollback::{append_scrollback, Scrollback};
 use bytes::BytesMut;
@@ -20,8 +20,8 @@ use tokio::time::{interval, MissedTickBehavior};
 /// (closure 内部) の責務 — batcher は単に「データが流れた」事実だけを通知する。
 pub type PtyOutputObserver = Arc<dyn Fn() + Send + Sync>;
 
-const FLUSH_INTERVAL_MS: u64 = 16;
-const FLUSH_BYTES: usize = 32 * 1024;
+const FLUSH_INTERVAL_MS: u64 = 32;
+const FLUSH_BYTES: usize = 64 * 1024;
 /// 起動直後の emit 抑止時間。
 ///
 /// 旧設計 (Issue #285 以前) は renderer が `terminal_create` の戻り値で id を受け取って
@@ -178,7 +178,7 @@ pub(super) fn extract_emit_payload(buf: &mut BytesMut, scrollback: &Scrollback) 
     // 退避 → emit 後に extend_from_slice で書き戻していた。slice 借用で済む処理を
     // Vec 経由に分割していたため、flush ごとに `remainder.to_vec()` の追加 alloc + memcpy
     // が走っていた。安定 API の copy_within で in-place 圧縮することで、flush あたりの
-    // ヒープ allocation を 1 件削減する (60Hz 上限で常時 emit 中は ~60 alloc/s 削減)。
+    // ヒープ allocation を 1 件削減する (30Hz 上限で常時 emit 中は ~30 alloc/s 削減)。
     let emit_slice = &buf[..safe_end];
     append_scrollback(scrollback, emit_slice);
     let text = String::from_utf8_lossy(emit_slice).into_owned();
@@ -190,7 +190,7 @@ pub(super) fn extract_emit_payload(buf: &mut BytesMut, scrollback: &Scrollback) 
     Some(text)
 }
 
-/// Issue #494: spawn_batcher の `recv` 側 flush 判定。32 KiB を超えたらフラッシュする
+/// Issue #494: spawn_batcher の `recv` 側 flush 判定。64 KiB を超えたらフラッシュする
 /// 単純な閾値関数。spawn_batcher 内のロジックと統一して、テスト側からも同じ関数で
 /// 検証できるようにする。
 pub(super) fn should_flush_after_recv(buf_len: usize) -> bool {

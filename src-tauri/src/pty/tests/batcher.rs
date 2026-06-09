@@ -15,13 +15,13 @@ use crate::pty::batcher::{
 use crate::pty::scrollback::{new_scrollback, scrollback_to_string, SCROLLBACK_CAPACITY};
 use bytes::BytesMut;
 
-/// 16ms / 32 KiB の閾値が想定値から動いていないこと。
-/// renderer 側 60Hz レンダリングと PTY backpressure の両立に効く重要定数なので
+/// 32ms / 64 KiB の閾値が想定値から動いていないこと。
+/// renderer 側の描画負荷抑制と PTY backpressure の両立に効く重要定数なので
 /// 静的に snapshot しておく。
 #[test]
 fn flush_thresholds_are_pinned_to_expected_values() {
-    assert_eq!(flush_interval_ms(), 16, "flush tick must be ~60Hz (16ms)");
-    assert_eq!(flush_bytes_threshold(), 32 * 1024, "flush byte threshold = 32KiB");
+    assert_eq!(flush_interval_ms(), 32, "flush tick must be ~30Hz (32ms)");
+    assert_eq!(flush_bytes_threshold(), 64 * 1024, "flush byte threshold = 64KiB");
     assert_eq!(
         PTY_CHANNEL_CAPACITY, 256,
         "bounded channel must keep ~4MiB backpressure buffer"
@@ -136,7 +136,7 @@ fn scrollback_caps_at_64kib_after_repeated_extracts() {
     assert!(snap.chars().all(|c| c == 'a'));
 }
 
-/// Issue #48 のクリティカルケース: 「ちょうど 32KiB ぴったりだが末尾が日本語の途中」のとき、
+/// Issue #48 のクリティカルケース: 「ちょうど閾値ぴったりだが末尾が日本語の途中」のとき、
 /// flush threshold を満たしていても境界手前まで emit される (= U+FFFD 化を防ぐ)。
 #[test]
 fn flush_threshold_with_partial_multibyte_tail_emits_safely() {

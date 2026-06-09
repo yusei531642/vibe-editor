@@ -1,6 +1,6 @@
 //! Issue #494: PTY 周辺の integration test 集約モジュール。
 //!
-//! `batcher` の flush 境界条件 (UTF-8 安全境界 / 16ms tick / 32KiB バッファ閾値) を
+//! `batcher` の flush 境界条件 (UTF-8 安全境界 / 32ms tick / 64KiB バッファ閾値) を
 //! Tauri AppHandle に依存せず純粋関数経由で検証する。
 //!
 //! Issue #738: `session.rs` 分割に伴い、旧 `session.rs` 内の `env_strip_tests` /

@@ -353,6 +353,7 @@ pub fn spawn_session(
     };
     drop(pair.slave);
 
+    let process_id = child.process_id();
     let killer = child.clone_killer();
 
     // reader thread (blocking IO -> mpsc)
@@ -421,7 +422,7 @@ pub fn spawn_session(
     // `member_diagnostics[agent_id].last_pty_output_at` を update する observer を渡す。
     // ターミナルタブ等の agent_id 無し PTY では None で no-op。
     //
-    // closure 内 dedup: 1 秒間隔でしか hub.state lock を取らない。flush は最短 16ms 間隔
+    // closure 内 dedup: 1 秒間隔でしか hub.state lock を取らない。flush は最短 32ms 間隔
     // (FLUSH_INTERVAL_MS) で起こり得るので、生の flush ごとに lock 取得すると `inject` /
     // `team_send` 等の MCP tool と競合して latency 悪化を招く。
     let on_output: Option<PtyOutputObserver> = opts.agent_id.as_ref().map(|aid| {
@@ -518,6 +519,7 @@ pub fn spawn_session(
         role: opts.role,
         cwd: opts.cwd,
         is_codex: opts.is_codex,
+        process_id,
         injecting: AtomicBool::new(false),
         write_budget: Mutex::new(WriteBudget {
             window_started_at: Instant::now(),

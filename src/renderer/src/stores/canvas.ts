@@ -21,6 +21,7 @@ import {
   normalizeCanvasState
 } from '../lib/canvas-migrations';
 import type { AgentPayload } from '../components/canvas/cards/AgentNodeCard/types';
+import type { PersistStorage, StorageValue } from 'zustand/middleware';
 
 export type CardType = 'terminal' | 'agent' | 'editor' | 'diff' | 'fileTree' | 'changes';
 
@@ -302,6 +303,39 @@ export const NODE_MIN_H = 280;
  *  - 大量 handoff 時の保留 timer 蓄積を抑える
  */
 const pulseTimers = new Map<string, number>();
+let canvasPersistPaused = false;
+
+type CanvasPersistState = Pick<
+  CanvasState,
+  'nodes' | 'viewport' | 'stageView' | 'teamLocks' | 'arrangeGap'
+>;
+
+function canvasStorage(): Storage | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+const canvasPersistStorage: PersistStorage<CanvasPersistState> = {
+  getItem: (name) => {
+    const raw = canvasStorage()?.getItem(name);
+    if (!raw) return null;
+    return JSON.parse(raw) as StorageValue<CanvasPersistState>;
+  },
+  setItem: (name, value) => {
+    // Issue #864/#835: drag 中は nodes が毎フレーム変わるため、localStorage への
+    // JSON.stringify が UI スレッドを詰まらせる。drag 終了時の setCanvasDragging(false)
+    // と直後の setNodes で最新状態が flush されるので、drag 中だけ丸ごと skip する。
+    if (canvasPersistPaused) return;
+    canvasStorage()?.setItem(name, JSON.stringify(value));
+  },
+  removeItem: (name) => {
+    canvasStorage()?.removeItem(name);
+  }
+};
 
 /** Issue #385: テストから直接 normalize の挙動を検証するための export。
  *  本体は zustand persist の migrate / merge から間接呼出しされるが、unit test では
@@ -361,7 +395,10 @@ export const useCanvasStore = create<CanvasState>()(
       setNodes: (nodes) => set({ nodes }),
       setEdges: (edges) => set({ edges }),
       setViewport: (viewport) => set({ viewport }),
-      setCanvasDragging: (isDragging) => set({ isDragging }),
+      setCanvasDragging: (isDragging) => {
+        canvasPersistPaused = isDragging;
+        set({ isDragging });
+      },
       addCard: ({ type, title, payload, position }) => {
         const id = newId(type);
         const existing = get().nodes;
@@ -494,6 +531,7 @@ export const useCanvasStore = create<CanvasState>()(
     }),
     {
       name: 'vibe-editor:canvas',
+      storage: canvasPersistStorage,
       // Issue #385: v4 で persisted state は必ず normalizeCanvasState を経由させる。
       // 同 version の rehydrate でも `merge` で再正規化するため、runtime で紛れ込んだ
       // NaN viewport / 範囲外 zoom / 壊れた node も次回起動時には掃除される。
