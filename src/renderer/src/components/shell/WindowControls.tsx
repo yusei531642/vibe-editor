@@ -67,7 +67,7 @@ export function WindowControls(): JSX.Element {
   };
 
   return (
-    <div className="window-controls" role="group" aria-label="Window controls">
+    <div className="window-controls" role="group" aria-label={t('windowControls.group')}>
       <button
         type="button"
         className="window-controls__btn window-controls__btn--minimize"

@@ -576,7 +576,7 @@ export function FileTreePanel({
           className="filetree__refresh"
           onClick={refreshAll}
           title={t('filetree.refresh')}
-          aria-label="refresh"
+          aria-label={t('filetree.refresh')}
         >
           <RefreshCw size={12} strokeWidth={1.75} />
         </button>
