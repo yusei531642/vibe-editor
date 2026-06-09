@@ -528,6 +528,7 @@ function FlowApp({ actions }: FlowAppProps): JSX.Element {
 /** stageView === 'list' のときに ReactFlow の代わりに表示する簡易ロスター。
  *  Canvas 上の agent ノードを一覧化する。 */
 function StageListOverlay(): JSX.Element {
+  const t = useT();
   const nodes = useCanvasNodes();
   const { settings } = useSettings();
   const { byId: profilesById } = useRoleProfiles();
@@ -536,11 +537,13 @@ function StageListOverlay(): JSX.Element {
     <div className="tc-list-overlay">
       <div className="tc-list-overlay__inner">
         <div className="tc-list-overlay__head">
-          <h2 className="tc-list-overlay__title">チーム</h2>
-          <span className="tc-list-overlay__sub">{agentNodes.length} agents</span>
+          <h2 className="tc-list-overlay__title">{t('canvas.list.title')}</h2>
+          <span className="tc-list-overlay__sub">
+            {t('canvas.agentCount', { count: agentNodes.length })}
+          </span>
         </div>
         {agentNodes.length === 0 ? (
-          <div className="tc-list-overlay__empty">まだエージェントが配置されていません</div>
+          <div className="tc-list-overlay__empty">{t('canvas.list.empty')}</div>
         ) : (
           agentNodes.map((n) => {
             // Issue #732: 旧 inline 型キャストを agentPayloadOf に置換 (agent カードのみ payload を返す)。

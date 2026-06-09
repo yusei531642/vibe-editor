@@ -88,6 +88,15 @@ const ja: Dict = {
   'appMenu.newDialogTitle': '新規プロジェクト',
   'appMenu.openFolderDialogTitle': 'フォルダを開く',
   'appMenu.openFileDialogTitle': 'ファイルを開く',
+  'project.newDialogTitle': '新規プロジェクト: 空フォルダを選択/作成',
+  'project.openExistingDialogTitle': '既存プロジェクトを開く',
+  'project.loading': 'プロジェクト読み込み中…',
+  'project.loadError': '読み込みエラー: {error}',
+  'project.initError': '初期化エラー: {error}',
+  'project.newFolderNotEmpty': 'フォルダが空ではありません。既存として開きます',
+  'project.created': '新規プロジェクトを作成',
+  'project.fileParentLoaded': '{file} の親フォルダをプロジェクトとして読み込みました',
+  'project.recentCleared': '最近のプロジェクト履歴をクリアしました',
   'appMenu.addWorkspaceDialogTitle': 'ワークスペースに追加',
   'appMenu.addToWorkspace': 'フォルダをワークスペースに追加…',
   'appMenu.addToWorkspaceHint': 'サイドバーに別ルートを並べる',
@@ -220,6 +229,7 @@ const ja: Dict = {
   'filetree.confirmDeleteFile': '"{name}" をゴミ箱に移動しますか？',
   'filetree.confirmDeleteFolder': '"{name}" とその中身をすべてゴミ箱に移動しますか？',
   'filetree.confirmDeletePermanent': '"{name}" を完全に削除しますか？この操作は元に戻せません。',
+  'filetree.preloadRestartRequired': 'アプリを再起動してください（preload 更新のため）',
   'canvasMenu.lockTeam': 'チームで一緒に動かす',
   'canvasMenu.unlockTeam': 'チーム固定を解除',
   'canvasMenu.deleteCard': 'カードを削除',
@@ -272,6 +282,8 @@ const ja: Dict = {
   'canvas.switchToIde.tooltip': 'IDE — エディタとターミナル中心の IDE モードへ切替',
   'canvas.modeToggle': 'Canvas モードに切り替え',
   'canvas.card.editor': 'エディタ',
+  'canvas.list.title': 'チーム',
+  'canvas.list.empty': 'まだエージェントが配置されていません',
 
   // ---------- Agent Card ----------
   'agentCard.close': 'カードを閉じる',
@@ -385,6 +397,8 @@ const ja: Dict = {
   'dashboard.empty.noMembers':
     'このチームにはまだメンバーがいません。Leader から `team_recruit` でメンバーを招集してください',
   'dashboard.banner.humanGate': 'Human gate が blocked: Leader の判断待ちです',
+  'dashboard.alert.leaderInput': 'Leader 入力待ち',
+  'dashboard.alert.staleOutput': '5 分以上出力なし',
   // Issue #615: dual / multi preset 対応の team section heading
   'dashboard.team.label': 'チーム {index}',
 
@@ -706,8 +720,12 @@ const ja: Dict = {
   'terminal.status.reconnect': '再接続: {command}',
   'terminal.status.reconnectRestored': '再接続 (出力復元): {command}',
   'terminal.status.exception': '例外: {error}',
+  'terminal.limitReached': 'ターミナル上限（{max}）に達しました',
+  'terminal.limitWarning': 'ターミナル数が {threshold} に達しました（上限 {max}）',
   'terminal.restart': '再起動',
   'terminal.closeTab': '閉じる',
+  'layout.sidebarResizeTitle': 'ドラッグでサイドバー幅を調整 / ダブルクリックでリセット',
+  'layout.idePanelResizeTitle': 'ドラッグで IDE モードパネルの幅を調整',
   'cmd.settings.open': '設定を開く',
   'cmd.settings.cycleDensity': '情報密度を切り替え',
   'cmd.settings.cycleDensitySub': '現在: {density}',
@@ -786,6 +804,17 @@ const ja: Dict = {
 
   // ---------- Status ----------
   'status.noProject': 'プロジェクトが選択されていません',
+
+  // ---------- Image preview ----------
+  'imagePreview.devUnavailable': 'dev:vite モードでは画像プレビューを利用できません。',
+  'imagePreview.loadError': '画像を表示できません: {path}',
+
+  // ---------- Team history ----------
+  'teamHistory.resume.emptyMembers': 'チームメンバー情報が空のため復元できません',
+  'teamHistory.resume.otherProject':
+    'このチームは別プロジェクト({project})の履歴です',
+  'teamHistory.resume.terminalLimit':
+    'ターミナル上限({max})を超えるため復元できません',
 
   // ---------- Onboarding ----------
   'onboarding.back': '戻る',
@@ -900,6 +929,15 @@ const en: Dict = {
   'appMenu.newDialogTitle': 'New project',
   'appMenu.openFolderDialogTitle': 'Open folder',
   'appMenu.openFileDialogTitle': 'Open file',
+  'project.newDialogTitle': 'New project: choose or create an empty folder',
+  'project.openExistingDialogTitle': 'Open existing project',
+  'project.loading': 'Loading project…',
+  'project.loadError': 'Load error: {error}',
+  'project.initError': 'Initialization error: {error}',
+  'project.newFolderNotEmpty': 'Folder is not empty. Opening it as an existing project.',
+  'project.created': 'Created new project',
+  'project.fileParentLoaded': 'Loaded the parent folder of {file} as the project',
+  'project.recentCleared': 'Cleared recent project history',
   'appMenu.addWorkspaceDialogTitle': 'Add to workspace',
   'appMenu.openFileHint': 'Single file',
   'appMenu.addToWorkspace': 'Add folder to workspace…',
@@ -1033,6 +1071,7 @@ const en: Dict = {
   'filetree.confirmDeleteFile': 'Move "{name}" to the trash?',
   'filetree.confirmDeleteFolder': 'Move "{name}" and all of its contents to the trash?',
   'filetree.confirmDeletePermanent': 'Permanently delete "{name}"? This action cannot be undone.',
+  'filetree.preloadRestartRequired': 'Restart the app to apply the preload update',
   'canvasMenu.lockTeam': 'Move team together',
   'canvasMenu.unlockTeam': 'Unlock team movement',
   'canvasMenu.deleteCard': 'Delete card',
@@ -1085,6 +1124,8 @@ const en: Dict = {
   'canvas.switchToIde.tooltip': 'IDE — Return to the editor + terminal IDE mode',
   'canvas.modeToggle': 'Switch to Canvas mode',
   'canvas.card.editor': 'Editor',
+  'canvas.list.title': 'Team',
+  'canvas.list.empty': 'No agents have been placed yet',
 
   // ---------- Agent Card ----------
   'agentCard.close': 'Close card',
@@ -1200,6 +1241,8 @@ const en: Dict = {
   'dashboard.empty.noMembers':
     'This team has no members yet. Recruit members from the Leader using `team_recruit`.',
   'dashboard.banner.humanGate': 'Human gate blocked: waiting for leader decision',
+  'dashboard.alert.leaderInput': 'Awaiting Leader input',
+  'dashboard.alert.staleOutput': 'No output for 5+ minutes',
   // Issue #615: dual / multi preset support for team section heading
   'dashboard.team.label': 'Team {index}',
 
@@ -1525,8 +1568,12 @@ const en: Dict = {
   'terminal.status.reconnect': 'Reconnected: {command}',
   'terminal.status.reconnectRestored': 'Reconnected (restored output): {command}',
   'terminal.status.exception': 'Exception: {error}',
+  'terminal.limitReached': 'Terminal limit reached ({max})',
+  'terminal.limitWarning': 'Terminal count reached {threshold} (limit {max})',
   'terminal.restart': 'Restart',
   'terminal.closeTab': 'Close',
+  'layout.sidebarResizeTitle': 'Drag to resize the sidebar / double-click to reset',
+  'layout.idePanelResizeTitle': 'Drag to resize the IDE mode panel',
   'cmd.settings.open': 'Open settings',
   'cmd.settings.cycleDensity': 'Cycle density',
   'cmd.settings.cycleDensitySub': 'Current: {density}',
@@ -1607,6 +1654,17 @@ const en: Dict = {
     "Couldn't find past transcripts; restarted {count} tab(s) as new conversations.",
 
   'status.noProject': 'No project selected',
+
+  // ---------- Image preview ----------
+  'imagePreview.devUnavailable': 'Image preview is unavailable in dev:vite mode.',
+  'imagePreview.loadError': 'Unable to display image: {path}',
+
+  // ---------- Team history ----------
+  'teamHistory.resume.emptyMembers': 'Cannot resume because team member information is empty',
+  'teamHistory.resume.otherProject':
+    'This team history belongs to another project ({project})',
+  'teamHistory.resume.terminalLimit':
+    'Cannot resume because it would exceed the terminal limit ({max})',
 
   // ---------- Onboarding ----------
   'onboarding.back': 'Back',

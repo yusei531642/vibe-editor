@@ -10,6 +10,7 @@
  */
 import { useMemo, useState } from 'react';
 import { convertFileSrc } from '@tauri-apps/api/core';
+import { useT } from '../lib/i18n';
 import { isTauri } from '../lib/tauri-api';
 
 interface ImagePreviewProps {
@@ -20,6 +21,7 @@ interface ImagePreviewProps {
 }
 
 export function ImagePreview({ absolutePath, relativePath }: ImagePreviewProps): JSX.Element {
+  const t = useT();
   const [errored, setErrored] = useState(false);
   const tauri = isTauri();
   const url = useMemo(() => {
@@ -34,7 +36,7 @@ export function ImagePreview({ absolutePath, relativePath }: ImagePreviewProps):
   if (!tauri) {
     return (
       <div className="image-preview">
-        <div className="image-preview__error">Image preview is unavailable in dev:vite mode.</div>
+        <div className="image-preview__error">{t('imagePreview.devUnavailable')}</div>
       </div>
     );
   }
@@ -42,7 +44,9 @@ export function ImagePreview({ absolutePath, relativePath }: ImagePreviewProps):
   if (errored || !url) {
     return (
       <div className="image-preview">
-        <div className="image-preview__error">画像を表示できません: {relativePath}</div>
+        <div className="image-preview__error">
+          {t('imagePreview.loadError', { path: relativePath })}
+        </div>
       </div>
     );
   }

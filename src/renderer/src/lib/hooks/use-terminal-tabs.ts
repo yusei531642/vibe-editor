@@ -4,6 +4,7 @@ import type {
   TeamRole
 } from '../../../../types/shared';
 import type { TerminalRuntimeStatus } from '../terminal-status';
+import { useT } from '../i18n';
 
 /** 同時に立てられるターミナルの上限。メモリ/レイアウト保護の安全弁 */
 export const MAX_TERMINALS = 30;
@@ -183,6 +184,7 @@ export interface UseTerminalTabsResult {
  *   残るため hook では持たない。
  */
 export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsResult {
+  const t = useT();
   const optsRef = useRef(opts);
   optsRef.current = opts;
 
@@ -280,9 +282,10 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
       let assignedId: number | null = null;
       setTerminalTabs((prev) => {
         if (prev.length >= MAX_TERMINALS) {
-          optsRef.current.showToast(`ターミナル上限（${MAX_TERMINALS}）に達しました`, {
-            tone: 'warning'
-          });
+          optsRef.current.showToast(
+            t('terminal.limitReached', { max: MAX_TERMINALS }),
+            { tone: 'warning' }
+          );
           return prev;
         }
         const id = nextTerminalIdRef.current++;
@@ -321,7 +324,10 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
         // 閾値を超えそうなら軽く警告
         if (prev.length + 1 === TERMINAL_WARN_THRESHOLD) {
           optsRef.current.showToast(
-            `ターミナル数が ${TERMINAL_WARN_THRESHOLD} に達しました（上限 ${MAX_TERMINALS}）`,
+            t('terminal.limitWarning', {
+              threshold: TERMINAL_WARN_THRESHOLD,
+              max: MAX_TERMINALS
+            }),
             { tone: 'info' }
           );
         }
@@ -332,7 +338,7 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
       });
       return assignedId;
     },
-    []
+    [t]
   );
 
   const doCloseTab = useCallback((tabId: number) => {

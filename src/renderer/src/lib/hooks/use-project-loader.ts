@@ -88,7 +88,7 @@ export function useProjectLoader(
         return false;
       }
       setProjectRoot(root);
-      useUiStore.getState().setStatus('プロジェクト読み込み中…');
+      useUiStore.getState().setStatus(t('project.loading'));
       setGitLoading(true);
 
       try {
@@ -124,13 +124,13 @@ export function useProjectLoader(
         }
         return true;
       } catch (err) {
-        useUiStore.getState().setStatus(`読み込みエラー: ${String(err)}`);
+        useUiStore.getState().setStatus(t('project.loadError', { error: String(err) }));
         return false;
       } finally {
         setGitLoading(false);
       }
     },
-    [projectRoot, mcpAutoSetup, recentProjects, updateSettings]
+    [projectRoot, mcpAutoSetup, recentProjects, updateSettings, t]
   );
 
   // 初回ロード — lastOpenedRoot (前回開いたルート) があれば復元、なければフォルダ選択ダイアログ。
@@ -185,7 +185,7 @@ export function useProjectLoader(
         optsRef.current.onLoaded({ gitStatus: gs, sessions: sess });
         useUiStore.getState().setStatus(root.split(/[\\/]/).pop() ?? root);
       } catch (err) {
-        useUiStore.getState().setStatus(`初期化エラー: ${String(err)}`);
+        useUiStore.getState().setStatus(t('project.initError', { error: String(err) }));
         setGitLoading(false);
       }
     })();
@@ -227,39 +227,39 @@ export function useProjectLoader(
 
   const handleNewProject = useCallback(async () => {
     const folder = await window.api.dialog.openFolder(
-      '新規プロジェクト: 空フォルダを選択/作成'
+      t('project.newDialogTitle')
     );
     if (!folder) return;
     const empty = await window.api.dialog.isFolderEmpty(folder);
     const loaded = await loadProject(folder);
     if (!loaded) return;
     if (!empty) {
-      optsRef.current.showToast('フォルダが空ではありません。既存として開きます', {
+      optsRef.current.showToast(t('project.newFolderNotEmpty'), {
         tone: 'warning'
       });
     } else {
-      optsRef.current.showToast('新規プロジェクトを作成', { tone: 'success' });
+      optsRef.current.showToast(t('project.created'), { tone: 'success' });
     }
-  }, [loadProject]);
+  }, [loadProject, t]);
 
   const handleOpenFolder = useCallback(async () => {
-    const folder = await window.api.dialog.openFolder('既存プロジェクトを開く');
+    const folder = await window.api.dialog.openFolder(t('project.openExistingDialogTitle'));
     if (!folder) return;
     await loadProject(folder);
-  }, [loadProject]);
+  }, [loadProject, t]);
 
   const handleOpenFile = useCallback(async () => {
-    const file = await window.api.dialog.openFile('ファイルを開く');
+    const file = await window.api.dialog.openFile(t('appMenu.openFileDialogTitle'));
     if (!file) return;
     const parent = file.replace(/[\\/][^\\/]+$/, '');
     const loaded = await loadProject(parent);
     if (loaded) {
       optsRef.current.showToast(
-        `${file} の親フォルダをプロジェクトとして読み込みました`,
+        t('project.fileParentLoaded', { file }),
         { tone: 'info' }
       );
     }
-  }, [loadProject]);
+  }, [loadProject, t]);
 
   const handleOpenRecent = useCallback(
     async (path: string) => {
@@ -270,10 +270,10 @@ export function useProjectLoader(
 
   const handleClearRecent = useCallback(() => {
     void updateSettings({ recentProjects: [] });
-    optsRef.current.showToast('最近のプロジェクト履歴をクリアしました', {
+    optsRef.current.showToast(t('project.recentCleared'), {
       tone: 'info'
     });
-  }, [updateSettings]);
+  }, [updateSettings, t]);
 
   const handleAddWorkspaceFolder = useCallback(async () => {
     const folder = await window.api.dialog.openFolder(

@@ -562,7 +562,7 @@ export function AppShell({
         className="resize-handle resize-handle--sidebar"
         onMouseDown={onSidebarResizeStart}
         onDoubleClick={onSidebarResizeDouble}
-        title="ドラッグでサイドバー幅を調整 / ダブルクリックでリセット"
+        title={t('layout.sidebarResizeTitle')}
         role="separator"
         aria-orientation="vertical"
       />
@@ -616,7 +616,7 @@ export function AppShell({
         <div
           className="resize-handle"
           onMouseDown={onClaudePanelResizeStart}
-          title="ドラッグで IDE モードパネルの幅を調整"
+          title={t('layout.idePanelResizeTitle')}
           role="separator"
           aria-orientation="vertical"
         />

@@ -1,6 +1,18 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../../i18n', () => ({
+  useT: () => (key: string, params?: Record<string, string | number>) => {
+    if (key === 'terminal.limitReached') {
+      return `ターミナル上限（${params?.max}）に達しました`;
+    }
+    if (key === 'terminal.limitWarning') {
+      return `ターミナル数が ${params?.threshold} に達しました（上限 ${params?.max}）`;
+    }
+    return key;
+  }
+}));
+
 import {
   MAX_TERMINALS,
   TERMINAL_WARN_THRESHOLD,

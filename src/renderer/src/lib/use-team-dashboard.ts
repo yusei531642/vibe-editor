@@ -31,6 +31,7 @@ import type {
   AgentPayload,
   AgentStatus
 } from '../components/canvas/cards/AgentNodeCard/types';
+import { useT } from './i18n';
 
 const POLL_INTERVAL_MS = 5_000;
 
@@ -105,6 +106,7 @@ export function useTeamDashboard(input: {
   projectRoot: string | null;
 }): TeamDashboardData {
   const { teamId, projectRoot } = input;
+  const t = useT();
 
   const allNodes = useCanvasNodes();
   const agentNodes = useMemo<Node<CardData>[]>(
@@ -194,10 +196,10 @@ export function useTeamDashboard(input: {
             task?.blockedReason ??
             task?.requiredHumanDecision ??
             (state?.humanGate.blocked ? state.humanGate.reason ?? null : null) ??
-            'Leader 入力待ち'
+            t('dashboard.alert.leaderInput')
           );
         }
-        if (computed === 'stale') return '5 分以上出力なし';
+        if (computed === 'stale') return t('dashboard.alert.staleOutput');
         return null;
       })();
 
@@ -214,7 +216,7 @@ export function useTeamDashboard(input: {
         alert
       };
     });
-  }, [agentNodes, byCard, state]);
+  }, [agentNodes, byCard, state, t]);
 
   const aggregate = useMemo<TeamDashboardAggregate>(() => {
     let active = 0;
@@ -275,6 +277,7 @@ export function useTeamDashboardMulti(input: {
   projectRoot: string | null;
 }): MultiTeamDashboardData {
   const { teamIds, projectRoot } = input;
+  const t = useT();
 
   // teamIds 配列の参照ゆれで useEffect が頻繁に再起動しないよう、安定リスト + JSON key に正規化。
   const stableTeamIds = useMemo<string[]>(() => {
@@ -378,10 +381,10 @@ export function useTeamDashboardMulti(input: {
               task?.blockedReason ??
               task?.requiredHumanDecision ??
               (state?.humanGate.blocked ? state.humanGate.reason ?? null : null) ??
-              'Leader 入力待ち'
+              t('dashboard.alert.leaderInput')
             );
           }
-          if (computed === 'stale') return '5 分以上出力なし';
+          if (computed === 'stale') return t('dashboard.alert.staleOutput');
           return null;
         })();
 
@@ -434,7 +437,7 @@ export function useTeamDashboardMulti(input: {
 
       return { teamId, rows, aggregate, state };
     });
-  }, [stableTeamIds, nodesByTeam, stateByTeam, byCard]);
+  }, [stableTeamIds, nodesByTeam, stateByTeam, byCard, t]);
 
   const total = useMemo<TeamDashboardAggregate>(() => {
     let total = 0;
