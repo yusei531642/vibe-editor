@@ -79,6 +79,7 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
   });
   const listenersRef = useRef(new Set<() => void>());
   const saveTimerRef = useRef<number | null>(null);
+  const saveBlockedRef = useRef(false);
 
   const emitSnapshot = useCallback((): void => {
     snapshotRef.current = {
@@ -116,6 +117,16 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
           merged.language = loc.startsWith('ja') ? 'ja' : 'en';
         }
         commitState(merged, false);
+        saveBlockedRef.current = false;
+      } catch (err) {
+        if (cancelled) return;
+        saveBlockedRef.current = true;
+        bridgedToast(
+          translate(settingsRef.current.language ?? 'ja', 'toast.settings.loadFailed', {
+            error: String(err)
+          }),
+          { tone: 'error' }
+        );
       } finally {
         if (!cancelled && loadingRef.current) {
           commitState(settingsRef.current, false);
@@ -154,6 +165,7 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
         settingsRef.current = updated;
         emitSnapshot();
         if (saveTimerRef.current !== null) window.clearTimeout(saveTimerRef.current);
+        if (saveBlockedRef.current) return;
         saveTimerRef.current = window.setTimeout(() => {
           saveTimerRef.current = null;
           void window.api.settings.save(settingsRef.current).catch(() => {});
@@ -192,6 +204,9 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
     async (patch: Partial<AppSettings>) => {
       const next = { ...settingsRef.current, ...patch };
       commitState(next, loadingRef.current);
+      if (saveBlockedRef.current) {
+        return;
+      }
       if (saveTimerRef.current !== null) {
         window.clearTimeout(saveTimerRef.current);
       }
@@ -214,6 +229,7 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
 
   useEffect(() => {
     const handler = (): void => {
+      if (saveBlockedRef.current) return;
       if (saveTimerRef.current !== null) {
         window.clearTimeout(saveTimerRef.current);
         saveTimerRef.current = null;
@@ -227,6 +243,13 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
   }, []);
 
   const reset = useCallback(async () => {
+    if (saveBlockedRef.current) {
+      bridgedToast(
+        translate(settingsRef.current.language ?? 'ja', 'toast.settings.saveBlocked'),
+        { tone: 'error' }
+      );
+      return;
+    }
     const next = cloneDefaultSettings();
     commitState(next, loadingRef.current);
     await window.api.settings.save(next);

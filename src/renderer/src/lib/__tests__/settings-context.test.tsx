@@ -36,10 +36,14 @@ interface MockApi {
   };
 }
 
-function installApi(initial?: Partial<AppSettings>, saveImpl?: () => Promise<void>): MockApi {
+function installApi(
+  initial?: Partial<AppSettings>,
+  saveImpl?: () => Promise<void>,
+  loadImpl?: () => Promise<unknown>
+): MockApi {
   const api: MockApi = {
     settings: {
-      load: vi.fn(async () => ({ ...DEFAULT_SETTINGS, ...(initial ?? {}) })),
+      load: vi.fn(loadImpl ?? (async () => ({ ...DEFAULT_SETTINGS, ...(initial ?? {}) }))),
       save: vi.fn(saveImpl ?? (async () => undefined))
     },
     app: {
@@ -159,5 +163,33 @@ describe('settings-context', () => {
       },
       { timeout: 1500 }
     );
+  });
+
+  it('settings load が reject した場合は default 状態の auto-save を抑止する', async () => {
+    const api = installApi(
+      undefined,
+      async () => undefined,
+      async () => {
+        throw new Error('sharing violation');
+      }
+    );
+    const { result } = renderHook(() => useSettings(), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    await waitFor(
+      () => {
+        const toast = document.querySelector('.toast--error');
+        expect(toast).not.toBeNull();
+      },
+      { timeout: 1500 }
+    );
+
+    await act(async () => {
+      await result.current.update({ editorFontSize: 22 });
+    });
+
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
+    expect(api.settings.save).not.toHaveBeenCalled();
   });
 });
