@@ -150,7 +150,7 @@ export function EditorView({
           onClick={onSave}
           disabled={!dirty || readOnly}
           title={readOnly ? readOnlyReason ?? t('editor.save') : t('editor.save')}
-          aria-label="save"
+          aria-label={t('editor.save.ariaLabel')}
         >
           <Save size={15} strokeWidth={1.75} />
         </button>

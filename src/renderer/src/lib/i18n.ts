@@ -22,6 +22,7 @@ const ja: Dict = {
   'windowControls.maximize': '最大化',
   'windowControls.restore': '元のサイズに戻す',
   'windowControls.close': '閉じる',
+  'windowControls.group': 'ウィンドウ操作',
 
   // ---------- Topbar (redesign shell) ----------
   'topbar.mode.canvas': 'Canvas',
@@ -132,6 +133,7 @@ const ja: Dict = {
   'sidebar.teams': 'チーム',
   'sidebar.singleSessions': '個別セッション',
   'sidebar.notes': 'メモ',
+  'rail.primaryNav': 'メインナビゲーション',
 
   // ---------- Notes (Issue #17) ----------
   'notes.title': 'メモ',
@@ -153,6 +155,7 @@ const ja: Dict = {
   'filetree.refresh': '再読込',
   'editor.loading': 'ファイルを読み込み中…',
   'editor.save': '保存 (Ctrl+S)',
+  'editor.save.ariaLabel': '保存',
   'editor.viewPreview': 'プレビュー表示',
   'editor.viewSource': 'ソース表示',
   'editor.binaryNotice': 'バイナリファイルは編集できません: {path}',
@@ -517,6 +520,7 @@ const ja: Dict = {
   // Issue #729: SettingsModal の inline isJa を i18n.ts に移管
   'settings.dialog.label': '設定',
   'settings.back': '戻る',
+  'settings.sections.ariaLabel': '設定セクション',
   'settings.saveFailedSeeConsole': '設定の保存に失敗しました。詳細は開発者ツールのコンソールを確認してください。',
   'settings.search.placeholder': '設定を検索…',
   'settings.search.ariaLabel': '設定を検索',
@@ -772,6 +776,7 @@ const ja: Dict = {
   'onboarding.next': '次へ',
   'onboarding.skip': 'あとでにする',
   'onboarding.replay': 'セットアップをもう一度',
+  'onboarding.ariaLabel': 'vibe-editor セットアップ',
   'onboarding.welcome.eyebrow': 'vibe-editor',
   'onboarding.welcome.title': '静かな集中の、新しい入口。',
   'onboarding.welcome.subtitle':
@@ -788,6 +793,7 @@ const ja: Dict = {
     'プロジェクトの場所を選ぶと、次回以降も自動で開きます。あとから追加してもかまいません。',
   'onboarding.workspace.choose': 'フォルダを選ぶ',
   'onboarding.workspace.change': '別のフォルダを選ぶ',
+  'onboarding.workspace.clear': '選択したフォルダをクリア',
   'onboarding.done.eyebrow': 'Ready',
   'onboarding.done.title': '準備ができました',
   'onboarding.done.subtitle': '落ち着いた画面で、今日の一行を書きはじめましょう。',
@@ -813,6 +819,7 @@ const en: Dict = {
   'windowControls.maximize': 'Maximize',
   'windowControls.restore': 'Restore',
   'windowControls.close': 'Close',
+  'windowControls.group': 'Window controls',
 
   // ---------- Topbar (redesign shell) ----------
   'topbar.mode.canvas': 'Canvas',
@@ -923,6 +930,7 @@ const en: Dict = {
   'sidebar.teams': 'Teams',
   'sidebar.singleSessions': 'Single sessions',
   'sidebar.notes': 'Notes',
+  'rail.primaryNav': 'Primary navigation',
 
   // ---------- Notes (Issue #17) ----------
   'notes.title': 'Notes',
@@ -944,6 +952,7 @@ const en: Dict = {
   'filetree.refresh': 'Reload',
   'editor.loading': 'Loading file…',
   'editor.save': 'Save (Ctrl+S)',
+  'editor.save.ariaLabel': 'Save',
   'editor.viewPreview': 'Show preview',
   'editor.viewSource': 'Show source',
   'editor.binaryNotice': 'Binary file cannot be edited: {path}',
@@ -1311,6 +1320,7 @@ const en: Dict = {
   // Issue #729: SettingsModal inline isJa moved into i18n.ts
   'settings.dialog.label': 'Settings',
   'settings.back': 'Back',
+  'settings.sections.ariaLabel': 'Settings sections',
   'settings.saveFailedSeeConsole': 'Failed to save settings. See the developer console for details.',
   'settings.search.placeholder': 'Search settings…',
   'settings.search.ariaLabel': 'Search settings',
@@ -1571,6 +1581,7 @@ const en: Dict = {
   'onboarding.next': 'Next',
   'onboarding.skip': 'Skip for now',
   'onboarding.replay': 'Run setup again',
+  'onboarding.ariaLabel': 'vibe-editor setup',
   'onboarding.welcome.eyebrow': 'vibe-editor',
   'onboarding.welcome.title': 'A calmer entry to deep work.',
   'onboarding.welcome.subtitle':
@@ -1588,6 +1599,7 @@ const en: Dict = {
     'Pick a project folder and we will reopen it next time. You can always add more later.',
   'onboarding.workspace.choose': 'Choose folder',
   'onboarding.workspace.change': 'Choose a different folder',
+  'onboarding.workspace.clear': 'Clear selected folder',
   'onboarding.done.eyebrow': 'Ready',
   'onboarding.done.title': 'You are all set',
   'onboarding.done.subtitle': 'A calm workspace for today’s first line.',

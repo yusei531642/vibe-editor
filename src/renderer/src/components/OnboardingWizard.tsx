@@ -141,7 +141,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
       data-state={dataState}
       role="dialog"
       aria-modal="true"
-      aria-label="vibe-editor setup"
+      aria-label={t('onboarding.ariaLabel')}
     >
       <div className="onboarding__card" data-state={dataState}>
         <div className="onboarding__progress" aria-hidden>
@@ -379,7 +379,7 @@ function WorkspaceStep({
               type="button"
               className="onboarding__folder-clear"
               onClick={onClear}
-              aria-label="clear"
+              aria-label={t('onboarding.workspace.clear')}
             >
               ×
             </button>

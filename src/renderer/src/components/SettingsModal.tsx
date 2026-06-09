@@ -334,7 +334,7 @@ export function SettingsModal({
         </header>
 
         <div className="modal__body modal__body--settings">
-          <nav className="settings-shell__nav" aria-label="Settings sections">
+          <nav className="settings-shell__nav" aria-label={t('settings.sections.ariaLabel')}>
             <div className="settings-shell__search">
               <Search size={13} strokeWidth={2} className="settings-shell__search-icon" />
               <input

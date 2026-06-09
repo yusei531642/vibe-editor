@@ -82,7 +82,7 @@ export function Rail({
   );
 
   return (
-    <nav className="rail" aria-label="Primary navigation">
+    <nav className="rail" aria-label={t('rail.primaryNav')}>
       {items.map((item) => {
         // sidebar 折り畳み中は「アクティブ表示」にしない (どれも開いていないので誤解の元)
         const active = !sidebarCollapsed && sidebarView === item.view;
