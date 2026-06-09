@@ -17,7 +17,7 @@ import { generateTeamSystemPrompt } from '../team-prompts';
 describe('Issue #409: worker template enforces ACK / progress / completion protocol', () => {
   it('English worker template requires ACK + team_update_task on receipt', () => {
     expect(WORKER_TEMPLATE_EN).toMatch(/ACK:/);
-    expect(WORKER_TEMPLATE_EN).toMatch(/team_update_task\(N, "in_progress"\)/);
+    expect(WORKER_TEMPLATE_EN).toMatch(/team_update_task\(\{ task_id:N, status:"in_progress" \}\)/);
   });
 
   it('English worker template requires periodic team_status while working', () => {
@@ -26,14 +26,16 @@ describe('Issue #409: worker template enforces ACK / progress / completion proto
   });
 
   it('English worker template requires done/blocked update on completion', () => {
-    expect(WORKER_TEMPLATE_EN).toMatch(/team_update_task\(N, "done", \{ done_evidence: \[\.\.\.\] \}\)/);
+    expect(WORKER_TEMPLATE_EN).toMatch(
+      /team_update_task\(\{ task_id:N, status:"done", done_evidence:\[\.\.\.\] \}\)/
+    );
     expect(WORKER_TEMPLATE_EN).toMatch(/done_evidence/);
     expect(WORKER_TEMPLATE_EN).toMatch(/"blocked"/);
   });
 
   it('Japanese worker template requires ACK + team_update_task on receipt', () => {
     expect(WORKER_TEMPLATE_JA).toMatch(/ACK:/);
-    expect(WORKER_TEMPLATE_JA).toMatch(/team_update_task\(N, "in_progress"\)/);
+    expect(WORKER_TEMPLATE_JA).toMatch(/team_update_task\(\{ task_id:N, status:"in_progress" \}\)/);
   });
 
   it('Japanese worker template requires periodic team_status while working', () => {
@@ -42,9 +44,68 @@ describe('Issue #409: worker template enforces ACK / progress / completion proto
   });
 
   it('Japanese worker template requires done/blocked update on completion', () => {
-    expect(WORKER_TEMPLATE_JA).toMatch(/team_update_task\(N, "done", \{ done_evidence: \[\.\.\.\] \}\)/);
+    expect(WORKER_TEMPLATE_JA).toMatch(
+      /team_update_task\(\{ task_id:N, status:"done", done_evidence:\[\.\.\.\] \}\)/
+    );
     expect(WORKER_TEMPLATE_JA).toMatch(/done_evidence/);
     expect(WORKER_TEMPLATE_JA).toMatch(/"blocked"/);
+  });
+});
+
+describe('Issue #863: team prompts use MCP JSON object call examples', () => {
+  const team = { id: 'team-1', name: 'Team 1' } as any;
+  const leaderTab = {
+    id: 'leader-tab',
+    role: 'leader',
+    teamId: 'team-1',
+    agentId: 'leader-aid',
+    agent: 'claude'
+  } as any;
+  const workerTab = {
+    id: 'worker-tab',
+    role: 'worker',
+    teamId: 'team-1',
+    agentId: 'worker-aid',
+    agent: 'claude'
+  } as any;
+
+  const prompts = [
+    WORKER_TEMPLATE_EN,
+    WORKER_TEMPLATE_JA,
+    BUILTIN_BY_ID['leader'].prompt.template,
+    BUILTIN_BY_ID['leader'].prompt.templateJa ?? '',
+    BUILTIN_BY_ID['hr'].prompt.template,
+    BUILTIN_BY_ID['hr'].prompt.templateJa ?? '',
+    generateTeamSystemPrompt(leaderTab, [leaderTab, workerTab], team) ?? '',
+    generateTeamSystemPrompt(workerTab, [leaderTab, workerTab], team) ?? ''
+  ];
+
+  it('shows object-argument examples for task, message, and status tools', () => {
+    const combined = prompts.join('\n');
+
+    expect(combined).toMatch(/team_send\(\{/);
+    expect(combined).toMatch(/team_update_task\(\{/);
+    expect(combined).toMatch(/team_status\(\{/);
+    expect(combined).toMatch(/team_assign_task\(\{/);
+  });
+
+  it('does not reintroduce ambiguous positional examples that can break MCP parsing', () => {
+    const forbidden = [
+      /team_send\(\s*["']/,
+      /team_update_task\(\s*N\s*,/,
+      /team_update_task\(\s*task_id\s*,/,
+      /team_assign_task\(\s*(assignee|["'])/,
+      /team_status\(\s*["']/,
+      /team_send\(\{\s*to:[^,}]+,\s*message:/,
+      /team_lock_files\(paths\)/,
+      /team_unlock_files\(paths\)/
+    ];
+
+    for (const prompt of prompts) {
+      for (const pattern of forbidden) {
+        expect(prompt).not.toMatch(pattern);
+      }
+    }
   });
 });
 
