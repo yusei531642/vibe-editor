@@ -165,4 +165,46 @@ describe('SettingsModal', () => {
     expect(onApply).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });
+
+  it('カスタム画像のクリアは variant も DEFAULT_SETTINGS に戻す', async () => {
+    const onApply = vi.fn();
+    const onClose = vi.fn();
+    const initial: AppSettings = {
+      ...DEFAULT_SETTINGS,
+      statusMascotVariant: 'custom',
+      statusMascotCustomPath: 'C:/tmp/mascot.png'
+    };
+
+    render(
+      <Wrapper>
+        <SettingsModal
+          open
+          initial={initial}
+          onApply={onApply}
+          onClose={onClose}
+        />
+      </Wrapper>
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '表示' }));
+    const custom = screen.getByRole('radio', { name: /Custom/ }) as HTMLInputElement;
+    expect(custom.checked).toBe(true);
+
+    fireEvent.click(screen.getByRole('button', { name: 'クリア' }));
+
+    const vibe = screen.getByRole('radio', { name: /Vibe/ }) as HTMLInputElement;
+    expect(vibe.checked).toBe(true);
+
+    const applyBtn = screen.getByRole('button', { name: /適用して保存|Apply & save/ });
+    fireEvent.click(applyBtn);
+
+    expect(onApply).toHaveBeenCalledTimes(1);
+    const applied = onApply.mock.calls[0][0] as AppSettings;
+    expect(applied.statusMascotCustomPath).toBe('');
+    expect(applied.statusMascotVariant).toBe(DEFAULT_SETTINGS.statusMascotVariant);
+  });
 });
