@@ -27,8 +27,26 @@ export function CommandPalette({
   const [selected, setSelected] = useState<number>(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLUListElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const restoreFocusRef = useRef<HTMLElement | null>(null);
+  const wasOpenRef = useRef(false);
 
   const filtered = useMemo(() => filterCommands(commands, query), [commands, query]);
+
+  // Issue #846: モーダルを閉じた後、開く前に操作していた要素へ focus を戻す。
+  useEffect(() => {
+    if (open && !wasOpenRef.current) {
+      restoreFocusRef.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    } else if (!open && wasOpenRef.current) {
+      const target = restoreFocusRef.current;
+      restoreFocusRef.current = null;
+      if (target && document.contains(target)) {
+        target.focus();
+      }
+    }
+    wasOpenRef.current = open;
+  }, [open]);
 
   // 開いた瞬間に入力フォーカス＋クエリクリア
   useEffect(() => {
@@ -82,6 +100,33 @@ export function CommandPalette({
     [filtered.length, runSelected, onClose]
   );
 
+  const handleDialogKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (e.key !== 'Tab') return;
+
+    const root = dialogRef.current;
+    if (!root) return;
+
+    const focusables = Array.from(
+      root.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [contenteditable]:not([contenteditable="false"]), [tabindex]:not([tabindex="-1"])'
+      )
+    ).filter((el) => el.tabIndex >= 0);
+
+    if (focusables.length === 0) return;
+
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const active = document.activeElement as HTMLElement | null;
+
+    if (e.shiftKey && active === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && active === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }, []);
+
   // Issue #180: 旧実装は backdrop onClick={onClose} で閉じていたため、リスト内/入力欄で
   // mousedown → backdrop で mouseup と移動するドラッグ選択 (テキスト選択) でも click が
   // backdrop に届いて閉じていた。
@@ -106,10 +151,12 @@ export function CommandPalette({
 
   return createPortal(
     <div
+      ref={dialogRef}
       className="cmdp-backdrop"
       data-state={dataState}
       data-motion={motion}
       onMouseDown={handleBackdropMouseDown}
+      onKeyDown={handleDialogKeyDown}
       role="dialog"
       aria-modal="true"
       aria-label={t('palette.ariaLabel')}
