@@ -424,7 +424,7 @@ export const useCanvasStore = create<CanvasState>()(
         const existing = get().nodes;
         let pos = position;
         if (!pos) {
-          // Issue #840: 削除後に existing.length だけを見ると既存カードの座標へ重なる。
+          // Issue #840: 削除後に existing.length だけを見ると既存カードと座標が重なる。
           // 6 列グリッド上の占有スロットを避け、最初の空き位置へ配置する。
           pos = nextFallbackCardPosition(existing);
         }

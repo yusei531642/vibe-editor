@@ -9,7 +9,7 @@ describe('useCanvasStore.addCard fallback placement (Issue #840)', () => {
     useCanvasStore.getState().clear();
   });
 
-  it('カード削除後も position 省略の addCard が既存カードと座標重複しない', () => {
+  it('カード削除後も position 省略の addCard が既存カードと座標が重複しない', () => {
     const store = useCanvasStore.getState();
     const ids = Array.from({ length: 7 }, (_, index) =>
       store.addCard({
