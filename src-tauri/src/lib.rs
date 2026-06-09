@@ -325,8 +325,17 @@ pub fn run() {
             let app_handle_for_root = app.handle().clone();
             spawn_observed("settings_restore", async move {
                 // Issue #493: settings_load は Settings struct を返すようになった。
+                // Issue #905: 一時的な読み取り不能は default 扱いせず Err にする。
+                // ここで復元を諦めることで、原本 settings.json が default で上書きされる
+                // 経路を起動直後から作らない。
                 // last_opened_root を優先し、空なら claudeCwd を fallback。
-                let settings = commands::settings::settings_load().await;
+                let settings = match commands::settings::settings_load().await {
+                    Ok(settings) => settings,
+                    Err(e) => {
+                        tracing::warn!("[setup] settings restore skipped: {e}");
+                        return;
+                    }
+                };
                 let root = Some(settings.last_opened_root.clone())
                     .filter(|s| !s.trim().is_empty())
                     .or_else(|| Some(settings.claude_cwd.clone()).filter(|s| !s.trim().is_empty()));

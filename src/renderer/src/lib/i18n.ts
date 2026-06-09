@@ -638,6 +638,10 @@ const ja: Dict = {
   'toast.fileOpFailed': 'ファイル操作に失敗しました: {error}',
   'toast.fileOpClipboardEmpty': 'クリップボードに対象がありません',
   'toast.terminalNotReady': 'ターミナルが起動していません',
+  'toast.settings.loadFailed':
+    '設定ファイルを読み込めなかったため、この起動中は設定の自動保存を停止しました: {error}',
+  'toast.settings.saveBlocked':
+    '設定ファイルを読み込めなかったため、設定の保存を停止しています。アプリを再起動してください。',
   'toast.settings.saveFailed': '設定の保存に失敗しました: {error}',
   'toast.settings.projectRootFailed': 'プロジェクトルートの反映に失敗しました: {error}',
   // Issue #578: Canvas 非表示中に recruit が走った件数を可視化時に警告する
@@ -1483,6 +1487,10 @@ const en: Dict = {
   'toast.fileOpFailed': 'File operation failed: {error}',
   'toast.fileOpClipboardEmpty': 'Nothing to paste',
   'toast.terminalNotReady': 'Terminal is not ready',
+  'toast.settings.loadFailed':
+    'Failed to load settings, so automatic settings saves are disabled for this launch: {error}',
+  'toast.settings.saveBlocked':
+    'Settings were not loaded, so saving settings is disabled. Please restart the app.',
   'toast.settings.saveFailed': 'Failed to save settings: {error}',
   'toast.settings.projectRootFailed': 'Failed to apply project root: {error}',
   // Issue #578: Warn when recruits ran while canvas was hidden

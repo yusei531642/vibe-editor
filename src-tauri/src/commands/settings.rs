@@ -19,13 +19,18 @@ use crate::commands::error::{CommandError, CommandResult};
 use crate::util::backup::write_timestamped_backup;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path, time::Duration};
 use tokio::fs;
 use tokio::sync::Mutex;
 
 /// Issue #37: 並列 save を直列化する。atomic_write だけでは同時 2 save で
 /// どちらかが temp rename 競合して 1 つが失敗しうるが、この Mutex で書き込みを 1 つずつに。
 static SAVE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+const SETTINGS_READ_RETRY_DELAYS: &[Duration] = &[
+    Duration::from_millis(40),
+    Duration::from_millis(120),
+    Duration::from_millis(240),
+];
 
 /// `~/.vibe-editor/settings.json` の serde 表現。renderer 側 `src/types/shared.ts` の
 /// `AppSettings` と完全一致 (camelCase ですべての field が同名・同型)。
@@ -156,8 +161,14 @@ impl std::fmt::Debug for VoiceSettings {
             .field("language", &self.language)
             .field("voice_name", &self.voice_name)
             // device id は機微ではないが、ハードウェア identifier なのでログ出さない
-            .field("input_device_id", &self.input_device_id.as_ref().map(|_| "<set>"))
-            .field("output_device_id", &self.output_device_id.as_ref().map(|_| "<set>"))
+            .field(
+                "input_device_id",
+                &self.input_device_id.as_ref().map(|_| "<set>"),
+            )
+            .field(
+                "output_device_id",
+                &self.output_device_id.as_ref().map(|_| "<set>"),
+            )
             .field("toggle_shortcut", &self.toggle_shortcut)
             .field("confirmation_mode", &self.confirmation_mode)
             .field("has_shown_disclaimer", &self.has_shown_disclaimer)
@@ -292,18 +303,52 @@ fn default_sidebar_width() -> f64 {
     272.0
 }
 
+async fn read_optional_file_with_retry(
+    path: &Path,
+    label: &str,
+    retry_delays: &[Duration],
+) -> CommandResult<Option<Vec<u8>>> {
+    for attempt in 0..=retry_delays.len() {
+        match fs::read(path).await {
+            Ok(bytes) => return Ok(Some(bytes)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => {
+                if let Some(delay) = retry_delays.get(attempt) {
+                    tracing::warn!(
+                        "[{label}] read failed at {} (attempt {}/{}): {e}; retrying in {:?}",
+                        path.display(),
+                        attempt + 1,
+                        retry_delays.len() + 1,
+                        delay
+                    );
+                    tokio::time::sleep(*delay).await;
+                    continue;
+                }
+                return Err(CommandError::Io(format!(
+                    "{label} read failed at {} after {} attempt(s): {e}",
+                    path.display(),
+                    retry_delays.len() + 1
+                )));
+            }
+        }
+    }
+    unreachable!("retry loop always returns");
+}
+
 #[tauri::command]
-pub async fn settings_load() -> Settings {
+pub async fn settings_load() -> CommandResult<Settings> {
     tracing::info!("[IPC] settings_load called");
     let path = crate::util::config_paths::settings_path();
-    let Ok(bytes) = fs::read(&path).await else {
-        // Issue #29: 初回起動 / 読み取り不能時は default を返す。renderer 側 `migrateSettings`
-        // は schemaVersion=10 (current) で呼ばれることになるので migration は no-op、
-        // shallow merge で DEFAULT_SETTINGS と一致した値が settingsRef に乗る。
-        return Settings::default();
+    let Some(bytes) =
+        read_optional_file_with_retry(&path, "settings_load", SETTINGS_READ_RETRY_DELAYS).await?
+    else {
+        // Issue #29: 初回起動で settings.json がまだ無いときだけ default を返す。
+        // Issue #905: PermissionDenied / sharing violation 等の読み取り不能は default 扱いに
+        // しない。renderer 側へ Err を返し、default ベースの auto-save で原本を上書きしない。
+        return Ok(Settings::default());
     };
     match serde_json::from_slice::<Settings>(&bytes) {
-        Ok(v) => v,
+        Ok(v) => Ok(v),
         Err(e) => {
             // Issue #170: 旧実装は parse 失敗時に黙って Null を返し、次の save で
             // ユーザー設定が完全消失する事故が起きていた。.bak に元ファイルを退避してから
@@ -319,13 +364,10 @@ pub async fn settings_load() -> Settings {
             );
             // best-effort: バックアップが取れなくても続行
             match write_timestamped_backup(&path, &bytes, None).await {
-                Ok(bak) => tracing::info!(
-                    "[settings] wrote timestamped backup: {}",
-                    bak.display()
-                ),
+                Ok(bak) => tracing::info!("[settings] wrote timestamped backup: {}", bak.display()),
                 Err(berr) => tracing::warn!("[settings] backup write failed: {berr}"),
             }
-            Settings::default()
+            Ok(Settings::default())
         }
     }
 }
@@ -382,10 +424,22 @@ pub(crate) fn validate_custom_agent_ids(settings: &Settings) -> Result<(), Comma
 /// disk から既存 settings.json の `schema_version` だけを軽量に読み取る。
 /// ファイル不在 / parse 失敗 / フィールド欠落はすべて `None` を返し、check_schema_compat 側で
 /// 「ガード対象外」として扱う (= 旧データ / 初回保存 / 破損ファイルは save を許容する)。
-async fn read_disk_schema_version(path: &std::path::Path) -> Option<u32> {
-    let bytes = fs::read(path).await.ok()?;
-    let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
-    v.get("schemaVersion").and_then(|n| n.as_u64()).map(|n| n as u32)
+async fn read_disk_schema_version(path: &std::path::Path) -> CommandResult<Option<u32>> {
+    let Some(bytes) = read_optional_file_with_retry(
+        path,
+        "settings_save.schema_version",
+        SETTINGS_READ_RETRY_DELAYS,
+    )
+    .await?
+    else {
+        return Ok(None);
+    };
+    let Ok(v) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return Ok(None);
+    };
+    Ok(v.get("schemaVersion")
+        .and_then(|n| n.as_u64())
+        .map(|n| n as u32))
 }
 
 #[tauri::command]
@@ -395,7 +449,7 @@ pub async fn settings_save(app: tauri::AppHandle, settings: Settings) -> Command
     // Issue #641: 古い build が新スキーマの settings.json を silent に上書きするのを防ぐ。
     // disk の `schemaVersion` が現行 const より大きい場合、新フィールドが silent drop される
     // ため reject する (renderer 側でユーザーに「最新版に更新してください」を表示する経路)。
-    let disk_v = read_disk_schema_version(&path).await;
+    let disk_v = read_disk_schema_version(&path).await?;
     check_schema_compat(disk_v, settings.schema_version)?;
     validate_custom_agent_ids(&settings)?;
     let json = serde_json::to_vec_pretty(&settings)?;
@@ -665,7 +719,7 @@ mod tests {
             .await
             .unwrap();
         let v = read_disk_schema_version(&path).await;
-        assert_eq!(v, Some(42));
+        assert_eq!(v.unwrap(), Some(42));
     }
 
     /// 不在ファイル / parse 失敗 / フィールド欠落はすべて `None` を返す。
@@ -673,14 +727,49 @@ mod tests {
     async fn read_disk_schema_version_returns_none_for_missing_or_invalid() {
         let dir = tempfile::tempdir().unwrap();
         let missing = dir.path().join("nope.json");
-        assert_eq!(read_disk_schema_version(&missing).await, None);
+        assert_eq!(read_disk_schema_version(&missing).await.unwrap(), None);
 
         let invalid = dir.path().join("invalid.json");
         tokio::fs::write(&invalid, b"not-json").await.unwrap();
-        assert_eq!(read_disk_schema_version(&invalid).await, None);
+        assert_eq!(read_disk_schema_version(&invalid).await.unwrap(), None);
 
         let no_field = dir.path().join("no-field.json");
-        tokio::fs::write(&no_field, br#"{"language":"ja"}"#).await.unwrap();
-        assert_eq!(read_disk_schema_version(&no_field).await, None);
+        tokio::fs::write(&no_field, br#"{"language":"ja"}"#)
+            .await
+            .unwrap();
+        assert_eq!(read_disk_schema_version(&no_field).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn read_optional_file_with_retry_returns_none_only_for_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("missing.json");
+        let result = read_optional_file_with_retry(&missing, "test", &[])
+            .await
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn read_optional_file_with_retry_rejects_non_not_found_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = read_optional_file_with_retry(dir.path(), "test", &[])
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("test read failed"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn read_disk_schema_version_rejects_non_not_found_read_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = read_disk_schema_version(dir.path()).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("settings_save.schema_version read failed"),
+            "unexpected error: {err}"
+        );
     }
 }
