@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { APP_SETTINGS_SCHEMA_VERSION } from '../../../../types/shared';
+import { APP_SETTINGS_SCHEMA_VERSION, DEFAULT_SETTINGS } from '../../../../types/shared';
 import { migrateSettings } from '../settings-migrate';
 
 describe('migrateSettings', () => {
@@ -34,6 +34,70 @@ describe('migrateSettings', () => {
     });
 
     expect(migrated.statusMascotVariant).toBe('vibe');
+  });
+
+  // ---------- Issue #836: schemaVersion >= 1 でも theme / language を毎ロード検証 ----------
+  describe('theme / language validation (Issue #836)', () => {
+    it('current schema でも未知 theme / language を default に戻す', () => {
+      const migrated = migrateSettings({
+        schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
+        language: 'xx',
+        theme: 'removed-theme'
+      });
+
+      expect(migrated.language).toBe(DEFAULT_SETTINGS.language);
+      expect(migrated.theme).toBe(DEFAULT_SETTINGS.theme);
+    });
+
+    it('current schema の有効な theme / language は維持する', () => {
+      const migrated = migrateSettings({
+        schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
+        language: 'en',
+        theme: 'glass'
+      });
+
+      expect(migrated.language).toBe('en');
+      expect(migrated.theme).toBe('glass');
+    });
+  });
+
+  // ---------- Issue #821: customAgents.id の built-in 予約語衝突を修復 ----------
+  describe('custom agent reserved id migration (Issue #821)', () => {
+    it('claude / codex と衝突する customAgents.id を user namespace に改名する', () => {
+      const migrated = migrateSettings({
+        schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
+        language: 'ja',
+        theme: 'claude-dark',
+        customAgents: [
+          { id: 'claude', name: 'Shadow Claude', command: 'shadow', args: '' },
+          { id: 'codex', name: 'Shadow Codex', command: 'shadow', args: '' },
+          { id: 'aider', name: 'Aider', command: 'aider', args: '' }
+        ]
+      });
+
+      expect(migrated.customAgents?.map((agent) => agent.id)).toEqual([
+        '_user_claude',
+        '_user_codex',
+        'aider'
+      ]);
+    });
+
+    it('改名先が既に存在する場合は suffix を付けて重複を避ける', () => {
+      const migrated = migrateSettings({
+        schemaVersion: APP_SETTINGS_SCHEMA_VERSION,
+        language: 'ja',
+        theme: 'claude-dark',
+        customAgents: [
+          { id: '_user_claude', name: 'Existing', command: 'existing', args: '' },
+          { id: 'claude', name: 'Shadow Claude', command: 'shadow', args: '' }
+        ]
+      });
+
+      expect(migrated.customAgents?.map((agent) => agent.id)).toEqual([
+        '_user_claude',
+        '_user_claude_2'
+      ]);
+    });
   });
 
   // ---------- Issue #449: v9 → v10 Unicode dash 正規化 ----------

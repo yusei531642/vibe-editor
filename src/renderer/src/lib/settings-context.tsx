@@ -60,6 +60,13 @@ if (__hot) {
   });
 }
 
+function cloneDefaultSettings(): AppSettings {
+  if (typeof structuredClone === 'function') {
+    return structuredClone(DEFAULT_SETTINGS);
+  }
+  return JSON.parse(JSON.stringify(DEFAULT_SETTINGS)) as AppSettings;
+}
+
 export function SettingsProvider({ children }: { children: ReactNode }): JSX.Element {
   const [settingsState, setSettingsState] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [loadingState, setLoadingState] = useState<boolean>(true);
@@ -220,8 +227,9 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
   }, []);
 
   const reset = useCallback(async () => {
-    commitState(DEFAULT_SETTINGS, loadingRef.current);
-    await window.api.settings.save(DEFAULT_SETTINGS);
+    const next = cloneDefaultSettings();
+    commitState(next, loadingRef.current);
+    await window.api.settings.save(next);
   }, [commitState]);
 
   const store = useMemo<SettingsStore>(

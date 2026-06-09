@@ -142,8 +142,10 @@ function FlowApp({ actions }: FlowAppProps): JSX.Element {
         : changes;
       if (remaining.length === 0) return;
       const draggingNow = remaining.some((c) => c.type === 'position' && c.dragging);
-      if (useCanvasStore.getState().isDragging !== draggingNow) {
-        setCanvasDragging(draggingNow);
+      const wasDragging = useCanvasStore.getState().isDragging;
+      const draggingChanged = wasDragging !== draggingNow;
+      if (draggingChanged && draggingNow) {
+        setCanvasDragging(true);
       }
 
       // Issue #196: 旧実装は変更ごとに `nodes.find` + `for (other of nodes)` + 内側 `remaining.some(...)`
@@ -245,6 +247,9 @@ function FlowApp({ actions }: FlowAppProps): JSX.Element {
 
       const allChanges = extra.length > 0 ? [...remaining, ...extra] : remaining;
       setNodes(applyNodeChanges(allChanges, currentNodes));
+      if (draggingChanged && !draggingNow) {
+        setCanvasDragging(false);
+      }
     },
     [setNodes, confirmRemoveCard, isTeamLocked, setCanvasDragging]
   );
