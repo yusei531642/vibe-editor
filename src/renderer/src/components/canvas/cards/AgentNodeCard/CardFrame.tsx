@@ -330,7 +330,7 @@ function AgentNodeCardImpl({
   const healthRow = payload.agentId
     ? healthSnapshot.byAgentId[payload.agentId] ?? null
     : null;
-  const health = useMemo(() => deriveHealth(healthRow), [healthRow]);
+  const health = useMemo(() => deriveHealth(healthRow, nowTick), [healthRow, nowTick]);
   const hasHealthRow = healthRow !== null;
   const unreadInboxCount = hasHealthRow
     ? health.pendingInboxCount
