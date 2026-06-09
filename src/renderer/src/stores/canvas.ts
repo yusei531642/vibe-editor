@@ -366,6 +366,26 @@ function makeCardNode<T extends CardType>(
   };
 }
 
+function nextFallbackCardPosition(nodes: Node<CardData>[]): { x: number; y: number } {
+  const cols = 6;
+  const stepX = NODE_W + 32;
+  const stepY = NODE_H + 32;
+  const occupied = new Set(
+    nodes.map((node) => `${Math.round(node.position.x)},${Math.round(node.position.y)}`)
+  );
+
+  for (let slot = 0; slot <= nodes.length; slot++) {
+    const x = (slot % cols) * stepX;
+    const y = Math.floor(slot / cols) * stepY;
+    if (!occupied.has(`${x},${y}`)) return { x, y };
+  }
+
+  return {
+    x: ((nodes.length + 1) % cols) * stepX,
+    y: Math.floor((nodes.length + 1) / cols) * stepY
+  };
+}
+
 export const useCanvasStore = create<CanvasState>()(
   /**
    * Issue #253 sub: subscribeWithSelector で `subscribe(selector, listener)` API を有効化。
@@ -404,13 +424,9 @@ export const useCanvasStore = create<CanvasState>()(
         const existing = get().nodes;
         let pos = position;
         if (!pos) {
-          // 簡易: 6 列グリッドで右下に積む
-          const idx = existing.length;
-          const cols = 6;
-          pos = {
-            x: (idx % cols) * (NODE_W + 32),
-            y: Math.floor(idx / cols) * (NODE_H + 32)
-          };
+          // Issue #840: 削除後に existing.length だけを見ると既存カードと座標が重なる。
+          // 6 列グリッド上の占有スロットを避け、最初の空き位置へ配置する。
+          pos = nextFallbackCardPosition(existing);
         }
         set({
           nodes: [...existing, makeCardNode(id, type, pos, title, payload)]
