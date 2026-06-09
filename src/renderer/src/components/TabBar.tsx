@@ -27,9 +27,22 @@ export function TabBar({
   onTogglePin
 }: TabBarProps): JSX.Element {
   const t = useT();
+
+  const selectAndFocusTab = (targetIndex: number, tablist: HTMLElement | null): void => {
+    const targetTab = tabs[targetIndex];
+    if (!targetTab) {
+      return;
+    }
+
+    onSelect(targetTab.id);
+
+    const tabElements = Array.from(tablist?.querySelectorAll<HTMLElement>('[role="tab"]') ?? []);
+    tabElements[targetIndex]?.focus();
+  };
+
   return (
     <div className="tabbar" role="tablist">
-      {tabs.map((tab) => {
+      {tabs.map((tab, index) => {
         const active = tab.id === activeId;
 
         return (
@@ -47,9 +60,31 @@ export function TabBar({
             aria-selected={active}
             tabIndex={active ? 0 : -1}
             onKeyDown={(e) => {
+              if (e.target !== e.currentTarget) {
+                return;
+              }
+
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 onSelect(tab.id);
+                return;
+              }
+
+              const lastIndex = tabs.length - 1;
+              const tablist = e.currentTarget.closest<HTMLElement>('[role="tablist"]');
+
+              if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                selectAndFocusTab(index >= lastIndex ? 0 : index + 1, tablist);
+              } else if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                selectAndFocusTab(index <= 0 ? lastIndex : index - 1, tablist);
+              } else if (e.key === 'Home') {
+                e.preventDefault();
+                selectAndFocusTab(0, tablist);
+              } else if (e.key === 'End') {
+                e.preventDefault();
+                selectAndFocusTab(lastIndex, tablist);
               }
             }}
           >
