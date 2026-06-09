@@ -23,17 +23,6 @@ export function resolveAgentConfig(
   agentId: string,
   settings: AppSettings
 ): ResolvedAgent {
-  const custom = (settings.customAgents ?? []).find((a) => a.id === agentId);
-  if (custom) {
-    return {
-      id: custom.id,
-      name: custom.name,
-      command: custom.command,
-      args: custom.args,
-      cwd: custom.cwd || settings.lastOpenedRoot || '',
-      color: custom.color
-    };
-  }
   if (agentId === 'codex') {
     return {
       id: 'codex',
@@ -42,6 +31,19 @@ export function resolveAgentConfig(
       args: settings.codexArgs || '',
       cwd: settings.lastOpenedRoot || ''
     };
+  }
+  if (agentId !== 'claude') {
+    const custom = (settings.customAgents ?? []).find((a) => a.id === agentId);
+    if (custom) {
+      return {
+        id: custom.id,
+        name: custom.name,
+        command: custom.command,
+        args: custom.args,
+        cwd: custom.cwd || settings.lastOpenedRoot || '',
+        color: custom.color
+      };
+    }
   }
   // claude (default fallback)
   return {

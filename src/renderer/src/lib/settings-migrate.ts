@@ -28,6 +28,37 @@ function isObject(v: unknown): v is Raw {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
+const RESERVED_CUSTOM_AGENT_IDS = new Set(['claude', 'codex']);
+
+function uniqueCustomAgentId(base: string, used: Set<string>): string {
+  let candidate = base;
+  let suffix = 2;
+  while (used.has(candidate)) {
+    candidate = `${base}_${suffix}`;
+    suffix++;
+  }
+  return candidate;
+}
+
+function sanitizeCustomAgentIds(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  const used = new Set<string>();
+  return value.map((entry, index) => {
+    if (!isObject(entry)) return entry;
+    const rawId =
+      typeof entry.id === 'string' && entry.id.trim()
+        ? entry.id.trim()
+        : `custom_${index + 1}`;
+    const base = RESERVED_CUSTOM_AGENT_IDS.has(rawId.toLowerCase())
+      ? `_user_${rawId.toLowerCase()}`
+      : rawId;
+    const id = uniqueCustomAgentId(base, used);
+    used.add(id);
+    if (id === entry.id) return entry;
+    return { ...entry, id };
+  });
+}
+
 /**
  * Issue #449: 引数文字列をパースして再構築することで、各 token 先頭の Unicode dash を
  * ASCII '-' に正規化する。空白を含む値は再構築時に `"..."` で囲み直す。
@@ -221,6 +252,10 @@ export function migrateSettings(raw: unknown): AppSettings {
       });
     }
   }
+
+  // Issue #821: customAgents.id の 'claude' / 'codex' は built-in agent と衝突する予約語。
+  // 既存 settings.json に残っている場合は、読み込み時にユーザー定義用 ID へ改名する。
+  data.customAgents = sanitizeCustomAgentIds(data.customAgents);
 
   // --- Version 10 → 11: Windows ConPTY UTF-8 強制フラグの導入 (Issue #618) ---
   // 旧 settings.json には `terminalForceUtf8` フィールドが存在しないため、`true` (default) で

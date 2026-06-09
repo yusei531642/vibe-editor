@@ -361,6 +361,24 @@ pub(crate) fn check_schema_compat(
         .check_compat(disk_schema_version, incoming_schema_version)
 }
 
+fn is_reserved_custom_agent_id(id: &str) -> bool {
+    matches!(id.trim().to_ascii_lowercase().as_str(), "claude" | "codex")
+}
+
+pub(crate) fn validate_custom_agent_ids(settings: &Settings) -> Result<(), CommandError> {
+    if let Some(agents) = settings.custom_agents.as_ref() {
+        for agent in agents {
+            if is_reserved_custom_agent_id(&agent.id) {
+                return Err(CommandError::validation(format!(
+                    "customAgents.id '{}' is reserved for a built-in agent",
+                    agent.id
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 /// disk から既存 settings.json の `schema_version` だけを軽量に読み取る。
 /// ファイル不在 / parse 失敗 / フィールド欠落はすべて `None` を返し、check_schema_compat 側で
 /// 「ガード対象外」として扱う (= 旧データ / 初回保存 / 破損ファイルは save を許容する)。
@@ -379,6 +397,7 @@ pub async fn settings_save(app: tauri::AppHandle, settings: Settings) -> Command
     // ため reject する (renderer 側でユーザーに「最新版に更新してください」を表示する経路)。
     let disk_v = read_disk_schema_version(&path).await;
     check_schema_compat(disk_v, settings.schema_version)?;
+    validate_custom_agent_ids(&settings)?;
     let json = serde_json::to_vec_pretty(&settings)?;
     // Issue #37: 書き込み中の crash で settings.json が半端 JSON にならないよう atomic
     atomic_write(&path, &json)
@@ -600,6 +619,37 @@ mod tests {
             msg.contains("future schema"),
             "error message must mention future schema: got {msg}"
         );
+    }
+
+    #[test]
+    fn custom_agent_reserved_ids_are_rejected() {
+        let mut s = Settings::default();
+        s.custom_agents = Some(vec![AgentConfig {
+            id: "claude".into(),
+            name: "Shadow Claude".into(),
+            command: "shadow".into(),
+            args: "".into(),
+            cwd: None,
+            color: None,
+        }]);
+
+        let err = validate_custom_agent_ids(&s).unwrap_err();
+        assert!(err.to_string().contains("reserved"));
+    }
+
+    #[test]
+    fn custom_agent_non_reserved_ids_are_allowed() {
+        let mut s = Settings::default();
+        s.custom_agents = Some(vec![AgentConfig {
+            id: "aider".into(),
+            name: "Aider".into(),
+            command: "aider".into(),
+            args: "".into(),
+            cwd: None,
+            color: None,
+        }]);
+
+        assert!(validate_custom_agent_ids(&s).is_ok());
     }
 
     /// `read_disk_schema_version` の挙動 sanity: 通常 JSON から正しく読める。
