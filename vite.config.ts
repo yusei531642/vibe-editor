@@ -9,7 +9,7 @@ const host = process.env.TAURI_DEV_HOST;
 const minify: false | 'esbuild' = process.env.TAURI_ENV_DEBUG ? false : 'esbuild';
 
 export default defineConfig(() => ({
-  plugins: react(),
+  plugins: [react()],
   root: resolve(__dirname, 'src/renderer'),
   resolve: {
     alias: {
