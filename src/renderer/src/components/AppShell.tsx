@@ -70,6 +70,7 @@ import {
   canRenderTerminalForAgent,
   shouldShowGlobalClaudeCheck
 } from '../lib/terminal-render-gate';
+import { formatTerminalRuntimeStatus } from '../lib/terminal-status';
 import { useProject, useTabs, useTeam } from '../lib/app-state-context';
 
 export interface AppShellProps {
@@ -901,7 +902,9 @@ export function AppShell({
                 {tab.exited && (
                   <div className="terminal-pane__exit-banner" onClick={(e) => e.stopPropagation()}>
                     <span className="terminal-pane__exit-banner-text">
-                      {t('terminal.exitedBanner', { status: tab.status || t('terminal.exited') })}
+                      {t('terminal.exitedBanner', {
+                        status: formatTerminalRuntimeStatus(tab.status, t) || t('terminal.exited')
+                      })}
                     </span>
                     <button
                       className="terminal-pane__exit-banner-btn"

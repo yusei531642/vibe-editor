@@ -190,7 +190,7 @@ export function useTeamHistorySync(
         setTerminalTabs((prev) =>
           prev.map((tab) =>
             tab.agent === 'claude' && !tab.exited
-              ? { ...tab, version: tab.version + 1, status: '' }
+              ? { ...tab, version: tab.version + 1, status: null }
               : tab
           )
         );

@@ -20,6 +20,7 @@ import { useUiStore } from '../../../../stores/ui';
 import { useCanvasTerminalFit } from '../../../../lib/use-canvas-terminal-fit';
 import { useXtermScrollToBottomOnResize } from '../../../../lib/use-xterm-scroll-on-resize';
 import { useRecruitSpawnAck } from '../../../../lib/use-terminal-spawn';
+import type { TerminalRuntimeStatus } from '../../../../lib/terminal-status';
 import type { AgentPayload, AgentStatus } from './types';
 
 /**
@@ -62,8 +63,8 @@ export interface TerminalOverlayProps {
   codexInstructions?: string;
   /** Issue #359: 新セッション起動時に初手で送るプロンプト */
   initialMessage?: string;
-  /** ヘッダー行に表示する pty 状態文字列を CardFrame に上げる */
-  onStatus: (status: string) => void;
+  /** ヘッダー行に表示する pty 状態を CardFrame に上げる */
+  onStatus: (status: TerminalRuntimeStatus) => void;
   /** 出力アクティビティ → CardFrame の StatusBadge に反映。
    *  React の setState (Dispatch<SetStateAction<AgentStatus>>) を直接渡し、
    *  既存実装どおり関数形 updater で 'idle' 復帰時の不要 re-render を抑止する。 */

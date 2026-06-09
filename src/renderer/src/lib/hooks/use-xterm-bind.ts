@@ -30,6 +30,7 @@ import {
   createTerminalInputGate,
   type TerminalInputGateResetReason
 } from '../terminal-input-gate';
+import type { TerminalRuntimeStatus } from '../terminal-status';
 import {
   acquireGeneration,
   cacheDelete,
@@ -51,7 +52,7 @@ export interface PtySpawnSnapshot {
 }
 
 export interface PtySessionCallbacks {
-  onStatus?: (status: string) => void;
+  onStatus?: (status: TerminalRuntimeStatus) => void;
   onActivity?: () => void;
   onExit?: () => void;
   onSessionId?: (sessionId: string) => void;
@@ -432,7 +433,11 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           term.writeln(
             `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m`
           );
-          callbacksRef.current.onStatus?.(`終了 (exitCode=${info.exitCode})`);
+          callbacksRef.current.onStatus?.({
+            kind: 'exited',
+            exitCode: info.exitCode,
+            signal: info.signal
+          });
           ptyIdRef.current = null;
           cacheDelete(skey);
           callbacksRef.current.onExit?.();
@@ -461,7 +466,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           return;
         }
 
-        callbacksRef.current.onStatus?.(`${command} を起動中…`);
+        callbacksRef.current.onStatus?.({ kind: 'starting', command });
         // 不変式 #2: 初回 spawn 時点のスナップショットを使う (以後の prop 変化は無視)
         const snap = snapRef.current;
         // Issue #271: HMR remount 経路では `import.meta.hot.data.ptyBySessionKey`
@@ -489,7 +494,11 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           term.writeln(
             `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m`
           );
-          callbacksRef.current.onStatus?.(`終了 (exitCode=${info.exitCode})`);
+          callbacksRef.current.onStatus?.({
+            kind: 'exited',
+            exitCode: info.exitCode,
+            signal: info.signal
+          });
           ptyIdRef.current = null;
           cacheDelete(skey);
           callbacksRef.current.onExit?.();
@@ -532,7 +541,11 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           term.writeln(
             `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m`
           );
-          callbacksRef.current.onStatus?.(`終了 (exitCode=${info.exitCode})`);
+          callbacksRef.current.onStatus?.({
+            kind: 'exited',
+            exitCode: info.exitCode,
+            signal: info.signal
+          });
           ptyIdRef.current = null;
           cacheDelete(skey);
           callbacksRef.current.onExit?.();
@@ -618,7 +631,10 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           unsubscribePtyListeners();
           const errMsg = res.error ?? '不明なエラー';
           term.writeln(`\x1b[31m[起動エラー] ${errMsg}\x1b[0m`);
-          callbacksRef.current.onStatus?.(`起動失敗: ${res.error ?? ''}`);
+          callbacksRef.current.onStatus?.({
+            kind: 'spawn_failed',
+            error: res.error ?? ''
+          });
           // Issue #342 Phase 1: recruit 経路から呼ばれた spawn なら、Hub に失敗を ack して
           // 30 秒の handshake timeout を待たず即座に構造化エラーで返せるようにする。
           callbacksRef.current.onSpawnError?.(errMsg);
@@ -721,11 +737,11 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           attachQueueFlushed = true;
 
           // UI 通知は status ラインのみ。xterm buffer に UI メッセージを書き込まない (Codex Lane 1)。
-          callbacksRef.current.onStatus?.(
-            res.replay && res.replay.length > 0
-              ? `再接続 (出力復元): ${res.command ?? command}`
-              : `再接続: ${res.command ?? command}`
-          );
+          callbacksRef.current.onStatus?.({
+            kind: 'reconnecting',
+            command: res.command ?? command,
+            restored: Boolean(res.replay && res.replay.length > 0)
+          });
         } else {
           // 新規 spawn 経路: pre-subscribe 済みの listener はそのまま使う。
           // setupPostSubscribe は新規 spawn では if (!offData) ガードで no-op になるが、
@@ -748,7 +764,10 @@ export function useXtermBind(options: UseXtermBindOptions): void {
               return;
             }
           }
-          callbacksRef.current.onStatus?.(`実行中: ${res.command ?? command}`);
+          callbacksRef.current.onStatus?.({
+            kind: 'running',
+            command: res.command ?? command
+          });
           setupPostSubscribe(res.id, attached);
         }
       } catch (err) {
@@ -760,7 +779,10 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         } catch {
           /* term が dispose 済み等で writeln 自体が落ちる可能性に備える */
         }
-        callbacksRef.current.onStatus?.(`例外: ${String(err)}`);
+        callbacksRef.current.onStatus?.({
+          kind: 'exception',
+          error: String(err)
+        });
       }
     })();
 
