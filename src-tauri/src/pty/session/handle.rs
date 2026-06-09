@@ -15,6 +15,10 @@ use anyhow::Result;
 use portable_pty::{MasterPty, PtySize};
 use serde::Serialize;
 use std::io::Write;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+#[cfg(windows)]
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -45,6 +49,8 @@ pub struct SessionHandle {
     pub role: Option<String>,
     pub cwd: String,
     pub is_codex: bool,
+    /// OS child PID。Windows では `taskkill /T` で MCP 等の孫プロセスまで止めるために使う。
+    pub(super) process_id: Option<u32>,
     /// Issue #153: prompt injection 中はユーザー入力を抑止する。
     /// `inject_codex_prompt_to_pty` 等が begin/end で立て下げる。
     /// renderer 側からの terminal_write は user_write 経由でこのフラグを見る。
@@ -152,6 +158,7 @@ impl SessionHandle {
         // Issue #632: kill 時点で watcher_cancel を立てる。これにより claude_watcher が
         // 60 秒 deadline まで待たずに即座 (短い polling 間隔以内で) exit する。
         self.watcher_cancel.store(true, Ordering::Release);
+        self.kill_process_tree_best_effort();
         let mut k = lock_poisoned!(self.killer, "killer")?;
         let _ = k.kill();
         Ok(())
@@ -192,6 +199,34 @@ impl SessionHandle {
     }
 }
 
+impl SessionHandle {
+    #[cfg(windows)]
+    fn kill_process_tree_best_effort(&self) {
+        let Some(pid) = self.process_id else {
+            return;
+        };
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        match Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status()
+        {
+            Ok(status) if status.success() => {
+                tracing::info!("[pty] process tree killed pid={pid}");
+            }
+            Ok(status) => {
+                tracing::debug!("[pty] taskkill returned status={status} pid={pid}");
+            }
+            Err(e) => {
+                tracing::debug!("[pty] taskkill failed pid={pid}: {e}");
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn kill_process_tree_best_effort(&self) {}
+}
+
 /// Issue #144: SessionHandle が drop されたタイミングで child プロセスを必ず kill する。
 /// SessionRegistry::remove() は kill を呼ばずに Map から外すだけだったため、
 /// Arc の参照が残っている間 reader thread が PTY master を保持し続け、
@@ -215,6 +250,7 @@ impl Drop for SessionHandle {
                 poisoned.into_inner()
             }
         };
+        self.kill_process_tree_best_effort();
         if let Err(e) = k.kill() {
             tracing::warn!(?e, "[pty] SessionHandle child kill failed during drop");
         }
@@ -298,6 +334,7 @@ mod drop_tests {
             role: None,
             cwd: String::new(),
             is_codex: false,
+            process_id: None,
             injecting: AtomicBool::new(false),
             write_budget: Mutex::new(WriteBudget {
                 window_started_at: Instant::now(),

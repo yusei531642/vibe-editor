@@ -5,7 +5,7 @@
  * zoomSubscribe が毎フレーム発火する silent breakage になる。型レベルでは検出できないので
  * このテストでガードする。
  */
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 describe('useCanvasStore subscribeWithSelector middleware (Issue #253 W#2)', () => {
   beforeEach(() => {
@@ -79,5 +79,42 @@ describe('useCanvasStore subscribeWithSelector middleware (Issue #253 W#2)', () 
     );
     expect(typeof unsubscribe).toBe('function');
     unsubscribe();
+  });
+
+  it('drag 中の nodes 更新は localStorage persist を skip し、drag 終了時に flush する', async () => {
+    const { useCanvasStore } = await import('../canvas');
+    const store = useCanvasStore.getState();
+    store.clear();
+
+    const setItemSpy = vi.spyOn(Storage.prototype, 'setItem');
+    setItemSpy.mockClear();
+
+    store.setCanvasDragging(true);
+    store.setNodes([
+      {
+        id: 'agent-issue-864',
+        type: 'agent',
+        position: { x: 10, y: 20 },
+        data: { cardType: 'agent', title: 'agent', payload: { agent: 'claude' } },
+        style: { width: 760, height: 460 }
+      }
+    ]);
+
+    expect(
+      setItemSpy.mock.calls.some(([name]) => name === 'vibe-editor:canvas')
+    ).toBe(false);
+
+    store.setCanvasDragging(false);
+
+    const canvasWrites = setItemSpy.mock.calls.filter(
+      ([name]) => name === 'vibe-editor:canvas'
+    );
+    expect(canvasWrites.length).toBeGreaterThanOrEqual(1);
+    const [, raw] = canvasWrites[canvasWrites.length - 1];
+    const saved = JSON.parse(String(raw)) as { state: { nodes: Array<{ id: string }> } };
+    expect(saved.state.nodes).toHaveLength(1);
+    expect(saved.state.nodes[0].id).toBe('agent-issue-864');
+
+    setItemSpy.mockRestore();
   });
 });
