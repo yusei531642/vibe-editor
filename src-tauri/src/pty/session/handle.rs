@@ -49,7 +49,7 @@ pub struct SessionHandle {
     pub role: Option<String>,
     pub cwd: String,
     pub is_codex: bool,
-    /// OS child PID。Windows では `taskkill /T` で MCP 等の孫プロセスまで止めるために使う。
+    /// OS child PID。Windows では `taskkill /T` で MCP 等の孤児化を防ぐために使う。
     pub(super) process_id: Option<u32>,
     /// Issue #153: prompt injection 中はユーザー入力を抑止する。
     /// `inject_codex_prompt_to_pty` 等が begin/end で立て下げる。
@@ -158,8 +158,12 @@ impl SessionHandle {
         // Issue #632: kill 時点で watcher_cancel を立てる。これにより claude_watcher が
         // 60 秒 deadline まで待たずに即座 (短い polling 間隔以内で) exit する。
         self.watcher_cancel.store(true, Ordering::Release);
-        self.kill_process_tree_best_effort();
         let mut k = lock_poisoned!(self.killer, "killer")?;
+        #[cfg(windows)]
+        if let Some(pid) = self.process_id {
+            Self::spawn_process_tree_kill(pid, k.clone_killer());
+            return Ok(());
+        }
         let _ = k.kill();
         Ok(())
     }
@@ -201,10 +205,20 @@ impl SessionHandle {
 
 impl SessionHandle {
     #[cfg(windows)]
-    fn kill_process_tree_best_effort(&self) {
-        let Some(pid) = self.process_id else {
-            return;
-        };
+    fn spawn_process_tree_kill(
+        pid: u32,
+        mut fallback: Box<dyn portable_pty::ChildKiller + Send + Sync>,
+    ) {
+        std::thread::spawn(move || {
+            Self::kill_process_tree_best_effort(pid);
+            if let Err(e) = fallback.kill() {
+                tracing::warn!(?e, "[pty] fallback child kill failed after taskkill");
+            }
+        });
+    }
+
+    #[cfg(windows)]
+    fn kill_process_tree_best_effort(pid: u32) {
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         match Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
@@ -222,9 +236,6 @@ impl SessionHandle {
             }
         }
     }
-
-    #[cfg(not(windows))]
-    fn kill_process_tree_best_effort(&self) {}
 }
 
 /// Issue #144: SessionHandle が drop されたタイミングで child プロセスを必ず kill する。
@@ -250,7 +261,11 @@ impl Drop for SessionHandle {
                 poisoned.into_inner()
             }
         };
-        self.kill_process_tree_best_effort();
+        #[cfg(windows)]
+        if let Some(pid) = self.process_id {
+            Self::spawn_process_tree_kill(pid, k.clone_killer());
+            return;
+        }
         if let Err(e) = k.kill() {
             tracing::warn!(?e, "[pty] SessionHandle child kill failed during drop");
         }
