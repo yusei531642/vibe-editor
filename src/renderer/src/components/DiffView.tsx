@@ -44,7 +44,7 @@ export function DiffView({
     return (
       <div className="diffview">
         <div className="diffview__placeholder diffview__placeholder--error">
-          {t('diff.error', { error: result.error })}
+          {t('diff.error', { error: result.error ?? '' })}
         </div>
       </div>
     );

@@ -27,31 +27,31 @@ export interface RoleProfileSummary {
   singleton: boolean;
 }
 
-interface TeamMcpMember {
+export interface TeamMcpMember {
   agentId: string;
   role: string;
   agent: string;
 }
-interface SetupTeamMcpResult {
+export interface SetupTeamMcpResult {
   ok: boolean;
   error?: string;
   socket?: string;
   changed?: boolean;
 }
-interface CleanupTeamMcpResult {
+export interface CleanupTeamMcpResult {
   ok: boolean;
   error?: string;
   removed?: boolean;
 }
-interface ActiveLeaderResult {
+export interface ActiveLeaderResult {
   ok: boolean;
   error?: string;
 }
-interface OpenExternalResult {
+export interface OpenExternalResult {
   ok: boolean;
   error?: string;
 }
-interface TeamHubInfo {
+export interface TeamHubInfo {
   socket: string;
   token: string;
   bridgePath: string;

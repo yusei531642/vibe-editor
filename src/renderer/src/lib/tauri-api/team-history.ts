@@ -3,7 +3,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { TeamHistoryEntry } from '../../../../types/shared';
 
-interface MutationResult {
+export interface MutationResult {
   ok: boolean;
   error?: string;
   /**

@@ -238,7 +238,8 @@ export function useRecruitListener(): void {
             description: p.dynamicRole.description,
             instructions: p.dynamicRole.instructions,
             instructionsJa: p.dynamicRole.instructionsJa,
-            teamId: p.teamId
+            teamId: p.teamId,
+            createdByRole: p.requesterRole
           });
         }
         const store = useCanvasStore.getState();

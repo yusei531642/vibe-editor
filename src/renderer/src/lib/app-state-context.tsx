@@ -127,15 +127,15 @@ export function AppStateProvider({
   // discardEditorTabsForRoot は use-file-tabs / use-terminal-tabs /
   // use-team-management の戻り値に依存するため、それらが宣言される前に
   // useProjectLoader へ渡すには ref 経由のブリッジが必要。
-  const confirmDiscardRef = useRef<() => boolean>(() => true);
+  const confirmDiscardRef = useRef<() => Promise<boolean>>(async () => true);
   const projectSwitchedRef = useRef<(root: string) => void>(() => {});
   const projectLoadedRef = useRef<
     (snapshot: { gitStatus: GitStatus; sessions: SessionInfo[] }) => void
   >(() => {});
   // handleRemoveWorkspaceFolder の「rootPath で editor タブを整理する」ブリッジ。
   // useFileTabs の戻り値が確定するまでは true を返す noop。
-  const discardEditorTabsForRootRef = useRef<(rootPath: string) => boolean>(
-    () => true
+  const discardEditorTabsForRootRef = useRef<(rootPath: string) => Promise<boolean>>(
+    async () => true
   );
   const stableConfirmDiscard = useCallback(
     () => confirmDiscardRef.current(),
@@ -255,14 +255,14 @@ export function AppStateProvider({
   // handleRemoveWorkspaceFolder で「rootPath = path のエディタタブを破棄する」
   // ブリッジ関数を ref に差し込む (Issue #33 の約束を維持: dirty があれば確認、
   // Cancel なら settings / tabs どちらも変更しない)。
-  discardEditorTabsForRootRef.current = (path: string): boolean => {
+  discardEditorTabsForRootRef.current = async (path: string): Promise<boolean> => {
     const closingTabs = editorTabs.filter((tab) => tab.rootPath === path);
     const dirty = closingTabs.filter(
       (tab) => !tab.isBinary && tab.content !== tab.originalContent
     );
     if (
       dirty.length > 0 &&
-      !confirmDiscardEditorTabs(closingTabs.map((tab) => tab.id))
+      !(await confirmDiscardEditorTabs(closingTabs.map((tab) => tab.id)))
     ) {
       return false;
     }

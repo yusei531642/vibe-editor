@@ -159,7 +159,6 @@ export interface IpcMap {
     response: ClaudeCheckResult;
   };
   [IPC_CHANNELS.APP_SET_ZOOM_LEVEL]: { request: [level: number]; response: void };
-  [IPC_CHANNELS.APP_GET_ZOOM_LEVEL]: { request: []; response: number };
   [IPC_CHANNELS.APP_SETUP_TEAM_MCP]: {
     request: [
       projectRoot: string,

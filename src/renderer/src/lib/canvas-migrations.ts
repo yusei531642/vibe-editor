@@ -67,6 +67,57 @@ function clampZoom(zoom: number): number {
   return Math.min(Math.max(zoom, VIEWPORT_MIN_ZOOM), VIEWPORT_MAX_ZOOM);
 }
 
+function cardDataForType(
+  type: CardType,
+  data: Record<string, unknown>,
+  title: string
+): CardData {
+  switch (type) {
+    case 'terminal':
+      return {
+        ...data,
+        cardType: type,
+        title,
+        payload: data.payload as Extract<CardData, { cardType: 'terminal' }>['payload']
+      };
+    case 'agent':
+      return {
+        ...data,
+        cardType: type,
+        title,
+        payload: data.payload as Extract<CardData, { cardType: 'agent' }>['payload']
+      };
+    case 'editor':
+      return {
+        ...data,
+        cardType: type,
+        title,
+        payload: data.payload as Extract<CardData, { cardType: 'editor' }>['payload']
+      };
+    case 'diff':
+      return {
+        ...data,
+        cardType: type,
+        title,
+        payload: data.payload as Extract<CardData, { cardType: 'diff' }>['payload']
+      };
+    case 'fileTree':
+      return {
+        ...data,
+        cardType: type,
+        title,
+        payload: data.payload as Extract<CardData, { cardType: 'fileTree' }>['payload']
+      };
+    case 'changes':
+      return {
+        ...data,
+        cardType: type,
+        title,
+        payload: data.payload as Extract<CardData, { cardType: 'changes' }>['payload']
+      };
+  }
+}
+
 /**
  * crypto.randomUUID() ベースの安定 ID 生成。
  * Issue #157: 旧 `Date.now() + counter` 方式は zustand persist 復元 + リロード後の
@@ -133,12 +184,7 @@ export function normalizeCanvasState(input: unknown): NormalizedCanvasState {
             id: typeof raw.id === 'string' && raw.id ? raw.id : newId(type),
             type,
             position: { x: safeX, y: safeY },
-            data: {
-              ...data,
-              cardType: type,
-              title,
-              payload: data.payload
-            },
+            data: cardDataForType(type, data, title),
             style: {
               ...styleRaw,
               width: finiteOr(styleRaw.width, NODE_W),
@@ -167,9 +213,11 @@ export function normalizeCanvasState(input: unknown): NormalizedCanvasState {
     vpX = 0;
     vpY = 0;
   }
-  const teamLocks = isRecord(p.teamLocks)
+  const teamLocks: Record<string, boolean> = isRecord(p.teamLocks)
     ? Object.fromEntries(
-        Object.entries(p.teamLocks).filter(([, v]) => typeof v === 'boolean')
+        Object.entries(p.teamLocks).filter(
+          (entry): entry is [string, boolean] => typeof entry[1] === 'boolean'
+        )
       )
     : {};
   const stageView = STAGE_VIEWS.includes(p.stageView as StageView)

@@ -10,7 +10,7 @@ import type {
   TerminalTabsLoadResult
 } from '../../../../types/shared';
 
-interface MutationResult {
+export interface MutationResult {
   ok: boolean;
   error?: string;
 }

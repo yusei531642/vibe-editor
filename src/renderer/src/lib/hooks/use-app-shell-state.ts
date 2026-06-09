@@ -28,10 +28,18 @@ export type AppShellSettings = Pick<
   | 'codexArgs'
   | 'language'
   | 'theme'
+  | 'uiFontFamily'
+  | 'uiFontSize'
+  | 'editorFontFamily'
+  | 'editorFontSize'
+  | 'terminalFontFamily'
+  | 'terminalFontSize'
   | 'density'
   | 'statusMascotVariant'
   | 'statusMascotCustomPath'
+  | 'notepad'
   | 'hasCompletedOnboarding'
+  | 'customAgents'
   | 'mcpAutoSetup'
 >;
 
@@ -49,10 +57,18 @@ export function useAppShellState(): AppShellSettings {
     codexArgs: useSettingsValue('codexArgs'),
     language: useSettingsValue('language'),
     theme: useSettingsValue('theme'),
+    uiFontFamily: useSettingsValue('uiFontFamily'),
+    uiFontSize: useSettingsValue('uiFontSize'),
+    editorFontFamily: useSettingsValue('editorFontFamily'),
+    editorFontSize: useSettingsValue('editorFontSize'),
+    terminalFontFamily: useSettingsValue('terminalFontFamily'),
+    terminalFontSize: useSettingsValue('terminalFontSize'),
     density: useSettingsValue('density'),
     statusMascotVariant: useSettingsValue('statusMascotVariant'),
     statusMascotCustomPath: useSettingsValue('statusMascotCustomPath'),
+    notepad: useSettingsValue('notepad'),
     hasCompletedOnboarding: useSettingsValue('hasCompletedOnboarding'),
+    customAgents: useSettingsValue('customAgents'),
     mcpAutoSetup: useSettingsValue('mcpAutoSetup')
   };
 }

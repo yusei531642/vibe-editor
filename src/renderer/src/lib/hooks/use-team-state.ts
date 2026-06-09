@@ -91,6 +91,10 @@ export function useTeamState(opts: UseTeamStateOptions): UseTeamStateResult {
             status: '',
             exited: false,
             resumeSessionId: null,
+            freshSessionId: true,
+            cwd: null,
+            initialCols: null,
+            initialRows: null,
             teamHistoryMemberIdx: null,
             label: 'Claude #1',
             customLabel: null

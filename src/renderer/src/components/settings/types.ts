@@ -6,9 +6,9 @@ export type UpdateSetting = <K extends keyof AppSettings>(
 ) => void;
 
 export type StringSettingKey = {
-  [K in keyof AppSettings]: AppSettings[K] extends string ? K : never;
+  [K in keyof AppSettings]-?: Extract<AppSettings[K], string> extends never ? never : K;
 }[keyof AppSettings];
 
 export type NumberSettingKey = {
-  [K in keyof AppSettings]: AppSettings[K] extends number ? K : never;
+  [K in keyof AppSettings]-?: Extract<AppSettings[K], number> extends never ? never : K;
 }[keyof AppSettings];

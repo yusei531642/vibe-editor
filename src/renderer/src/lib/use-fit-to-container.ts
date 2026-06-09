@@ -25,7 +25,7 @@ const ZOOM_DEBOUNCE_MS = 100;
  * `unscaledFit=false` のままなら IDE モードと同じ挙動 (regression ゼロ)。
  */
 export interface UseFitToContainerOptions {
-  containerRef: RefObject<HTMLDivElement>;
+  containerRef: RefObject<HTMLDivElement | null>;
   termRef: MutableRefObject<Terminal | null>;
   fitRef: MutableRefObject<FitAddon | null>;
   ptyIdRef: MutableRefObject<string | null>;

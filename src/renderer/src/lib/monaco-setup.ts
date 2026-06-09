@@ -4,9 +4,8 @@
 // のみを読み込む。language worker (ts/css/html/json) は登録しないので
 // editor.worker だけで動作する。
 
-import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
+import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
 import { loader } from '@monaco-editor/react';
-// @ts-expect-error ?worker import は Vite 固有
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 
 // basic-languages: 軽量シンタックスハイライトのみ (language worker なし)
@@ -212,4 +211,4 @@ function defineMonacoThemes(): void {
 defineMonacoThemes();
 
 // 初期化を確実に完了させる
-export const monacoReady = loader.init();
+export const monacoReady: Promise<unknown> = Promise.resolve(loader.init());

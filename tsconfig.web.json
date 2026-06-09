@@ -15,6 +15,7 @@
     "allowSyntheticDefaultImports": true,
     "noEmit": true,
     "types": ["vite/client"],
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@shared/*": ["src/types/*"]
@@ -24,5 +25,8 @@
     "src/renderer/**/*.ts",
     "src/renderer/**/*.tsx",
     "src/types/**/*.ts"
+  ],
+  "exclude": [
+    "src/renderer/src/**/__tests__/**"
   ]
 }

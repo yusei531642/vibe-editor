@@ -18,7 +18,7 @@ type ToastFn = (
 export interface UseProjectLoaderOptions {
   /** 既存タブの discard 確認。返り値が false ならプロジェクト切替を中止する。
    *  Phase 1-2 (use-file-tabs) 抽出までの一時的注入。 */
-  confirmDiscardEditorTabs: () => boolean;
+  confirmDiscardEditorTabs: () => Promise<boolean>;
   /** loadProject によりプロジェクトが切り替わった直後に呼ばれる。
    *  App.tsx 側で editor tabs / sessions / teams / terminal tabs を初期化するために使う。
    *  Phase 1-2 〜 1-4 で各 hook に分散したら順次 opts から削る。 */
@@ -33,7 +33,7 @@ export interface UseProjectLoaderOptions {
    *  タブを破棄する」ためのブリッジ。dirty タブがあるときはユーザー確認を取り、OK なら
    *  setEditorTabs で当該タブを閉じる。返り値が false の場合 (= ユーザーが Cancel)、
    *  hook 側は workspaceFolders を変更してはならない (Issue #33 と同じ約束)。 */
-  discardEditorTabsForRoot: (rootPath: string) => boolean;
+  discardEditorTabsForRoot: (rootPath: string) => Promise<boolean>;
 }
 
 export interface UseProjectLoaderResult {
@@ -84,7 +84,7 @@ export function useProjectLoader(
       root: string,
       options: { addToRecent?: boolean } = { addToRecent: true }
     ): Promise<boolean> => {
-      if (projectRoot && projectRoot !== root && !optsRef.current.confirmDiscardEditorTabs()) {
+      if (projectRoot && projectRoot !== root && !(await optsRef.current.confirmDiscardEditorTabs())) {
         return false;
       }
       setProjectRoot(root);
@@ -314,7 +314,7 @@ export function useProjectLoader(
       // Cancel された場合は settings / tabs どちらも変更せず、UI と永続状態の整合を保つ。
       // editor-tab 側の操作 (確認 → 閉じる) は呼び出し側の use-file-tabs 知識が必要なので
       // discardEditorTabsForRoot ブリッジ越しに委譲する。
-      if (!optsRef.current.discardEditorTabsForRoot(path)) {
+      if (!(await optsRef.current.discardEditorTabsForRoot(path))) {
         return;
       }
       if (isPrimary) {

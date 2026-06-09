@@ -28,7 +28,7 @@ interface NormalizedMouseEvent extends MouseEvent {
 }
 
 interface PointerNormalizerOptions {
-  containerRef: RefObject<HTMLElement>;
+  containerRef: RefObject<HTMLElement | null>;
   unscaledFit: boolean | undefined;
   getZoom: (() => number) | undefined;
 }

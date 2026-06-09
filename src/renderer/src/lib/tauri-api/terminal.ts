@@ -8,7 +8,7 @@ import type {
   TerminalExitInfo
 } from '../../../../types/shared';
 
-interface SavePastedImageResult {
+export interface SavePastedImageResult {
   ok: boolean;
   path?: string;
   error?: string;

@@ -146,11 +146,11 @@ export function CanvasLayout(): JSX.Element {
   useEffect(() => {
     if (!addCardOpen && !spawnOpen) return;
     const handlePointerDown = (event: MouseEvent): void => {
-      const target = event.target as Node;
-      if (addCardOpen && addPopoverRef.current && !addPopoverRef.current.contains(target)) {
+      const target = event.target as globalThis.Node | null;
+      if (addCardOpen && addPopoverRef.current && target && !addPopoverRef.current.contains(target)) {
         setAddCardOpen(false);
       }
-      if (spawnOpen && spawnPopoverRef.current && !spawnPopoverRef.current.contains(target)) {
+      if (spawnOpen && spawnPopoverRef.current && target && !spawnPopoverRef.current.contains(target)) {
         setSpawnOpen(false);
       }
     };
@@ -208,7 +208,7 @@ export function CanvasLayout(): JSX.Element {
       const organization: TeamOrganizationMeta = { id: teamId, ...org.meta };
       const members: SpawnTeamMember[] = org.members.map((m) => ({
         role: m.role,
-        agent: m.agent,
+        agent: m.agent === 'codex' ? 'codex' : 'claude',
         position: presetPosition(m.col, m.row),
         // Issue #69: 未知 role でもクラッシュしないよう fallback
         title: ROLE_META[m.role]?.label ?? m.role ?? 'Agent'
@@ -247,7 +247,7 @@ export function CanvasLayout(): JSX.Element {
           : presetPosition(i % 3, Math.floor(i / 3));
       return {
         role: m.role,
-        agent: m.agent,
+        agent: m.agent === 'codex' ? 'codex' : 'claude',
         position,
         // Issue #69: 未知 role でも落ちないよう optional chain
         title: ROLE_META[m.role]?.label ?? m.role ?? 'Agent',
@@ -343,17 +343,35 @@ export function CanvasLayout(): JSX.Element {
 
   const addByType = (type: Exclude<CardType, 'terminal' | 'agent'>): void => {
     const cwd = projectRoot;
-    const titles: Record<typeof type, string> = {
-      editor: t('canvas.card.editor'),
-      diff: 'Diff',
-      fileTree: t('sidebar.files'),
-      changes: t('sidebar.changes')
-    };
-    const payload =
-      type === 'fileTree' || type === 'changes'
-        ? { projectRoot: cwd }
-        : { projectRoot: cwd, relPath: '' };
-    addCards([{ type, title: titles[type], position: stagger(type), payload }]);
+    if (type === 'editor') {
+      addCards([{
+        type,
+        title: t('canvas.card.editor'),
+        position: stagger(type),
+        payload: { projectRoot: cwd, relPath: '' }
+      }]);
+    } else if (type === 'diff') {
+      addCards([{
+        type,
+        title: 'Diff',
+        position: stagger(type),
+        payload: { projectRoot: cwd, relPath: '' }
+      }]);
+    } else if (type === 'fileTree') {
+      addCards([{
+        type,
+        title: t('sidebar.files'),
+        position: stagger(type),
+        payload: { projectRoot: cwd }
+      }]);
+    } else {
+      addCards([{
+        type,
+        title: t('sidebar.changes'),
+        position: stagger(type),
+        payload: { projectRoot: cwd }
+      }]);
+    }
     setAddCardOpen(false);
   };
 

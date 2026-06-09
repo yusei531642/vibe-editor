@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import type { KeyboardEvent, RefObject } from 'react';
 
 interface UseSettingsKeydownOptions {
-  dialogRef: RefObject<HTMLDivElement>;
+  dialogRef: RefObject<HTMLDivElement | null>;
   onClose: () => void;
 }
 

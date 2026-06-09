@@ -172,7 +172,7 @@ export function useXtermInstance(
   disableWebgl = false,
   forceWheelScrollback = false
 ): {
-  containerRef: RefObject<HTMLDivElement>;
+  containerRef: RefObject<HTMLDivElement | null>;
   termRef: MutableRefObject<Terminal | null>;
   fitRef: MutableRefObject<FitAddon | null>;
 } {

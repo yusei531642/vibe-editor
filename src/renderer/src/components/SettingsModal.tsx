@@ -53,7 +53,7 @@ export function SettingsModal({
   // saved → false / onClose に切り替える deferred timer。
   // unmount / 直前の Apply キャンセルで必ずクリアする (アンマウント済み state 更新警告を防ぐ)。
   // 型は ReturnType を使うことで browser (number) / Node 系 (NodeJS.Timeout) どちらでも安全。
-  const saveTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
   // サイドバー検索 (空文字なら全表示)
   const [navQuery, setNavQuery] = useState('');
   // Issue #195: focus trap + Escape + autofocus 用のルート ref

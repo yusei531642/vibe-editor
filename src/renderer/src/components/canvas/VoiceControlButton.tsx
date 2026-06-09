@@ -112,7 +112,7 @@ export function VoiceControlButton({
 
   // ---- pending function call (always モード) の inline trail / modal ----
   const [trailRemainingMs, setTrailRemainingMs] = useState<number | null>(null);
-  const trailTimerRef = useRef<ReturnType<typeof window.setInterval> | null>(null);
+  const trailTimerRef = useRef<number | null>(null);
   const trailDeadlineRef = useRef<number | null>(null);
 
   // safe 系: 3 秒カウントダウンで自動 approve。confirm 系: modal 表示で待機 (trail なし)。

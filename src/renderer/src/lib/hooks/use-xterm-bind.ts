@@ -111,7 +111,7 @@ export interface UseXtermBindOptions {
   /** unscaled fit 用のセルメトリクス取得 */
   getCellSize?: () => CellSize | null;
   /** unscaled fit 用のコンテナ参照 (clientWidth/clientHeight 取得) */
-  containerRef?: RefObject<HTMLDivElement>;
+  containerRef?: RefObject<HTMLDivElement | null>;
   /**
    * useFitToContainer と共有する「最後にスケジュールしたサイズ」ref。
    * 初回 spawn 時の `term.resize(cols, rows)` 後に seed しておくと、その直後に走る
