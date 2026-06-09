@@ -81,7 +81,7 @@ describe('useCanvasStore subscribeWithSelector middleware (Issue #253 W#2)', () 
     unsubscribe();
   });
 
-  it('drag 中の nodes 更新は localStorage persist を skip し、drag 終了時に flush する', async () => {
+  it('drag 中の nodes 更新は localStorage persist を skip し、drag 終了時に一度だけ flush する (Issue #835)', async () => {
     const { useCanvasStore } = await import('../canvas');
     const store = useCanvasStore.getState();
     store.clear();
@@ -92,9 +92,18 @@ describe('useCanvasStore subscribeWithSelector middleware (Issue #253 W#2)', () 
     store.setCanvasDragging(true);
     store.setNodes([
       {
-        id: 'agent-issue-864',
+        id: 'agent-issue-835',
         type: 'agent',
         position: { x: 10, y: 20 },
+        data: { cardType: 'agent', title: 'agent', payload: { agent: 'claude' } },
+        style: { width: 760, height: 460 }
+      }
+    ]);
+    store.setNodes([
+      {
+        id: 'agent-issue-835',
+        type: 'agent',
+        position: { x: 30, y: 40 },
         data: { cardType: 'agent', title: 'agent', payload: { agent: 'claude' } },
         style: { width: 760, height: 460 }
       }
@@ -109,11 +118,14 @@ describe('useCanvasStore subscribeWithSelector middleware (Issue #253 W#2)', () 
     const canvasWrites = setItemSpy.mock.calls.filter(
       ([name]) => name === 'vibe-editor:canvas'
     );
-    expect(canvasWrites.length).toBeGreaterThanOrEqual(1);
+    expect(canvasWrites).toHaveLength(1);
     const [, raw] = canvasWrites[canvasWrites.length - 1];
-    const saved = JSON.parse(String(raw)) as { state: { nodes: Array<{ id: string }> } };
+    const saved = JSON.parse(String(raw)) as {
+      state: { nodes: Array<{ id: string; position: { x: number; y: number } }> };
+    };
     expect(saved.state.nodes).toHaveLength(1);
-    expect(saved.state.nodes[0].id).toBe('agent-issue-864');
+    expect(saved.state.nodes[0].id).toBe('agent-issue-835');
+    expect(saved.state.nodes[0].position).toEqual({ x: 30, y: 40 });
 
     setItemSpy.mockRestore();
   });
