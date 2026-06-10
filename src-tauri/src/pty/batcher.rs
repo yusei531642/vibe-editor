@@ -5,7 +5,7 @@
 
 use crate::pty::scrollback::{append_scrollback, Scrollback};
 use bytes::BytesMut;
-use std::sync::Arc;
+use std::sync::{mpsc as std_mpsc, Arc};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
@@ -46,60 +46,63 @@ pub const PTY_CHANNEL_CAPACITY: usize = 256;
 pub fn spawn_batcher(
     app: AppHandle,
     data_event_name: String,
+    rx: mpsc::Receiver<Vec<u8>>,
+    scrollback: Scrollback,
+    on_output: Option<PtyOutputObserver>,
+) -> std_mpsc::Receiver<()> {
+    let (done_tx, done_rx) = std_mpsc::channel();
+    tokio::spawn(async move {
+        run_batcher(app, data_event_name, rx, scrollback, on_output).await;
+        let _ = done_tx.send(());
+    });
+    done_rx
+}
+
+async fn run_batcher(
+    app: AppHandle,
+    data_event_name: String,
     mut rx: mpsc::Receiver<Vec<u8>>,
     scrollback: Scrollback,
     on_output: Option<PtyOutputObserver>,
 ) {
-    tokio::spawn(async move {
-        // 旧 post-subscribe 経路互換のための短い猶予 (詳細は STARTUP_DELAY_MS コメント)。
-        tokio::time::sleep(Duration::from_millis(STARTUP_DELAY_MS)).await;
+    // 旧 post-subscribe 経路互換のための短い猶予 (詳細は STARTUP_DELAY_MS コメント)。
+    tokio::time::sleep(Duration::from_millis(STARTUP_DELAY_MS)).await;
 
-        let mut buf = BytesMut::with_capacity(FLUSH_BYTES * 2);
-        loop {
-            if buf.is_empty() || safe_utf8_boundary(&buf) == 0 {
-                match rx.recv().await {
-                    Some(chunk) => {
-                        buf.extend_from_slice(&chunk);
-                        // Issue #494: 閾値判定はテストと共有する pure 関数経由。
-                        if should_flush_after_recv(buf.len()) {
-                            flush(
-                                &app,
-                                &data_event_name,
-                                &mut buf,
-                                &scrollback,
-                                on_output.as_ref(),
-                            );
-                        }
+    let mut buf = BytesMut::with_capacity(FLUSH_BYTES * 2);
+    loop {
+        if buf.is_empty() || safe_utf8_boundary(&buf) == 0 {
+            match rx.recv().await {
+                Some(chunk) => {
+                    buf.extend_from_slice(&chunk);
+                    // Issue #494: 閾値判定はテストと共有する pure 関数経由。
+                    if should_flush_after_recv(buf.len()) {
+                        flush(
+                            &app,
+                            &data_event_name,
+                            &mut buf,
+                            &scrollback,
+                            on_output.as_ref(),
+                        );
                     }
-                    None => break,
                 }
-                if buf.is_empty() || safe_utf8_boundary(&buf) == 0 {
-                    continue;
-                }
+                None => break,
             }
+            if buf.is_empty() || safe_utf8_boundary(&buf) == 0 {
+                continue;
+            }
+        }
 
-            let mut tick = interval(Duration::from_millis(FLUSH_INTERVAL_MS));
-            tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
-            tick.tick().await;
+        let mut tick = interval(Duration::from_millis(FLUSH_INTERVAL_MS));
+        tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        tick.tick().await;
 
-            while !buf.is_empty() && safe_utf8_boundary(&buf) > 0 {
-                tokio::select! {
-                    maybe = rx.recv() => {
-                        match maybe {
-                            Some(chunk) => {
-                                buf.extend_from_slice(&chunk);
-                                if should_flush_after_recv(buf.len()) {
-                                    flush(
-                                        &app,
-                                        &data_event_name,
-                                        &mut buf,
-                                        &scrollback,
-                                        on_output.as_ref(),
-                                    );
-                                }
-                            }
-                            None => {
-                                // reader thread が exit。最後にまとめて flush。
+        while !buf.is_empty() && safe_utf8_boundary(&buf) > 0 {
+            tokio::select! {
+                maybe = rx.recv() => {
+                    match maybe {
+                        Some(chunk) => {
+                            buf.extend_from_slice(&chunk);
+                            if should_flush_after_recv(buf.len()) {
                                 flush(
                                     &app,
                                     &data_event_name,
@@ -107,12 +110,10 @@ pub fn spawn_batcher(
                                     &scrollback,
                                     on_output.as_ref(),
                                 );
-                                return;
                             }
                         }
-                    }
-                    _ = tick.tick() => {
-                        if should_flush_on_tick(buf.len()) {
+                        None => {
+                            // reader thread が exit。最後にまとめて flush。
                             flush(
                                 &app,
                                 &data_event_name,
@@ -120,12 +121,24 @@ pub fn spawn_batcher(
                                 &scrollback,
                                 on_output.as_ref(),
                             );
+                            return;
                         }
+                    }
+                }
+                _ = tick.tick() => {
+                    if should_flush_on_tick(buf.len()) {
+                        flush(
+                            &app,
+                            &data_event_name,
+                            &mut buf,
+                            &scrollback,
+                            on_output.as_ref(),
+                        );
                     }
                 }
             }
         }
-    });
+    }
 }
 
 fn flush(

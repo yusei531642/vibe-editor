@@ -9,7 +9,7 @@
 //! 一切変えていない。Windows 専用のパス解決は `super::windows_resolve` に分離した。
 
 use crate::pty::batcher::{spawn_batcher, PtyOutputObserver};
-use crate::pty::scrollback::{new_scrollback, WriteBudget};
+use crate::pty::scrollback::{new_scrollback, scrollback_to_string, WriteBudget};
 use crate::{commands::terminal::command_validation, util::log_redact::redact_home};
 use anyhow::{anyhow, Result};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
@@ -19,7 +19,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
@@ -467,7 +467,7 @@ pub fn spawn_session(
         }) as PtyOutputObserver
     });
 
-    spawn_batcher(app.clone(), data_event, rx, scrollback.clone(), on_output);
+    let batcher_done = spawn_batcher(app.clone(), data_event, rx, scrollback.clone(), on_output);
 
     // exit watcher (blocking child.wait → emit exit event)
     // Issue #152: child.wait() の後に registry からも remove して、孤立 entry が
@@ -485,27 +485,50 @@ pub fn spawn_session(
                 .unwrap_or(-1),
             signal: None,
         };
-        if let Err(e) = app_for_exit.emit(&exit_event_clone, info.clone()) {
-            tracing::warn!("emit {exit_event_clone} failed: {e}");
-        }
         // child.wait() が返った時点で kill 不要だが、registry::remove は handle.kill() を呼ぶ。
         // SessionHandle::kill() は何度呼んでも安全 (ChildKiller 内部で no-op)。
         let removed = registry_for_exit.remove(&id_for_exit);
-        if let Some(handle) = removed {
+        let exit_record = removed.as_ref().and_then(|handle| {
             if let (Some(team_id), Some(agent_id)) =
                 (handle.team_id.clone(), handle.agent_id.clone())
             {
-                let output_tail = handle.scrollback_snapshot();
-                let app = app_for_exit.clone();
-                tauri::async_runtime::spawn(async move {
-                    let Some(state) = app.try_state::<crate::state::AppState>() else {
-                        return;
-                    };
-                    let hub = state.team_hub.clone();
-                    hub.record_agent_process_exit(&team_id, &agent_id, info.exit_code, output_tail)
-                        .await;
-                });
+                Some((team_id, agent_id, handle.scrollback.clone()))
+            } else {
+                None
             }
+        });
+        // Windows ConPTY は master drop 後に reader EOF → batcher final flush となる。
+        // `removed` を保持したまま待つと master も残り、final flush が進まない。
+        drop(removed);
+
+        let exit_flush_wait_timeout = Duration::from_secs(2);
+        match batcher_done.recv_timeout(exit_flush_wait_timeout) {
+            Ok(()) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                tracing::warn!(
+                    "[pty] timed out waiting for final data flush before exit event: {exit_event_clone}"
+                );
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
+        }
+
+        let output_tail = exit_record
+            .as_ref()
+            .and_then(|(_, _, scrollback)| scrollback_to_string(scrollback));
+
+        if let Err(e) = app_for_exit.emit(&exit_event_clone, info.clone()) {
+            tracing::warn!("emit {exit_event_clone} failed: {e}");
+        }
+        if let Some((team_id, agent_id, _)) = exit_record {
+            let app = app_for_exit.clone();
+            tauri::async_runtime::spawn(async move {
+                let Some(state) = app.try_state::<crate::state::AppState>() else {
+                    return;
+                };
+                let hub = state.team_hub.clone();
+                hub.record_agent_process_exit(&team_id, &agent_id, info.exit_code, output_tail)
+                    .await;
+            });
         }
     });
 
@@ -591,7 +614,10 @@ mod resolve_valid_cwd_tests {
             w.params.get("requested").map(String::as_str),
             Some("/definitely/does/not/exist/vibe")
         );
-        assert_eq!(w.params.get("fallback").map(String::as_str), Some(fb.as_str()));
+        assert_eq!(
+            w.params.get("fallback").map(String::as_str),
+            Some(fb.as_str())
+        );
     }
 
     #[test]
@@ -613,12 +639,18 @@ mod resolve_valid_cwd_tests {
             Some("/also/not/exists/vibe"),
         );
         let w = warning.expect("expected warning when both invalid");
-        assert_eq!(w.message_key, "terminal.cwd.invalidFallbackToProcessDefault");
+        assert_eq!(
+            w.message_key,
+            "terminal.cwd.invalidFallbackToProcessDefault"
+        );
         assert_eq!(
             w.params.get("requested").map(String::as_str),
             Some("/definitely/does/not/exist/vibe")
         );
-        assert_eq!(w.params.get("fallback").map(String::as_str), Some(cwd.as_str()));
+        assert_eq!(
+            w.params.get("fallback").map(String::as_str),
+            Some(cwd.as_str())
+        );
     }
 
     #[test]
@@ -638,8 +670,14 @@ mod resolve_valid_cwd_tests {
             "expected i18n key in payload, got {json}"
         );
         // params keys are passed as-is from Rust callsite (`requested` / `fallback`).
-        assert!(json.contains("\"requested\""), "params.requested missing in {json}");
-        assert!(json.contains("\"fallback\""), "params.fallback missing in {json}");
+        assert!(
+            json.contains("\"requested\""),
+            "params.requested missing in {json}"
+        );
+        assert!(
+            json.contains("\"fallback\""),
+            "params.fallback missing in {json}"
+        );
     }
 }
 
@@ -715,8 +753,8 @@ mod prepare_spawn_command_boundary_tests {
         // Issue #827: 再 normalize を廃止しても defense-in-depth の再チェックは維持する。
         // 正規化済み形 (command=cmd, args=[/c, ...]) を渡し /c が弾かれることを確認する。
         let o = opts("cmd".to_string(), &["/c", "echo", "unsafe"]);
-        let err = prepare_spawn_command(&o)
-            .expect_err("cmd immediate-exec must be rejected at boundary");
+        let err =
+            prepare_spawn_command(&o).expect_err("cmd immediate-exec must be rejected at boundary");
         assert!(
             err.to_string().contains("cmd immediate-exec flags"),
             "unexpected error: {err}"
