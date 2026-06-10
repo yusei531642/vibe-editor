@@ -385,7 +385,9 @@ export function useXtermInstance(
     // 文字が滲んだり位置が崩れる。requestAnimationFrame で次の paint 後に再計測する。
     requestAnimationFrame(() => {
       try {
-        fitRef.current?.fit();
+        if (!disableWebgl) {
+          fitRef.current?.fit();
+        }
         // Issue #123: fit() が cols/rows を変えなかった場合、内部的に refresh が走らず
         // 既に描画済みの行が古いフォント glyph のまま残ることがある。明示的に全行 refresh する。
         termRef.current?.refresh(0, (termRef.current.rows ?? 1) - 1);
