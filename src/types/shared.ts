@@ -333,6 +333,53 @@ export const DEFAULT_SETTINGS: AppSettings = {
   terminalForceUtf8: true
 };
 
+/**
+ * Issue #885: 設定モーダルの「デフォルトに戻す」が初期化してよい preference キーの
+ * 単一情報源。設定 UI で編集可能なキーのみを列挙する。
+ *
+ * 設定 UI に編集可能キーを追加したらこの配列にも追加すること。
+ * runtime 状態 (`notepad` / `lastOpenedRoot` / `recentProjects` / `workspaceFolders` /
+ * `hasCompletedOnboarding` / `fileTreeExpanded` / `fileTreeCollapsedRoots` /
+ * `claudeCodePanelWidth` / `sidebarWidth`) とユーザーデータ (`customAgents`) は
+ * **入れない**。「温存キーの列挙」ではなく「リセット対象の列挙」を採るのは、
+ * 将来のキー追加漏れの失敗モードが「そのキーだけリセットされない」(安全側) になり、
+ * 新規状態キーが Reset で消える (危険側) 再発を構造的に防げるため。
+ */
+export const RESETTABLE_SETTING_KEYS = [
+  'language',
+  'theme',
+  'uiFontFamily',
+  'uiFontSize',
+  'editorFontFamily',
+  'editorFontSize',
+  'terminalFontFamily',
+  'terminalFontSize',
+  'density',
+  'statusMascotVariant',
+  'claudeCommand',
+  'claudeArgs',
+  'claudeCwd',
+  'codexCommand',
+  'codexArgs',
+  'mcpAutoSetup',
+  'terminalForceUtf8'
+] as const satisfies readonly (keyof AppSettings)[];
+
+/**
+ * Issue #885: 現在の設定のうち `RESETTABLE_SETTING_KEYS` のキーだけを
+ * `DEFAULT_SETTINGS` の値で上書きした新しいオブジェクトを返す純関数。
+ * runtime 状態とユーザーデータは `current` の値を温存する。
+ */
+export function resetPreferencesToDefaults(current: AppSettings): AppSettings {
+  const next: AppSettings = { ...current };
+  for (const key of RESETTABLE_SETTING_KEYS) {
+    // キーごとに値型が異なる union への代入は TS が静的検証できないため
+    // ここだけ Record 経由で書き込む (キー自体は keyof AppSettings に束縛済み)。
+    (next as Record<string, unknown>)[key] = DEFAULT_SETTINGS[key];
+  }
+  return next;
+}
+
 /** git status --porcelain のエントリ */
 export interface GitFileChange {
   path: string;

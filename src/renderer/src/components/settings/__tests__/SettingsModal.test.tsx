@@ -5,8 +5,12 @@
  *   1. open=true で「設定」見出しと General セクション (Language / Density) が描画される
  *   2. Density のラジオを切り替えると Apply 押下時に onApply に新しい draft が渡る
  *   3. Apply 押下から 380ms 後に onClose が呼ばれる (saved → close 遷移)
- *   4. Reset ボタンは draft を DEFAULT_SETTINGS に戻すが、永続化は行わない
+ *   4. Reset ボタンは draft の preference キーだけを既定値に戻すが、永続化は行わない
  *      (= onApply 未押下なので外部 onApply は呼ばれない)
+ *
+ * Issue #885: Reset は RESETTABLE_SETTING_KEYS のみ初期化し、runtime 状態
+ * (notepad / recentProjects / workspaceFolders / lastOpenedRoot /
+ * hasCompletedOnboarding) とユーザーデータ (customAgents) を温存する。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
@@ -14,7 +18,11 @@ import type { ReactNode } from 'react';
 import { SettingsModal } from '../../SettingsModal';
 import { SettingsProvider } from '../../../lib/settings-context';
 import { ToastProvider } from '../../../lib/toast-context';
-import { DEFAULT_SETTINGS, type AppSettings } from '../../../../../types/shared';
+import {
+  DEFAULT_SETTINGS,
+  type AgentConfig,
+  type AppSettings
+} from '../../../../../types/shared';
 
 type TestWindow = Window &
   typeof globalThis & {
@@ -130,7 +138,7 @@ describe('SettingsModal', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('Reset は draft を DEFAULT_SETTINGS に戻すが onApply は呼ばない', async () => {
+  it('Reset は draft の preference を既定値に戻すが onApply は呼ばない', async () => {
     const onApply = vi.fn();
     const onClose = vi.fn();
     const initial: AppSettings = { ...DEFAULT_SETTINGS, density: 'comfortable' };
@@ -164,6 +172,60 @@ describe('SettingsModal', () => {
     // onApply / onClose は呼ばれない (Reset は draft 操作のみ)
     expect(onApply).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('Issue #885: Reset → Apply で runtime 状態と customAgents が温存される', async () => {
+    const onApply = vi.fn();
+    const onClose = vi.fn();
+    const agent: AgentConfig = {
+      id: 'custom-1',
+      name: 'My Agent',
+      command: 'my-agent',
+      args: '--flag'
+    };
+    const initial: AppSettings = {
+      ...DEFAULT_SETTINGS,
+      density: 'comfortable',
+      notepad: 'ターミナル間の受け渡しメモ',
+      recentProjects: ['C:\\proj-a', 'C:\\proj-b'],
+      workspaceFolders: ['C:\\proj-a\\packages'],
+      lastOpenedRoot: 'C:\\proj-a',
+      hasCompletedOnboarding: true,
+      customAgents: [agent]
+    };
+
+    render(
+      <Wrapper>
+        <SettingsModal
+          open
+          initial={initial}
+          onApply={onApply}
+          onClose={onClose}
+        />
+      </Wrapper>
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+    });
+
+    // Reset → Apply
+    fireEvent.click(screen.getByRole('button', { name: /デフォルトに戻す|Reset to defaults/ }));
+    fireEvent.click(screen.getByRole('button', { name: /適用して保存|Apply & save/ }));
+
+    expect(onApply).toHaveBeenCalledTimes(1);
+    const applied = onApply.mock.calls[0][0] as AppSettings;
+
+    // preference は既定値に戻る
+    expect(applied.density).toBe(DEFAULT_SETTINGS.density);
+
+    // runtime 状態とユーザーデータは温存される
+    expect(applied.notepad).toBe('ターミナル間の受け渡しメモ');
+    expect(applied.recentProjects).toEqual(['C:\\proj-a', 'C:\\proj-b']);
+    expect(applied.workspaceFolders).toEqual(['C:\\proj-a\\packages']);
+    expect(applied.lastOpenedRoot).toBe('C:\\proj-a');
+    expect(applied.hasCompletedOnboarding).toBe(true);
+    expect(applied.customAgents).toEqual([agent]);
   });
 
   it('カスタム画像のクリアは variant も DEFAULT_SETTINGS に戻す', async () => {
