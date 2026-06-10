@@ -824,6 +824,7 @@ mod handshake_auth_tests {
         let read_res = timeout(Duration::from_secs(5), reader.read_line(&mut line)).await;
         let outcome = match read_res {
             Ok(Ok(0)) | Ok(Err(_)) | Err(_) => None,
+            // safe-load-exempt: socket プロトコル行 (テスト) の parse。永続化ファイルではない。
             Ok(Ok(_)) => serde_json::from_str::<serde_json::Value>(line.trim()).ok(),
         };
 

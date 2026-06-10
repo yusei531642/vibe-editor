@@ -413,10 +413,13 @@ pub async fn handoffs_read(
     }
     let id = safe_segment(&handoff_id);
     let path = handoff_dir(&project_root, team_id.as_deref()).join(format!("{id}.json"));
-    let Ok(bytes) = fs::read(&path).await else {
-        return Ok(None);
-    };
-    Ok(serde_json::from_slice::<HandoffCheckpoint>(&bytes).ok())
+    // Issue #948: 生 `from_slice(...).ok()` の握り潰し読込を廃止し、safe_load 共通基盤 (#936)
+    // に統一する。破損 checkpoint は `.bak.<ts>` へ退避してから None に倒す。
+    Ok(
+        crate::commands::safe_load::safe_load_or_quarantine::<HandoffCheckpoint>(&path, None)
+            .await
+            .into_option(),
+    )
 }
 
 #[tauri::command]

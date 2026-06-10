@@ -63,6 +63,12 @@ jobs:
       - name: ESLint
         run: npm run lint
 
+      # Issue #948: 永続化ファイルの生 serde parse 握り潰し (`serde_json::from_*(...).ok()`)
+      # を検出して fail させる。読込は safe_load 共通基盤 (#936) 経由を強制する。
+      # 例外は該当行直前の `// safe-load-exempt: <理由>` で明示 opt-out。
+      - name: Safe-load lint (persistence parse guard)
+        run: npm run lint:safe-load
+
       # Issue #721: renderer の単体テスト (vitest) を CI で実行する。
       # 従来は package.json に test スクリプトと vitest.config.ts があるのに
       # CI で一度も走らず、renderer のリグレッションがフリーパスだった。

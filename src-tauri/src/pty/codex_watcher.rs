@@ -190,6 +190,8 @@ fn read_codex_session_meta(path: &Path) -> Option<(String, String)> {
     if reader.read_line(&mut first).ok()? == 0 {
         return None; // 空ファイル
     }
+    // safe-load-exempt: Codex CLI が書く rollout jsonl (外部ファイル) の read-only 参照。
+    // partial write は次イベントで recheck される設計で、退避も上書きもしない。
     let v: serde_json::Value = serde_json::from_str(first.trim()).ok()?;
     if v.get("type").and_then(|t| t.as_str()) != Some("session_meta") {
         return None;
