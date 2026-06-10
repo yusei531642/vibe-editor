@@ -776,17 +776,20 @@ async fn dispatch_injects(
                     // skill の guidelines 参照): inject_failed は send 後にしか来ないため、
                     // listener 登録前に emit が走る race は構造的に発生しない。
                     if let Some(app) = app {
-                        let payload = json!({
-                            "teamId": ctx.team_id,
-                            "fromAgentId": ctx.agent_id,
-                            "fromRole": ctx.role,
-                            "toAgentId": target_aid,
-                            "toRole": target_role,
-                            "messageId": guard.msg_id,
-                            "reasonCode": reason_code,
-                            "reasonMessage": reason_message,
-                            "failedAt": failed_at,
-                        });
+                        // Issue #959/#930: payload は events.rs の named struct。初回配送の
+                        // inject 失敗なので retried=false で team_inject.rs と形状を統一。
+                        let payload = crate::team_hub::events::InjectFailedEventPayload {
+                            team_id: ctx.team_id.clone(),
+                            from_agent_id: ctx.agent_id.clone(),
+                            from_role: ctx.role.clone(),
+                            to_agent_id: target_aid.clone(),
+                            to_role: target_role.clone(),
+                            message_id: guard.msg_id,
+                            reason_code: reason_code.to_string(),
+                            reason_message: reason_message.clone(),
+                            failed_at: failed_at.clone(),
+                            retried: false,
+                        };
                         if let Err(e) = app.emit("team:inject_failed", payload) {
                             tracing::warn!("emit team:inject_failed failed: {e}");
                         }

@@ -172,18 +172,19 @@ pub async fn team_send_retry_inject(
                 reason_message
             );
             // 再失敗時も `team:inject_failed` を emit して UI が state 更新できるようにする。
-            let payload = json!({
-                "teamId": args.team_id,
-                "fromAgentId": from_agent_id,
-                "fromRole": from_role,
-                "toAgentId": args.agent_id,
-                "toRole": "",
-                "messageId": args.message_id,
-                "reasonCode": reason_code,
-                "reasonMessage": reason_message,
-                "failedAt": failed_at,
-                "retried": true,
-            });
+            // Issue #959/#930: payload は events.rs の named struct (retried=true で再失敗を区別)。
+            let payload = crate::team_hub::events::InjectFailedEventPayload {
+                team_id: args.team_id.clone(),
+                from_agent_id: from_agent_id.clone(),
+                from_role: from_role.clone(),
+                to_agent_id: args.agent_id.clone(),
+                to_role: String::new(),
+                message_id: args.message_id,
+                reason_code: reason_code.to_string(),
+                reason_message: reason_message.clone(),
+                failed_at: failed_at.clone(),
+                retried: true,
+            };
             if let Err(e) = app.emit("team:inject_failed", payload) {
                 tracing::warn!("[retry_inject] emit team:inject_failed failed: {e}");
             }
