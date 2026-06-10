@@ -19,6 +19,14 @@ interface UseCanvasAutoSaveOptions {
   setRecent: Dispatch<SetStateAction<TeamHistoryEntry[]>>;
 }
 
+function nodeRenderedDimension(
+  direct: number | undefined,
+  styleValue: unknown
+): number | undefined {
+  const value = typeof direct === 'number' ? direct : styleValue;
+  return typeof value === 'number' ? Math.round(value) : undefined;
+}
+
 /** Phase 5: Canvas state が変わったら、active な team について team-history へ自動保存。
  *
  *  Issue #124: ドラッグ中は React Flow が onNodesChange で毎フレーム新しい nodes 配列を
@@ -101,8 +109,8 @@ export function useCanvasAutoSave(opts: UseCanvasAutoSaveOptions): void {
         // 位置は整数に丸めて key の微動を抑える (サブピクセル更新で再保存しない)
         x: Math.round(n.position.x),
         y: Math.round(n.position.y),
-        width: typeof n.style?.width === 'number' ? Math.round(n.style.width as number) : undefined,
-        height: typeof n.style?.height === 'number' ? Math.round(n.style.height as number) : undefined
+        width: nodeRenderedDimension(n.width, n.style?.width),
+        height: nodeRenderedDimension(n.height, n.style?.height)
       });
       if (p.latestHandoff) {
         const prev = entry.latestHandoff;
