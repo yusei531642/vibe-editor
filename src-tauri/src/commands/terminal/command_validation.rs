@@ -328,11 +328,14 @@ fn is_posix_immediate_exec_arg(token: &str) -> bool {
     let lower = token.trim().to_ascii_lowercase();
     // `--command=evil` の値分離形式に対応するため `=` の前で切る (fish のバイパス経路)。
     let head = lower.split('=').next().unwrap_or(&lower);
-    if head == "--command" || head == "--commands" {
-        return true;
+    if let Some(long) = head.strip_prefix("--") {
+        // `--command` / `--commands` への前置一致 (fish の wgetopt_long が受理する
+        // `--c`/`--co`/`--com` 等の unique prefix 略形を含む)。`--config` 等は一致しない。
+        return !long.is_empty()
+            && ("command".starts_with(long) || "commands".starts_with(long));
     }
-    // `--` 始まりの長形式 (上記以外) と素の `-` / `--` は対象外。
-    if head.starts_with("--") || !head.starts_with('-') || head.len() < 2 {
+    // 素の `-` / `--` (上で処理済み) と非 dash は対象外。
+    if !head.starts_with('-') || head.len() < 2 {
         return false;
     }
     let cluster = &head[1..];
@@ -865,6 +868,31 @@ mod command_normalization_tests {
             reject_immediate_exec_args("bash", &["--config=x".to_string()]).is_none(),
             "bash --config=x must be allowed"
         );
+    }
+
+    // Issue #890 三次レビュー: fish の wgetopt_long が受理する `--command` の unique prefix
+    // 略形 (`--c`/`--co`/`--com` 等) を素通りさせていたバイパスを塞ぐ。
+    #[test]
+    fn rejects_fish_long_prefix_abbreviations() {
+        // `--command` への前置一致になる略形はすべてブロック
+        for arg in ["--c", "--co", "--com", "--comm", "--comman", "--commands"] {
+            assert!(
+                reject_immediate_exec_args("fish", &[arg.to_string(), "evil".to_string()]).is_some(),
+                "expected {arg} to be blocked"
+            );
+        }
+        // 値分離形式の略形も塞ぐ
+        assert!(
+            reject_immediate_exec_args("fish", &["--com=evil".to_string()]).is_some(),
+            "fish --com=evil must be blocked"
+        );
+        // 前置一致しない長形式は誤検知させない
+        for arg in ["--config", "--login", "--no-config", "--init"] {
+            assert!(
+                reject_immediate_exec_args("fish", &[arg.to_string()]).is_none(),
+                "expected {arg} to be allowed"
+            );
+        }
     }
 
     #[test]
