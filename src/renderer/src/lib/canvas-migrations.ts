@@ -67,6 +67,14 @@ function clampZoom(zoom: number): number {
   return Math.min(Math.max(zoom, VIEWPORT_MIN_ZOOM), VIEWPORT_MAX_ZOOM);
 }
 
+function stripTransientNodeState(raw: Record<string, unknown>): Partial<Node<CardData>> {
+  const node: Record<string, unknown> = { ...raw };
+  delete node.dragging;
+  delete node.selected;
+  delete node.resizing;
+  return node as Partial<Node<CardData>>;
+}
+
 /**
  * crypto.randomUUID() ベースの安定 ID 生成。
  * Issue #157: 旧 `Date.now() + counter` 方式は zustand persist 復元 + リロード後の
@@ -129,7 +137,7 @@ export function normalizeCanvasState(input: unknown): NormalizedCanvasState {
               ? Math.floor(index / 6) * (NODE_H + 32)
               : rawY;
           return {
-            ...(raw as Partial<Node<CardData>>),
+            ...stripTransientNodeState(raw),
             id: typeof raw.id === 'string' && raw.id ? raw.id : newId(type),
             type,
             position: { x: safeX, y: safeY },

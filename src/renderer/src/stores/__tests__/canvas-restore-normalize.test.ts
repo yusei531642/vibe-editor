@@ -109,6 +109,29 @@ describe('normalizeCanvasState (Issue #385)', () => {
     expect(out.nodes[0]!.id.length).toBeGreaterThan(0);
   });
 
+  it('rehydrate 時に React Flow の transient interaction フラグを除去する', () => {
+    const out = normalizeCanvasState({
+      nodes: [
+        {
+          id: 'dragging-node',
+          type: 'agent',
+          position: { x: 0, y: 0 },
+          data: { cardType: 'agent', title: 'Leader' },
+          style: { width: 760, height: 460 },
+          dragging: true,
+          selected: true,
+          resizing: true
+        }
+      ]
+    });
+
+    expect(out.nodes).toHaveLength(1);
+    const node = out.nodes[0] as unknown as Record<string, unknown>;
+    expect(node.dragging).toBeUndefined();
+    expect(node.selected).toBeUndefined();
+    expect(node.resizing).toBeUndefined();
+  });
+
   it('teamLocks に boolean 以外の値が混じっていても落とす', () => {
     const out = normalizeCanvasState({
       nodes: [],
