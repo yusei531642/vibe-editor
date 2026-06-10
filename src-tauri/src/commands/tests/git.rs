@@ -7,7 +7,7 @@
 //! `git --version` を `which git` ではなく `Command::new("git").arg("--version").status()`
 //! で確認し、不在なら early return する (= "ok-skip" 扱い)。
 
-use crate::commands::git::{git_diff, git_status};
+use crate::commands::git::{git_diff_inner as git_diff, git_status_inner as git_status};
 use std::path::Path;
 use std::process::Command;
 use tempfile::tempdir;

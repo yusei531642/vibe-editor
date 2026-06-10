@@ -87,6 +87,18 @@ export function useProjectLoader(
       if (projectRoot && projectRoot !== root && !optsRef.current.confirmDiscardEditorTabs()) {
         return false;
       }
+      // Issue #954: backend の active project_root を先に確定させる。git_status / files_list
+      // 等の read 系 IPC は active root とのゲート照合 (#932 の read 側拡張) を通るため、
+      // 確定前に fetch を発火すると transient reject でパネルが空振りする。
+      // setProjectRoot は fs_watch 付け替え / asset scope 許可も担う既存 IPC で冪等
+      // (settings-context 側の同期 effect が後から同じ root で呼んでも無害)。
+      // 失敗 (system 領域 reject 等) 時はロード自体を中止してステータスに表示する。
+      try {
+        await window.api.app.setProjectRoot(root);
+      } catch (err) {
+        useUiStore.getState().setStatus(t('project.loadError', { error: String(err) }));
+        return false;
+      }
       setProjectRoot(root);
       useUiStore.getState().setStatus(t('project.loading'));
       setGitLoading(true);

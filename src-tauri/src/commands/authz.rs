@@ -125,6 +125,88 @@ pub async fn assert_active_project_root(
     Ok(active_canon)
 }
 
+/// Issue #954: read/probe 系 IPC (`files_list` / `files_read`) 用のゲート。
+///
+/// write 系 (#932) の `assert_active_project_root` は active project との厳格一致だが、
+/// ファイルツリーは multi-root workspace (`settings.workspaceFolders`, Issue #4) で
+/// active 以外の追加ルートも正当に列挙・閲覧するため、厳格一致だとこの機能が壊れる。
+/// 本 helper は「active project root **または** settings.json に永続化された
+/// workspaceFolders のいずれか」に canonicalize 一致する場合のみ許可する。
+///
+/// - workspaceFolders の参照先は **Rust 側 settings.json (SSOT)** であり、呼び出しごとの
+///   renderer 引数ではない (renderer が任意 path を主張しても settings に無ければ reject)。
+/// - settings 読込は active 不一致のときだけ走る (primary root の通常フローでは I/O 追加なし)。
+/// - active が未設定 (起動直後) でも workspaceFolders 一致なら許可する (起動時の
+///   追加ルート列挙を transient reject しない)。
+pub async fn assert_readable_project_root(
+    project_root_slot: &ArcSwapOption<String>,
+    given: &str,
+) -> CommandResult<PathBuf> {
+    let trimmed = given.trim();
+    if trimmed.is_empty() {
+        tracing::warn!(
+            given = %clamp_for_log(given),
+            "[authz] assert_readable_project_root rejected: empty project_root"
+        );
+        return Err(CommandError::authz("project_root is empty"));
+    }
+    let req_canon = match tokio::fs::canonicalize(trimmed).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(
+                given = %clamp_for_log(given),
+                error = %e,
+                "[authz] assert_readable_project_root rejected: canonicalize requested project_root failed"
+            );
+            return Err(CommandError::authz(format!(
+                "canonicalize requested project_root failed: {e}"
+            )));
+        }
+    };
+
+    // 1. active project root と一致するか (最頻パス、settings I/O なし)
+    let active = current_project_root(project_root_slot).unwrap_or_default();
+    if !active.trim().is_empty() {
+        if let Ok(active_canon) = tokio::fs::canonicalize(active.trim()).await {
+            if req_canon == active_canon {
+                return Ok(active_canon);
+            }
+        }
+    }
+
+    // 2. settings.workspaceFolders (Rust 側 SSOT) に含まれるか
+    if let Ok(settings) = crate::commands::settings::settings_load().await {
+        if matches_any_workspace_folder(&req_canon, &settings.workspace_folders).await {
+            return Ok(req_canon);
+        }
+    }
+
+    tracing::warn!(
+        requested = %clamp_for_log(&req_canon.to_string_lossy()),
+        "[authz] assert_readable_project_root rejected: not active project nor workspace folder"
+    );
+    Err(CommandError::authz(
+        "project_root does not match active project or workspace folders",
+    ))
+}
+
+/// `req_canon` (canonicalize 済み) が `folders` のいずれかと canonicalize 一致するか。
+/// 存在しない / canonicalize できない folder エントリは skip する。
+async fn matches_any_workspace_folder(req_canon: &std::path::Path, folders: &[String]) -> bool {
+    for folder in folders {
+        let f = folder.trim();
+        if f.is_empty() {
+            continue;
+        }
+        if let Ok(folder_canon) = tokio::fs::canonicalize(f).await {
+            if req_canon == folder_canon {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Issue #601 (Tier A-3): renderer 由来の `team_id` が `TeamHub` の active set に含まれるかを
 /// 検証する。`team_diagnostics_read` (#601) のような **renderer がリーダー視点を impersonate
 /// する** IPC で、過去 / 別プロジェクト / 任意 fabricated な team_id を probe されないように
@@ -264,6 +346,56 @@ mod tests {
         assert_eq!(
             canon,
             std::fs::canonicalize(project.path()).expect("canonicalize"),
+        );
+    }
+
+    // ---------- Issue #954: assert_readable_project_root ----------
+
+    #[tokio::test]
+    async fn readable_accepts_active_project_root() {
+        let project = tempdir().expect("project");
+        let lock = make_lock(Some(project.path().to_string_lossy().into_owned()));
+        let canon =
+            assert_readable_project_root(&lock, project.path().to_string_lossy().as_ref())
+                .await
+                .expect("active root must be readable");
+        assert_eq!(canon, std::fs::canonicalize(project.path()).unwrap());
+    }
+
+    #[tokio::test]
+    async fn readable_rejects_empty_and_foreign_paths() {
+        let active = tempdir().expect("active");
+        let foreign = tempdir().expect("foreign");
+        let lock = make_lock(Some(active.path().to_string_lossy().into_owned()));
+
+        let err = assert_readable_project_root(&lock, "").await.unwrap_err();
+        assert!(matches!(err, CommandError::Authz(ref m) if m.contains("empty")));
+
+        // active でも workspace folder でもない実在 path → reject
+        // (テスト環境の settings.json に tempdir が登録されていることはない)
+        let err = assert_readable_project_root(&lock, foreign.path().to_string_lossy().as_ref())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, CommandError::Authz(ref m) if m.contains("workspace folders")),
+            "got: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_folder_matching_is_canonical_and_skips_missing() {
+        let folder = tempdir().expect("folder");
+        let req = std::fs::canonicalize(folder.path()).unwrap();
+        // 実在 folder は raw 表記が違っても canonicalize 一致で許可
+        let raw = format!("{}{}", folder.path().to_string_lossy(), std::path::MAIN_SEPARATOR);
+        assert!(matches_any_workspace_folder(&req, &[raw]).await);
+        // 存在しない folder / 空文字エントリは skip され、一致しない
+        assert!(
+            !matches_any_workspace_folder(
+                &req,
+                &["".into(), "   ".into(), folder.path().join("nope").to_string_lossy().into_owned()]
+            )
+            .await
         );
     }
 
