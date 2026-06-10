@@ -10,6 +10,8 @@
 
 pub mod bridge;
 pub mod error;
+// Issue #930: Tauri イベント payload の名前付き struct 集約 (shared.ts と同期)。
+pub mod events;
 // Issue #526: vibe-team の advisory file locks (worker のファイル編集衝突を warn する)。
 pub mod file_locks;
 pub mod inject;
@@ -20,6 +22,8 @@ pub mod role_lint;
 // inject 本文を「summary + attached: <path>」に置換する spool 機構。
 pub mod spool;
 pub mod state;
+// Issue #935: タスク status ドメイン値の SSOT (許容値 / alias 正規化 / open・done 判定)。
+pub mod task_status;
 
 /// Issue #494: TeamHub 周辺の integration test を集約する test-only module。
 /// `protocol::permissions` の matrix 検証等を `tests/permissions.rs` に置く。

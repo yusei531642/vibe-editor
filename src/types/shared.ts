@@ -885,6 +885,21 @@ export interface TeamOrchestrationSummary {
 }
 
 /**
+ * Issue #935: タスク status の canonical 値。Rust 側 SSOT
+ * (`src-tauri/src/team_hub/task_status.rs` の `TaskStatus`) と同期する。
+ * 受信境界 (team_update_task) で legacy alias ("completed"/"complete"/"canceled")
+ * は canonical 値へ正規化されるため、新規データはこの union のみになる。
+ */
+export type TeamTaskStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'done'
+  | 'blocked'
+  | 'needs_input'
+  | 'failed'
+  | 'cancelled';
+
+/**
  * Issue #514: TeamHub orchestration state の TS 投影。
  * Rust 側 `commands/team_state.rs` の `TeamOrchestrationState` (camelCase) に揃える。
  * dashboard / 履歴復元 / 統合フェーズビューなど renderer 全体で参照する。
@@ -893,6 +908,11 @@ export interface TeamTaskSnapshot {
   id: number;
   assignedTo: string;
   description: string;
+  /**
+   * 通常は `TeamTaskStatus` の canonical 値。永続化済みの古いデータには
+   * legacy alias / 当時の任意文字列が残りうるため型は string のまま
+   * (判定は Rust 側 `task_status.rs` が正規化して行う)。
+   */
   status: string;
   createdBy: string;
   createdAt: string;
@@ -1000,7 +1020,8 @@ export interface WorkerReportPayload {
  */
 export interface UpdateTaskArgs {
   taskId: number;
-  status: 'pending' | 'in_progress' | 'done' | 'completed' | 'blocked' | string;
+  /** Issue #935: trailing `| string` を撤去し canonical union のみ許可する */
+  status: TeamTaskStatus;
   summary?: string;
   blockedReason?: string;
   nextAction?: string;
@@ -1505,6 +1526,55 @@ export interface RecruitAckArgs {
   reason?: string | null;
   /** 失敗 phase。Rust 側は enum で受けるため `RecruitAckPhase` の値のみを送る。 */
   phase?: RecruitAckPhase | null;
+}
+
+/**
+ * Issue #930: `team:recruit-request` に同梱される動的ロール定義。
+ * Rust 側 `team_hub/events.rs` の `RecruitRequestDynamicRole` (camelCase) と同期。
+ */
+export interface RecruitRequestDynamicRole {
+  id: string;
+  label: string;
+  description: string;
+  instructions: string;
+  instructionsJa?: string | null;
+}
+
+/**
+ * Issue #930: `team:recruit-request` イベントの payload。
+ * Rust 側 `team_hub/events.rs` の `RecruitRequestPayload` (camelCase) と同期。
+ * emit 箇所は recruit.rs (worker 採用) と create_leader.rs (leader 生成) の 2 つで、
+ * leader 経路では waitPolicy キーが載らない。
+ */
+export interface RecruitRequestPayload {
+  teamId: string;
+  requesterAgentId: string;
+  requesterRole: string;
+  newAgentId: string;
+  roleProfileId: string;
+  engine: 'claude' | 'codex';
+  agentLabelHint?: string;
+  waitPolicy?: WaitPolicy;
+  /** Leader が team_recruit(role_definition=...) で 1 ステップ採用した場合に同梱される */
+  dynamicRole?: RecruitRequestDynamicRole | null;
+}
+
+/**
+ * Issue #930: `team:handoff` イベントの payload。
+ * Rust 側 `team_hub/events.rs` の `HandoffEventPayload` (camelCase) と同期。
+ * emit 箇所は send.rs (初回配送, retried=false) と team_inject.rs (再送, retried=true)。
+ */
+export interface HandoffPayload {
+  teamId: string;
+  fromAgentId: string;
+  fromRole: string;
+  toAgentId: string;
+  toRole: string;
+  preview: string;
+  messageId: number;
+  timestamp?: string;
+  /** retry 配送 (`app_team_retry_inject`) による再送なら true */
+  retried?: boolean;
 }
 
 // ---------- Window Effects (Issue #260) ----------

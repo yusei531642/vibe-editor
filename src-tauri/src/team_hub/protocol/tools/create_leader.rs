@@ -140,16 +140,19 @@ pub async fn team_create_leader(
 
     let app = hub.app_handle.lock().await.clone();
     if let Some(app) = &app {
-        let payload = json!({
-            "teamId": ctx.team_id,
-            "requesterAgentId": ctx.agent_id,
-            "requesterRole": ctx.role,
-            "newAgentId": new_agent_id,
-            "roleProfileId": role_profile_id,
-            "engine": resolved_engine,
-            "agentLabelHint": agent_label_hint,
-            "dynamicRole": Value::Null,
-        });
+        // Issue #930: recruit.rs と同じ named struct で emit し、emit 箇所間の形状分岐を防ぐ。
+        // leader は wait_policy 概念を持たないので None (キー自体を載せない、従来互換)。
+        let payload = crate::team_hub::events::RecruitRequestPayload {
+            team_id: ctx.team_id.clone(),
+            requester_agent_id: ctx.agent_id.clone(),
+            requester_role: ctx.role.clone(),
+            new_agent_id: new_agent_id.clone(),
+            role_profile_id: role_profile_id.clone(),
+            engine: resolved_engine.clone(),
+            agent_label_hint: agent_label_hint.clone(),
+            wait_policy: None,
+            dynamic_role: None,
+        };
         if let Err(e) = app.emit("team:recruit-request", payload) {
             hub.cancel_pending_recruit(&new_agent_id).await;
             return Err(RecruitError::new(

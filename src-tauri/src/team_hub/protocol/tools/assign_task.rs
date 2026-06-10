@@ -394,7 +394,8 @@ pub async fn team_assign_task(
             id: task_id,
             assigned_to: assignee.to_string(),
             description: description.to_string(),
-            status: "pending".into(),
+            // Issue #935: 初期 status も SSOT の canonical 値を使う
+            status: crate::team_hub::task_status::TaskStatus::Pending.as_str().into(),
             created_by: ctx.role.clone(),
             created_at: assigned_at.clone(),
             updated_at: None,

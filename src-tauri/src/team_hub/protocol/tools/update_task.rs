@@ -3,6 +3,7 @@
 //! Issue #373 Phase 2 で `protocol.rs` から切り出し。
 
 use crate::commands::team_state::TaskDoneEvidenceSnapshot;
+use crate::team_hub::task_status::TaskStatus;
 use crate::team_hub::{CallContext, TeamHub};
 use chrono::Utc;
 use serde_json::{json, Value};
@@ -30,13 +31,6 @@ fn normalize_criterion(s: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
         .to_ascii_lowercase()
-}
-
-fn is_done_status(status: &str) -> bool {
-    matches!(
-        status.trim().to_ascii_lowercase().as_str(),
-        "done" | "completed" | "complete"
-    )
 }
 
 fn done_evidence_invalid(message: impl Into<String>) -> ToolError {
@@ -203,7 +197,19 @@ pub async fn team_update_task(
     args: &Value,
 ) -> Result<Value, ToolError> {
     let task_id = parse_task_id(args)?;
-    let status = args.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    // Issue #935: status は受信境界で TaskStatus に parse する。旧実装は無検証で
+    // 任意文字列 (欠落時は空文字) を保存しており、消費側ごとの許容値リストと
+    // 食い違ってタスクが状態不明のまま open 滞留する事故を生んでいた。
+    let status_raw = args.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    let status = TaskStatus::parse(status_raw).ok_or_else(|| {
+        ToolError::new(
+            "update_task_invalid_status",
+            format!(
+                "status must be one of {:?} (got {status_raw:?})",
+                TaskStatus::allowed_values()
+            ),
+        )
+    })?;
     let done_evidence = parse_done_evidence(args)?;
     let summary = optional_string(args, "summary", "summary");
     let blocked_reason = optional_string(args, "blocked_reason", "blockedReason");
@@ -257,7 +263,7 @@ pub async fn team_update_task(
                 agent_id = %ctx.agent_id,
                 role = %ctx.role,
                 task_id = task_id,
-                attempted_status = %status,
+                attempted_status = %status_raw,
                 task_assigned_to = %task.assigned_to,
                 "[team_update_task] permission denied: caller is not assignee nor leader"
             );
@@ -267,7 +273,7 @@ pub async fn team_update_task(
                 "update task assigned to another agent",
             ));
         }
-        if is_done_status(status) && !task.done_criteria.is_empty() {
+        if status.is_done() && !task.done_criteria.is_empty() {
             let missing = task
                 .done_criteria
                 .iter()
@@ -284,7 +290,8 @@ pub async fn team_update_task(
                 return Err(done_evidence_missing(missing));
             }
         }
-        task.status = status.to_string();
+        // alias ("completed" 等) は parse で正規化済みなので canonical 値が保存される
+        task.status = status.as_str().to_string();
         task.updated_at = Some(now_iso.clone());
         if !done_evidence.is_empty() {
             task.done_evidence = done_evidence.clone();
@@ -322,17 +329,13 @@ pub async fn team_update_task(
                 let _ = team.next_actions.pop_front();
             }
         }
-        let status_lower = status.to_ascii_lowercase();
-        if matches!(
-            status_lower.as_str(),
-            "done" | "completed" | "complete" | "blocked"
-        ) {
+        if status.is_done() || status == TaskStatus::Blocked {
             let kind = optional_string(args, "report_kind", "reportKind")
-                .unwrap_or_else(|| status_lower.clone());
+                .unwrap_or_else(|| status.as_str().to_string());
             let report_summary = summary
                 .clone()
                 .or_else(|| task_summary.clone())
-                .unwrap_or_else(|| format!("Task #{task_id} marked {status}"));
+                .unwrap_or_else(|| format!("Task #{task_id} marked {}", status.as_str()));
             team.worker_reports
                 .push_back(crate::commands::team_state::WorkerReportSnapshot {
                     id: format!("task-{task_id}-{}", now_iso.replace([':', '.'], "-")),
@@ -370,6 +373,111 @@ mod tests {
     use crate::pty::SessionRegistry;
     use crate::team_hub::{TeamHub, TeamInfo, TeamTask};
     use std::sync::Arc;
+
+    /// Issue #935: 旧実装は status 無検証 (欠落時は空文字保存) で、タスクが状態不明の
+    /// まま open 滞留していた。受信境界で不正値・欠落を構造化エラーで拒否することを固定する。
+    #[tokio::test]
+    async fn update_task_rejects_invalid_or_missing_status() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let team_id = "team-status-validation".to_string();
+        {
+            let mut state = hub.state.lock().await;
+            let team = state
+                .teams
+                .entry(team_id.clone())
+                .or_insert_with(TeamInfo::default);
+            team.tasks.push_back(TeamTask {
+                id: 1,
+                assigned_to: "worker".into(),
+                description: "validate status".into(),
+                status: "pending".into(),
+                created_by: "leader".into(),
+                created_at: "2026-06-10T10:00:00Z".into(),
+                updated_at: None,
+                summary: None,
+                blocked_reason: None,
+                next_action: None,
+                artifact_path: None,
+                blocked_by_human_gate: false,
+                required_human_decision: None,
+                target_paths: Vec::new(),
+                lock_conflicts: Vec::new(),
+                pre_approval: None,
+                done_criteria: Vec::new(),
+                done_evidence: Vec::new(),
+            });
+        }
+        let ctx = CallContext {
+            team_id: team_id.clone(),
+            role: "worker".into(),
+            agent_id: "worker-1".into(),
+        };
+
+        for args in [
+            json!({ "task_id": 1 }),                          // status 欠落
+            json!({ "task_id": 1, "status": "" }),            // 空文字
+            json!({ "task_id": 1, "status": "wip" }),         // 未知値
+        ] {
+            let err = team_update_task(&hub, &ctx, &args)
+                .await
+                .expect_err("invalid status must be rejected");
+            assert_eq!(err.code, "update_task_invalid_status", "args={args}");
+        }
+
+        // 不正リクエストで task が汚れていない (pending のまま)
+        let state = hub.state.lock().await;
+        let team = state.teams.get(&team_id).unwrap();
+        assert_eq!(team.tasks[0].status, "pending");
+    }
+
+    /// Issue #935: legacy alias は受理しつつ canonical 値へ正規化して保存する。
+    #[tokio::test]
+    async fn update_task_normalizes_legacy_status_aliases() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let team_id = "team-status-alias".to_string();
+        {
+            let mut state = hub.state.lock().await;
+            let team = state
+                .teams
+                .entry(team_id.clone())
+                .or_insert_with(TeamInfo::default);
+            team.tasks.push_back(TeamTask {
+                id: 1,
+                assigned_to: "worker".into(),
+                description: "alias normalization".into(),
+                status: "in_progress".into(),
+                created_by: "leader".into(),
+                created_at: "2026-06-10T10:00:00Z".into(),
+                updated_at: None,
+                summary: None,
+                blocked_reason: None,
+                next_action: None,
+                artifact_path: None,
+                blocked_by_human_gate: false,
+                required_human_decision: None,
+                target_paths: Vec::new(),
+                lock_conflicts: Vec::new(),
+                pre_approval: None,
+                done_criteria: Vec::new(),
+                done_evidence: Vec::new(),
+            });
+        }
+        let ctx = CallContext {
+            team_id: team_id.clone(),
+            role: "worker".into(),
+            agent_id: "worker-1".into(),
+        };
+
+        team_update_task(&hub, &ctx, &json!({ "task_id": 1, "status": "Completed" }))
+            .await
+            .expect("legacy alias must be accepted");
+
+        let state = hub.state.lock().await;
+        let team = state.teams.get(&team_id).unwrap();
+        assert_eq!(team.tasks[0].status, "done", "alias must be normalized");
+        // done 扱いなので worker_reports にも report が積まれる (kind は canonical)
+        assert_eq!(team.worker_reports.back().unwrap().kind, "done");
+    }
 
     #[tokio::test]
     async fn update_task_marks_caller_as_seen_activity() {

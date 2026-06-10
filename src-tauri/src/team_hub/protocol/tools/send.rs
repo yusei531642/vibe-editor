@@ -720,17 +720,19 @@ async fn dispatch_injects(
                         .record_delivery(hub, &ctx.team_id, &target_aid, &delivered_at)
                         .await;
                     // Phase 3: hand-off イベントを Canvas にブロードキャスト
+                    // (Issue #930: payload は events.rs の名前付き struct。初回配送なので retried=false)
                     if let Some(app) = app {
-                        let payload = json!({
-                            "teamId": ctx.team_id,
-                            "fromAgentId": ctx.agent_id,
-                            "fromRole": ctx.role,
-                            "toAgentId": target_aid,
-                            "toRole": target_role,
-                            "preview": preview,
-                            "messageId": guard.msg_id,
-                            "timestamp": guard.timestamp,
-                        });
+                        let payload = crate::team_hub::events::HandoffEventPayload {
+                            team_id: ctx.team_id.clone(),
+                            from_agent_id: ctx.agent_id.clone(),
+                            from_role: ctx.role.clone(),
+                            to_agent_id: target_aid.clone(),
+                            to_role: target_role.clone(),
+                            preview: preview.clone(),
+                            message_id: guard.msg_id,
+                            timestamp: guard.timestamp.clone(),
+                            retried: false,
+                        };
                         if let Err(e) = app.emit("team:handoff", payload) {
                             tracing::warn!("emit team:handoff failed: {e}");
                         }

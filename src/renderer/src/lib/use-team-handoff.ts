@@ -1,23 +1,19 @@
 import { useEffect, useRef } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import type { HandoffPayload } from '../../../types/shared';
 
 /**
  * Issue #158: Rust TeamHub の `team:handoff` イベントは Canvas と ActivityFeed の
  * 両方が listen しており、同じイベントに対して 2 つの Tauri リスナーが並ぶ構造になっていた。
  * 将来カウントロジック等で重複事故を起こさないよう、Tauri 側の listen を 1 本にまとめ、
  * 各購読者は in-memory の Set 経由で broadcast を受け取る方式に変更する。
+ *
+ * Issue #930: HandoffPayload は shared.ts に移動し、Rust 側 team_hub/events.rs の
+ * `HandoffEventPayload` struct と同期する (retried フィールドの欠落を解消)。
+ * 既存 importer 互換のため re-export する。
  */
 
-export interface HandoffPayload {
-  teamId: string;
-  fromAgentId: string;
-  fromRole: string;
-  toAgentId: string;
-  toRole: string;
-  preview: string;
-  messageId: number;
-  timestamp?: string;
-}
+export type { HandoffPayload } from '../../../types/shared';
 
 type Listener = (p: HandoffPayload) => void;
 const listeners = new Set<Listener>();

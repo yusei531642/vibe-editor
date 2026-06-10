@@ -29,7 +29,11 @@ import type { CardData } from '../stores/canvas';
 import { useRoleProfiles } from './role-profiles-context';
 import { ackRecruit } from './recruit-ack';
 import { findRecruitPosition } from './canvas-recruit-position';
-import type { RecruitRescuedPayload, WaitPolicy } from '../../../types/shared';
+import type {
+  RecruitRequestPayload,
+  RecruitRescuedPayload,
+  WaitPolicy
+} from '../../../types/shared';
 import { useToast } from './toast-context';
 import { useT } from './i18n';
 import {
@@ -55,26 +59,10 @@ function resolveHiddenThresholdMs(): number {
   return DEFAULT_HIDDEN_THRESHOLD_MS;
 }
 
-interface RecruitRequestPayload {
-  teamId: string;
-  requesterAgentId: string;
-  requesterRole: string;
-  newAgentId: string;
-  roleProfileId: string;
-  engine: 'claude' | 'codex';
-  agentLabelHint?: string;
-  customInstructions?: string;
-  waitPolicy?: WaitPolicy;
-  /** Leader が team_recruit(role_definition=...) で 1 ステップ採用した場合に同梱される */
-  dynamicRole?: {
-    id: string;
-    label: string;
-    description: string;
-    instructions: string;
-    instructionsJa?: string;
-  } | null;
-}
-
+// Issue #930: RecruitRequestPayload は shared.ts に移動し、Rust 側
+// team_hub/events.rs の同名 struct と同期する。旧ローカル定義にあった
+// customInstructions は Rust 側のどの emit にも存在しないファントムフィールド
+// (常に undefined) だったため削除した。
 interface DismissRequestPayload {
   teamId: string;
   agentId: string;
@@ -113,12 +101,6 @@ function waitPolicyInstructions(policy: WaitPolicy | undefined): string {
   ].join('\n');
 }
 
-function mergeCustomInstructions(
-  raw: string | undefined,
-  waitPolicy: WaitPolicy | undefined
-): string {
-  return [raw?.trim(), waitPolicyInstructions(waitPolicy)].filter(Boolean).join('\n\n');
-}
 
 export function useRecruitListener(): void {
   // 動的ロールを RoleProfilesContext に投入するためのフック関数
@@ -268,7 +250,10 @@ export function useRecruitListener(): void {
             organization: requesterOrganization,
             // Issue #117: AgentNodeCard が拾って Claude(--append-system-prompt) /
             // Codex(model_instructions_file) 両方の経路に注入する正本フィールド。
-            customInstructions: mergeCustomInstructions(p.customInstructions, p.waitPolicy),
+            // Issue #930: 旧 p.customInstructions は Rust 側に存在しないファントム
+            // フィールドで常に undefined だったため、waitPolicy 由来の指示のみを使う
+            // (実行時挙動は従来と同一)。
+            customInstructions: waitPolicyInstructions(p.waitPolicy),
             waitPolicy: p.waitPolicy ?? 'strict'
           }
         });
