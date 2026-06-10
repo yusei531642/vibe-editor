@@ -105,9 +105,23 @@ export function useTerminalTabsPersistence(
   const cwdMapRef = useRef(new Map<number, string>());
   /** 永続化ファイルの直近キャッシュ。save 時に他プロジェクトの entry を保持する用途 */
   const fileCacheRef = useRef<PersistedTerminalTabsFile | null>(null);
+  /** schema guard 等で保存が拒否されたときの警告 toast はセッション 1 回に抑える */
+  const saveWarningShownRef = useRef(false);
   /** size/cwd の Map 更新を save effect に観測させるための tick */
   const [tickNonce, setTickNonce] = useState(0);
   const bumpTick = useCallback(() => setTickNonce((n) => n + 1), []);
+  const warnSaveFailed = useCallback((err: unknown) => {
+    const detail = err instanceof Error ? err.message : String(err);
+    console.warn('[terminal-tabs] save failed:', err);
+    if (saveWarningShownRef.current) return;
+    saveWarningShownRef.current = true;
+    showToastRef.current(
+      tRef.current('terminalTabs.saveFailed', {
+        error: detail || 'unknown error'
+      }),
+      { tone: 'warning' }
+    );
+  }, []);
 
   // mount 時に 1 度だけ load → 復元
   useEffect(() => {
@@ -225,13 +239,28 @@ export function useTerminalTabsPersistence(
         lastSavedAt: new Date().toISOString(),
         byProject: { ...prevFile.byProject, [projectRoot]: slot }
       };
-      fileCacheRef.current = nextFile;
-      void api.terminalTabs.save(nextFile).catch((err) => {
-        console.warn('[terminal-tabs] save failed:', err);
-      });
+      void api.terminalTabs
+        .save(nextFile)
+        .then((result) => {
+          if (!result.ok) {
+            warnSaveFailed(result.error ?? 'unknown error');
+            return;
+          }
+          fileCacheRef.current = nextFile;
+        })
+        .catch((err) => {
+          warnSaveFailed(err);
+        });
     }, SAVE_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [terminalTabs, activeTerminalTabId, projectRoot, isReady, tickNonce]);
+  }, [
+    terminalTabs,
+    activeTerminalTabId,
+    projectRoot,
+    isReady,
+    tickNonce,
+    warnSaveFailed
+  ]);
 
   const reportSize = useCallback(
     (tabId: number, cols: number, rows: number) => {
