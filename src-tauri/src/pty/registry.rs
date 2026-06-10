@@ -373,6 +373,58 @@ impl SessionRegistry {
         }
     }
 
+    /// Issue #951: シャットダウン / 再起動経路専用の **同期** kill_all。
+    ///
+    /// `kill_all()` の `SessionHandle::kill()` は Windows で process-tree kill (taskkill) を
+    /// detached thread に逃がして即返るため、直後に `app.exit(0)` / `app.restart()` で
+    /// 自プロセスごと消えると taskkill が走り切る前に殺され、子プロセス (claude/codex +
+    /// その配下の MCP) が孤児として残る競合があった。
+    ///
+    /// 本メソッドは各 session の process-tree kill を並列 thread で実行し、全完了 (または
+    /// `timeout`) まで呼び出し thread をブロックして待つ。blocking なので async context
+    /// からは `spawn_blocking` 経由で呼ぶこと。
+    pub fn kill_all_blocking(&self, timeout: Duration) {
+        let sessions: Vec<Arc<SessionHandle>> = {
+            let mut g = recover(self.inner.lock());
+            g.by_agent.clear();
+            g.by_session_key.clear();
+            g.by_id.drain().map(|(_, s)| s).collect()
+        };
+        if sessions.is_empty() {
+            return;
+        }
+        let total = sessions.len();
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        for s in sessions {
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                s.kill_blocking();
+                let _ = tx.send(());
+            });
+        }
+        drop(tx);
+        let deadline = Instant::now() + timeout;
+        let mut done = 0usize;
+        while done < total {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match rx.recv_timeout(remaining) {
+                Ok(()) => done += 1,
+                Err(_) => break, // timeout または全 sender drop
+            }
+        }
+        if done < total {
+            tracing::warn!(
+                "[pty] kill_all_blocking timeout: {done}/{total} sessions confirmed killed \
+                 within {timeout:?} — proceeding with shutdown"
+            );
+        } else {
+            tracing::info!("[pty] kill_all_blocking finished ({done}/{total})");
+        }
+    }
+
     /// Issue #937: チーム解散 (`app_cleanup_team_mcp` → `clear_team`) 時に、当該 `team_id` に
     /// 属する PTY を **backend 側で確実に回収** する。回収した session 数を返す。
     ///
@@ -660,6 +712,50 @@ mod attach_lookup_tests {
         // 片方のみ Some → false (片側のみ team 紐付けが残っている状況は cross-team risk)
         assert!(!team_ids_match(Some("team-a"), None));
         assert!(!team_ids_match(None, Some("team-b")));
+    }
+}
+
+#[cfg(test)]
+mod kill_all_blocking_tests {
+    //! Issue #951: `kill_all_blocking` が「返った時点で全 session の kill が完了している」
+    //! ことを検証する。detached thread に逃がす `kill_all` と違い、直後に exit(0) /
+    //! restart してもプロセス回収が走り切っている保証が欲しい経路 (シャットダウン) 用。
+    use super::*;
+    use crate::pty::session::test_support::handle_with;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn kill_all_blocking_kills_all_sessions_before_returning() {
+        let reg = SessionRegistry::new();
+        let k1 = Arc::new(AtomicUsize::new(0));
+        let k2 = Arc::new(AtomicUsize::new(0));
+        assert!(reg
+            .insert_if_absent(
+                "s1".to_string(),
+                handle_with(Some("a1"), Some("k1"), None, k1.clone()),
+            )
+            .is_ok());
+        assert!(reg
+            .insert_if_absent(
+                "s2".to_string(),
+                handle_with(Some("a2"), Some("k2"), None, k2.clone()),
+            )
+            .is_ok());
+
+        reg.kill_all_blocking(Duration::from_secs(5));
+
+        // 返った時点で各 session の killer が呼ばれている (>=1 は Drop 経由の冪等二重 kill 許容)
+        assert!(k1.load(Ordering::SeqCst) >= 1, "s1 must be killed before return");
+        assert!(k2.load(Ordering::SeqCst) >= 1, "s2 must be killed before return");
+        assert!(reg.get("s1").is_none());
+        assert!(reg.get("s2").is_none());
+    }
+
+    #[test]
+    fn kill_all_blocking_on_empty_registry_returns_immediately() {
+        let reg = SessionRegistry::new();
+        // session 0 件なら channel 待ちに入らず即返る (hang しないことの smoke)
+        reg.kill_all_blocking(Duration::from_millis(50));
     }
 }
 

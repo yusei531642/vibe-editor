@@ -19,6 +19,9 @@ pub mod path_norm;
 pub mod registry;
 pub mod scrollback;
 pub mod session;
+// Issue #950: PTY child の OS 寿命バインド (Windows Job Object)。
+#[cfg(windows)]
+pub mod win_job_object;
 
 /// Issue #494: PTY (`batcher` flush 境界条件等) の integration test を集約する test-only module。
 #[cfg(test)]

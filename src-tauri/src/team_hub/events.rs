@@ -65,3 +65,26 @@ pub struct HandoffEventPayload {
     /// retry 経由の配送なら true。UI が「再送で届いた」ことを区別して描画できる。
     pub retried: bool,
 }
+
+/// `team:inject_failed` の payload。shared.ts の `TeamInjectFailedEvent` と同期。
+///
+/// emit 箇所:
+/// - `protocol/tools/send.rs` (初回配送の inject 失敗 — retried フィールド無し)
+/// - `commands/team_inject.rs` (`app_team_retry_inject` の再失敗 — retried=true)
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InjectFailedEventPayload {
+    pub team_id: String,
+    pub from_agent_id: String,
+    pub from_role: String,
+    pub to_agent_id: String,
+    pub to_role: String,
+    pub message_id: u32,
+    pub reason_code: String,
+    pub reason_message: String,
+    pub failed_at: String,
+    /// retry IPC 経由の再失敗なら true。初回配送 (send.rs) では false。
+    /// TS 側 `TeamInjectFailedEvent.retried` は optional だが、struct 化に伴い常に
+    /// 明示送出する (false も載る) ことで emit 箇所間の形状を統一する。
+    pub retried: bool,
+}
