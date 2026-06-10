@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Issue #948: 永続化ファイルの「生 serde parse 握り潰し読込」を CI で検出する tripwire。
+// Issue #948: 永続化ファイルの「生 serde parse 握りつぶし読込」を CI で検出する tripwire。
 //
 // #936 の根本原因は、新しい永続化ストアを書く開発者が `serde_json::from_*(...).ok()`
 // (parse 失敗を黙って捨てて default に倒す) を最も簡単な前例としてコピーできること。
@@ -58,7 +58,7 @@ for (const file of walk(scanRoot)) {
 
 if (violations.length > 0) {
   console.error(
-    '[check-safe-load] 永続化ファイルの生 serde parse 握り潰し (`serde_json::from_*(...).ok()`) を検出しました。\n' +
+    '[check-safe-load] 永続化ファイルの生 serde parse 握りつぶし (`serde_json::from_*(...).ok()`) を検出しました。\n' +
       '`crate::commands::safe_load::safe_load_or_quarantine` / `safe_parse_or_quarantine` を使うか、\n' +
       '永続化ファイルの読込でない場合は該当行の直前に `// safe-load-exempt: <理由>` を書いてください (Issue #948)。\n'
   );
