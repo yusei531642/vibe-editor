@@ -136,6 +136,22 @@ describe('canvas-arrange / tidyTerminals', () => {
     expect(positions[1].x - positions[0].x).toBe(NODE_W + ARRANGE_GAP_PX.normal);
     expect(positions[2].y - positions[0].y).toBe(NODE_H + ARRANGE_GAP_PX.normal);
   });
+
+  it('clears direct width/height attributes so tidy size wins after manual resize', () => {
+    const manuallyResized = {
+      ...makeNode('t1', 'terminal', { x: 0, y: 0 }, { width: NODE_W, height: NODE_H }),
+      width: 980,
+      height: 640
+    } as Node<CardData>;
+
+    const out = tidyTerminals([manuallyResized]);
+    const node = out[0] as unknown as Record<string, unknown>;
+
+    expect(node.width).toBeUndefined();
+    expect(node.height).toBeUndefined();
+    expect(out[0].style?.width).toBe(NODE_W);
+    expect(out[0].style?.height).toBe(NODE_H);
+  });
 });
 
 describe('canvas-arrange / unifyTerminalSize', () => {
@@ -158,5 +174,21 @@ describe('canvas-arrange / unifyTerminalSize', () => {
     const nodes: Node<CardData>[] = [makeNode('e1', 'editor', { x: 0, y: 0 })];
     const out = unifyTerminalSize(nodes);
     expect(out).toBe(nodes);
+  });
+
+  it('clears direct width/height attributes so unified style size is rendered', () => {
+    const manuallyResized = {
+      ...makeNode('a1', 'agent', { x: 10, y: 20 }, { width: 500, height: 300 }),
+      width: 900,
+      height: 700
+    } as Node<CardData>;
+
+    const out = unifyTerminalSize([manuallyResized]);
+    const node = out[0] as unknown as Record<string, unknown>;
+
+    expect(node.width).toBeUndefined();
+    expect(node.height).toBeUndefined();
+    expect(out[0].style?.width).toBe(NODE_W);
+    expect(out[0].style?.height).toBe(NODE_H);
   });
 });

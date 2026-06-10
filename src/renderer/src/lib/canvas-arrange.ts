@@ -31,6 +31,13 @@ export function computeColumns(count: number): number {
   return Math.max(1, Math.ceil(Math.sqrt(count)));
 }
 
+function withoutDirectDimensions(node: Node<CardData>): Node<CardData> {
+  const next = { ...node } as Record<string, unknown>;
+  delete next.width;
+  delete next.height;
+  return next as Node<CardData>;
+}
+
 interface ArrangeOptions {
   /** ピッチ (cards 間 gap) */
   gap?: ArrangeGap;
@@ -72,14 +79,15 @@ export function tidyTerminals(
     const idx = orderById.get(n.id) ?? 0;
     const col = idx % cols;
     const row = Math.floor(idx / cols);
+    const node = withoutDirectDimensions(n);
     return {
-      ...n,
+      ...node,
       position: {
         x: originX + col * (width + gap),
         y: originY + row * (height + gap)
       },
       style: {
-        ...(n.style ?? {}),
+        ...(node.style ?? {}),
         width,
         height
       }
@@ -100,10 +108,11 @@ export function unifyTerminalSize(
   const next = nodes.map((n) => {
     if (!isTerminalLike(n)) return n;
     touched = true;
+    const node = withoutDirectDimensions(n);
     return {
-      ...n,
+      ...node,
       style: {
-        ...(n.style ?? {}),
+        ...(node.style ?? {}),
         width,
         height
       }
