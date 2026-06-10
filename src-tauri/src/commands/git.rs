@@ -7,7 +7,21 @@
 // - 既存実装は status と diff のみで、シェル呼び出しのオーバーヘッドは無視できる
 
 use serde::Serialize;
+use tauri::{AppHandle, Manager};
 use tokio::process::Command;
+
+/// Issue #954: renderer 由来の `project_root` を active project と照合する read/probe ゲート。
+/// git パネル / DiffCard は active project (primary root) のみを対象とするため、
+/// files 系と違い workspaceFolders 許可は不要で厳格一致 (`assert_active_project_root`) を使う。
+async fn assert_project_root_via(
+    app: &AppHandle,
+    project_root: &str,
+) -> crate::commands::error::CommandResult<()> {
+    let state = app.state::<crate::state::AppState>();
+    crate::commands::authz::assert_active_project_root(&state.project_root, project_root)
+        .await
+        .map(|_| ())
+}
 
 /// Windows で GUI アプリ (Tauri) からコンソールプロセス (git.exe) を起動すると、
 /// 既定では一瞬コンソールウィンドウが表示されてしまう。
@@ -241,7 +255,20 @@ fn is_not_git_repo_error(err: &str) -> bool {
 }
 
 #[tauri::command]
-pub async fn git_status(project_root: String) -> GitStatus {
+pub async fn git_status(app: AppHandle, project_root: String) -> GitStatus {
+    // Issue #954: read/probe 系も project_root ゲートに通す (任意リポジトリ probe の阻止)。
+    if let Err(e) = assert_project_root_via(&app, &project_root).await {
+        return GitStatus {
+            ok: false,
+            error: Some(e.to_string()),
+            ..Default::default()
+        };
+    }
+    git_status_inner(project_root).await
+}
+
+/// ゲート通過後の本体 (#932 の files_write_inner と同じ分割。テストはこちらを呼ぶ)。
+pub(crate) async fn git_status_inner(project_root: String) -> GitStatus {
     // repo root
     let repo_root = match run_git(&["rev-parse", "--show-toplevel"], &project_root).await {
         Ok(s) => s.trim().to_string(),
@@ -288,10 +315,28 @@ pub async fn git_status(project_root: String) -> GitStatus {
 
 #[tauri::command]
 pub async fn git_diff(
+    app: AppHandle,
     project_root: String,
     rel_path: String,
     // Issue #19: rename の場合、HEAD 側 (移動前) のパス。UI (GitFileChange.originalPath) から渡す。
     // 未指定なら rel_path を両側に使う (通常の変更)。
+    original_rel_path: Option<String>,
+) -> GitDiffResult {
+    // Issue #954: read/probe 系も project_root ゲートに通す (任意リポジトリの差分 probe の阻止)。
+    if let Err(e) = assert_project_root_via(&app, &project_root).await {
+        return GitDiffResult {
+            ok: false,
+            error: Some(e.to_string()),
+            ..Default::default()
+        };
+    }
+    git_diff_inner(project_root, rel_path, original_rel_path).await
+}
+
+/// ゲート通過後の本体 (#932 の files_write_inner と同じ分割。テストはこちらを呼ぶ)。
+pub(crate) async fn git_diff_inner(
+    project_root: String,
+    rel_path: String,
     original_rel_path: Option<String>,
 ) -> GitDiffResult {
     // 旧実装と同じく `git diff -- <path>` ではなく、HEAD と worktree を別々に取って

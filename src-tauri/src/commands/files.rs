@@ -28,6 +28,19 @@ async fn assert_project_root_via(app: &AppHandle, project_root: &str) -> Command
         .await
         .map(|_| ())
 }
+
+/// Issue #954: read/probe 系 (`files_list` / `files_read`) 用ゲート。write 系 (#932) と違い、
+/// multi-root workspace の追加ルート (settings.workspaceFolders, Issue #4) も正当な読み取り
+/// 対象なので、active 厳格一致ではなく `assert_readable_project_root` を使う。
+async fn assert_readable_project_root_via(
+    app: &AppHandle,
+    project_root: &str,
+) -> CommandResult<()> {
+    let state = app.state::<AppState>();
+    crate::commands::authz::assert_readable_project_root(&state.project_root, project_root)
+        .await
+        .map(|_| ())
+}
 use hash::{mtime_ms_of, sha256_hex};
 // safe_join は外部 (commands/git.rs) からも呼ばれるので pub use で再 export する。
 pub use path_safety::safe_join;
@@ -101,7 +114,16 @@ pub struct FileWriteResult {
 }
 
 #[tauri::command]
-pub async fn files_list(project_root: String, rel_path: String) -> FileListResult {
+pub async fn files_list(app: AppHandle, project_root: String, rel_path: String) -> FileListResult {
+    // Issue #954: read/probe 系も project_root ゲートに通す (任意ディレクトリ列挙の阻止)。
+    if let Err(e) = assert_readable_project_root_via(&app, &project_root).await {
+        return FileListResult {
+            ok: false,
+            error: Some(e.to_string()),
+            dir: rel_path,
+            entries: vec![],
+        };
+    }
     let dir = safe_join(&project_root, &rel_path);
     let dir = match dir {
         Some(p) if p.is_dir() => p,
@@ -162,7 +184,16 @@ pub async fn files_list(project_root: String, rel_path: String) -> FileListResul
 }
 
 #[tauri::command]
-pub async fn files_read(project_root: String, rel_path: String) -> FileReadResult {
+pub async fn files_read(app: AppHandle, project_root: String, rel_path: String) -> FileReadResult {
+    // Issue #954: read/probe 系も project_root ゲートに通す (任意ファイル読取の阻止)。
+    if let Err(e) = assert_readable_project_root_via(&app, &project_root).await {
+        return FileReadResult {
+            ok: false,
+            error: Some(e.to_string()),
+            path: rel_path,
+            ..Default::default()
+        };
+    }
     let Some(abs) = safe_join(&project_root, &rel_path) else {
         return FileReadResult {
             ok: false,
