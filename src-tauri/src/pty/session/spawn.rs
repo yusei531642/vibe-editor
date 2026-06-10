@@ -356,6 +356,15 @@ pub fn spawn_session(
     let process_id = child.process_id();
     let killer = child.clone_killer();
 
+    // Issue #950: child を kill-on-close Job Object に bind し、vibe-editor 本体の
+    // クラッシュ / 強制終了でも OS が handle close 経由で子プロセスツリーを回収できる
+    // ようにする。作成 / assign 失敗は warn のみ (従来の taskkill 経路で回収継続)。
+    #[cfg(windows)]
+    let job = process_id
+        .and_then(|pid| {
+            crate::pty::win_job_object::KillOnCloseJob::create().filter(|job| job.assign_pid(pid))
+        });
+
     // reader thread (blocking IO -> mpsc)
     let mut reader = pair.master.try_clone_reader()?;
     let mut writer = pair.master.take_writer()?;
@@ -551,6 +560,8 @@ pub fn spawn_session(
         scrollback,
         // Issue #632: watcher cancel token は session 起動と同寿命。kill() / Drop で flip。
         watcher_cancel: Arc::new(AtomicBool::new(false)),
+        #[cfg(windows)]
+        job,
     })
 }
 

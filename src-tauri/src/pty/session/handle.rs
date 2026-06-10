@@ -65,6 +65,12 @@ pub struct SessionHandle {
     /// 観測して即時 exit する。これにより「session が 1 秒で死んでも watcher が 60 秒
     /// 並走する」リソース蓄積を防ぐ。
     pub(super) watcher_cancel: Arc<AtomicBool>,
+    /// Issue #950: child プロセスツリーを bind した kill-on-close Job Object。
+    /// この handle の drop (= タブ close / kill_all / vibe-editor 異常死による OS の
+    /// handle 強制 close) で job 内の全プロセス (孫含む) が OS により kill される。
+    /// Job 作成 / assign に失敗した場合は None (taskkill 経路のみで回収)。
+    #[cfg(windows)]
+    pub(super) job: Option<crate::pty::win_job_object::KillOnCloseJob>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -369,6 +375,8 @@ pub(crate) mod test_support {
             }),
             scrollback: new_scrollback(),
             watcher_cancel: Arc::new(AtomicBool::new(false)),
+            #[cfg(windows)]
+            job: None,
         }
     }
 
