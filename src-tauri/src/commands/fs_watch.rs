@@ -128,7 +128,18 @@ pub(crate) fn is_safe_watch_root(root: &Path) -> bool {
 
     #[cfg(windows)]
     {
-        let lower = canon.to_string_lossy().to_lowercase();
+        // Issue #963: `Path::canonicalize` は Windows で `\\?\C:\...` の verbatim prefix を
+        // 付ける。素の `to_string_lossy` だと denylist の `c:\windows` 前方一致が
+        // `\\?\c:\windows` に対して常に false になり、C:\Windows / ドライブルートが
+        // 「safe」と誤判定されていた (= #639 の project_root setter ガードも無効化)。
+        // verbatim prefix (`\\?\` / `\\?\UNC\`) を剥がしてから比較する。
+        let raw = canon.to_string_lossy();
+        let stripped = raw
+            .strip_prefix(r"\\?\UNC\")
+            .map(|rest| format!(r"\\{rest}"))
+            .or_else(|| raw.strip_prefix(r"\\?\").map(str::to_string))
+            .unwrap_or_else(|| raw.to_string());
+        let lower = stripped.to_lowercase();
         if lower.len() <= 3 && lower.ends_with(":\\") {
             return false;
         }
@@ -323,11 +334,46 @@ pub fn start_for_root(app: AppHandle, root: String) {
 #[cfg(test)]
 mod tests {
     use super::{
-        claim_active_for_root, current_active, file_name_is_ignored, path_is_ignored,
-        rollback_active_if_current, ACTIVE_WATCHER_GEN,
+        claim_active_for_root, current_active, file_name_is_ignored, is_safe_watch_root,
+        path_is_ignored, rollback_active_if_current, ACTIVE_WATCHER_GEN,
     };
     use once_cell::sync::Lazy;
     use std::ffi::OsStr;
+
+    /// Issue #963: canonicalize の verbatim prefix (`\\?\C:\...`) で system 領域 denylist が
+    /// 素通りしていた回帰を固定する。system ディレクトリは safe と判定してはならない。
+    #[test]
+    fn system_directories_are_not_safe_watch_roots() {
+        #[cfg(windows)]
+        for sys in ["C:\\Windows", "C:\\Program Files", "C:\\"] {
+            let p = std::path::Path::new(sys);
+            if p.exists() {
+                assert!(
+                    !is_safe_watch_root(p),
+                    "{sys} must be rejected as an unsafe watch root"
+                );
+            }
+        }
+        #[cfg(unix)]
+        for sys in ["/etc", "/usr", "/"] {
+            let p = std::path::Path::new(sys);
+            if p.exists() {
+                assert!(
+                    !is_safe_watch_root(p),
+                    "{sys} must be rejected as an unsafe watch root"
+                );
+            }
+        }
+    }
+
+    /// 通常のプロジェクトディレクトリ (tempdir) は safe と判定される。
+    #[test]
+    fn ordinary_project_dir_is_safe_watch_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("my-project");
+        std::fs::create_dir(&sub).unwrap();
+        assert!(is_safe_watch_root(&sub));
+    }
     use std::path::Path;
     use std::sync::Mutex;
 

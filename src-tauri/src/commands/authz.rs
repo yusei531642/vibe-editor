@@ -125,16 +125,21 @@ pub async fn assert_active_project_root(
     Ok(active_canon)
 }
 
-/// Issue #954: read/probe 系 IPC (`files_list` / `files_read`) 用のゲート。
+/// Issue #954 / #963: ファイル系 IPC (`files_*`) 用のゲート。
 ///
-/// write 系 (#932) の `assert_active_project_root` は active project との厳格一致だが、
-/// ファイルツリーは multi-root workspace (`settings.workspaceFolders`, Issue #4) で
-/// active 以外の追加ルートも正当に列挙・閲覧するため、厳格一致だとこの機能が壊れる。
-/// 本 helper は「active project root **または** settings.json に永続化された
-/// workspaceFolders のいずれか」に canonicalize 一致する場合のみ許可する。
+/// `assert_active_project_root` は active project との厳格一致だが、ファイルツリーは
+/// multi-root workspace (`settings.workspaceFolders`, Issue #4) で active 以外の追加
+/// ルートも正当に列挙・閲覧・編集するため、厳格一致だとこの機能が壊れる
+/// (#954 で read 側、#963 で write 側に適用)。本 helper は「active project root
+/// **または** settings.json に永続化された workspaceFolders のいずれか」に
+/// canonicalize 一致する場合のみ許可する。
 ///
 /// - workspaceFolders の参照先は **Rust 側 settings.json (SSOT)** であり、呼び出しごとの
 ///   renderer 引数ではない (renderer が任意 path を主張しても settings に無ければ reject)。
+/// - workspaceFolders 経由の許可は `fs_watch::is_safe_watch_root` (system 領域 / home /
+///   drive root の denylist) も併せて要求する (#963)。settings_save は workspaceFolders を
+///   無検証で受けるため、ここで通過させると write 系がシステム領域に届いてしまう。
+///   active root は `app_set_project_root` 入口で同検証済み (#639) なので再検証しない。
 /// - settings 読込は active 不一致のときだけ走る (primary root の通常フローでは I/O 追加なし)。
 /// - active が未設定 (起動直後) でも workspaceFolders 一致なら許可する (起動時の
 ///   追加ルート列挙を transient reject しない)。
@@ -190,8 +195,9 @@ pub async fn assert_readable_project_root(
     ))
 }
 
-/// `req_canon` (canonicalize 済み) が `folders` のいずれかと canonicalize 一致するか。
-/// 存在しない / canonicalize できない folder エントリは skip する。
+/// `req_canon` (canonicalize 済み) が `folders` のいずれかと canonicalize 一致し、かつ
+/// その folder が `is_safe_watch_root` (system 領域 / home / drive root denylist, #963)
+/// を通るか。存在しない / canonicalize できない / unsafe な folder エントリは skip する。
 ///
 /// PR #962 auto-review: canonicalize は folder ごとに blocking I/O を伴うため、NFS/SMB 等の
 /// 低速マウントで folder 数分の直列待ちにならないよう `JoinSet` で並列実行し、
@@ -204,7 +210,33 @@ async fn matches_any_workspace_folder(req_canon: &std::path::Path, folders: &[St
             continue;
         }
         let f = f.to_string();
-        set.spawn(async move { tokio::fs::canonicalize(&f).await.ok() });
+        set.spawn(async move {
+            // Issue #963: settings_save は workspaceFolders を無検証で受けるため、
+            // ゲート通過条件としてここで safe root 検証を要求する (write 系の防御)。
+            // `is_safe_watch_root` は **raw path を受け取り内部で canonicalize する**
+            // 設計 (app_set_project_root #639 と同じ呼び方)。canonicalize 済みの
+            // verbatim-prefix (`\\?\C:\...`) 付き path を渡すと Windows の denylist
+            // (`c:\windows` 前方一致) が素通りするため、raw `f` を渡すこと。
+            //
+            // PR #968 auto-review: `is_safe_watch_root` は同期 blocking I/O
+            // (`std::fs::canonicalize` + metadata) を含むため、Tokio ワーカースレッドを
+            // 塞がないよう spawn_blocking に逃がす。canonicalize も同 blocking task 内で
+            // 行い、async fs 呼び出しとの二重 I/O も避ける。
+            tokio::task::spawn_blocking(move || {
+                if !crate::commands::fs_watch::is_safe_watch_root(std::path::Path::new(&f)) {
+                    tracing::warn!(
+                        folder = %clamp_for_log(&f),
+                        "[authz] workspace folder skipped by safe-root check"
+                    );
+                    return None;
+                }
+                // 比較は canonicalize 後の path で行う (req_canon も canonicalize 済み)。
+                std::fs::canonicalize(&f).ok()
+            })
+            .await
+            .ok()
+            .flatten()
+        });
     }
     while let Some(res) = set.join_next().await {
         if let Ok(Some(folder_canon)) = res {
@@ -389,6 +421,21 @@ mod tests {
         assert!(
             matches!(err, CommandError::Authz(ref m) if m.contains("workspace folders")),
             "got: {err}"
+        );
+    }
+
+    /// Issue #963: settings_save は workspaceFolders を無検証で受けるため、system 領域が
+    /// 登録されていてもゲートは通さない (write 系がシステム領域に届くのを防ぐ)。
+    #[tokio::test]
+    async fn workspace_folder_in_system_area_is_skipped() {
+        #[cfg(windows)]
+        let sys = "C:\\Windows";
+        #[cfg(unix)]
+        let sys = "/etc";
+        let req = std::fs::canonicalize(sys).expect("system dir must exist");
+        assert!(
+            !matches_any_workspace_folder(&req, &[sys.to_string()]).await,
+            "system-area workspace folder must be rejected by safe-root check"
         );
     }
 
