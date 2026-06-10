@@ -6,7 +6,6 @@
 use crate::commands::files::hash::{mtime_ms_of, sha256_hex};
 use crate::commands::team_state::TeamOrchestrationSummary;
 use crate::pty::path_norm::normalize_project_root;
-use crate::util::backup::write_timestamped_backup;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -230,25 +229,25 @@ async fn fingerprint_from_bytes(path: &Path, bytes: &[u8]) -> DiskFingerprint {
     }
 }
 
+/// Issue #947: parse 失敗時の退避は safe_load 共通基盤 (#936) に委譲する。
+/// fingerprint (#642) と同じ bytes を見る必要があるため bytes ベースの
+/// `safe_parse_or_quarantine` を使う (退避規約は従来と同一で挙動等価)。
 async fn parse_entries_or_backup(
     path: &Path,
     bytes: &[u8],
     context: &str,
 ) -> Vec<TeamHistoryEntry> {
-    match serde_json::from_slice::<Vec<TeamHistoryEntry>>(bytes) {
-        Ok(entries) => entries,
-        Err(e) => {
+    use crate::commands::safe_load::{safe_parse_or_quarantine, LoadOutcome};
+    match safe_parse_or_quarantine::<Vec<TeamHistoryEntry>>(path, bytes, Some(0o600)).await {
+        LoadOutcome::Loaded(entries) => entries,
+        LoadOutcome::Corrupted => {
             tracing::warn!(
-                "[team_history] parse failed during {context} (backing up then using empty history): {e}"
+                "[team_history] parse failed during {context}; falling back to empty history"
             );
-            match write_timestamped_backup(path, bytes, Some(0o600)).await {
-                Ok(bak) => {
-                    tracing::info!("[team_history] wrote timestamped backup: {}", bak.display())
-                }
-                Err(berr) => tracing::warn!("[team_history] backup write failed: {berr}"),
-            }
             Vec::new()
         }
+        // bytes は読込済みなので Absent は到達しないが、enum の網羅性のため empty に倒す
+        LoadOutcome::Absent => Vec::new(),
     }
 }
 

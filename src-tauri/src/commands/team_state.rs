@@ -348,27 +348,19 @@ pub async fn load_orchestration_state(
 /// handoff・open task・human gate 状態がすべて **silent に消失** していた (最も発見が難しい
 /// 類の障害)。fail-safe にするため:
 ///   - read 失敗は NotFound (= 未保存 / 初回起動) を silent に、それ以外の IO エラーは warn。
-///   - parse 失敗は warn + 破損ファイルを `.corrupt` へ best-effort 退避する (後から調査・
-///     手動復旧でき、退避後の原本は次回 save で健全な状態に上書きされる)。
+///   - parse 失敗は warn + 破損ファイルを `.bak.<ts>` へ best-effort コピー退避する (#947 で
+///     safe_load 共通基盤へ統一。後から調査・手動復旧でき、原本は次回 save で上書きされる)。
 ///   - 読み込んだ schema_version が現行と異なる場合は warn (`normalize` が無条件で上書きする
 ///     前に検知する。将来の migration 判定の足場)。
 async fn load_orchestration_state_from_path(path: &Path) -> Option<TeamOrchestrationState> {
-    let bytes = match fs::read(path).await {
-        Ok(b) => b,
-        Err(e) => {
-            // NotFound は通常状態 (team-state 未保存 / 初回起動) なので silent。
-            // それ以外の IO エラー (権限 / I/O 障害) は痕跡を残す。
-            if e.kind() != std::io::ErrorKind::NotFound {
-                tracing::warn!(
-                    "[team_state] failed to read orchestration state at {}: {e}",
-                    path.display()
-                );
-            }
-            return None;
-        }
-    };
-    match serde_json::from_slice::<TeamOrchestrationState>(&bytes) {
-        Ok(state) => {
+    use crate::commands::safe_load::{safe_load_or_quarantine, LoadOutcome};
+    // Issue #947: 個別の `.corrupt` rename 退避を safe_load 共通基盤 (#936) の
+    // `.bak.<ts>` コピー退避へ統一する。挙動差は「原本が rename で消える」→「原本残置 +
+    // 次回 save が上書き」だが、復旧可能性 (forensic 用 backup が残る) は同等で、
+    // コピー退避は原本 path を一切触らないため、#853 の TOCTOU (並行 save が置いた
+    // valid file を `.corrupt` へ追い出す race) が再検証ロジック無しで構造的に消える。
+    match safe_load_or_quarantine::<TeamOrchestrationState>(path, None).await {
+        LoadOutcome::Loaded(state) => {
             if state.schema_version != TEAM_STATE_SCHEMA_VERSION {
                 tracing::warn!(
                     "[team_state] orchestration state at {} has schema_version {} (expected {}); \
@@ -380,106 +372,17 @@ async fn load_orchestration_state_from_path(path: &Path) -> Option<TeamOrchestra
             }
             Some(normalize(state))
         }
-        Err(e) => {
+        LoadOutcome::Absent => None,
+        LoadOutcome::Corrupted => {
             tracing::warn!(
-                "[team_state] failed to parse orchestration state at {}: {e}; backing up corrupt \
-                 file and skipping restore (task/handoff/human-gate state will be recreated on next save)",
+                "[team_state] failed to parse orchestration state at {}; corrupt original was \
+                 quarantined to .bak.<ts> and restore is skipped (task/handoff/human-gate state \
+                 will be recreated on next save)",
                 path.display()
             );
-            // Issue #853: load 時に読んだ破損 bytes を渡し、退避直前に再 read して
-            // 内容が変化していない (= まだ破損したまま) ときだけ退避する。並行 save が
-            // valid file を置いていれば bytes が変化しているので退避を skip し、valid state を
-            // `.corrupt` へ巻き込まない (TOCTOU の解消)。
-            backup_corrupt_state_file(path, &bytes).await;
             None
         }
     }
-}
-
-/// Issue #830: 破損した team-state JSON を `<file>.corrupt` (衝突時は `.corrupt.1` ..
-/// `.corrupt.9`) に best-effort で退避する。退避できれば原本は消えるので、次回
-/// `save_orchestration_state` が健全な状態で上書きできる。退避失敗 (rename 不可 / backup
-/// が増え過ぎ) は warn に留め、load 自体は失敗させない。
-///
-/// Issue #853 (TOCTOU 修正): `corrupt_bytes` は load 時に読んで parse に失敗した原本の bytes。
-/// rename は lock 外で走るため、その間に並行 `save_orchestration_state` (atomic_write) が
-/// **valid な file** を同 path に置き換えうる。素朴に rename するとこの valid file を
-/// `.corrupt` へ追い出し、save 直後の健全な state を失う race があった。退避の直前に現在の
-/// file bytes を再 read し、`corrupt_bytes` と **完全一致するときだけ** 退避する。一致しない
-/// (= 並行 save で内容が変わった / 既に他経路で退避され消えた) 場合は退避を skip し、active
-/// path を温存する。これで「valid file を退避しない」不変条件を保証する。
-async fn backup_corrupt_state_file(path: &Path, corrupt_bytes: &[u8]) {
-    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
-        tracing::warn!(
-            "[team_state] cannot derive file name for corrupt backup of {}",
-            path.display()
-        );
-        return;
-    };
-    let Some(parent) = path.parent() else {
-        tracing::warn!(
-            "[team_state] cannot derive parent dir for corrupt backup of {}",
-            path.display()
-        );
-        return;
-    };
-    // Issue #853: 退避直前の再検証。並行 save が割り込んで file が valid に置き換わって
-    // いれば bytes が変化しているので退避せずに抜ける (valid state を巻き込まない)。
-    // read 失敗 (並行退避で消えた等) も退避対象が消えたとみなし skip する。
-    match fs::read(path).await {
-        Ok(current) if current == corrupt_bytes => {
-            // 依然として load 時の破損 bytes と同一。退避を続行する。
-        }
-        Ok(_) => {
-            tracing::info!(
-                "[team_state] corrupt backup skipped: {} changed since load (likely a concurrent \
-                 valid save); not evicting the active file",
-                path.display()
-            );
-            return;
-        }
-        Err(e) => {
-            tracing::info!(
-                "[team_state] corrupt backup skipped: cannot re-read {} ({e}); file may have been \
-                 replaced or removed by a concurrent save",
-                path.display()
-            );
-            return;
-        }
-    }
-    // 既存 backup を上書きしない (forensic 情報を保持する) ため、空きスロットを探す。
-    for idx in 0..=9u32 {
-        let candidate_name = if idx == 0 {
-            format!("{file_name}.corrupt")
-        } else {
-            format!("{file_name}.corrupt.{idx}")
-        };
-        let candidate = parent.join(&candidate_name);
-        if fs::metadata(&candidate).await.is_ok() {
-            continue;
-        }
-        match fs::rename(path, &candidate).await {
-            Ok(()) => {
-                tracing::warn!(
-                    "[team_state] moved corrupt orchestration state to {}",
-                    candidate.display()
-                );
-                return;
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "[team_state] failed to move corrupt state {} -> {}: {e}",
-                    path.display(),
-                    candidate.display()
-                );
-                return;
-            }
-        }
-    }
-    tracing::warn!(
-        "[team_state] too many corrupt backups already exist for {}; leaving file in place",
-        path.display()
-    );
 }
 
 pub async fn save_orchestration_state(
@@ -602,6 +505,23 @@ mod tests {
         assert_eq!(state.pending_tasks[0].id, 2);
     }
 
+    /// tempdir 内の `<name>.bak.<ts>` 退避ファイル一覧を返すテストヘルパ。
+    async fn list_bak_files(dir: &std::path::Path, name: &str) -> Vec<std::path::PathBuf> {
+        let prefix = format!("{name}.bak.");
+        let mut out = Vec::new();
+        let mut rd = fs::read_dir(dir).await.unwrap();
+        while let Ok(Some(entry)) = rd.next_entry().await {
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(&prefix)
+            {
+                out.push(entry.path());
+            }
+        }
+        out
+    }
+
     /// Issue #830: 未保存 (ファイル不在) は silent に None を返し、退避ファイルも作らない。
     #[tokio::test]
     async fn load_from_path_returns_none_for_missing_file() {
@@ -609,10 +529,8 @@ mod tests {
         let path = dir.path().join("missing.json");
         assert!(load_orchestration_state_from_path(&path).await.is_none());
         assert!(
-            fs::metadata(dir.path().join("missing.json.corrupt"))
-                .await
-                .is_err(),
-            "missing file must not produce a corrupt backup"
+            list_bak_files(dir.path(), "missing.json").await.is_empty(),
+            "missing file must not produce a quarantine backup"
         );
     }
 
@@ -641,10 +559,14 @@ mod tests {
         assert_eq!(loaded.pending_tasks.len(), 1);
     }
 
-    /// Issue #830 (core): 破損 JSON は silent に捨てず、`.corrupt` に退避してから None を返す。
-    /// 退避後は原本が消えるので、次回 save が健全な状態で上書きできる。
+    /// Issue #830 (core) + #947: 破損 JSON は silent に捨てず、`.bak.<ts>` へコピー退避して
+    /// から None を返す。コピー退避なので原本は残置され、次回 save が上書きする。
+    ///
+    /// Issue #853 (TOCTOU) の不変条件「並行 save が置いた valid file を退避で巻き込まない」は、
+    /// コピー退避が原本 path を一切触らない (rename しない) ことで構造的に保証される
+    /// (旧実装は rename だったため退避直前の bytes 再検証が必要だった)。
     #[tokio::test]
-    async fn load_from_path_backs_up_corrupt_json() {
+    async fn load_from_path_quarantines_corrupt_json_without_touching_original() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("team.json");
         let corrupt = b"{ this is not valid json ]";
@@ -653,101 +575,16 @@ mod tests {
         let loaded = load_orchestration_state_from_path(&path).await;
         assert!(loaded.is_none(), "corrupt JSON must not silently load");
 
-        // 原本は退避されて消え、`.corrupt` に同じ内容が残っている。
-        assert!(
-            fs::metadata(&path).await.is_err(),
-            "corrupt original should be moved away"
-        );
-        let backup = dir.path().join("team.json.corrupt");
-        let backup_bytes = fs::read(&backup).await.expect("corrupt backup must exist");
-        assert_eq!(backup_bytes, corrupt);
-    }
-
-    /// Issue #830: 既に `.corrupt` がある場合は上書きせず `.corrupt.1` に退避する (forensic 保持)。
-    #[tokio::test]
-    async fn backup_corrupt_state_file_does_not_clobber_existing_backup() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("team.json");
-        fs::write(&path, b"corrupt-2").await.unwrap();
-        fs::write(dir.path().join("team.json.corrupt"), b"corrupt-1")
-            .await
-            .unwrap();
-
-        // Issue #853: 退避直前に再 read される bytes が load 時の破損 bytes と一致するので退避続行。
-        backup_corrupt_state_file(&path, b"corrupt-2").await;
-
-        // 既存 backup は不変、新 backup は `.corrupt.1` に置かれる。
+        // #853: 原本 path は退避処理に一切触られず残置される (並行 save の valid file を
+        // 追い出す余地が無い)。
         assert_eq!(
-            fs::read(dir.path().join("team.json.corrupt"))
-                .await
-                .unwrap(),
-            b"corrupt-1"
+            fs::read(&path).await.expect("original must remain in place"),
+            corrupt
         );
-        assert_eq!(
-            fs::read(dir.path().join("team.json.corrupt.1"))
-                .await
-                .unwrap(),
-            b"corrupt-2"
-        );
-        assert!(fs::metadata(&path).await.is_err());
-    }
 
-    /// Issue #853 (TOCTOU 回帰テスト): load が破損 bytes を読んだ後、退避が走る前に並行 save が
-    /// **valid な内容** で同 path を置き換えた場合、退避はその valid file を `.corrupt` へ追い出して
-    /// はならない。`backup_corrupt_state_file` に load 時の破損 bytes を渡し、退避直前の再 read で
-    /// 内容が変化していれば skip することを検証する。
-    ///
-    /// 修正前 (素の rename) はここで active file (valid) が `.corrupt` に移動して save 直後の
-    /// 健全な state を失うため、この assert は fail する。修正後は valid file が原 path に温存される。
-    #[tokio::test]
-    async fn backup_corrupt_state_file_does_not_evict_concurrently_saved_valid_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("team.json");
-
-        // load 時に読んだ破損 bytes。
-        let corrupt_bytes = b"{ this is not valid json ]".to_vec();
-
-        // 退避が走る前に並行 save が valid file を置いた状況を再現する
-        // (file は corrupt_bytes とは異なる valid な内容になっている)。
-        let valid_bytes = br#"{"schemaVersion":1,"teamId":"t","projectRoot":"/p"}"#.to_vec();
-        fs::write(&path, &valid_bytes).await.unwrap();
-
-        backup_corrupt_state_file(&path, &corrupt_bytes).await;
-
-        // valid file は原 path にそのまま残り、`.corrupt` には退避されていない。
-        assert_eq!(
-            fs::read(&path).await.expect("valid file must remain at the active path"),
-            valid_bytes,
-            "concurrently saved valid state must not be evicted from the active path"
-        );
-        assert!(
-            fs::metadata(dir.path().join("team.json.corrupt"))
-                .await
-                .is_err(),
-            "no corrupt backup should be created when the file changed to a valid one"
-        );
-    }
-
-    /// Issue #853: 破損 bytes が退避直前まで変化していない (= 並行 save が無い) 通常ケースでは
-    /// 従来どおり `.corrupt` へ退避し、原本を消す。再検証の追加で正常系が壊れていないことを確認。
-    #[tokio::test]
-    async fn backup_corrupt_state_file_still_backs_up_unchanged_corrupt_file() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("team.json");
-        let corrupt_bytes = b"{ broken json".to_vec();
-        fs::write(&path, &corrupt_bytes).await.unwrap();
-
-        backup_corrupt_state_file(&path, &corrupt_bytes).await;
-
-        assert!(
-            fs::metadata(&path).await.is_err(),
-            "unchanged corrupt file should still be moved away"
-        );
-        assert_eq!(
-            fs::read(dir.path().join("team.json.corrupt"))
-                .await
-                .expect("corrupt backup must exist"),
-            corrupt_bytes
-        );
+        // `.bak.<ts>` に破損原本のコピーが残っている (forensic 用)。
+        let baks = list_bak_files(dir.path(), "team.json").await;
+        assert_eq!(baks.len(), 1, "exactly one quarantine backup must exist");
+        assert_eq!(fs::read(&baks[0]).await.unwrap(), corrupt);
     }
 }

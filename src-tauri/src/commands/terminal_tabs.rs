@@ -11,7 +11,6 @@
 
 use crate::commands::schema_version::SchemaVersion;
 use crate::commands::team_history::MutationResult;
-use crate::util::backup::write_timestamped_backup;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -108,33 +107,16 @@ async fn load_from_disk() -> Option<PersistedTerminalTabsFile> {
 }
 
 /// disk からロードする。schemaVersion 不一致は `None` を返して旧データを無視する。
+///
+/// Issue #947: parse 失敗時の退避 (default に倒す前に `.bak.<ts>` へコピー) は
+/// safe_load 共通基盤 (#936) に委譲する。退避規約は従来と同一で挙動等価。
+/// schemaVersion チェックは terminal_tabs 固有の関心事なので従来どおりここで行う。
 async fn load_from_disk_at(path: &Path) -> Option<PersistedTerminalTabsFile> {
-    let bytes = match fs::read(path).await {
-        Ok(bytes) => bytes,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
-        Err(e) => {
-            tracing::warn!(
-                "[terminal_tabs] read failed (treating as missing): {}: {e}",
-                path.display()
-            );
-            return None;
-        }
-    };
-    let file: PersistedTerminalTabsFile = match serde_json::from_slice(&bytes) {
-        Ok(f) => f,
-        Err(e) => {
-            tracing::warn!(
-                "[terminal_tabs] parse failed (backing up then treating as missing): {e}"
-            );
-            match write_timestamped_backup(path, &bytes, Some(0o600)).await {
-                Ok(bak) => tracing::info!(
-                    "[terminal_tabs] wrote timestamped backup: {}",
-                    bak.display()
-                ),
-                Err(berr) => tracing::warn!("[terminal_tabs] backup write failed: {berr}"),
-            }
-            return None;
-        }
+    use crate::commands::safe_load::{safe_load_or_quarantine, LoadOutcome};
+    let file = match safe_load_or_quarantine::<PersistedTerminalTabsFile>(path, Some(0o600)).await
+    {
+        LoadOutcome::Loaded(f) => f,
+        LoadOutcome::Absent | LoadOutcome::Corrupted => return None,
     };
     if file.schema_version != TERMINAL_TABS_SCHEMA_VERSION {
         tracing::info!(
