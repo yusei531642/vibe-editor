@@ -16,23 +16,20 @@ use crate::commands::error::CommandResult;
 use crate::state::AppState;
 use encoding::{detect_text_or_binary, encode_for_save};
 
-/// Issue #932: renderer 由来の `project_root` を `AppState` の active project と照合する共通ゲート。
+/// Issue #932 / #954 / #963: renderer 由来の `project_root` を検証する files_* 共通ゲート。
+///
+/// 当初 (#932) は write 系を active project との厳格一致で守っていたが、multi-root
+/// workspace (settings.workspaceFolders, Issue #4) の追加ルート内ファイル操作
+/// (新規作成 / リネーム / 削除 / 貼り付け) まで拒否してしまう退行があった (#963)。
+/// read 側 (#954) と同じ `assert_readable_project_root` (active root ∪ settings.json
+/// SSOT の workspaceFolders、workspace folder には `is_safe_watch_root` 検証を追加要求)
+/// に read/write とも統一する。
 ///
 /// async command が `State` (参照入力) を取ると Tauri が `Result` 返却を強制するため、非 `Result`
 /// を返す既存 FS コマンド契約 (renderer は構造体をそのまま受ける) を保てない。owned/'static な
 /// `AppHandle` 経由で state を引くことでこの制約を回避し、既存の戻り値型を維持したまま
-/// `assert_active_project_root` ゲートを各 mutation コマンド先頭に挿せるようにする。
-async fn assert_project_root_via(app: &AppHandle, project_root: &str) -> CommandResult<()> {
-    let state = app.state::<AppState>();
-    crate::commands::authz::assert_active_project_root(&state.project_root, project_root)
-        .await
-        .map(|_| ())
-}
-
-/// Issue #954: read/probe 系 (`files_list` / `files_read`) 用ゲート。write 系 (#932) と違い、
-/// multi-root workspace の追加ルート (settings.workspaceFolders, Issue #4) も正当な読み取り
-/// 対象なので、active 厳格一致ではなく `assert_readable_project_root` を使う。
-async fn assert_readable_project_root_via(
+/// ゲートを各コマンド先頭に挿せるようにする。
+async fn assert_workspace_project_root_via(
     app: &AppHandle,
     project_root: &str,
 ) -> CommandResult<()> {
@@ -116,7 +113,7 @@ pub struct FileWriteResult {
 #[tauri::command]
 pub async fn files_list(app: AppHandle, project_root: String, rel_path: String) -> FileListResult {
     // Issue #954: read/probe 系も project_root ゲートに通す (任意ディレクトリ列挙の阻止)。
-    if let Err(e) = assert_readable_project_root_via(&app, &project_root).await {
+    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
         return FileListResult {
             ok: false,
             error: Some(e.to_string()),
@@ -186,7 +183,7 @@ pub async fn files_list(app: AppHandle, project_root: String, rel_path: String) 
 #[tauri::command]
 pub async fn files_read(app: AppHandle, project_root: String, rel_path: String) -> FileReadResult {
     // Issue #954: read/probe 系も project_root ゲートに通す (任意ファイル読取の阻止)。
-    if let Err(e) = assert_readable_project_root_via(&app, &project_root).await {
+    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
         return FileReadResult {
             ok: false,
             error: Some(e.to_string()),
@@ -285,7 +282,7 @@ pub async fn files_write(
 ) -> FileWriteResult {
     // Issue #932: renderer 由来の project_root を active project と照合する共通ゲート。
     // 未検証だと乗っ取られた renderer が active プロジェクト外の任意ファイルを上書きできた。
-    if let Err(e) = assert_project_root_via(&app, &project_root).await {
+    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
         return FileWriteResult {
             ok: false,
             error: Some(e.to_string()),
@@ -586,7 +583,7 @@ pub async fn files_create(
     overwrite: Option<bool>,
 ) -> FileMutationResult {
     // Issue #932: active project と照合してから FS 操作を行う (任意ファイル作成を防ぐ)。
-    if let Err(e) = assert_project_root_via(&app, &project_root).await {
+    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
         return FileMutationResult::err(rel_path, e.to_string());
     }
     files_create_inner(project_root, rel_path, name, overwrite).await
@@ -635,7 +632,7 @@ pub async fn files_create_dir(
     name: String,
 ) -> FileMutationResult {
     // Issue #932: active project と照合してから FS 操作を行う (任意ディレクトリ作成を防ぐ)。
-    if let Err(e) = assert_project_root_via(&app, &project_root).await {
+    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
         return FileMutationResult::err(rel_path, e.to_string());
     }
     files_create_dir_inner(project_root, rel_path, name).await
@@ -686,7 +683,7 @@ pub async fn files_rename(
     overwrite: Option<bool>,
 ) -> FileMutationResult {
     // Issue #932: active project と照合してから FS 操作を行う (任意ファイル rename/move を防ぐ)。
-    if let Err(e) = assert_project_root_via(&app, &project_root).await {
+    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
         return FileMutationResult::err(from_rel, e.to_string());
     }
     files_rename_inner(project_root, from_rel, to_parent_rel, new_name, overwrite).await
@@ -758,7 +755,7 @@ pub async fn files_delete(
     permanent: Option<bool>,
 ) -> FileMutationResult {
     // Issue #932: active project と照合してから FS 操作を行う (任意ファイル削除を防ぐ)。
-    if let Err(e) = assert_project_root_via(&app, &project_root).await {
+    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
         return FileMutationResult::err(rel_path, e.to_string());
     }
     files_delete_inner(project_root, rel_path, permanent).await
@@ -817,7 +814,7 @@ pub async fn files_copy(
     overwrite: Option<bool>,
 ) -> FileMutationResult {
     // Issue #932: active project と照合してから FS 操作を行う (任意ファイル複製を防ぐ)。
-    if let Err(e) = assert_project_root_via(&app, &project_root).await {
+    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
         return FileMutationResult::err(from_rel, e.to_string());
     }
     files_copy_inner(project_root, from_rel, to_parent_rel, new_name, overwrite).await
