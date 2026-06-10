@@ -527,6 +527,11 @@ pub async fn terminal_create(
 
     // チーム所属端末なら TeamHub の socket/token と team/agent/role を env に注入
     let mut env = opts.env.unwrap_or_default();
+    // Issue #889: renderer (信頼境界外) 由来の env は VIBE_* のみ許可。
+    // NODE_OPTIONS / LD_PRELOAD 等の注入による command allowlist 迂回を遮断する。
+    // この直後に Rust が信頼境界内で insert する VIBE_TEAM_* / VIBE_AGENT_ID と、
+    // spawn 側の TERM/COLORTERM 注入には影響しない。
+    env.retain(|k, _| crate::pty::session::env_allowlist::is_safe_renderer_env_key(k));
     if let Some(team_id) = &opts.team_id {
         let (socket, token, _) = state.team_hub.info().await;
         env.insert("VIBE_TEAM_SOCKET".into(), socket);
