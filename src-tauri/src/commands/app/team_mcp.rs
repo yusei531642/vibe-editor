@@ -536,7 +536,7 @@ mod tests {
 
         let res = run_setup_at(&claude_path, &codex_path, &desired, "/tmp/bridge.js").await;
 
-        assert!(res.is_err(), "codex setup should reject non UTF-8 config");
+        assert!(res.is_err(), "codex setup should reject non-UTF-8 config");
         let msg = format!("{:#}", res.unwrap_err());
         assert!(
             msg.contains("codex mcp setup"),

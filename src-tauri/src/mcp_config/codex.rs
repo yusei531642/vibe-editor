@@ -254,7 +254,7 @@ mod tests {
 
         assert!(
             res.is_err(),
-            "non UTF-8 config must not be treated as empty"
+            "non-UTF-8 config must not be treated as empty"
         );
         let msg = format!("{:#}", res.unwrap_err());
         assert!(
@@ -262,6 +262,6 @@ mod tests {
             "error should explain UTF-8 decode failure: {msg}"
         );
         let still = fs::read(&path).await.unwrap();
-        assert_eq!(still, original, "non UTF-8 config must not be overwritten");
+        assert_eq!(still, original, "non-UTF-8 config must not be overwritten");
     }
 }
