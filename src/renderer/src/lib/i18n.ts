@@ -805,6 +805,8 @@ const ja: Dict = {
   // ---------- Terminal タブ復元 (Issue #857) ----------
   'terminalTabs.restore.transcriptMissing':
     '過去の会話履歴が見つからず {count} 件のタブを新規会話で再起動しました',
+  'terminalTabs.saveFailed':
+    'ターミナルタブの保存を停止しました: {error}',
 
   // ---------- Status ----------
   'status.noProject': 'プロジェクトが選択されていません',
@@ -1660,6 +1662,7 @@ const en: Dict = {
   // ---------- Terminal tab restore (Issue #857) ----------
   'terminalTabs.restore.transcriptMissing':
     "Couldn't find past transcripts; restarted {count} tab(s) as new conversations.",
+  'terminalTabs.saveFailed': 'Stopped saving terminal tabs: {error}',
 
   'status.noProject': 'No project selected',
 
