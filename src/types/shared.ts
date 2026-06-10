@@ -885,6 +885,21 @@ export interface TeamOrchestrationSummary {
 }
 
 /**
+ * Issue #935: タスク status の canonical 値。Rust 側 SSOT
+ * (`src-tauri/src/team_hub/task_status.rs` の `TaskStatus`) と同期する。
+ * 受信境界 (team_update_task) で legacy alias ("completed"/"complete"/"canceled")
+ * は canonical 値へ正規化されるため、新規データはこの union のみになる。
+ */
+export type TeamTaskStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'done'
+  | 'blocked'
+  | 'needs_input'
+  | 'failed'
+  | 'cancelled';
+
+/**
  * Issue #514: TeamHub orchestration state の TS 投影。
  * Rust 側 `commands/team_state.rs` の `TeamOrchestrationState` (camelCase) に揃える。
  * dashboard / 履歴復元 / 統合フェーズビューなど renderer 全体で参照する。
@@ -893,6 +908,11 @@ export interface TeamTaskSnapshot {
   id: number;
   assignedTo: string;
   description: string;
+  /**
+   * 通常は `TeamTaskStatus` の canonical 値。永続化済みの古いデータには
+   * legacy alias / 当時の任意文字列が残りうるため型は string のまま
+   * (判定は Rust 側 `task_status.rs` が正規化して行う)。
+   */
   status: string;
   createdBy: string;
   createdAt: string;
@@ -1000,7 +1020,8 @@ export interface WorkerReportPayload {
  */
 export interface UpdateTaskArgs {
   taskId: number;
-  status: 'pending' | 'in_progress' | 'done' | 'completed' | 'blocked' | string;
+  /** Issue #935: trailing `| string` を撤去し canonical union のみ許可する */
+  status: TeamTaskStatus;
   summary?: string;
   blockedReason?: string;
   nextAction?: string;

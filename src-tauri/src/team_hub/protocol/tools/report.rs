@@ -10,6 +10,7 @@
 //! (報告自体は state に保存済みなので、`team_get_tasks` 経由で読み取れる)。
 
 use crate::commands::team_state::{TeamReportFinding, TeamReportSnapshot};
+use crate::team_hub::task_status::TaskStatus;
 use crate::team_hub::{inject, CallContext, TeamHub};
 
 use super::super::consts::MAX_TEAM_REPORTS;
@@ -17,6 +18,8 @@ use super::error::ToolError;
 use chrono::Utc;
 use serde_json::{json, Value};
 
+/// team_report が受け付ける status の部分集合 (task status SSOT = `TaskStatus` の subset)。
+/// 報告は「作業の区切り」を表すため pending / in_progress / cancelled は対象外。
 const ALLOWED_STATUSES: &[&str] = &["done", "blocked", "needs_input", "failed"];
 const ALLOWED_SEVERITIES: &[&str] = &["high", "medium", "low"];
 /// 1 レポートあたりの findings 上限 (Hub 側 OOM 防止)。
@@ -127,13 +130,16 @@ fn parse_status(args: &Value) -> Result<String, ToolError> {
         .and_then(|v| v.as_str())
         .map(str::trim)
         .ok_or_else(|| invalid_args(format!("status is required ({ALLOWED_STATUSES:?})")))?;
-    let lower = raw.to_ascii_lowercase();
-    if !ALLOWED_STATUSES.contains(&lower.as_str()) {
-        return Err(invalid_args(format!(
-            "status must be one of {ALLOWED_STATUSES:?} (got {raw:?})"
-        )));
-    }
-    Ok(lower)
+    // Issue #935: alias 正規化 ("completed" → "done" 等) は TaskStatus::parse に集約し、
+    // report ドメインの許容 subset チェックだけここで行う。
+    let status = TaskStatus::parse(raw)
+        .filter(|s| ALLOWED_STATUSES.contains(&s.as_str()))
+        .ok_or_else(|| {
+            invalid_args(format!(
+                "status must be one of {ALLOWED_STATUSES:?} (got {raw:?})"
+            ))
+        })?;
+    Ok(status.as_str().to_string())
 }
 
 fn parse_task_id(args: &Value) -> Result<(String, Option<u32>), ToolError> {

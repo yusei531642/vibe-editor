@@ -312,11 +312,10 @@ async fn ensure_private_dir(dir: &Path) -> crate::commands::error::CommandResult
     Ok(())
 }
 
+/// Issue #935: open 判定は task_status の SSOT に委譲する (許容値リストの分裂防止)。
+/// 不明値は従来どおり open 扱い (タスクを見失わない方向に倒す)。
 fn is_open_task(status: &str) -> bool {
-    !matches!(
-        status.trim().to_ascii_lowercase().as_str(),
-        "done" | "completed" | "complete" | "cancelled" | "canceled"
-    )
+    crate::team_hub::task_status::is_open_status_str(status)
 }
 
 fn normalize(mut state: TeamOrchestrationState) -> TeamOrchestrationState {

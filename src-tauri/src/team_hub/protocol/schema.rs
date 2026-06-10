@@ -222,7 +222,11 @@ pub(super) fn tool_defs() -> Value {
                         "maximum": 4294967295u32,
                         "description": "Numeric task id from team_assign_task (must fit in a u32; missing or out-of-range values are rejected with update_task_invalid_args)."
                     },
-                    "status": { "type": "string" },
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "in_progress", "done", "blocked", "needs_input", "failed", "cancelled"],
+                        "description": "Canonical task status (Issue #935). Legacy aliases completed/complete/canceled are still accepted and normalized server-side."
+                    },
                     "summary": { "type": "string" },
                     "blocked_reason": { "type": "string" },
                     "next_action": { "type": "string" },
@@ -232,7 +236,7 @@ pub(super) fn tool_defs() -> Value {
                     "report_kind": { "type": "string" },
                     "done_evidence": {
                         "type": "array",
-                        "description": "Required when status is done/completed/complete for tasks with done_criteria.",
+                        "description": "Required when status is done for tasks with done_criteria.",
                         "items": {
                             "type": "object",
                             "properties": {

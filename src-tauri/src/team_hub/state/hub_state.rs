@@ -328,6 +328,10 @@ pub struct TeamTask {
     pub id: u32,
     pub assigned_to: String,
     pub description: String,
+    /// Issue #935: 通常は `task_status::TaskStatus::as_str()` の canonical 値。
+    /// 永続化済み legacy データには alias / 任意文字列が残りうるため String のまま、
+    /// 書き込みは受信境界 (update_task / assign_task) で必ず正規化する。
+    /// 判定 (open / done) は `task_status` module 経由のみとし、`matches!` を散らさない。
     pub status: String,
     pub created_by: String,
     pub created_at: String,
