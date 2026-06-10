@@ -1,6 +1,6 @@
 // Codex MCP 設定 (~/.codex/config.toml) の `[mcp_servers.vibe-team]` を更新
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
@@ -62,7 +62,21 @@ pub(crate) async fn setup_at(path: &Path, bridge_path: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).await?;
     }
-    let mut content: String = fs::read_to_string(path).await.unwrap_or_default();
+    let mut content: String = match fs::read(path).await {
+        Ok(bytes) if bytes.is_empty() => String::new(),
+        Ok(bytes) => String::from_utf8(bytes).with_context(|| {
+            format!(
+                "{} is not valid UTF-8; refusing to overwrite",
+                path.display()
+            )
+        })?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => {
+            return Err(e).with_context(|| {
+                format!("failed to read {}; refusing to overwrite", path.display())
+            });
+        }
+    };
     content = remove_toml_section(&content, SECTION);
     content = remove_toml_section(&content, LEGACY_SECTION);
     // Issue #44: bridge_path を TOML basic string 用に正規 escape。
@@ -199,12 +213,17 @@ mod tests {
         // setup を走らせて vibe-team section を追加
         setup_at(&path, "/tmp/bridge.js").await.unwrap();
         let after_setup = fs::read(&path).await.unwrap();
-        assert!(after_setup.windows(SECTION.len()).any(|w| w == SECTION.as_bytes()));
+        assert!(after_setup
+            .windows(SECTION.len())
+            .any(|w| w == SECTION.as_bytes()));
 
         // snapshot を使って巻き戻す
         restore_at(&path, snap).await.unwrap();
         let restored = fs::read(&path).await.unwrap();
-        assert_eq!(restored, original, "restore should match original byte-for-byte");
+        assert_eq!(
+            restored, original,
+            "restore should match original byte-for-byte"
+        );
     }
 
     #[tokio::test]
@@ -218,6 +237,31 @@ mod tests {
         assert!(path.exists());
         // restore(None) でファイル削除
         restore_at(&path, snap).await.unwrap();
-        assert!(!path.exists(), "restore(None) should remove file created by setup");
+        assert!(
+            !path.exists(),
+            "restore(None) should remove file created by setup"
+        );
+    }
+
+    #[tokio::test]
+    async fn setup_at_returns_err_when_config_is_not_utf8() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("config.toml");
+        let original = b"[other]\n# cp932-ish invalid utf8: \x82\xa0\n".to_vec();
+        fs::write(&path, &original).await.unwrap();
+
+        let res = setup_at(&path, "/tmp/bridge.js").await;
+
+        assert!(
+            res.is_err(),
+            "non UTF-8 config must not be treated as empty"
+        );
+        let msg = format!("{:#}", res.unwrap_err());
+        assert!(
+            msg.contains("not valid UTF-8"),
+            "error should explain UTF-8 decode failure: {msg}"
+        );
+        let still = fs::read(&path).await.unwrap();
+        assert_eq!(still, original, "non UTF-8 config must not be overwritten");
     }
 }
