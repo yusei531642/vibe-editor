@@ -308,6 +308,8 @@ fn flag_stem(token: &str) -> String {
 /// 対話起動フラグは前置一致しないため誤検知しない。
 fn is_powershell_immediate_exec_arg(token: &str) -> bool {
     let stem = flag_stem(token);
+    // `-Command:value` / `-Command=value` の値分離形式に対応するため区切り前で切る。
+    let stem = stem.split([':', '=']).next().unwrap_or(&stem);
     if stem.is_empty() {
         return false;
     }
@@ -316,7 +318,7 @@ fn is_powershell_immediate_exec_arg(token: &str) -> bool {
     }
     ["command", "encodedcommand", "file"]
         .iter()
-        .any(|name| name.starts_with(&stem))
+        .any(|name| name.starts_with(stem))
 }
 
 /// Issue #890: POSIX shell の即時実行フラグを検出する。
@@ -324,14 +326,16 @@ fn is_powershell_immediate_exec_arg(token: &str) -> bool {
 /// に `c` が含まれれば true。`-i`/`-l`/`--login`/`--`/`-` は素通りさせる。
 fn is_posix_immediate_exec_arg(token: &str) -> bool {
     let lower = token.trim().to_ascii_lowercase();
-    if lower == "--command" || lower == "--commands" {
+    // `--command=evil` の値分離形式に対応するため `=` の前で切る (fish のバイパス経路)。
+    let head = lower.split('=').next().unwrap_or(&lower);
+    if head == "--command" || head == "--commands" {
         return true;
     }
     // `--` 始まりの長形式 (上記以外) と素の `-` / `--` は対象外。
-    if lower.starts_with("--") || !lower.starts_with('-') || lower.len() < 2 {
+    if head.starts_with("--") || !head.starts_with('-') || head.len() < 2 {
         return false;
     }
-    let cluster = &lower[1..];
+    let cluster = &head[1..];
     cluster.chars().all(|c| c.is_ascii_alphabetic()) && cluster.contains('c')
 }
 
@@ -833,6 +837,34 @@ mod command_normalization_tests {
             &["--command".to_string(), "evil".to_string()]
         )
         .is_some());
+    }
+
+    // Issue #890 二次レビュー: `=` / `:` 値分離形式のバイパスを塞ぐ
+    #[test]
+    fn rejects_value_separated_immediate_exec_args() {
+        // fish の `--command=evil` / `--commands=evil`
+        assert!(
+            reject_immediate_exec_args("fish", &["--command=evil".to_string()]).is_some(),
+            "fish --command=evil must be blocked"
+        );
+        assert!(
+            reject_immediate_exec_args("fish", &["--commands=evil".to_string()]).is_some(),
+            "fish --commands=evil must be blocked"
+        );
+        // PowerShell の `-Command:value` / `-Com=value`
+        assert!(
+            reject_immediate_exec_args("powershell", &["-command:iex".to_string()]).is_some(),
+            "powershell -command:value must be blocked"
+        );
+        assert!(
+            reject_immediate_exec_args("powershell", &["-com=iex".to_string()]).is_some(),
+            "powershell -com=value must be blocked"
+        );
+        // 誤検知ガード: `--config=x` は immediate-exec ではない
+        assert!(
+            reject_immediate_exec_args("bash", &["--config=x".to_string()]).is_none(),
+            "bash --config=x must be allowed"
+        );
     }
 
     #[test]
