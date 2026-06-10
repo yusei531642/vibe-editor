@@ -506,30 +506,30 @@ pub async fn team_recruit(
     // RoleProfilesContext のメモリキャッシュへ追加し、worker template に instructions を流し込む。
     // (team:role-created を別 emit でも届けているが、recruit-request と同梱しておくと到達順に依存しない)
     let dynamic_role_payload = match (&dynamic_role, &dynamic_match) {
-        (Some(d), _) | (_, Some(d)) => Some(json!({
-            "id": d.id,
-            "label": d.label,
-            "description": d.description,
-            "instructions": d.instructions,
-            "instructionsJa": d.instructions_ja,
-        })),
+        (Some(d), _) | (_, Some(d)) => Some(crate::team_hub::events::RecruitRequestDynamicRole {
+            id: d.id.clone(),
+            label: d.label.clone(),
+            description: d.description.clone(),
+            instructions: d.instructions.clone(),
+            instructions_ja: d.instructions_ja.clone(),
+        }),
         _ => None,
     };
 
-    // Renderer にカード生成を依頼
+    // Renderer にカード生成を依頼 (Issue #930: payload は events.rs の名前付き struct)
     let app = hub.app_handle.lock().await.clone();
     if let Some(app) = &app {
-        let payload = json!({
-            "teamId": ctx.team_id,
-            "requesterAgentId": ctx.agent_id,
-            "requesterRole": ctx.role,
-            "newAgentId": new_agent_id,
-            "roleProfileId": role_profile_id,
-            "engine": resolved_engine,
-            "agentLabelHint": agent_label_hint,
-            "waitPolicy": wait_policy.clone(),
-            "dynamicRole": dynamic_role_payload,
-        });
+        let payload = crate::team_hub::events::RecruitRequestPayload {
+            team_id: ctx.team_id.clone(),
+            requester_agent_id: ctx.agent_id.clone(),
+            requester_role: ctx.role.clone(),
+            new_agent_id: new_agent_id.clone(),
+            role_profile_id: role_profile_id.clone(),
+            engine: resolved_engine.clone(),
+            agent_label_hint: agent_label_hint.clone(),
+            wait_policy: Some(wait_policy.clone()),
+            dynamic_role: dynamic_role_payload,
+        };
         if let Err(e) = app.emit("team:recruit-request", payload) {
             hub.cancel_pending_recruit(&new_agent_id).await;
             return Err(RecruitError::new(

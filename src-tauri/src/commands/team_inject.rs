@@ -139,17 +139,18 @@ pub async fn team_send_retry_inject(
             }
             // Canvas 側 UI が「retry で配達成功」を視覚化するため team:handoff を emit する。
             // from_role は元 sender の role を保つ (UI が「誰からの message か」を再描画できるように)。
-            let payload = json!({
-                "teamId": args.team_id,
-                "fromAgentId": from_agent_id,
-                "fromRole": from_role,
-                "toAgentId": args.agent_id,
-                "toRole": "",
-                "preview": preview,
-                "messageId": args.message_id,
-                "timestamp": delivered_at,
-                "retried": true,
-            });
+            // Issue #930: payload は events.rs の名前付き struct (retried=true で再送を区別)。
+            let payload = crate::team_hub::events::HandoffEventPayload {
+                team_id: args.team_id.clone(),
+                from_agent_id: from_agent_id.clone(),
+                from_role: from_role.clone(),
+                to_agent_id: args.agent_id.clone(),
+                to_role: String::new(),
+                preview: preview.clone(),
+                message_id: args.message_id,
+                timestamp: delivered_at.clone(),
+                retried: true,
+            };
             if let Err(e) = app.emit("team:handoff", payload) {
                 tracing::warn!("[retry_inject] emit team:handoff failed: {e}");
             }

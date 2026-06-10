@@ -10,6 +10,8 @@
 
 pub mod bridge;
 pub mod error;
+// Issue #930: Tauri イベント payload の名前付き struct 集約 (shared.ts と同期)。
+pub mod events;
 // Issue #526: vibe-team の advisory file locks (worker のファイル編集衝突を warn する)。
 pub mod file_locks;
 pub mod inject;
