@@ -326,19 +326,17 @@ async fn load_persisted_dynamic_for_team(
         return Vec::new();
     }
     let path = crate::util::config_paths::role_profiles_path();
-    let bytes = match tokio::fs::read(&path).await {
-        Ok(b) => b,
-        Err(_) => return Vec::new(), // file 不在は normal (初回起動 / 動的ロールを使わない運用)
-    };
-    let value: serde_json::Value = match serde_json::from_slice(&bytes) {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                "[register_team] role-profiles.json parse failed when loading dynamic[]: {e}"
-            );
-            return Vec::new();
-        }
-    };
+    // Issue #936: 旧実装は parse 失敗時に warn だけ出して空配列で続行し、破損 role-profiles.json
+    // を退避していなかった。共通ヘルパ経由にして「default (空) に倒す前に原本を退避」する。
+    // 退避は主オーナー role_profiles_load と同じ write_timestamped_backup・0o600 規約で、コピー
+    // 退避ゆえ並行 role_profiles_save の valid file を巻き込まない。
+    let value: serde_json::Value =
+        match crate::commands::safe_load::safe_load_or_quarantine(&path, Some(0o600)).await {
+            crate::commands::safe_load::LoadOutcome::Loaded(v) => v,
+            // 不在は normal (初回起動 / 動的ロール未使用)。破損は退避済みなので空で続行。
+            crate::commands::safe_load::LoadOutcome::Absent
+            | crate::commands::safe_load::LoadOutcome::Corrupted => return Vec::new(),
+        };
     let Some(arr) = value.get("dynamic").and_then(|v| v.as_array()) else {
         // 古い JSON (dynamic フィールドなし) は no-op で OK。新規 save 時に renderer が追加する。
         return Vec::new();
