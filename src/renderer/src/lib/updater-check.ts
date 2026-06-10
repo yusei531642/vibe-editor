@@ -25,14 +25,12 @@
  *   - network / その他 error は静かに skip。
  */
 import type { Language } from '../../../types/shared';
+import type { ToastOptions } from './toast-context';
 import { translate } from './i18n';
 
 export interface UpdaterDeps {
   language: Language;
-  showToast: (
-    message: string,
-    options?: { duration?: number; tone?: 'info' | 'success' | 'warning' | 'error' }
-  ) => number;
+  showToast: (message: string, options?: ToastOptions) => number;
   dismissToast?: (id: number) => void;
   /** コマンドパレット / ヘルプメニューからの手動チェック。最新時の通知や失敗 toast を出す。 */
   manual?: boolean;
@@ -159,7 +157,16 @@ function isSigningEnabled(): boolean {
  * Issue #609: signature 系 error を 24h に 1 度だけ toast で通知する。
  * cooldown は Rust 側 `~/.vibe-editor/updater-warned.json` に永続化されている。
  * deps が無い (preview / test) ときは toast を出さず終わる。
+ *
+ * Issue #852: cooldown の record は「toast を表示した時点」ではなく「ユーザーが
+ * toast を閉じた (= 明示的に認知した) 時点」で行う。表示しただけで record すると、
+ * ユーザーが画面を離れている間に署名警告が出て消えた場合でも 24h 抑止され、
+ * 改竄の可能性を一度も認知しないまま警告が止まるため。未認知のまま終了した場合は
+ * record されず、次回起動で再警告される。あわせて自動消滅を実質無効化する長い
+ * duration を与え、ユーザー操作でのみ閉じられる持続表示にする。
  */
+const SIGNATURE_WARNING_TOAST_MS = 86_400_000; // 24h ≒ 実質持続表示 (自動消滅させない)
+
 async function maybeWarnSignatureFailure(deps?: SilentCheckDeps): Promise<void> {
   if (!deps) return;
   if (!isSigningEnabled()) {
@@ -185,9 +192,14 @@ async function maybeWarnSignatureFailure(deps?: SilentCheckDeps): Promise<void> 
     }
     deps.showToast(translate(deps.language, 'updater.signatureFailed'), {
       tone: 'warning',
-      duration: 12_000
+      duration: SIGNATURE_WARNING_TOAST_MS,
+      onUserDismiss: () => {
+        // ユーザーが閉じた = 認知したときだけ cooldown を記録する (Issue #852)
+        void recordFn().catch((e) => {
+          console.debug('[updater] signature warning record failed:', e);
+        });
+      }
     });
-    await recordFn();
   } catch (e) {
     console.debug('[updater] signature warning gate failed:', e);
   }
@@ -197,10 +209,7 @@ async function maybeWarnSignatureFailure(deps?: SilentCheckDeps): Promise<void> 
  *  (test / 旧来の hook) では undefined を渡す。 */
 export interface SilentCheckDeps {
   language: Language;
-  showToast: (
-    message: string,
-    options?: { duration?: number; tone?: 'info' | 'success' | 'warning' | 'error' }
-  ) => number;
+  showToast: (message: string, options?: ToastOptions) => number;
 }
 
 /**
