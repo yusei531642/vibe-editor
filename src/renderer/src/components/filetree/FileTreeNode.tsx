@@ -55,6 +55,14 @@ function FileTreeNodeImpl({
     <>
       <button
         type="button"
+        // Issue #908: WAI-ARIA tree パターン。ツリー全体で 1 tab stop にするため
+        // 行は常に tabIndex=-1 で render し、roving tabindex (どの行を 0 にするか) は
+        // FileTreePanel 側が DOM 直接操作で管理する (memo 構造を壊さないため)。
+        role="treeitem"
+        aria-level={depth + 1}
+        aria-expanded={node.isDir ? isOpen : undefined}
+        aria-selected={node.isDir ? undefined : isActive}
+        tabIndex={-1}
         className={`filetree__row${isActive ? ' is-active' : ''}`}
         style={fileTreeGuideStyle(depth)}
         onClick={handleClick}
@@ -66,6 +74,7 @@ function FileTreeNodeImpl({
               size={13}
               strokeWidth={2.25}
               className={`filetree__chevron${isOpen ? ' is-open' : ''}`}
+              aria-hidden
             />
             <folderDef.Icon
               size={14}

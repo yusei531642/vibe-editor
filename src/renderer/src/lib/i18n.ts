@@ -164,6 +164,7 @@ const ja: Dict = {
 
   // ---------- File tree / Editor ----------
   'filetree.refresh': '再読込',
+  'filetree.treeLabel': 'ファイルツリー',
   'diff.loading': 'diff を読み込み中…',
   'diff.selectFile': '差分を表示するファイルを選択してください',
   'diff.error': 'エラー: {error}',
@@ -1015,6 +1016,7 @@ const en: Dict = {
 
   // ---------- File tree / Editor ----------
   'filetree.refresh': 'Reload',
+  'filetree.treeLabel': 'File tree',
   'diff.loading': 'Loading diff…',
   'diff.selectFile': 'Select a file to view its diff',
   'diff.error': 'Error: {error}',
