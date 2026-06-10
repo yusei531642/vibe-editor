@@ -626,6 +626,7 @@ const ja: Dict = {
 
   // ---------- Toast ----------
   'toast.reviewRequested': '差分レビューを依頼: {path}',
+  'toast.sessionResumed': 'セッションに復帰: {title}',
   'toast.pathCopied': 'パスをクリップボードにコピー',
   'toast.copyFailed': 'クリップボードへのコピーに失敗しました',
   'toast.revealFailed': 'ファイルマネージャでの表示に失敗しました',
@@ -1478,6 +1479,7 @@ const en: Dict = {
 
   // ---------- Toast ----------
   'toast.reviewRequested': 'Review requested: {path}',
+  'toast.sessionResumed': 'Resumed session: {title}',
   'toast.pathCopied': 'Path copied to clipboard',
   'toast.copyFailed': 'Failed to copy to clipboard',
   'toast.revealFailed': 'Failed to reveal in file manager',

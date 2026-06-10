@@ -605,7 +605,7 @@ export function CanvasLayout(): JSX.Element {
             className="resize-handle resize-handle--sidebar"
             onMouseDown={onSidebarResizeStart}
             onDoubleClick={onSidebarResizeDouble}
-            title="ドラッグでサイドバー幅を調整 / ダブルクリックでリセット"
+            title={t('layout.sidebarResizeTitle')}
             role="separator"
             aria-orientation="vertical"
           />
