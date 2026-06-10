@@ -175,6 +175,18 @@ export function useProjectLoader(
           root = picked;
         }
         if (cancelled) return;
+        // Issue #954 (PR #962 auto-review): 起動復元パスも loadProject と同様に backend の
+        // active project_root を await で確定させてから git/sessions の fetch を発火する。
+        // ゲート (#932 read 側拡張) は active root 未設定時に reject するため、これが無いと
+        // 起動時の git パネルが transient reject で空振りする。
+        try {
+          await window.api.app.setProjectRoot(root);
+        } catch (err) {
+          useUiStore.getState().setStatus(t('project.initError', { error: String(err) }));
+          setGitLoading(false);
+          return;
+        }
+        if (cancelled) return;
         setProjectRoot(root);
         if (root !== lastOpenedRoot) {
           void updateSettings({ lastOpenedRoot: root });

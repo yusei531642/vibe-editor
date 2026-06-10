@@ -192,14 +192,24 @@ pub async fn assert_readable_project_root(
 
 /// `req_canon` (canonicalize 済み) が `folders` のいずれかと canonicalize 一致するか。
 /// 存在しない / canonicalize できない folder エントリは skip する。
+///
+/// PR #962 auto-review: canonicalize は folder ごとに blocking I/O を伴うため、NFS/SMB 等の
+/// 低速マウントで folder 数分の直列待ちにならないよう `JoinSet` で並列実行し、
+/// 一致を見つけた時点で残りを打ち切る。
 async fn matches_any_workspace_folder(req_canon: &std::path::Path, folders: &[String]) -> bool {
+    let mut set = tokio::task::JoinSet::new();
     for folder in folders {
         let f = folder.trim();
         if f.is_empty() {
             continue;
         }
-        if let Ok(folder_canon) = tokio::fs::canonicalize(f).await {
-            if req_canon == folder_canon {
+        let f = f.to_string();
+        set.spawn(async move { tokio::fs::canonicalize(&f).await.ok() });
+    }
+    while let Some(res) = set.join_next().await {
+        if let Ok(Some(folder_canon)) = res {
+            if folder_canon == req_canon {
+                set.abort_all();
                 return true;
             }
         }
