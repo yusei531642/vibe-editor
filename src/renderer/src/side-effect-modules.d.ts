@@ -22,3 +22,5 @@ declare module '@fontsource-variable/*';
 declare module 'monaco-editor/esm/vs/editor/editor.api' {
   export * from 'monaco-editor';
 }
+// Issue #841: 型を同梱しない side-effect import / selective entry の ambient 宣言は
+// 本ファイルに集約する (新たに TS2882 / TS2307 を踏んだら同様にここへ追記する)。
