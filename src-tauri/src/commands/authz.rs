@@ -217,15 +217,25 @@ async fn matches_any_workspace_folder(req_canon: &std::path::Path, folders: &[St
             // 設計 (app_set_project_root #639 と同じ呼び方)。canonicalize 済みの
             // verbatim-prefix (`\\?\C:\...`) 付き path を渡すと Windows の denylist
             // (`c:\windows` 前方一致) が素通りするため、raw `f` を渡すこと。
-            if !crate::commands::fs_watch::is_safe_watch_root(std::path::Path::new(&f)) {
-                tracing::warn!(
-                    folder = %clamp_for_log(&f),
-                    "[authz] workspace folder skipped by safe-root check"
-                );
-                return None;
-            }
-            // 比較は canonicalize 後の path で行う (req_canon も canonicalize 済み)。
-            tokio::fs::canonicalize(&f).await.ok()
+            //
+            // PR #968 auto-review: `is_safe_watch_root` は同期 blocking I/O
+            // (`std::fs::canonicalize` + metadata) を含むため、Tokio ワーカースレッドを
+            // 塞がないよう spawn_blocking に逃がす。canonicalize も同 blocking task 内で
+            // 行い、async fs 呼び出しとの二重 I/O も避ける。
+            tokio::task::spawn_blocking(move || {
+                if !crate::commands::fs_watch::is_safe_watch_root(std::path::Path::new(&f)) {
+                    tracing::warn!(
+                        folder = %clamp_for_log(&f),
+                        "[authz] workspace folder skipped by safe-root check"
+                    );
+                    return None;
+                }
+                // 比較は canonicalize 後の path で行う (req_canon も canonicalize 済み)。
+                std::fs::canonicalize(&f).ok()
+            })
+            .await
+            .ok()
+            .flatten()
         });
     }
     while let Some(res) = set.join_next().await {
