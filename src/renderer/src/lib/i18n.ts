@@ -806,7 +806,7 @@ const ja: Dict = {
   'terminalTabs.restore.transcriptMissing':
     '過去の会話履歴が見つからず {count} 件のタブを新規会話で再起動しました',
   'terminalTabs.saveFailed':
-    'ターミナルタブの保存を停止しました: {error}',
+    'ターミナルタブの保存に失敗しました: {error}',
 
   // ---------- Status ----------
   'status.noProject': 'プロジェクトが選択されていません',
