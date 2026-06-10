@@ -46,8 +46,14 @@ fn watch_dir_tree(watcher: &mut RecommendedWatcher, root: &Path) -> notify::Resu
             continue;
         }
 
-        watcher.watch(&dir, RecursiveMode::NonRecursive)?;
-        watched += 1;
+        match watcher.watch(&dir, RecursiveMode::NonRecursive) {
+            Ok(()) => watched += 1,
+            Err(e) if dir == root => return Err(e),
+            Err(e) => {
+                tracing::warn!("[fs_watch] failed to watch subdir {dir:?}; continuing: {e}");
+                continue;
+            }
+        }
 
         let Ok(entries) = fs::read_dir(&dir) else {
             tracing::debug!("[fs_watch] cannot read dir while registering watch: {dir:?}");
@@ -174,22 +180,35 @@ fn current_active() -> (u64, Option<String>) {
         .unwrap_or((0, None))
 }
 
+fn claim_active_for_root(root: &str) -> Option<u64> {
+    let Ok(mut g) = ACTIVE_WATCHER_GEN.lock() else {
+        return None;
+    };
+    if g.1.as_deref() == Some(root) {
+        return None;
+    }
+    g.0 = g.0.wrapping_add(1);
+    g.1 = Some(root.to_string());
+    Some(g.0)
+}
+
+fn rollback_active_if_current(generation: u64, root: &str) {
+    let Ok(mut g) = ACTIVE_WATCHER_GEN.lock() else {
+        return;
+    };
+    if g.0 == generation && g.1.as_deref() == Some(root) {
+        g.1 = None;
+    }
+}
+
 /// `root` 配下を監視開始する。既に別 root で動いていたら停止する。
 pub fn start_for_root(app: AppHandle, root: String) {
     // Issue #171: 「同 root なら no-op」判定と generation 更新の lock を分けると
     // TOCTOU で同 root に並行 start_for_root が両方 spawn する race があった。
     // 1 つの critical section にまとめ、no-op 判定 → generation 更新 → spawn 引数生成までを
     // ロック保持中に行う。
-    let my_generation = {
-        let Ok(mut g) = ACTIVE_WATCHER_GEN.lock() else {
-            return;
-        };
-        if g.1.as_deref() == Some(root.as_str()) {
-            return; // 同 root 同 generation が既に動いているので no-op
-        }
-        g.0 = g.0.wrapping_add(1);
-        g.1 = Some(root.clone());
-        g.0
+    let Some(my_generation) = claim_active_for_root(&root) else {
+        return; // 同 root 同 generation が既に動いているので no-op
     };
 
     let my_root = root;
@@ -197,10 +216,12 @@ pub fn start_for_root(app: AppHandle, root: String) {
         let root_path = PathBuf::from(&my_root);
         if !root_path.exists() {
             tracing::debug!("[fs_watch] root does not exist: {my_root}");
+            rollback_active_if_current(my_generation, &my_root);
             return;
         }
         if !is_safe_watch_root(&root_path) {
             tracing::warn!("[fs_watch] refusing unsafe watch root: {my_root}");
+            rollback_active_if_current(my_generation, &my_root);
             return;
         }
 
@@ -214,6 +235,7 @@ pub fn start_for_root(app: AppHandle, root: String) {
             Ok(w) => w,
             Err(e) => {
                 tracing::warn!("[fs_watch] watcher init failed: {e}");
+                rollback_active_if_current(my_generation, &my_root);
                 return;
             }
         };
@@ -221,6 +243,7 @@ pub fn start_for_root(app: AppHandle, root: String) {
             Ok(count) => tracing::info!("[fs_watch] started for {my_root} ({count} dirs watched)"),
             Err(e) => {
                 tracing::warn!("[fs_watch] watch failed: {e}");
+                rollback_active_if_current(my_generation, &my_root);
                 return;
             }
         }
@@ -299,9 +322,21 @@ pub fn start_for_root(app: AppHandle, root: String) {
 
 #[cfg(test)]
 mod tests {
-    use super::{file_name_is_ignored, path_is_ignored};
+    use super::{
+        claim_active_for_root, current_active, file_name_is_ignored, path_is_ignored,
+        rollback_active_if_current, ACTIVE_WATCHER_GEN,
+    };
+    use once_cell::sync::Lazy;
     use std::ffi::OsStr;
     use std::path::Path;
+    use std::sync::Mutex;
+
+    static ACTIVE_WATCHER_TEST_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    fn reset_active_for_test() {
+        let mut active = ACTIVE_WATCHER_GEN.lock().unwrap();
+        *active = (0, None);
+    }
 
     #[test]
     fn ignores_configured_heavy_directories() {
@@ -323,5 +358,43 @@ mod tests {
             root
         ));
         assert!(!path_is_ignored(Path::new("project/src/main.rs"), root));
+    }
+
+    #[test]
+    fn rollback_allows_same_root_to_be_retried_after_start_failure() {
+        let _guard = ACTIVE_WATCHER_TEST_LOCK.lock().unwrap();
+        reset_active_for_test();
+
+        let root = "F:/tmp/vibe-editor-watch-root";
+        let generation = claim_active_for_root(root).expect("first claim should start");
+        assert!(claim_active_for_root(root).is_none());
+
+        rollback_active_if_current(generation, root);
+
+        let retried = claim_active_for_root(root);
+        assert!(
+            retried.is_some(),
+            "same root must be retryable after rollback"
+        );
+        reset_active_for_test();
+    }
+
+    #[test]
+    fn stale_rollback_does_not_clear_newer_watcher_generation() {
+        let _guard = ACTIVE_WATCHER_TEST_LOCK.lock().unwrap();
+        reset_active_for_test();
+
+        let old_root = "F:/tmp/vibe-editor-watch-old";
+        let new_root = "F:/tmp/vibe-editor-watch-new";
+        let old_generation = claim_active_for_root(old_root).unwrap();
+        let new_generation = claim_active_for_root(new_root).unwrap();
+
+        rollback_active_if_current(old_generation, old_root);
+
+        assert_eq!(
+            current_active(),
+            (new_generation, Some(new_root.to_string()))
+        );
+        reset_active_for_test();
     }
 }
