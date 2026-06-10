@@ -290,10 +290,12 @@ export function AppShell({
   const handleResumeSession = useCallback(
     (session: SessionInfo) => {
       setActiveSessionId(session.id);
-      showToast(`セッションに復帰: ${session.title.slice(0, 40)}`, { tone: 'info' });
+      showToast(t('toast.sessionResumed', { title: session.title.slice(0, 40) }), {
+        tone: 'info'
+      });
       addTerminalTab({ resumeSessionId: session.id });
     },
-    [showToast, addTerminalTab]
+    [showToast, addTerminalTab, t]
   );
 
   // Phase 1-9 (Issue #373): コマンドパレット用 Command[] 構築は lib/app-commands.ts に集約。
