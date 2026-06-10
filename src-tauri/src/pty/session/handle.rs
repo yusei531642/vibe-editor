@@ -168,6 +168,23 @@ impl SessionHandle {
         Ok(())
     }
 
+    /// Issue #951: シャットダウン / 再起動経路専用の **同期** kill。
+    ///
+    /// `kill()` は Windows で taskkill を detached thread に逃がして即返るため、直後に
+    /// プロセスごと exit すると taskkill が走り切る前に殺され、子プロセスが孤児化する
+    /// 競合があった。本メソッドは process-tree kill を呼び出し thread 上で同期実行する。
+    /// 通常のタブ close では従来どおり `kill()` を使う (UI をブロックしないため)。
+    pub fn kill_blocking(&self) {
+        self.watcher_cancel.store(true, Ordering::Release);
+        #[cfg(windows)]
+        if let Some(pid) = self.process_id {
+            Self::kill_process_tree_best_effort(pid);
+        }
+        if let Ok(mut k) = lock_poisoned!(self.killer, "killer") {
+            let _ = k.kill();
+        }
+    }
+
     /// Issue #632: claude_watcher が共有する cancel signal。`spawn_watcher` の caller
     /// (terminal_create) はこれを clone して watcher thread に渡す。session 寿命に追従して
     /// watcher を停止できる (= 60 秒 deadline での polling 漏れ問題を解消)。

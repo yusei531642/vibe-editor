@@ -475,7 +475,15 @@ pub fn run() {
                                     "[lifecycle] in-flight inject drain timeout — proceeding to kill_all (was={inflight_before}, remaining={remaining})"
                                 );
                             }
-                            state.pty_registry.kill_all();
+                            // Issue #951: 旧実装の kill_all() は taskkill を detached thread に
+                            // 逃がして即返るため、直後の exit(0) が taskkill より先に自プロセスを
+                            // 消して子プロセスが孤児化する競合があった。blocking 版で全 session の
+                            // process-tree kill 完了 (上限 2s) を待ってから exit する。
+                            let registry = state.pty_registry.clone();
+                            let _ = tauri::async_runtime::spawn_blocking(move || {
+                                registry.kill_all_blocking(std::time::Duration::from_secs(2));
+                            })
+                            .await;
                             // MCP エントリは残しておく (次回起動時に reclaim されるので副作用なし)
                             // team-bridge.js は ~/.vibe-editor/ に置いたまま (再利用のため)
                             app_for_drain.exit(0);
