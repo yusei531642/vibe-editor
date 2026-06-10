@@ -396,6 +396,12 @@ export interface GitFileChange {
 export interface GitStatus {
   ok: boolean;
   error?: string;
+  /**
+   * Issue #888: error が「git リポジトリではない」由来かどうかの構造化フラグ。
+   * renderer は raw stderr の文字列推測をせず、このフラグで i18n メッセージに引き当てる。
+   * Rust 側は常にシリアライズするが、TS 側で組み立てる既存コードの後方互換のため optional。
+   */
+  notGitRepo?: boolean;
   repoRoot?: string;
   branch?: string;
   files: GitFileChange[];

@@ -68,6 +68,9 @@ pub struct GitFileChange {
 pub struct GitStatus {
     pub ok: bool,
     pub error: Option<String>,
+    /// Issue #888: error が「git リポジトリではない」由来かどうかの構造化フラグ。
+    /// renderer は raw stderr の文字列推測をせず、このフラグで i18n メッセージに引き当てる。
+    pub not_git_repo: bool,
     pub repo_root: Option<String>,
     pub branch: Option<String>,
     pub files: Vec<GitFileChange>,
@@ -229,6 +232,14 @@ fn label_from_status(idx: char, wt: char) -> &'static str {
     }
 }
 
+/// Issue #888: git の stderr が「git リポジトリではない」エラーかを判定する。
+/// 典型形は `fatal: not a git repository (or any of the parent directories): .git`。
+/// 非英語ロケールでは stderr が翻訳され判定が外れうるが、その場合は従来どおり
+/// raw stderr の表示に fallback するだけで悪化はしない。
+fn is_not_git_repo_error(err: &str) -> bool {
+    err.to_ascii_lowercase().contains("not a git repository")
+}
+
 #[tauri::command]
 pub async fn git_status(project_root: String) -> GitStatus {
     // repo root
@@ -237,6 +248,7 @@ pub async fn git_status(project_root: String) -> GitStatus {
         Err(e) => {
             return GitStatus {
                 ok: false,
+                not_git_repo: is_not_git_repo_error(&e),
                 error: Some(e),
                 ..Default::default()
             }
@@ -254,6 +266,7 @@ pub async fn git_status(project_root: String) -> GitStatus {
             Err(e) => {
                 return GitStatus {
                     ok: false,
+                    not_git_repo: is_not_git_repo_error(&e),
                     error: Some(e),
                     repo_root: Some(repo_root),
                     branch,
@@ -266,6 +279,7 @@ pub async fn git_status(project_root: String) -> GitStatus {
     GitStatus {
         ok: true,
         error: None,
+        not_git_repo: false,
         repo_root: Some(repo_root),
         branch,
         files,
@@ -408,6 +422,20 @@ pub async fn git_diff(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn not_git_repo_error_detection() {
+        // Issue #888: 典型 stderr で true
+        assert!(is_not_git_repo_error(
+            "fatal: not a git repository (or any of the parent directories): .git"
+        ));
+        // 大文字小文字差でも true
+        assert!(is_not_git_repo_error("fatal: Not a Git Repository"));
+        // 別種のエラーでは false
+        assert!(!is_not_git_repo_error("fatal: bad revision 'HEAD'"));
+        assert!(!is_not_git_repo_error("failed to spawn git: program not found"));
+        assert!(!is_not_git_repo_error(""));
+    }
 
     #[test]
     fn parse_rename_record() {
