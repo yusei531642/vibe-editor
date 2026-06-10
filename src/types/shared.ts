@@ -15,6 +15,15 @@ export type Language = 'ja' | 'en';
 export type StatusMascotVariant = 'vibe' | 'spark' | 'mono' | 'coder' | 'custom';
 
 /**
+ * Issue #820: dialog_open_file に渡す拡張子フィルタ。
+ * extensions はドット無しの拡張子 (例: ['png', 'jpg'])。
+ */
+export interface DialogFileFilter {
+  name: string;
+  extensions: string[];
+}
+
+/**
  * Issue #75: AppSettings の現在スキーマ。
  * Issue #449 で claudeArgs / codexArgs / customAgents[].args の Unicode dash (U+2013 等)
  * を ASCII '-' に正規化する migration を追加し v10。

@@ -2,9 +2,19 @@
 //
 // tauri-plugin-dialog でファイル/フォルダ選択、自前で空フォルダ判定。
 
+use serde::Deserialize;
 use tauri::AppHandle;
 use tauri_plugin_dialog::DialogExt;
 use tokio::sync::oneshot;
+
+/// Issue #820: renderer から渡される拡張子フィルタ。
+/// `extensions` はドット無し (例: ["png", "jpg"])。shared.ts の `DialogFileFilter` と同期。
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DialogFileFilter {
+    pub name: String,
+    pub extensions: Vec<String>,
+}
 
 #[tauri::command]
 pub async fn dialog_open_folder(app: AppHandle, title: Option<String>) -> Option<String> {
@@ -20,11 +30,19 @@ pub async fn dialog_open_folder(app: AppHandle, title: Option<String>) -> Option
 }
 
 #[tauri::command]
-pub async fn dialog_open_file(app: AppHandle, title: Option<String>) -> Option<String> {
+pub async fn dialog_open_file(
+    app: AppHandle,
+    title: Option<String>,
+    filters: Option<Vec<DialogFileFilter>>,
+) -> Option<String> {
     let (tx, rx) = oneshot::channel();
     let mut builder = app.dialog().file();
     if let Some(t) = title {
         builder = builder.set_title(&t);
+    }
+    for filter in filters.unwrap_or_default() {
+        let exts: Vec<&str> = filter.extensions.iter().map(String::as_str).collect();
+        builder = builder.add_filter(&filter.name, &exts);
     }
     builder.pick_file(move |result| {
         let _ = tx.send(result.map(|p| p.to_string()));

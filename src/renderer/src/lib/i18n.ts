@@ -44,6 +44,7 @@ const ja: Dict = {
   // Issue #729: MascotSection の isJa 三項 / settings-options.ts hardcode を i18n.ts に集約
   'settings.mascot.title': 'キャラクター',
   'settings.mascot.pickTitle': '相棒にする画像を選択',
+  'settings.mascot.imageFilterName': '画像',
   'settings.mascot.choose': '画像を選ぶ…',
   'settings.mascot.clear': 'クリア',
   'settings.mascot.hint':
@@ -894,6 +895,7 @@ const en: Dict = {
   // Issue #729: MascotSection isJa ternaries / settings-options.ts hardcode -> centralised in i18n.ts
   'settings.mascot.title': 'Character',
   'settings.mascot.pickTitle': 'Pick a mascot image',
+  'settings.mascot.imageFilterName': 'Images',
   'settings.mascot.choose': 'Choose image…',
   'settings.mascot.clear': 'Clear',
   'settings.mascot.hint':
