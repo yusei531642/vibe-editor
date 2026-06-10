@@ -272,17 +272,23 @@ impl Drop for SessionHandle {
     }
 }
 
+/// テスト用の `SessionHandle` 構築サポート。実 PTY を起動せずに kill 回数を計数する
+/// mock killer 付き handle を作る。`handle.rs` の Drop/inject テストだけでなく、
+/// `pty::registry` の team/index 操作テスト (#937 の `kill_team`) からも再利用できるよう
+/// crate 内へ公開する (`pub(crate)`)。
 #[cfg(test)]
-mod drop_tests {
-    use super::*;
-    use portable_pty::PtySize;
+pub(crate) mod test_support {
+    use super::SessionHandle;
+    use crate::pty::scrollback::{new_scrollback, WriteBudget};
+    use portable_pty::{MasterPty, PtySize};
     use std::io::{Cursor, Read, Result as IoResult, Write};
-    use std::panic::{catch_unwind, AssertUnwindSafe};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::Instant;
 
     #[derive(Debug, Clone)]
-    struct CountingKiller {
-        kills: Arc<AtomicUsize>,
+    pub(crate) struct CountingKiller {
+        pub(crate) kills: Arc<AtomicUsize>,
     }
 
     impl portable_pty::ChildKiller for CountingKiller {
@@ -296,7 +302,7 @@ mod drop_tests {
         }
     }
 
-    struct DummyMaster;
+    pub(crate) struct DummyMaster;
 
     impl MasterPty for DummyMaster {
         fn resize(&self, _size: PtySize) -> std::result::Result<(), anyhow::Error> {
@@ -338,14 +344,20 @@ mod drop_tests {
         }
     }
 
-    fn test_handle(kills: Arc<AtomicUsize>) -> SessionHandle {
+    /// `agent_id` / `session_key` / `team_id` を指定して mock killer 付き handle を作る。
+    pub(crate) fn handle_with(
+        agent_id: Option<&str>,
+        session_key: Option<&str>,
+        team_id: Option<&str>,
+        kills: Arc<AtomicUsize>,
+    ) -> SessionHandle {
         SessionHandle {
             writer: Mutex::new(Box::new(Vec::<u8>::new())),
             master: Mutex::new(Box::new(DummyMaster)),
             killer: Mutex::new(Box::new(CountingKiller { kills })),
-            agent_id: None,
-            session_key: None,
-            team_id: None,
+            agent_id: agent_id.map(str::to_string),
+            session_key: session_key.map(str::to_string),
+            team_id: team_id.map(str::to_string),
             role: None,
             cwd: String::new(),
             is_codex: false,
@@ -355,10 +367,23 @@ mod drop_tests {
                 window_started_at: Instant::now(),
                 bytes_in_window: 0,
             }),
-            scrollback: crate::pty::scrollback::new_scrollback(),
+            scrollback: new_scrollback(),
             watcher_cancel: Arc::new(AtomicBool::new(false)),
         }
     }
+
+    /// `team_id` 等を持たない最小 handle (handle.rs の Drop/inject テスト用)。
+    pub(crate) fn test_handle(kills: Arc<AtomicUsize>) -> SessionHandle {
+        handle_with(None, None, None, kills)
+    }
+}
+
+#[cfg(test)]
+mod drop_tests {
+    use super::test_support::test_handle;
+    use super::*;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn drop_recovers_poisoned_killer_mutex_and_kills_child() {
