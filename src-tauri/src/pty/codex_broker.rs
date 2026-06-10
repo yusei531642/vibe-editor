@@ -102,6 +102,8 @@ fn cleanup_stale_in_state_dir(state_dir: &Path, is_alive: impl Fn(u32) -> bool) 
 
     let session = match std::fs::read_to_string(&broker_file)
         .ok()
+        // safe-load-exempt: Codex CLI が所有する外部ファイルの read-only 参照。vibe-editor は
+        // この path に save しないため #936 の「破損→default→上書き消失」経路が存在しない。
         .and_then(|s| serde_json::from_str::<BrokerSession>(&s).ok())
     {
         Some(session) => session,
