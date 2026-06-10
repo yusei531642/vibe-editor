@@ -284,6 +284,57 @@ pub fn reject_danger_flags(args: &[String], sanctioned: &HashSet<String>) -> Opt
     None
 }
 
+/// token 先頭の dash 類 (ASCII `-` `/` および Unicode ダッシュ) を全て剥がした小文字 stem を返す。
+/// `canonical_danger_flag` と同じ dash 集合を使い、PowerShell の `/command` 形式に対応するため
+/// `/` も剥がす。
+fn flag_stem(token: &str) -> String {
+    token
+        .trim()
+        .to_ascii_lowercase()
+        .trim_start_matches(|c: char| {
+            c == '-'
+                || c == '/'
+                || matches!(
+                    c,
+                    '\u{2010}'..='\u{2015}' | '\u{2212}' | '\u{FE58}' | '\u{FE63}' | '\u{FF0D}'
+                )
+        })
+        .to_string()
+}
+
+/// Issue #890: PowerShell の即時実行フラグ (`-Command` / `-EncodedCommand` / `-File`) を、
+/// 前置短縮形 (`-c`/`-co`/`-com`、`-e`/`-en`/`-enc`、`-f`/`-fil` 等) まで含めて検出する。
+/// `-ec` は EncodedCommand の文書化済み短縮形なので別途許可。`-nop`/`-ep`/`-con` 等の
+/// 対話起動フラグは前置一致しないため誤検知しない。
+fn is_powershell_immediate_exec_arg(token: &str) -> bool {
+    let stem = flag_stem(token);
+    if stem.is_empty() {
+        return false;
+    }
+    if stem == "ec" {
+        return true;
+    }
+    ["command", "encodedcommand", "file"]
+        .iter()
+        .any(|name| name.starts_with(&stem))
+}
+
+/// Issue #890: POSIX shell の即時実行フラグを検出する。
+/// `--command` / `--commands` の長形式に加え、連結短オプションクラスタ (`-cx`/`-xc`/`-cl`/`-lc`)
+/// に `c` が含まれれば true。`-i`/`-l`/`--login`/`--`/`-` は素通りさせる。
+fn is_posix_immediate_exec_arg(token: &str) -> bool {
+    let lower = token.trim().to_ascii_lowercase();
+    if lower == "--command" || lower == "--commands" {
+        return true;
+    }
+    // `--` 始まりの長形式 (上記以外) と素の `-` / `--` は対象外。
+    if lower.starts_with("--") || !lower.starts_with('-') || lower.len() < 2 {
+        return false;
+    }
+    let cluster = &lower[1..];
+    cluster.chars().all(|c| c.is_ascii_alphabetic()) && cluster.contains('c')
+}
+
 pub fn reject_immediate_exec_args(command: &str, args: &[String]) -> Option<&'static str> {
     let basename = command_basename(command);
     let lower_args: Vec<String> = args.iter().map(|a| a.trim().to_ascii_lowercase()).collect();
@@ -294,15 +345,15 @@ pub fn reject_immediate_exec_args(command: &str, args: &[String]) -> Option<&'st
     };
     match basename.as_str() {
         "bash" | "sh" | "zsh" | "fish" => {
-            if has_any(&["-c", "-lc"]) {
-                Some("shell immediate-exec flags (-c / -lc) are blocked")
+            if args.iter().any(|a| is_posix_immediate_exec_arg(a)) {
+                Some("shell immediate-exec flags (-c / -lc / connected short clusters) are blocked")
             } else {
                 None
             }
         }
         "pwsh" | "powershell" => {
-            if has_any(&["-c", "-command", "/command", "-encodedcommand", "-file"]) {
-                Some("PowerShell immediate-exec flags (-Command / -EncodedCommand / -File) are blocked")
+            if args.iter().any(|a| is_powershell_immediate_exec_arg(a)) {
+                Some("PowerShell immediate-exec flags (-Command / -EncodedCommand / -File, including prefix abbreviations) are blocked")
             } else {
                 None
             }
@@ -712,6 +763,97 @@ mod command_normalization_tests {
             reject_immediate_exec_args(&command, &args),
             Some("cmd immediate-exec flags (/c /k) are blocked")
         );
+    }
+
+    // Issue #890: PowerShell 前置短縮形による immediate-exec バイパスを塞ぐ
+    #[test]
+    fn rejects_powershell_command_prefix_abbreviations() {
+        for arg in [
+            "-e",
+            "-ec",
+            "-en",
+            "-enc",
+            "-encodedcommand",
+            "-c",
+            "-co",
+            "-com",
+            "-comm",
+            "-command",
+            "-f",
+            "-fil",
+            "-file",
+        ] {
+            let args = vec![arg.to_string(), "payload".to_string()];
+            assert!(
+                reject_immediate_exec_args("powershell", &args).is_some(),
+                "expected {arg} to be blocked"
+            );
+        }
+        // パス形式の command でも basename 正規化されて検出される
+        assert!(reject_immediate_exec_args(
+            r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+            &["-e".to_string(), "payload".to_string()]
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn allows_powershell_interactive_flags() {
+        for arg in [
+            "-nop",
+            "-noprofile",
+            "-nologo",
+            "-ep",
+            "-executionpolicy",
+            "-con",
+        ] {
+            let args = vec![arg.to_string(), "value".to_string()];
+            assert!(
+                reject_immediate_exec_args("powershell", &args).is_none(),
+                "expected {arg} to be allowed"
+            );
+        }
+        // 引数なしの対話起動も許可
+        assert!(reject_immediate_exec_args("powershell", &[]).is_none());
+    }
+
+    // Issue #890: POSIX 連結短オプションによる immediate-exec バイパスを塞ぐ
+    #[test]
+    fn rejects_posix_connected_short_clusters() {
+        for arg in ["-c", "-lc", "-cl", "-cx", "-xc", "-ic"] {
+            let args = vec![arg.to_string(), "evil".to_string()];
+            assert!(
+                reject_immediate_exec_args("bash", &args).is_some(),
+                "expected {arg} to be blocked"
+            );
+        }
+        // fish の長形式
+        assert!(reject_immediate_exec_args(
+            "fish",
+            &["--command".to_string(), "evil".to_string()]
+        )
+        .is_some());
+    }
+
+    #[test]
+    fn allows_posix_interactive_flags() {
+        for arg in ["-i", "-l", "--login", "--", "-"] {
+            let args = vec![arg.to_string()];
+            assert!(
+                reject_immediate_exec_args("bash", &args).is_none(),
+                "expected {arg} to be allowed"
+            );
+        }
+    }
+
+    #[test]
+    fn preserves_nu_immediate_exec_rejection() {
+        assert!(reject_immediate_exec_args("nu", &["-c".to_string(), "x".to_string()]).is_some());
+        assert!(reject_immediate_exec_args(
+            "nu",
+            &["--commands".to_string(), "x".to_string()]
+        )
+        .is_some());
     }
 
     // Issue #743: --dangerously-* フラグの拒否
