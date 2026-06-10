@@ -694,18 +694,24 @@ pub async fn terminal_write(
     data: String,
 ) -> crate::commands::error::CommandResult<()> {
     if let Some(s) = state.pty_registry.get(&id) {
-        match s.user_write(data.as_bytes()).map_err(|e| e.to_string())? {
+        let data_len = data.len();
+        let data_bytes = data.into_bytes();
+        let outcome = tokio::task::spawn_blocking(move || s.user_write(&data_bytes))
+            .await
+            .map_err(|e| format!("[terminal] terminal_write spawn_blocking failed for {id}: {e}"))?
+            .map_err(|e| e.to_string())?;
+        match outcome {
             UserWriteOutcome::Written | UserWriteOutcome::SuppressedInjecting => {}
             UserWriteOutcome::DroppedTooLarge => {
                 tracing::warn!(
                     "[terminal] dropped oversized terminal_write payload for {id}: {} bytes",
-                    data.len()
+                    data_len
                 );
             }
             UserWriteOutcome::DroppedRateLimited => {
                 tracing::warn!(
                     "[terminal] rate-limited terminal_write for {id}: {} bytes",
-                    data.len()
+                    data_len
                 );
             }
         }
@@ -721,11 +727,15 @@ pub async fn terminal_resize(
     rows: u32,
 ) -> crate::commands::error::CommandResult<()> {
     if let Some(s) = state.pty_registry.get(&id) {
+        let cols = cols.min(u32::from(u16::MAX)) as u16;
+        let rows = rows.min(u32::from(u16::MAX)) as u16;
         // resize 失敗は無害なので握りつぶす (旧実装と同じ)
-        let _ = s.resize(
-            cols.min(u32::from(u16::MAX)) as u16,
-            rows.min(u32::from(u16::MAX)) as u16,
-        );
+        match tokio::task::spawn_blocking(move || s.resize(cols, rows)).await {
+            Ok(Ok(())) | Ok(Err(_)) => {}
+            Err(e) => {
+                tracing::warn!("[terminal] terminal_resize spawn_blocking failed for {id}: {e}");
+            }
+        }
     }
     Ok(())
 }
