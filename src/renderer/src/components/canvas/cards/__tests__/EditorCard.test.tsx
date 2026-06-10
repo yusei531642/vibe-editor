@@ -7,7 +7,10 @@
  * 「タイトルが描画される」を最小限固定する。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+
+const editorViewMock = vi.hoisted(() => vi.fn());
+const confirmMock = vi.hoisted(() => vi.fn(async () => true));
 
 vi.mock('@xyflow/react', () => ({
   Handle: () => null,
@@ -17,7 +20,14 @@ vi.mock('@xyflow/react', () => ({
 }));
 
 vi.mock('../../../EditorView', () => ({
-  EditorView: () => <div data-testid="editor-view-stub" />
+  EditorView: (props: unknown) => {
+    editorViewMock(props);
+    return <div data-testid="editor-view-stub" />;
+  }
+}));
+
+vi.mock('../../../../lib/use-native-confirm', () => ({
+  useNativeConfirm: () => confirmMock
 }));
 
 import EditorCard from '../EditorCard';
@@ -37,11 +47,21 @@ function installApi(): {
 } {
   const read = vi.fn(async () => ({
     ok: true,
+    path: 'src/foo.ts',
     content: 'hello',
     isBinary: false,
+    encoding: 'utf-8',
+    mtimeMs: 1000,
+    sizeBytes: 5,
+    contentHash: 'hash-1',
     error: null
   }));
-  const write = vi.fn(async () => ({ ok: true }));
+  const write = vi.fn(async () => ({
+    ok: true,
+    mtimeMs: 2000,
+    sizeBytes: 7,
+    contentHash: 'hash-2'
+  }));
   (window as TestWindow).api = {
     settings: {
       load: vi.fn(async () => DEFAULT_SETTINGS),
@@ -54,6 +74,19 @@ function installApi(): {
     files: { read, write }
   };
   return { read, write };
+}
+
+type EditorViewMockProps = {
+  content: string;
+  dirty: boolean;
+  readOnly?: boolean;
+  readOnlyReason?: string;
+  onChange: (value: string) => void;
+  onSave: () => void;
+};
+
+function latestEditorProps(): EditorViewMockProps {
+  return editorViewMock.mock.calls.at(-1)?.[0] as EditorViewMockProps;
 }
 
 function Wrapper({ children }: { children: ReactNode }): JSX.Element {
@@ -93,6 +126,9 @@ describe('EditorCard (smoke)', () => {
 
   beforeEach(() => {
     originalApi = (window as TestWindow).api;
+    editorViewMock.mockClear();
+    confirmMock.mockReset();
+    confirmMock.mockResolvedValue(true);
   });
 
   afterEach(() => {
@@ -114,6 +150,116 @@ describe('EditorCard (smoke)', () => {
     expect(screen.getByTestId('editor-view-stub')).toBeInTheDocument();
     await waitFor(() => expect(api.read).toHaveBeenCalledTimes(1));
     expect(api.read).toHaveBeenCalledWith('/repo', 'src/foo.ts');
+  });
+
+  it('保存時に読み込み時の mtime / size / encoding / hash を渡す (Issue #892)', async () => {
+    const api = installApi();
+    api.read.mockResolvedValueOnce({
+      ok: true,
+      path: 'src/foo.ts',
+      content: 'hello',
+      isBinary: false,
+      encoding: 'shift_jis',
+      mtimeMs: 1234,
+      sizeBytes: 5,
+      contentHash: 'hash-before'
+    });
+
+    renderCard();
+
+    await waitFor(() => expect(latestEditorProps().content).toBe('hello'));
+    act(() => latestEditorProps().onChange('changed'));
+    await waitFor(() => expect(latestEditorProps().dirty).toBe(true));
+
+    await act(async () => {
+      latestEditorProps().onSave();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(api.write).toHaveBeenCalledTimes(1));
+    expect(api.write).toHaveBeenCalledWith(
+      '/repo',
+      'src/foo.ts',
+      'changed',
+      1234,
+      5,
+      'shift_jis',
+      'hash-before'
+    );
+  });
+
+  it('外部変更 conflict では確認後に encoding を保って強制上書きする', async () => {
+    const api = installApi();
+    api.read.mockResolvedValueOnce({
+      ok: true,
+      path: 'src/foo.ts',
+      content: 'hello',
+      isBinary: false,
+      encoding: 'shift_jis',
+      mtimeMs: 1234,
+      sizeBytes: 5,
+      contentHash: 'hash-before'
+    });
+    api.write
+      .mockResolvedValueOnce({ ok: false, conflict: true, error: 'conflict' })
+      .mockResolvedValueOnce({
+        ok: true,
+        mtimeMs: 3000,
+        sizeBytes: 7,
+        contentHash: 'hash-after'
+      });
+
+    renderCard();
+
+    await waitFor(() => expect(latestEditorProps().content).toBe('hello'));
+    act(() => latestEditorProps().onChange('changed'));
+    await waitFor(() => expect(latestEditorProps().dirty).toBe(true));
+
+    await act(async () => {
+      latestEditorProps().onSave();
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(api.write).toHaveBeenCalledTimes(2));
+    expect(confirmMock).toHaveBeenCalledTimes(1);
+    expect(api.write).toHaveBeenNthCalledWith(
+      2,
+      '/repo',
+      'src/foo.ts',
+      'changed',
+      undefined,
+      undefined,
+      'shift_jis',
+      undefined
+    );
+  });
+
+  it('lossy 読み込み時は readOnly にし、保存をブロックする', async () => {
+    const api = installApi();
+    api.read.mockResolvedValueOnce({
+      ok: true,
+      path: 'src/foo.ts',
+      content: 'hello',
+      isBinary: false,
+      encoding: 'lossy',
+      mtimeMs: 1234,
+      sizeBytes: 5,
+      contentHash: 'hash-before'
+    });
+
+    renderCard();
+
+    await waitFor(() => expect(latestEditorProps().readOnly).toBe(true));
+    expect(latestEditorProps().readOnlyReason).toBeTruthy();
+    act(() => latestEditorProps().onChange('changed'));
+    await waitFor(() => expect(latestEditorProps().dirty).toBe(true));
+
+    await act(async () => {
+      latestEditorProps().onSave();
+      await Promise.resolve();
+    });
+
+    expect(api.write).not.toHaveBeenCalled();
   });
 
   it('画像ファイルでは files.read を呼ばない (Issue #325)', async () => {
