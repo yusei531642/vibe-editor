@@ -70,7 +70,20 @@ pub async fn safe_load_or_quarantine<T: DeserializeOwned>(
             return LoadOutcome::Absent;
         }
     };
-    match serde_json::from_slice::<T>(&bytes) {
+    safe_parse_or_quarantine(path, &bytes, backup_mode).await
+}
+
+/// Issue #947: 既に読み込んだ bytes を `T` へ parse する variant。
+/// 呼び出し側が同じ bytes を fingerprint 計算 (#642 の外部変更検出) 等にも使うストア
+/// (team-history / team-state) 向け。`safe_load_or_quarantine` を使うと read が二重になり、
+/// fingerprint と parse が別スナップショットを見る race が生まれるため、こちらを使う。
+/// 退避の不変条件 (default に倒す前に `.bak.<ts>` へコピー退避) は同一。
+pub async fn safe_parse_or_quarantine<T: DeserializeOwned>(
+    path: &Path,
+    bytes: &[u8],
+    backup_mode: Option<u32>,
+) -> LoadOutcome<T> {
+    match serde_json::from_slice::<T>(bytes) {
         Ok(v) => LoadOutcome::Loaded(v),
         Err(e) => {
             tracing::error!(
@@ -80,7 +93,7 @@ pub async fn safe_load_or_quarantine<T: DeserializeOwned>(
             );
             // #936 の core invariant: default に倒す前に必ず退避する。コピー退避なので
             // 原本 path を触らず、並行 save の valid file を巻き込まない (#853 の TOCTOU 回避)。
-            match crate::util::backup::write_timestamped_backup(path, &bytes, backup_mode).await {
+            match crate::util::backup::write_timestamped_backup(path, bytes, backup_mode).await {
                 Ok(bak) => {
                     tracing::info!("[safe_load] wrote corrupt backup: {}", bak.display())
                 }
