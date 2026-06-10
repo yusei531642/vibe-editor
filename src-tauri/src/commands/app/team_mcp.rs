@@ -279,6 +279,18 @@ pub async fn app_cleanup_team_mcp(
     team_id: String,
 ) -> crate::commands::error::CommandResult<CleanupTeamMcpResult> {
     let last = state.team_hub.clear_team(&team_id).await;
+
+    // Issue #937: 従来は hub state / MCP 設定だけを消し PTY registry に触れていなかったため、
+    // チームの PTY (と claude CLI が spawn した MCP node 群) は renderer の React unmount kill
+    // 一極依存で、UI フリーズ/クラッシュ時に孤児化していた (#864 / #829)。チーム解散の所有者で
+    // ある本コマンドが backend 側でも team スコープの PTY を確実に回収する (残チーム数に依らず実行)。
+    let reclaimed = state.pty_registry.kill_team(&team_id);
+    if reclaimed > 0 {
+        tracing::info!(
+            "[cleanup_team_mcp] reclaimed {reclaimed} PTY session(s) for team {team_id}"
+        );
+    }
+
     if !last {
         return Ok(CleanupTeamMcpResult {
             ok: true,

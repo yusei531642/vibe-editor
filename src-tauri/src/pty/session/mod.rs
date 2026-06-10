@@ -33,4 +33,9 @@ pub(crate) mod windows_resolve;
 pub use handle::{SessionHandle, UserWriteOutcome};
 pub use spawn::{resolve_valid_cwd, spawn_session, SpawnOptions, TerminalWarning};
 
+// Issue #937: registry の kill_team テスト等が mock killer 付き handle を作れるよう、
+// テスト専用の構築 helper を crate 内へ再エクスポートする (`handle` モジュール自体は private)。
+#[cfg(test)]
+pub(crate) use handle::test_support;
+
 pub(crate) use spawn::resolve_terminal_command_path_for_check;
