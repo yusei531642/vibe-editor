@@ -70,6 +70,7 @@ import {
   type SpawnTeamMember,
   type SpawnTeamSpec
 } from '../lib/canvas-team-spawn';
+import { findExistingTeamNode } from '../lib/canvas-existing-team';
 
 type Tab = 'preset' | 'recent';
 
@@ -229,6 +230,16 @@ export function CanvasLayout(): JSX.Element {
   };
 
   const restoreRecent = async (entry: TeamHistoryEntry): Promise<void> => {
+    const existing = findExistingTeamNode(useCanvasStore.getState().nodes, entry.id);
+    if (existing) {
+      notifyRecruit(existing.id);
+      showToast(t('teamHistory.alreadyOpen', { name: entry.name || entry.id }), {
+        tone: 'info'
+      });
+      setSpawnOpen(false);
+      return;
+    }
+
     const cwd = projectRoot || entry.projectRoot;
     // Issue #611 / #612: history-based 復元も spawnTeam 経由に統一。
     //   entry.latestHandoff / entry.organization の payload 同梱と placeBatchAwayFromNodes

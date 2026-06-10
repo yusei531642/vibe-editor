@@ -158,6 +158,7 @@ const ja: Dict = {
   // ---------- Team history ----------
   'teamHistory.resume': 'チーム「{name}」を復元',
   'teamHistory.resumed': 'チーム「{name}」を復元しました',
+  'teamHistory.alreadyOpen': 'チーム「{name}」は既に Canvas 上にあります',
   'teamHistory.delete': '履歴から削除',
 
   // ---------- File tree / Editor ----------
@@ -1006,6 +1007,7 @@ const en: Dict = {
   // ---------- Team history ----------
   'teamHistory.resume': 'Resume team "{name}"',
   'teamHistory.resumed': 'Resumed team "{name}"',
+  'teamHistory.alreadyOpen': 'Team "{name}" is already open on the Canvas',
   'teamHistory.delete': 'Remove from history',
 
   // ---------- File tree / Editor ----------

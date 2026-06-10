@@ -17,6 +17,8 @@ import { useUiStore } from '../../stores/ui';
 import { ROLE_META } from '../../lib/team-roles';
 import { useFilesChanged } from '../../lib/use-files-changed';
 import { spawnTeam, type SpawnTeamMember } from '../../lib/canvas-team-spawn';
+import { findExistingTeamNode } from '../../lib/canvas-existing-team';
+import { useToast } from '../../lib/toast-context';
 
 interface CanvasSidebarProps {
   /** 外部 (CanvasLayout の Rail) から制御したい場合に渡す。省略時はローカル state */
@@ -37,6 +39,7 @@ export function CanvasSidebar({
   const { settings, update } = useSettings();
   const t = useT();
   const confirm = useNativeConfirm();
+  const { showToast } = useToast();
   // Issue #23: projectRoot は「現在開いているプロジェクト」= lastOpenedRoot を優先。
   // claudeCwd は Claude CLI 起動時の作業ディレクトリ設定 (別用途) としてだけ使う。
   // lastOpenedRoot が空 (初回) のときだけ claudeCwd にフォールバック。
@@ -144,6 +147,16 @@ export function CanvasSidebar({
 
   const handleResumeTeam = useCallback(
     async (entry: TeamHistoryEntry): Promise<void> => {
+      const canvas = useCanvasStore.getState();
+      const existing = findExistingTeamNode(canvas.nodes, entry.id);
+      if (existing) {
+        canvas.notifyRecruit(existing.id);
+        showToast(t('teamHistory.alreadyOpen', { name: entry.name || entry.id }), {
+          tone: 'info'
+        });
+        return;
+      }
+
       const cwd = projectRoot || entry.projectRoot;
       // Issue #611 / #612: 旧実装は 520x360 hardcode grid + placeBatchAwayFromNodes
       //   未経由 + latestHandoff 未同梱で、現行 NODE_W/NODE_H (#497) と不整合のうえ
@@ -185,7 +198,7 @@ export function CanvasSidebar({
       });
       addCards(cards);
     },
-    [addCards, projectRoot, settings.mcpAutoSetup]
+    [addCards, projectRoot, settings.mcpAutoSetup, showToast, t]
   );
 
   const handleDeleteTeamHistory = useCallback(
