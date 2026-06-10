@@ -1,6 +1,6 @@
 // Claude Code MCP 設定 (~/.claude.json) の `mcpServers.vibe-team` を更新
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use tokio::fs;
@@ -19,10 +19,19 @@ pub(crate) fn config_path() -> PathBuf {
 /// Issue #597: テスト容易化のため path を引数に取る (production code は config_path() を渡す)。
 pub(crate) async fn setup_at(path: &Path, desired: &Value) -> Result<bool> {
     let mut config: Value = match fs::read(path).await {
-        Ok(bytes) => {
-            serde_json::from_slice(&bytes).unwrap_or_else(|_| Value::Object(Default::default()))
+        Ok(bytes) if bytes.is_empty() => Value::Object(Default::default()),
+        Ok(bytes) => serde_json::from_slice(&bytes).with_context(|| {
+            format!(
+                "{} contains invalid JSON; refusing to overwrite",
+                path.display()
+            )
+        })?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Value::Object(Default::default()),
+        Err(e) => {
+            return Err(e).with_context(|| {
+                format!("failed to read {}; refusing to overwrite", path.display())
+            });
         }
-        Err(_) => Value::Object(Default::default()),
     };
     let obj = config
         .as_object_mut()
@@ -43,7 +52,7 @@ pub(crate) async fn setup_at(path: &Path, desired: &Value) -> Result<bool> {
     let json = serde_json::to_vec_pretty(&config)?;
     // Issue #37: ~/.claude.json は他アプリとも共有。半端書き込みで全消失するのを避けるため atomic に。
     // Issue #608 (Security): API token 等を含むため 0o600 を強制 (Unix のみ effective)。
-crate::commands::atomic_write::atomic_write_with_mode(path, &json, Some(0o600)).await?;
+    crate::commands::atomic_write::atomic_write_with_mode(path, &json, Some(0o600)).await?;
     Ok(true)
 }
 
@@ -92,7 +101,7 @@ pub(crate) async fn cleanup_at(path: &Path) -> Result<bool> {
         // 直接 fs::write で上書きすると、書き込み中のクラッシュで `~/.claude.json` が
         // 空 / 半端な状態で残り、Claude Code 全体の設定が失われる事故になる。
         // Issue #608 (Security): API token 等を含むため 0o600 を強制 (Unix のみ effective)。
-crate::commands::atomic_write::atomic_write_with_mode(path, &json, Some(0o600)).await?;
+        crate::commands::atomic_write::atomic_write_with_mode(path, &json, Some(0o600)).await?;
     }
     Ok(removed)
 }
@@ -137,5 +146,47 @@ mod tests {
         // ファイルは触られていないはず
         let still = fs::read(&path).await.unwrap();
         assert_eq!(still, b"[]");
+    }
+
+    #[tokio::test]
+    async fn setup_at_returns_err_when_json_parse_fails() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join(".claude.json");
+        let original = br#"{"mcpServers": {"other": true,}}"#;
+        fs::write(&path, original).await.unwrap();
+        let desired = json!({ "type": "stdio" });
+
+        let res = setup_at(&path, &desired).await;
+
+        assert!(
+            res.is_err(),
+            "invalid JSON must not be treated as empty config"
+        );
+        let msg = format!("{:#}", res.unwrap_err());
+        assert!(
+            msg.contains("invalid JSON"),
+            "error should explain parse failure: {msg}"
+        );
+        let still = fs::read(&path).await.unwrap();
+        assert_eq!(still, original, "invalid JSON file must not be overwritten");
+    }
+
+    #[tokio::test]
+    async fn setup_at_allows_absent_and_empty_files() {
+        let tmp = TempDir::new().unwrap();
+        let absent_path = tmp.path().join("absent.claude.json");
+        let desired = json!({ "type": "stdio" });
+
+        let changed = setup_at(&absent_path, &desired).await.unwrap();
+        assert!(changed, "absent file should be created");
+        let created = fs::read_to_string(&absent_path).await.unwrap();
+        assert!(created.contains("vibe-team"));
+
+        let empty_path = tmp.path().join("empty.claude.json");
+        fs::write(&empty_path, b"").await.unwrap();
+        let changed = setup_at(&empty_path, &desired).await.unwrap();
+        assert!(changed, "empty file should be initialized");
+        let initialized = fs::read_to_string(&empty_path).await.unwrap();
+        assert!(initialized.contains("vibe-team"));
     }
 }
