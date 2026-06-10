@@ -19,6 +19,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
   useCanvasStore,
   cardTeamId,
+  cardTeamName,
   cardAgentId,
   cardRoleId,
   agentPayloadOf
@@ -246,6 +247,7 @@ export function useRecruitListener(): void {
         // payload (AgentPayload) を取り出し、organization を継承させる
         // (旧 `payload as { organization?: unknown }` の置き換え)。
         const requesterOrganization = agentPayloadOf(requester.data)?.organization;
+        const requesterTeamName = cardTeamName(requester.data);
         const teamNodes = store.nodes.filter(
           (n) => cardTeamId(n.data) === p.teamId
         );
@@ -261,6 +263,7 @@ export function useRecruitListener(): void {
             // 旧コード互換: role 旧フィールドにも書く (一時的)
             role: p.roleProfileId,
             teamId: p.teamId,
+            teamName: requesterTeamName,
             agentId: p.newAgentId,
             organization: requesterOrganization,
             // Issue #117: AgentNodeCard が拾って Claude(--append-system-prompt) /

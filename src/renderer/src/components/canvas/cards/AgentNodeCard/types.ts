@@ -18,6 +18,8 @@ export interface AgentPayload {
   /** @deprecated 旧フィールド。canvas store v2 マイグレーションで roleProfileId に移行済み */
   role?: string;
   teamId?: string;
+  /** チーム表示名。cascade close 確認やチーム所属表示で使う。 */
+  teamName?: string;
   agentId?: string;
   command?: string;
   args?: string[];
