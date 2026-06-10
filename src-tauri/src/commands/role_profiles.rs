@@ -4,47 +4,28 @@
 // 形式の検証は renderer 側の TS で行う想定なので、ここでは raw JSON を扱うだけ。
 
 use crate::commands::atomic_write::atomic_write_with_mode;
-use crate::util::backup::write_timestamped_backup;
+use crate::commands::safe_load::{safe_load_or_quarantine, LoadOutcome};
 use once_cell::sync::Lazy;
 use serde_json::Value;
-use tokio::fs;
+use std::path::Path;
 use tokio::sync::Mutex;
 
 static SAVE_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
+/// Issue #947: 読み込みは safe_load 共通基盤に統一する。
+/// parse 失敗時の挙動 (default に倒す前に `.bak.<ts>` へコピー退避、0o600、5 世代回転 —
+/// #170 / #644 / #608 の積み上げ) は safe_load 側に集約済みで等価。
+async fn role_profiles_load_at(path: &Path) -> Value {
+    match safe_load_or_quarantine::<Value>(path, Some(0o600)).await {
+        LoadOutcome::Loaded(v) => v,
+        LoadOutcome::Absent | LoadOutcome::Corrupted => Value::Null,
+    }
+}
+
 #[tauri::command]
 pub async fn role_profiles_load() -> Value {
     let path = crate::util::config_paths::role_profiles_path();
-    let Ok(bytes) = fs::read(&path).await else {
-        return Value::Null;
-    };
-    match serde_json::from_slice::<Value>(&bytes) {
-        Ok(v) => v,
-        Err(e) => {
-            // Issue #170: 旧実装は parse 失敗で黙って Null を返し、次の save で
-            // 役割プロファイルが完全消失していた。.bak 退避してから Null を返す。
-            // Issue #644: 旧実装は単一 `.bak` を都度上書きしていたため、連続破損保存で
-            // 健全な原本が 1 ステップで失われていた。タイムスタンプ付き backup +
-            // 世代回転 (5 世代) に変更。
-            // Issue #608 (Security): role profile instructions は injection-prone な
-            // ユーザー定義 prompt を含むため、バックアップも 0o600 で書く。
-            tracing::error!(
-                "[role-profiles] parse failed ({}), backing up to {}.bak.<ts>",
-                e,
-                path.display()
-            );
-            match write_timestamped_backup(&path, &bytes, Some(0o600)).await {
-                Ok(bak) => tracing::info!(
-                    "[role-profiles] wrote timestamped backup: {}",
-                    bak.display()
-                ),
-                Err(berr) => {
-                    tracing::warn!("[role-profiles] backup write failed: {berr}")
-                }
-            }
-            Value::Null
-        }
-    }
+    role_profiles_load_at(&path).await
 }
 
 #[tauri::command]
@@ -58,4 +39,55 @@ pub async fn role_profiles_save(file: Value) -> crate::commands::error::CommandR
     Ok(atomic_write_with_mode(&path, &json, Some(0o600))
         .await
         .map_err(|e| e.to_string())?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use tokio::fs;
+
+    #[tokio::test]
+    async fn load_at_returns_null_for_missing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("role-profiles.json");
+        assert_eq!(role_profiles_load_at(&path).await, Value::Null);
+    }
+
+    #[tokio::test]
+    async fn load_at_parses_valid_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("role-profiles.json");
+        fs::write(&path, br#"{"profiles":[{"id":"leader"}]}"#)
+            .await
+            .unwrap();
+        assert_eq!(
+            role_profiles_load_at(&path).await,
+            json!({"profiles":[{"id":"leader"}]})
+        );
+    }
+
+    /// Issue #947 (元 #170/#644): 破損 JSON は Null に倒す前に `.bak.<ts>` へ退避され、
+    /// 原本はコピー退避なので残置される (次回 save が上書きする)。
+    #[tokio::test]
+    async fn load_at_quarantines_corrupt_json_before_null() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("role-profiles.json");
+        let corrupt = b"{ broken json";
+        fs::write(&path, corrupt).await.unwrap();
+
+        assert_eq!(role_profiles_load_at(&path).await, Value::Null);
+        assert!(path.exists(), "copy-style backup must leave the original");
+
+        let mut rd = fs::read_dir(dir.path()).await.unwrap();
+        let mut found = false;
+        while let Ok(Some(entry)) = rd.next_entry().await {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with("role-profiles.json.bak.") {
+                assert_eq!(fs::read(entry.path()).await.unwrap(), corrupt);
+                found = true;
+            }
+        }
+        assert!(found, "timestamped backup of the corrupt file must exist");
+    }
 }
