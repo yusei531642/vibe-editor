@@ -6,6 +6,7 @@
 use crate::commands::files::hash::{mtime_ms_of, sha256_hex};
 use crate::commands::team_state::TeamOrchestrationSummary;
 use crate::pty::path_norm::normalize_project_root;
+use crate::util::backup::write_timestamped_backup;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -213,28 +214,51 @@ async fn ensure_loaded(store: &mut TeamHistoryStore) {
         return;
     }
     let path = store_path();
-    match fs::read(&path).await {
-        Ok(bytes) => {
-            let entries =
-                serde_json::from_slice::<Vec<TeamHistoryEntry>>(&bytes).unwrap_or_default();
-            store.cache = Some(entries);
-            // Issue #642: 起動直後の fingerprint を保存。以後の save 直前にこれと現在 disk の
-            // fingerprint を比較して「外部変更が起きたか」を判定する。
-            let meta = fs::metadata(&path).await.ok();
-            let mtime_ms = meta.as_ref().and_then(mtime_ms_of);
-            let size = meta.as_ref().map(|m| m.len()).unwrap_or(bytes.len() as u64);
-            store.sync_state = DiskSyncState::Synced(DiskFingerprint {
-                mtime_ms,
-                size,
-                hash: sha256_hex(&bytes),
-            });
-        }
-        Err(_) => {
-            store.cache = Some(Vec::new());
-            // ファイルが存在しない状態を確認済みとして記録する。
-            store.sync_state = DiskSyncState::Absent;
+    let (entries, sync_state) = load_disk_entries(&path, "ensure_loaded").await;
+    store.cache = Some(entries);
+    store.sync_state = sync_state;
+}
+
+async fn fingerprint_from_bytes(path: &Path, bytes: &[u8]) -> DiskFingerprint {
+    let meta = fs::metadata(path).await.ok();
+    let mtime_ms = meta.as_ref().and_then(mtime_ms_of);
+    let size = meta.as_ref().map(|m| m.len()).unwrap_or(bytes.len() as u64);
+    DiskFingerprint {
+        mtime_ms,
+        size,
+        hash: sha256_hex(bytes),
+    }
+}
+
+async fn parse_entries_or_backup(
+    path: &Path,
+    bytes: &[u8],
+    context: &str,
+) -> Vec<TeamHistoryEntry> {
+    match serde_json::from_slice::<Vec<TeamHistoryEntry>>(bytes) {
+        Ok(entries) => entries,
+        Err(e) => {
+            tracing::warn!(
+                "[team_history] parse failed during {context} (backing up then using empty history): {e}"
+            );
+            match write_timestamped_backup(path, bytes, Some(0o600)).await {
+                Ok(bak) => {
+                    tracing::info!("[team_history] wrote timestamped backup: {}", bak.display())
+                }
+                Err(berr) => tracing::warn!("[team_history] backup write failed: {berr}"),
+            }
+            Vec::new()
         }
     }
+}
+
+async fn load_disk_entries(path: &Path, context: &str) -> (Vec<TeamHistoryEntry>, DiskSyncState) {
+    let Ok(bytes) = fs::read(path).await else {
+        return (Vec::new(), DiskSyncState::Absent);
+    };
+    let entries = parse_entries_or_backup(path, &bytes, context).await;
+    let fp = fingerprint_from_bytes(path, &bytes).await;
+    (entries, DiskSyncState::Synced(fp))
 }
 
 /// Issue #642: 現在 disk 上の fingerprint を計算する。ファイルが読めない / 存在しない場合は
@@ -242,14 +266,7 @@ async fn ensure_loaded(store: &mut TeamHistoryStore) {
 /// 「外部変更なし」を意味する。
 async fn compute_fingerprint(path: &Path) -> Option<DiskFingerprint> {
     let bytes = fs::read(path).await.ok()?;
-    let meta = fs::metadata(path).await.ok();
-    let mtime_ms = meta.as_ref().and_then(mtime_ms_of);
-    let size = meta.as_ref().map(|m| m.len()).unwrap_or(bytes.len() as u64);
-    Some(DiskFingerprint {
-        mtime_ms,
-        size,
-        hash: sha256_hex(&bytes),
-    })
+    Some(fingerprint_from_bytes(path, &bytes).await)
 }
 
 /// Issue #642: disk 上の `team-history.json` を読み直して現状の entries と fingerprint を返す。
@@ -258,15 +275,8 @@ async fn reload_disk_entries(path: &Path) -> (Vec<TeamHistoryEntry>, Option<Disk
     let Ok(bytes) = fs::read(path).await else {
         return (Vec::new(), None);
     };
-    let entries = serde_json::from_slice::<Vec<TeamHistoryEntry>>(&bytes).unwrap_or_default();
-    let meta = fs::metadata(path).await.ok();
-    let mtime_ms = meta.as_ref().and_then(mtime_ms_of);
-    let size = meta.as_ref().map(|m| m.len()).unwrap_or(bytes.len() as u64);
-    let fp = DiskFingerprint {
-        mtime_ms,
-        size,
-        hash: sha256_hex(&bytes),
-    };
+    let entries = parse_entries_or_backup(path, &bytes, "reload_disk_entries").await;
+    let fp = fingerprint_from_bytes(path, &bytes).await;
     (entries, Some(fp))
 }
 
@@ -701,6 +711,65 @@ mod tests {
         e
     }
 
+    async fn team_history_backups_in(dir: &Path) -> Vec<PathBuf> {
+        let mut backups = Vec::new();
+        let mut entries = tokio::fs::read_dir(dir).await.unwrap();
+        while let Some(entry) = entries.next_entry().await.unwrap() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with("team-history.json.bak.") {
+                backups.push(entry.path());
+            }
+        }
+        backups.sort();
+        backups
+    }
+
+    #[tokio::test]
+    async fn load_disk_entries_backs_up_invalid_json() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("team-history.json");
+        let corrupt = br#"[{"id":"team-a"}]"#;
+        tokio::fs::write(&path, corrupt).await.unwrap();
+
+        let (entries, sync_state) = load_disk_entries(&path, "test").await;
+
+        assert!(
+            entries.is_empty(),
+            "invalid history should fall back to empty"
+        );
+        assert!(
+            sync_state.synced_fingerprint().is_some(),
+            "corrupt disk bytes are still tracked as the last observed fingerprint"
+        );
+        let backups = team_history_backups_in(dir.path()).await;
+        assert_eq!(backups.len(), 1, "one timestamped backup should be written");
+        let backup_bytes = tokio::fs::read(&backups[0]).await.unwrap();
+        assert_eq!(backup_bytes, corrupt);
+    }
+
+    #[tokio::test]
+    async fn reload_disk_entries_backs_up_invalid_json() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("team-history.json");
+        let corrupt = br#"{"not":"an array"}"#;
+        tokio::fs::write(&path, corrupt).await.unwrap();
+
+        let (entries, fp) = reload_disk_entries(&path).await;
+
+        assert!(
+            entries.is_empty(),
+            "invalid reload should fall back to empty"
+        );
+        assert!(
+            fp.is_some(),
+            "reload should still return the corrupt file fingerprint"
+        );
+        let backups = team_history_backups_in(dir.path()).await;
+        assert_eq!(backups.len(), 1, "one timestamped backup should be written");
+        let backup_bytes = tokio::fs::read(&backups[0]).await.unwrap();
+        assert_eq!(backup_bytes, corrupt);
+    }
+
     /// Issue #640 root cause: 旧実装は cache を mutate してから disk write していたので
     /// failure path で「renderer に Err を返したのに cache だけ更新済み」状態が残った。
     /// 新実装は disk write 失敗時 cache が touch されないことを検証する。
@@ -869,7 +938,11 @@ mod tests {
         .await;
 
         assert!(result.ok);
-        let saved = captured.lock().unwrap().clone().expect("save_fn was called");
+        let saved = captured
+            .lock()
+            .unwrap()
+            .clone()
+            .expect("save_fn was called");
         // disk へ書き出された候補は mutate 適用後 (a, b の両方を含む)
         assert_eq!(saved.len(), 2);
         assert!(saved.iter().any(|id| id == "a"));
@@ -951,7 +1024,10 @@ mod tests {
 
         let merged = merge_external_disk(&mut cache, disk, &incoming);
 
-        assert!(!merged, "no other-id change → external_change_merged stays false");
+        assert!(
+            !merged,
+            "no other-id change → external_change_merged stays false"
+        );
         assert_eq!(cache.len(), 1);
         assert_eq!(
             cache[0]
@@ -976,7 +1052,10 @@ mod tests {
 
         let merged = merge_external_disk(&mut cache, disk, &incoming);
 
-        assert!(merged, "disk-only entry must trigger external_change_merged");
+        assert!(
+            merged,
+            "disk-only entry must trigger external_change_merged"
+        );
         assert_eq!(cache.len(), 2);
         let b = cache.iter().find(|e| e.id == "b").expect("b imported");
         assert_eq!(
