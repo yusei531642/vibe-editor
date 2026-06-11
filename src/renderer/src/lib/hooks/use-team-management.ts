@@ -75,6 +75,7 @@ export interface UseTeamManagementResult {
 
   // ---- terminal launch helpers (TerminalView props にそのまま渡せる形) ----
   getTerminalArgs: (tab: TerminalTab) => string[];
+  getClaudeInstructions: (tab: TerminalTab) => string | undefined;
   getCodexInstructions: (tab: TerminalTab) => string | undefined;
   getRolePrompt: (tab: TerminalTab) => string | undefined;
   getTerminalEnv: (tab: TerminalTab) => Record<string, string> | undefined;
@@ -123,6 +124,7 @@ export function useTeamManagement(
     handleTerminalSessionId: history.handleTerminalSessionId,
     persistTerminalCustomLabel: history.persistTerminalCustomLabel,
     getTerminalArgs: launch.getTerminalArgs,
+    getClaudeInstructions: launch.getClaudeInstructions,
     getCodexInstructions: launch.getCodexInstructions,
     getRolePrompt: launch.getRolePrompt,
     getTerminalEnv: launch.getTerminalEnv,
