@@ -15,6 +15,7 @@
     "lint": "eslint .",
     "test": "vitest run",
     "lint:safe-load": "node build/check-safe-load.mjs",
+    "lint:file-size": "node build/check-file-size-ratchet.mjs",
     "test:watch": "vitest",
     "icons": "node build/generate-icons.mjs"
   },

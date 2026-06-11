@@ -54,6 +54,11 @@ Tauri ベースの Claude Code / Codex 専用エディタ (v1.4.x)
 - PR 本文の `## Test plan` や `## Summary` 等は書いて良いが、Claude/Anthropic に紐づくクレジットだけは含めない。
 - ユーザーが明示的に「Claude の署名を入れて」と指示した場合のみ例外として許可する。
 
+### 7. 巨大ファイル分割 Issue の完了条件 (DoD) (Issue #939)
+- god-file 分割は「行数を減らす / ファイルを物理的に分ける」だけでは完了としない。
+- 完了条件: **対象の状態と不変条件の所有権が単一モジュールに閉じ、他モジュールは公開メソッド経由でしか触れない**こと。`pub(crate)` フィールドの直接 mutate を新たに作らない。
+- 新規ファイルは 500 行以下 (CI のファイルサイズ ratchet が強制)。既存の超過ファイルの上限は `build/file-size-baseline.json` で固定されており、引き上げる場合は分割できない理由を PR に明記する。
+
 ## アーキテクチャ原則
 - Rust 側 (`src-tauri/`): ファイル I/O、git、PTY (portable-pty)、設定永続化、TeamHub、MCP 設定、updater
 - レンダラー (`src/renderer/`): UI 描画のみ
