@@ -18,7 +18,6 @@ use crate::state::AppState;
 use crate::team_hub::inject;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
 
 #[derive(Deserialize)]
@@ -48,15 +47,13 @@ pub struct RetryInjectResult {
     pub failed_at: Option<String>,
 }
 
-/// `team_send_retry_inject` が `Err` で返す構造化エラー (JSON object) を組み立てる。
+/// `team_send_retry_inject` が `Err` で返す構造化エラーを組み立てる。
 ///
-/// Issue #737: 戻り値を `CommandResult<RetryInjectResult>` に統一した後も、renderer に届く
-/// payload は従来どおり `{"code":"retry_*","message":"..."}` の JSON 文字列を保つ。
-/// `CommandError` の `Serialize` は message をそのまま文字列化するため、`CommandError::internal`
-/// に JSON 文字列を載せれば旧 `Err(String)` と完全同一の wire 出力になる。
+/// Issue #931: `CommandError::Coded` で `{ code: "retry_*", message }` を正式フィールドとして
+/// 返す。旧実装は `CommandError::internal` に `{"code":...}` の JSON 文字列を載せる
+/// JSON-in-string ハックだった (renderer 側 `CommandError.from()` は object 形を直接解釈する)。
 fn retry_err(code: &str, message: String) -> crate::commands::error::CommandError {
-    let payload = json!({ "code": code, "message": message });
-    crate::commands::error::CommandError::internal(payload.to_string())
+    crate::commands::error::CommandError::coded(code, message)
 }
 
 /// `team_send` の partial failure に対する手動リトライ。同じ team / message / agent を 1 件単位で再 inject する。

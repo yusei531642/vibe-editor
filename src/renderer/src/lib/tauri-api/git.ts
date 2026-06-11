@@ -1,14 +1,14 @@
 // tauri-api/git.ts — git.* IPC namespace (Phase 5 / Issue #373)
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeCommand } from './command-error';
 import type { GitDiffResult, GitStatus } from '../../../../types/shared';
 
 export const git = {
-  status: (projectRoot: string): Promise<GitStatus> => invoke('git_status', { projectRoot }),
+  status: (projectRoot: string): Promise<GitStatus> => invokeCommand('git_status', { projectRoot }),
   diff: (
     projectRoot: string,
     relPath: string,
     originalRelPath?: string
   ): Promise<GitDiffResult> =>
-    invoke('git_diff', { projectRoot, relPath, originalRelPath })
+    invokeCommand('git_diff', { projectRoot, relPath, originalRelPath })
 };

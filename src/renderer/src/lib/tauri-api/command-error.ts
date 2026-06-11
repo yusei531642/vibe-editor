@@ -1,19 +1,24 @@
 /**
- * tauri-api/command-error.ts — IPC エラーの共通正規化層 (Issue #737)
+ * tauri-api/command-error.ts — IPC エラーの共通正規化層 (Issue #737 / #931)
  *
- * Rust 側は `commands/error.rs` の `CommandError` を `Serialize` で **message 文字列のみ**
- * シリアライズして返す (variant tag は含めない後方互換契約)。一部の command (例:
- * `team_send_retry_inject` / `team_diagnostics_read`) は `CommandError::internal` に
- * `{"code":"...","message":"..."}` の JSON 文字列を載せて構造化情報を運ぶ。
+ * Rust 側は `commands/error.rs` の `CommandError` を `Serialize` で
+ * **`{ code, message }` の構造化オブジェクト**として返す (Issue #931 で正式契約化)。
+ * `code` は machine-readable な失敗分類 (`io` / `parse` / `validation` / `not_found` /
+ * `internal` / `authz`、または `retry_*` 等の明示 code)。失敗理由の分岐は **必ず
+ * `err.code` で行い**、`err.message` (人間向け表示文字列) への `includes` / `===` /
+ * `startsWith` 分岐を書かないこと (#888 の dead branch の轍)。
+ *
+ * 旧契約 (message 文字列のみ + `{"code":...}` JSON-in-string ハック) のペイロードも
+ * `CommandError.from()` が後方互換で解釈する。
  *
  * `@tauri-apps/api` の `invoke()` は Rust 側 `Err` を「シリアライズされた値そのもの」で
  * reject するため、これまで renderer 各所が「string で来るときと object で来るとき」を
  * 場当たり的に処理していた。本モジュールは:
- *   - `CommandError` … 全 IPC 失敗を表す共通 Error subclass。`code` (構造化されていれば)
- *     と `message` を必ず持つ。
+ *   - `CommandError` … 全 IPC 失敗を表す共通 Error subclass。`code` と `message` を必ず持つ。
  *   - `invokeCommand()` … `invoke()` の薄いラッパ。reject を `CommandError` に正規化して
  *     再 throw する。成功時の戻り値・引数は `invoke()` と完全に同一。
- * を提供し、wrapper レベルでエラー型を 1 つに統一する。
+ * を提供し、wrapper レベルでエラー型を 1 つに統一する。raw `invoke` の直接 import は
+ * eslint `no-restricted-imports` (Issue #931) によりこのファイル以外で禁止されている。
  */
 import { invoke, type InvokeArgs } from '@tauri-apps/api/core';
 
