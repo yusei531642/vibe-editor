@@ -59,6 +59,10 @@ fn split_command_line(input: &str) -> Vec<String> {
             }
             '\\' => {
                 let next = chars.peek().copied();
+                // Issue #939: 2 つの分岐は「同じ動作・別条件」で意図的に分けている
+                // (quote 内のエスケープ規則 vs quote 外の規則)。条件の意味が別なので
+                // `||` で潰さず分けたまま allow する (将来どちらかの動作を変える余地を残す)。
+                #[allow(clippy::if_same_then_else)]
                 if quote.is_some() && next == quote {
                     current.push(chars.next().unwrap_or(ch));
                 } else if quote.is_none() && matches!(next, Some('"') | Some('\'')) {

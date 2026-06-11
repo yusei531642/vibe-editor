@@ -31,6 +31,8 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-04-26
         with:
           toolchain: stable
+          # Issue #939: clippy ゲート用。dtolnay/rust-toolchain は minimal profile なので明示する。
+          components: clippy
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
@@ -81,6 +83,12 @@ jobs:
       - name: Cargo check
         run: cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets
 
+      # Issue #939: clippy を品質ゲートに追加。warning を deny して新規の clippy lint 違反で
+      # CI を fail させる (`grep -c clippy ci.yml = 0` だった監査指摘の解消)。現時点の警告 0 件を
+      # baseline とし、許容できない lint は at-site `#[allow(...)]` + 理由コメントで明示 opt-out する。
+      - name: Cargo clippy (-D warnings)
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
       - name: Cargo test
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml
 
@@ -129,6 +137,8 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-04-26
         with:
           toolchain: stable
+          # Issue #939: cfg-gated コード (win_job_object 等の #[cfg(windows)]) も clippy 検査する。
+          components: clippy
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
@@ -137,6 +147,11 @@ jobs:
 
       - name: Cargo check (cfg-gated build)
         run: cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets
+
+      # Issue #939: Linux verify job の clippy は cfg(windows)/cfg(macos) コードを検査しないため、
+      # 各 OS でも clippy を走らせて cfg-gated コードの lint 違反を捕捉する。
+      - name: Cargo clippy (cfg-gated, -D warnings)
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
   # Issue #745: 既存の `npm audit` / `cargo audit` は advisory DB ベースの依存脆弱性検査で、
   # 「うっかり API key / token / 暗号鍵をコミットした」を検知できない。

@@ -8,6 +8,7 @@
 //! ごとに作成して child PID を assign する。Job handle は `SessionHandle` が保持し、
 //! - handle drop (タブ close / kill_all) → CloseHandle → job 内全プロセスを OS が kill
 //! - vibe-editor 本体の異常死 → OS が全 handle を強制 close → 同様に kill
+//!
 //! の両経路で「親の寿命 = 子プロセスツリーの寿命」を OS レベルで保証する。
 //!
 //! 制限:

@@ -44,7 +44,7 @@ fn sanitize_status_text(s: &str) -> String {
                 // CSI: `ESC [ <param-bytes>... <final-byte 0x40..=0x7E>`
                 Some('[') => {
                     chars.next();
-                    while let Some(p) = chars.next() {
+                    for p in chars.by_ref() {
                         if matches!(p, '@'..='~') {
                             break;
                         }

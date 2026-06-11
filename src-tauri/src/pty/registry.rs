@@ -199,6 +199,10 @@ impl SessionRegistry {
     ///   - `Ok(())`: 採用された (id は registry に登録済み)
     ///   - `Err(handle)`: 既存 PTY と id が衝突。caller の handle はそのまま返却される
     ///     ので、caller 側で `handle.kill()` してから別 id で retry する責務がある。
+    ///
+    /// Issue #939: `Err` に大きな `SessionHandle` を載せるのは「衝突時に handle を呼び出し元へ
+    /// 返して回収させる」という設計上の意図 (Box 化すると毎回ヒープ確保が増える)。許容する。
+    #[allow(clippy::result_large_err)]
     pub fn insert_if_absent(&self, id: String, handle: SessionHandle) -> Result<(), SessionHandle> {
         let mut g = recover(self.inner.lock());
         if g.by_id.contains_key(&id) {
@@ -350,39 +354,21 @@ impl SessionRegistry {
         removed
     }
 
-    /// アプリ終了 (window CloseRequested → `app.exit(0)` 直前) に全 PTY を kill する。
+    /// Issue #951: アプリ終了 (window CloseRequested → `app.exit(0)`) / 再起動経路専用の
+    /// **同期** 全 PTY kill。
     ///
-    /// Issue #834: 旧実装は各 session で `cleanup_codex_broker_after_kill()` を**同期直列**に
-    /// 呼んでおり、これが `git`/`tasklist` 子プロセス spawn + (broker 生存時) 250ms sleep を
-    /// 伴うため、codex タブ数ぶんアプリ終了がブロックされていた (#630 で inject drain を
-    /// 非同期化した狙いが相殺されていた)。
+    /// 旧 `kill_all()` (非 blocking) の `SessionHandle::kill()` は Windows で process-tree
+    /// kill (taskkill) を detached thread に逃がして即返るため、直後に `app.exit(0)` /
+    /// `app.restart()` で自プロセスごと消えると taskkill が走り切る前に殺され、子プロセス
+    /// (claude/codex + その配下の MCP) が孤児として残る競合があった。本メソッドは各 session の
+    /// process-tree kill を並列 thread で実行し、全完了 (または `timeout`) まで呼び出し thread を
+    /// ブロックして待つ。blocking なので async context からは `spawn_blocking` 経由で呼ぶこと。
+    /// (Issue #939: 非 blocking 版 `kill_all` は本メソッド導入後に呼び出し元が消えて dead code に
+    ///  なったため削除した。)
     ///
-    /// 終了経路では broker の stale state 掃除を**スキップ**する。掃除は best-effort な
-    /// state file の後始末に過ぎず、残っても次回起動時の spawn 前 cleanup
-    /// (`cleanup_codex_broker_if_stale`) で確実に回収できる。ここでは `s.kill()` による
-    /// 子プロセス停止だけを直列で確実に行い (これは速い)、即座に呼び出し元へ返す。
-    pub fn kill_all(&self) {
-        let sessions: Vec<Arc<SessionHandle>> = {
-            let mut g = recover(self.inner.lock());
-            g.by_agent.clear();
-            g.by_session_key.clear();
-            g.by_id.drain().map(|(_, s)| s).collect()
-        };
-        for s in sessions {
-            let _ = s.kill();
-        }
-    }
-
-    /// Issue #951: シャットダウン / 再起動経路専用の **同期** kill_all。
-    ///
-    /// `kill_all()` の `SessionHandle::kill()` は Windows で process-tree kill (taskkill) を
-    /// detached thread に逃がして即返るため、直後に `app.exit(0)` / `app.restart()` で
-    /// 自プロセスごと消えると taskkill が走り切る前に殺され、子プロセス (claude/codex +
-    /// その配下の MCP) が孤児として残る競合があった。
-    ///
-    /// 本メソッドは各 session の process-tree kill を並列 thread で実行し、全完了 (または
-    /// `timeout`) まで呼び出し thread をブロックして待つ。blocking なので async context
-    /// からは `spawn_blocking` 経由で呼ぶこと。
+    /// Issue #834: 終了経路では broker の stale state 掃除を**スキップ**する (掃除は best-effort で
+    /// 次回起動時の spawn 前 cleanup `cleanup_codex_broker_if_stale` で回収できる)。ここでは
+    /// process-tree kill だけを確実に行う。
     pub fn kill_all_blocking(&self, timeout: Duration) {
         let sessions: Vec<Arc<SessionHandle>> = {
             let mut g = recover(self.inner.lock());

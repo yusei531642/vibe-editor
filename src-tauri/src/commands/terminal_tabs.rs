@@ -304,7 +304,7 @@ async fn save_to_disk_at(path: &Path, file: &PersistedTerminalTabsFile) -> Resul
     // `~/.claude/projects/<encoded>/<uuid>.jsonl` の会話履歴に間接アクセスできるため
     // 機密ファイル扱い。`~/.claude.json` / role-profiles 等と同じく 0o600 を強制する。
     // Windows では mode は no-op (Windows ACL 強制は別 issue で対応)。
-    crate::commands::atomic_write::atomic_write_with_mode(&path, &json, Some(0o600))
+    crate::commands::atomic_write::atomic_write_with_mode(path, &json, Some(0o600))
         .await
         .map_err(|e| e.to_string())
 }
@@ -466,8 +466,10 @@ mod tests {
     async fn save_to_disk_rejects_future_incoming_schema() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("terminal-tabs.json");
-        let mut file = PersistedTerminalTabsFile::default();
-        file.schema_version = TERMINAL_TABS_SCHEMA_VERSION + 1;
+        let file = PersistedTerminalTabsFile {
+            schema_version: TERMINAL_TABS_SCHEMA_VERSION + 1,
+            ..Default::default()
+        };
 
         let err = save_to_disk_at(&path, &file).await.unwrap_err();
 

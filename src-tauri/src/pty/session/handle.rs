@@ -69,7 +69,12 @@ pub struct SessionHandle {
     /// この handle の drop (= タブ close / kill_all / vibe-editor 異常死による OS の
     /// handle 強制 close) で job 内の全プロセス (孫含む) が OS により kill される。
     /// Job 作成 / assign に失敗した場合は None (taskkill 経路のみで回収)。
+    ///
+    /// Issue #939: フィールドは **保持していること自体 (RAII)** が目的で、明示的に読まれる
+    /// ことはない。SessionHandle の drop で `KillOnCloseJob::drop` (= CloseHandle) が走り、
+    /// KILL_ON_JOB_CLOSE が発火する。clippy の dead-code は Drop の副作用を認識しないため allow。
     #[cfg(windows)]
+    #[allow(dead_code)]
     pub(super) job: Option<crate::pty::win_job_object::KillOnCloseJob>,
 }
 

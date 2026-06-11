@@ -122,15 +122,17 @@ async fn agent_config_minimal_entry_loads() {
 /// `customAgents` の `cwd` / `color` 完備バージョンも round-trip 可能。
 #[tokio::test]
 async fn agent_config_full_entry_round_trips() {
-    let mut s = Settings::default();
-    s.custom_agents = Some(vec![AgentConfig {
-        id: "claude-dev".into(),
-        name: "Claude (dev)".into(),
-        command: "claude".into(),
-        args: "--debug".into(),
-        cwd: Some("/tmp".into()),
-        color: Some("#ff0000".into()),
-    }]);
+    let s = Settings {
+        custom_agents: Some(vec![AgentConfig {
+            id: "claude-dev".into(),
+            name: "Claude (dev)".into(),
+            command: "claude".into(),
+            args: "--debug".into(),
+            cwd: Some("/tmp".into()),
+            color: Some("#ff0000".into()),
+        }]),
+        ..Settings::default()
+    };
 
     let bytes = serde_json::to_vec(&s).unwrap();
     let back: Settings = serde_json::from_slice(&bytes).unwrap();
@@ -227,9 +229,11 @@ async fn concurrent_atomic_writes_leave_valid_settings_json() {
     for i in 0..16 {
         let path_clone = path.clone();
         handles.push(tokio::spawn(async move {
-            let mut s = Settings::default();
-            s.notepad = format!("write-{i}");
-            s.ui_font_size = 14.0 + (i as f64);
+            let s = Settings {
+                notepad: format!("write-{i}"),
+                ui_font_size: 14.0 + (i as f64),
+                ..Settings::default()
+            };
             let json = serde_json::to_vec_pretty(&s).unwrap();
             atomic_write(&path_clone, &json).await.unwrap();
         }));

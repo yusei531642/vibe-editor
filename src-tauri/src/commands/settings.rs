@@ -677,15 +677,17 @@ mod tests {
 
     #[test]
     fn custom_agent_reserved_ids_are_rejected() {
-        let mut s = Settings::default();
-        s.custom_agents = Some(vec![AgentConfig {
-            id: "claude".into(),
-            name: "Shadow Claude".into(),
-            command: "shadow".into(),
-            args: "".into(),
-            cwd: None,
-            color: None,
-        }]);
+        let s = Settings {
+            custom_agents: Some(vec![AgentConfig {
+                id: "claude".into(),
+                name: "Shadow Claude".into(),
+                command: "shadow".into(),
+                args: "".into(),
+                cwd: None,
+                color: None,
+            }]),
+            ..Settings::default()
+        };
 
         let err = validate_custom_agent_ids(&s).unwrap_err();
         assert!(err.to_string().contains("reserved"));
@@ -693,15 +695,17 @@ mod tests {
 
     #[test]
     fn custom_agent_non_reserved_ids_are_allowed() {
-        let mut s = Settings::default();
-        s.custom_agents = Some(vec![AgentConfig {
-            id: "aider".into(),
-            name: "Aider".into(),
-            command: "aider".into(),
-            args: "".into(),
-            cwd: None,
-            color: None,
-        }]);
+        let s = Settings {
+            custom_agents: Some(vec![AgentConfig {
+                id: "aider".into(),
+                name: "Aider".into(),
+                command: "aider".into(),
+                args: "".into(),
+                cwd: None,
+                color: None,
+            }]),
+            ..Settings::default()
+        };
 
         assert!(validate_custom_agent_ids(&s).is_ok());
     }
