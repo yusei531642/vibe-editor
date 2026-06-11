@@ -249,7 +249,7 @@ mod resolution_tests {
     #[test]
     fn spawn_boundary_still_rejects_immediate_exec_flags() {
         // Issue #827: 再 normalize を廃止しても spawn 境界の defense-in-depth 再チェックは
-        // 維持する。正規化済み形 (command=cmd, args=[/c, ...]) を渡し /c が弾かれること。
+        // 維持する。Issue #933: cmd /c は対話モード限定 allowlist 契約で弾かれる。
         let opts = base_spawn_options(
             "cmd".to_string(),
             vec![
@@ -259,7 +259,7 @@ mod resolution_tests {
             ],
         );
         let err = prepare_spawn_command(&opts).unwrap_err().to_string();
-        assert!(err.contains("cmd immediate-exec flags"));
+        assert!(err.contains("interactive-session allowlist"));
     }
 
     #[test]
