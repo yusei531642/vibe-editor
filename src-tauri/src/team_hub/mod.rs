@@ -776,8 +776,8 @@ mod handshake_auth_tests {
         hub.state
             .lock()
             .await
-            .agent_role_bindings
-            .contains_key(&(team_id.to_string(), agent_id.to_string()))
+            .bound_role(team_id, agent_id)
+            .is_some()
     }
 
     async fn has_pending(hub: &TeamHub, agent_id: &str) -> bool {

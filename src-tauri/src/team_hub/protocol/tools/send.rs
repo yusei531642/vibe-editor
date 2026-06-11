@@ -480,10 +480,7 @@ impl MessageInsertionGuard {
             }
         }
         // Issue #342 Phase 3 (3.3): 受信側 diagnostics 更新
-        let recipient_diag = state
-            .member_diagnostics
-            .entry(target_aid.to_string())
-            .or_default();
+        let recipient_diag = state.diagnostics_mut(team_id, target_aid);
         record_recipient_delivery_diagnostics(recipient_diag, delivered_at);
     }
 }
@@ -573,10 +570,7 @@ async fn insert_team_message(
         }
     }
     // Issue #342 Phase 3 (3.3): 送信者自身の last_message_out_at / messages_out_count / last_seen_at を更新
-    let sender_diag = state
-        .member_diagnostics
-        .entry(ctx.agent_id.clone())
-        .or_default();
+    let sender_diag = state.diagnostics_mut(&ctx.team_id, &ctx.agent_id);
     sender_diag.last_message_out_at = Some(timestamp.clone());
     sender_diag.last_seen_at = Some(timestamp.clone());
     sender_diag.messages_out_count = sender_diag.messages_out_count.saturating_add(1);

@@ -300,10 +300,7 @@ pub async fn team_report(
             team.active_leader_agent_id.clone()
         };
         // 送信者の last_seen_at を更新 (team_diagnostics の活性監視と整合)。
-        let diag = state
-            .member_diagnostics
-            .entry(ctx.agent_id.clone())
-            .or_default();
+        let diag = state.diagnostics_mut(&ctx.team_id, &ctx.agent_id);
         diag.last_seen_at = Some(now_iso.clone());
         drop(state);
 

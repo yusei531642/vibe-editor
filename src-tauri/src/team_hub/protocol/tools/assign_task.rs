@@ -420,10 +420,7 @@ pub async fn team_assign_task(
         // agent_id 指定なら 1 名。team_assign_task は「Leader が task を渡した時点」の意味で
         // claim カウンタを増やすので、後続で worker が status を変えるか否かに依存しない。
         for (target_aid, _) in &resolved {
-            let diag = state
-                .member_diagnostics
-                .entry(target_aid.clone())
-                .or_default();
+            let diag = state.diagnostics_mut(&ctx.team_id, target_aid);
             diag.tasks_claimed_count = diag.tasks_claimed_count.saturating_add(1);
         }
     }

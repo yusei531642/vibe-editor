@@ -436,8 +436,15 @@ pub fn spawn_session(
     // closure 内 dedup: 1 秒間隔でしか hub.state lock を取らない。flush は最短 32ms 間隔
     // (FLUSH_INTERVAL_MS) で起こり得るので、生の flush ごとに lock 取得すると `inject` /
     // `team_send` 等の MCP tool と競合して latency 悪化を招く。
-    let on_output: Option<PtyOutputObserver> = opts.agent_id.as_ref().map(|aid| {
+    // Issue #934: 診断は (team_id, agent_id) の AgentEntry に統合されたため、
+    // team_id が無い PTY (単発ターミナル等) は observer 自体を張らない。
+    let on_output: Option<PtyOutputObserver> = opts
+        .agent_id
+        .as_ref()
+        .zip(opts.team_id.as_ref())
+        .map(|(aid, tid)| {
         let aid = aid.clone();
+        let tid = tid.clone();
         let app_for_obs = app.clone();
         let last_update: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
         Arc::new(move || {
@@ -458,6 +465,7 @@ pub fn spawn_session(
             }
             // hub.state.lock() は async なので tokio task に逃がす (flush は同期 callback)
             let aid = aid.clone();
+            let tid = tid.clone();
             let app = app_for_obs.clone();
             tauri::async_runtime::spawn(async move {
                 let state = match app.try_state::<crate::state::AppState>() {
@@ -472,7 +480,7 @@ pub fn spawn_session(
                 let hub = state.team_hub.clone();
                 let now_iso = chrono::Utc::now().to_rfc3339();
                 let mut s = hub.state.lock().await;
-                let diag = s.member_diagnostics.entry(aid).or_default();
+                let diag = s.diagnostics_mut(&tid, &aid);
                 diag.last_pty_output_at = Some(now_iso);
             });
         }) as PtyOutputObserver

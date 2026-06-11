@@ -355,10 +355,7 @@ pub async fn team_update_task(
             }
         }
     }
-    let diagnostics = state
-        .member_diagnostics
-        .entry(ctx.agent_id.clone())
-        .or_default();
+    let diagnostics = state.diagnostics_mut(&ctx.team_id, &ctx.agent_id);
     diagnostics.last_seen_at = Some(now_iso);
     drop(state);
     if let Err(e) = hub.persist_team_state(&ctx.team_id).await {
@@ -527,8 +524,8 @@ mod tests {
         .expect("team_update_task ok");
 
         let state = hub.state.lock().await;
-        let diagnostics = state.member_diagnostics.get(&worker_aid).unwrap();
-        assert!(diagnostics.last_seen_at.is_some());
+        let entry = state.agent_entry(&ctx.team_id, &worker_aid).unwrap();
+        assert!(entry.diagnostics.last_seen_at.is_some());
     }
 
     #[tokio::test]

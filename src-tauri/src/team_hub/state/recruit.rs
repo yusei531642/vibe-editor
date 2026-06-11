@@ -13,7 +13,6 @@ use std::time::{Duration, Instant};
 use tauri::Emitter;
 use tokio::sync::{oneshot, OwnedSemaphorePermit, Semaphore};
 
-use super::member_diagnostics::MemberDiagnostics;
 
 const RECRUIT_GRACE_DEFAULT_MS: u64 = 2_000;
 const RECRUIT_GRACE_MAX_MS: u64 = 10_000;
@@ -144,25 +143,15 @@ impl TeamHub {
                 ));
             }
         }
-        // Issue #342 Phase 3 (3.3): recruit 時の診断 entry を初期化。
-        // recruited_at は新規上書き (再 recruit を可視化)、他 timestamp/counter は default で初期化。
+        // Issue #342 Phase 3 (3.3) / #934: recruit 時に AgentEntry を Granted で初期化。
+        // recruited_at は新規上書き (再 recruit を可視化)、他 timestamp/counter は default。
+        // entry の存在が team 在籍記録 (旧 team_agent_roster) を兼ねるため、これ 1 回の
+        // insert で clear_team の retain が当該 agent を網羅できる。
         let now_iso = chrono::Utc::now().to_rfc3339();
-        s.member_diagnostics.insert(
-            agent_id.clone(),
-            MemberDiagnostics {
-                recruited_at: now_iso,
-                ..MemberDiagnostics::default()
-            },
+        s.agents.insert(
+            (team_id.clone(), agent_id.clone()),
+            super::agent_entry::AgentEntry::granted(now_iso),
         );
-        // Issue #829: agent-keyed な member_diagnostics / last_status_call_at を後で漏れなく
-        // 解放できるよう、binding とは独立した team 在籍記録に agent_id を登録する。
-        // recruit grant は member_diagnostics を挿入する最上流なので、ここで roster に入れて
-        // おけば dismiss / record_agent_process_exit / recruit timeout で binding が先に消えても
-        // clear_team が当該 team の agent を網羅して両 map を reclaim できる。
-        s.team_agent_roster
-            .entry(team_id.clone())
-            .or_default()
-            .insert(agent_id.clone());
         s.pending_recruits.insert(
             agent_id,
             PendingRecruit {
@@ -277,8 +266,8 @@ impl TeamHub {
         // 既に bind 済みの (team_id, agent_id) なら role 一致を強制。
         // Issue #637: team_id 次元で分離しているので、別 team の同 agent_id binding は
         // この lookup に引っかからず、上書きで old team の role が消えることもない。
-        let binding_key = (team_id.to_string(), agent_id.to_string());
-        if let Some(bound) = s.agent_role_bindings.get(&binding_key) {
+        // Issue #934: binding の正本は AgentEntry の phase (Active{role})。
+        if let Some(bound) = s.bound_role(team_id, agent_id) {
             if bound != role_profile_id {
                 tracing::warn!(
                     "[teamhub] role mismatch on handshake (rebind) team={} agent={} bound={} got={}",
@@ -290,10 +279,12 @@ impl TeamHub {
                 return false;
             }
         } else if consumed_pending {
-            // 初回 handshake: たった今 grant を消費したので bind を確立する。
+            // 初回 handshake: たった今 grant を消費したので Granted → Active へ遷移する。
             // 以後の再接続 (bridge の onClose→connect) はこの binding 経路で許可される。
-            s.agent_role_bindings
-                .insert(binding_key, role_profile_id.to_string());
+            if let Err(e) = s.bind_role(team_id, agent_id, role_profile_id) {
+                tracing::warn!("[teamhub] bind_role failed on first handshake: {e}");
+                return false;
+            }
         } else {
             // Issue #742: pending grant も binding も無い = Hub が発行していない未知 agent_id。
             // 正しい global token を持っていても、ここで reject して接続を切る。
@@ -304,25 +295,16 @@ impl TeamHub {
             return false;
         }
         // Issue #342 Phase 3 (3.3): 初回 handshake / 再接続 handshake いずれも last_handshake_at と
-        // last_seen_at を更新する。recruit 経路を通らずに直接 handshake してきた場合 (= 旧 context
-        // 残骸の再接続等) は entry が無いので or_default で生成する。
+        // last_seen_at を更新する。entry が無い経路 (旧 context 残骸の再接続等) は
+        // diagnostics_mut が Granted entry を生成して記録を落とさない (#934)。
+        // entry の存在が team 在籍記録を兼ねるので、旧 team_agent_roster への登録は不要。
         let now_iso = chrono::Utc::now().to_rfc3339();
-        let entry = s
-            .member_diagnostics
-            .entry(agent_id.to_string())
-            .or_default();
+        let entry = s.diagnostics_mut(team_id, agent_id);
         if entry.recruited_at.is_empty() {
             entry.recruited_at = now_iso.clone();
         }
         entry.last_handshake_at = Some(now_iso.clone());
         entry.last_seen_at = Some(now_iso);
-        // Issue #829: 再接続 handshake (binding 経由 / 旧 context 残骸) のように recruit grant を
-        // 経ずに member_diagnostics の entry が生える経路でも team 在籍記録を残す。これにより
-        // clear_team が当該 team の全 agent を網羅できる。
-        s.team_agent_roster
-            .entry(team_id.to_string())
-            .or_default()
-            .insert(agent_id.to_string());
         true
     }
 
@@ -676,15 +658,13 @@ mod role_binding_team_id_tests {
         );
         let s = hub.state.lock().await;
         assert_eq!(
-            s.agent_role_bindings
-                .get(&("team-a".to_string(), "agent-1".to_string())),
-            Some(&"programmer".to_string()),
+            s.bound_role("team-a", "agent-1").as_deref(),
+            Some("programmer"),
             "team-a binding should keep its original role even after team-b handshake"
         );
         assert_eq!(
-            s.agent_role_bindings
-                .get(&("team-b".to_string(), "agent-1".to_string())),
-            Some(&"reviewer".to_string()),
+            s.bound_role("team-b", "agent-1").as_deref(),
+            Some("reviewer"),
             "team-b binding should hold the role asserted on team-b handshake"
         );
     }
@@ -727,14 +707,12 @@ mod role_binding_team_id_tests {
 
         let s = hub.state.lock().await;
         assert!(
-            !s.agent_role_bindings
-                .contains_key(&("team-a".to_string(), "agent-1".to_string())),
-            "team-a binding should be removed"
+            s.bound_role("team-a", "agent-1").is_none(),
+            "team-a binding should be retired"
         );
         assert_eq!(
-            s.agent_role_bindings
-                .get(&("team-b".to_string(), "agent-1".to_string())),
-            Some(&"reviewer".to_string()),
+            s.bound_role("team-b", "agent-1").as_deref(),
+            Some("reviewer"),
             "team-b binding for the same agent_id must remain intact"
         );
     }

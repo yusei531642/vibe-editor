@@ -60,9 +60,8 @@ impl TeamHub {
                 );
                 continue;
             }
-            s.agent_role_bindings
-                .entry((team_id.to_string(), agent_id.clone()))
-                .or_insert_with(|| role.clone());
+            // Issue #934: seed は AgentEntry の遷移メソッド経由 (Active 済みは上書きしない)。
+            s.seed_role_binding(team_id, agent_id, role);
         }
         let team = s
             .teams
@@ -148,53 +147,21 @@ impl TeamHub {
         // 動的ロールもチーム単位でクリア (チーム破棄でロール定義を残す意味は無い)
         s.dynamic_roles.remove(team_id);
 
-        // Issue #829: team scope に紐付く in-memory state を漏れなく解放する。旧実装は
-        // teams / active_teams / dynamic_roles の 3 つしか掃除せず、`recruit_semaphores` /
-        // `file_locks` / `agent_role_bindings` / `member_diagnostics` / `last_status_call_at`
-        // は破棄済みチーム分も残り続けたため、長時間運用 (多数 team の作成・破棄 /
-        // recruit→dismiss の反復) でこれらが単調増加し、Hub (= アプリ) 再起動でしか
-        // 解放されなかった。
+        // Issue #829 → #934: team scope に紐付く in-memory state を漏れなく解放する。
+        // 旧実装は agent 状態が 4 並行 map に分散していたため「binding 逆引きで届かない
+        // agent の diagnostics が leak する」(#829) → 「掃除用 roster map を足す」という
+        // メタな対症療法を重ねていた。AgentEntry 統合後は agent 状態が
+        // `agents: HashMap<(team_id, agent_id), AgentEntry>` の 1 map に閉じるため、
+        // teardown は team prefix の retain 一発で完結し、cross-team 共有 agent も
+        // per-team entry なので他 team を巻き込まない (防御コードという概念ごと消える)。
 
         // (1) team_id 単体を key に持つ recruit 直列化 semaphore。
         s.recruit_semaphores.remove(team_id);
 
-        // (2) member_diagnostics / last_status_call_at は agent_id 単体 key で team 次元を
-        // 持たない。旧実装はこの 2 map を `agent_role_bindings` の逆引き (= 当該 team の
-        // binding が生存している agent) でしか掃除しなかったが、binding は dismiss /
-        // record_agent_process_exit / recruit timeout で **clear_team より先に** 消えるのが
-        // 通常運用 (worker は teardown 前に exit/dismiss される)。その結果 clear_team 到達時に
-        // binding が無く、逆引きで届かない agent の両 map が Hub 再起動まで永久 leak していた
-        // (本 issue の支配的経路)。binding と独立した team 在籍記録 `team_agent_roster` を
-        // 正本にして当該 team の agent を網羅し、両 map を reclaim する。
-        //
-        // cross-team 防御: 同一 agent_id が **別 team の roster にも** 在籍している場合は
-        // member_diagnostics / last_status_call_at を残す (別 team の診断を巻き込まない)。
-        // 実運用では agent_id は recruit ごとに `vc-{uuid}` で一意採番されるため衝突はまず
-        // 無いが、防御的に絞る。MutexGuard 越しの分割 borrow を避けるため、まず owned に
-        // 収集してから mutate する。
-        let this_team_agents: Vec<String> = s
-            .team_agent_roster
-            .remove(team_id)
-            .map(|set| set.into_iter().collect())
-            .unwrap_or_default();
-        if !this_team_agents.is_empty() {
-            // `s` は MutexGuard なので、roster の borrow を保持したまま member_diagnostics を
-            // mutate すると分割 borrow 不可。other-team の agent 集合は owned で先に確定させる。
-            let other_team_agents: std::collections::HashSet<String> = s
-                .team_agent_roster
-                .values()
-                .flat_map(|agents| agents.iter().cloned())
-                .collect();
-            for aid in &this_team_agents {
-                if !other_team_agents.contains(aid) {
-                    s.member_diagnostics.remove(aid);
-                    s.last_status_call_at.remove(aid);
-                }
-            }
-        }
+        // (2) agent ライフサイクル state (role binding / diagnostics / status rate limit) を一括除去。
+        s.remove_team_agents(team_id);
 
-        // (3) (team_id, *) を key に持つマップは retain で当該 team 分を一括除去する。
-        s.agent_role_bindings.retain(|(tid, _), _| tid != team_id);
+        // (3) (team_id, *) を key に持つ advisory file lock も retain で一括除去。
         s.file_locks.retain(|(tid, _), _| tid != team_id);
 
         s.active_teams.is_empty()
@@ -445,8 +412,8 @@ mod clear_team_release_tests {
     }
 
     /// `clear_team` は破棄対象 team scope の recruit_semaphores / file_locks /
-    /// agent_role_bindings / member_diagnostics / last_status_call_at を全て解放し、
-    /// 別 team の同種 state は保持する。
+    /// AgentEntry (role binding / diagnostics / status rate limit) を全て解放し、
+    /// 別 team の同種 state は保持する (Issue #829 → #934)。
     #[tokio::test]
     async fn clear_team_releases_all_team_scoped_state() {
         let hub = make_hub();
@@ -455,7 +422,7 @@ mod clear_team_release_tests {
         let team_b = "team-829-b";
         let agent_b = "vc-829-b";
 
-        // 両 team に binding / diagnostics / status timestamp / semaphore を仕込む。
+        // 両 team に AgentEntry (binding + diagnostics + status timestamp) / semaphore を仕込む。
         {
             let mut s = hub.state.lock().await;
             s.teams
@@ -467,33 +434,10 @@ mod clear_team_release_tests {
                 .or_insert_with(TeamInfo::default);
             s.active_teams.insert(team_b.to_string());
 
-            s.agent_role_bindings.insert(
-                (team_a.to_string(), agent_a.to_string()),
-                "programmer".to_string(),
-            );
-            s.agent_role_bindings.insert(
-                (team_b.to_string(), agent_b.to_string()),
-                "programmer".to_string(),
-            );
-
-            // Issue #829: 在籍記録 (roster) も seed する。clear_team はこれを正本に
-            // agent-keyed な両 map を reclaim する (binding 逆引きではなく)。
-            s.team_agent_roster
-                .entry(team_a.to_string())
-                .or_default()
-                .insert(agent_a.to_string());
-            s.team_agent_roster
-                .entry(team_b.to_string())
-                .or_default()
-                .insert(agent_b.to_string());
-
-            s.member_diagnostics.entry(agent_a.to_string()).or_default();
-            s.member_diagnostics.entry(agent_b.to_string()).or_default();
-
-            s.last_status_call_at
-                .insert(agent_a.to_string(), Instant::now());
-            s.last_status_call_at
-                .insert(agent_b.to_string(), Instant::now());
+            s.seed_role_binding(team_a, agent_a, "programmer");
+            s.seed_role_binding(team_b, agent_b, "programmer");
+            s.agent_entry_mut(team_a, agent_a).last_status_call_at = Some(Instant::now());
+            s.agent_entry_mut(team_b, agent_b).last_status_call_at = Some(Instant::now());
 
             s.recruit_semaphores
                 .insert(team_a.to_string(), Arc::new(Semaphore::new(1)));
@@ -525,11 +469,8 @@ mod clear_team_release_tests {
         {
             let s = hub.state.lock().await;
             assert!(s.recruit_semaphores.contains_key(team_a));
-            assert!(s.member_diagnostics.contains_key(agent_a));
-            assert!(s.last_status_call_at.contains_key(agent_a));
-            assert!(s
-                .agent_role_bindings
-                .contains_key(&(team_a.to_string(), agent_a.to_string())));
+            assert!(s.agent_entry(team_a, agent_a).is_some());
+            assert_eq!(s.bound_role(team_a, agent_a).as_deref(), Some("programmer"));
             assert!(s
                 .file_locks
                 .contains_key(&(team_a.to_string(), "src/a.rs".to_string())));
@@ -548,46 +489,33 @@ mod clear_team_release_tests {
             "recruit_semaphores leak"
         );
         assert!(
-            !s.member_diagnostics.contains_key(agent_a),
-            "member_diagnostics leak"
-        );
-        assert!(
-            !s.last_status_call_at.contains_key(agent_a),
-            "last_status_call_at leak"
-        );
-        assert!(
-            !s.agent_role_bindings
-                .contains_key(&(team_a.to_string(), agent_a.to_string())),
-            "agent_role_bindings leak"
+            s.agent_entry(team_a, agent_a).is_none(),
+            "AgentEntry (diagnostics / binding / status rate limit) leak"
         );
         assert!(
             !s.file_locks
                 .contains_key(&(team_a.to_string(), "src/a.rs".to_string())),
             "file_locks leak"
         );
-        assert!(
-            !s.team_agent_roster.contains_key(team_a),
-            "team_agent_roster leak"
-        );
 
         // team_b 由来の state は一切影響を受けない。
         assert!(s.teams.contains_key(team_b));
         assert!(s.recruit_semaphores.contains_key(team_b));
-        assert!(s.member_diagnostics.contains_key(agent_b));
-        assert!(s.last_status_call_at.contains_key(agent_b));
-        assert!(s.team_agent_roster.contains_key(team_b));
-        assert!(s
-            .agent_role_bindings
-            .contains_key(&(team_b.to_string(), agent_b.to_string())));
+        let entry_b = s.agent_entry(team_b, agent_b).expect("team_b entry survives");
+        assert_eq!(entry_b.active_role(), Some("programmer"));
+        assert!(entry_b.last_status_call_at.is_some());
         assert!(s
             .file_locks
             .contains_key(&(team_b.to_string(), "src/b.rs".to_string())));
     }
 
-    /// 同一 agent_id が複数 team に bind されている (実運用では稀) 場合、破棄した team 以外が
-    /// まだその agent_id を参照しているなら member_diagnostics / last_status_call_at は残す。
+    /// 同一 agent_id が複数 team に在籍している (実運用では稀) 場合、entry は
+    /// `(team_id, agent_id)` で per-team に分離されているため、破棄した team 以外の
+    /// entry (diagnostics / binding) は影響を受けない。
+    /// 旧実装 (agent_id 単独キー + roster 逆引き防御) の cross-team 防御コードは
+    /// per-team entry 化で概念ごと不要になった (Issue #934)。
     #[tokio::test]
-    async fn clear_team_keeps_diagnostics_for_agent_shared_with_other_team() {
+    async fn clear_team_keeps_other_team_entry_for_shared_agent() {
         let hub = make_hub();
         let team_a = "team-829-shared-a";
         let team_b = "team-829-shared-b";
@@ -602,70 +530,42 @@ mod clear_team_release_tests {
                 .entry(team_b.to_string())
                 .or_insert_with(TeamInfo::default);
             s.active_teams.insert(team_b.to_string());
-            // 同一 agent_id を両 team に bind。
-            s.agent_role_bindings.insert(
-                (team_a.to_string(), shared_agent.to_string()),
-                "programmer".to_string(),
-            );
-            s.agent_role_bindings.insert(
-                (team_b.to_string(), shared_agent.to_string()),
-                "programmer".to_string(),
-            );
-            // Issue #829: cross-team 防御は roster 在籍を見るので両 team に登録する。
-            s.team_agent_roster
-                .entry(team_a.to_string())
-                .or_default()
-                .insert(shared_agent.to_string());
-            s.team_agent_roster
-                .entry(team_b.to_string())
-                .or_default()
-                .insert(shared_agent.to_string());
-            s.member_diagnostics
-                .entry(shared_agent.to_string())
-                .or_default();
-            s.last_status_call_at
-                .insert(shared_agent.to_string(), Instant::now());
+            // 同一 agent_id を両 team に bind (per-team entry が 2 つできる)。
+            s.seed_role_binding(team_a, shared_agent, "programmer");
+            s.seed_role_binding(team_b, shared_agent, "programmer");
+            s.agent_entry_mut(team_b, shared_agent).last_status_call_at = Some(Instant::now());
         }
 
         hub.clear_team(team_a).await;
 
         let s = hub.state.lock().await;
-        // team_a の binding は消えるが、team_b がまだ shared_agent を参照しているので
-        // member_diagnostics / last_status_call_at は残す。
-        assert!(!s
-            .agent_role_bindings
-            .contains_key(&(team_a.to_string(), shared_agent.to_string())));
-        assert!(s
-            .agent_role_bindings
-            .contains_key(&(team_b.to_string(), shared_agent.to_string())));
-        assert!(
-            s.member_diagnostics.contains_key(shared_agent),
-            "shared agent diagnostics must survive while team_b still references it"
-        );
-        assert!(s.last_status_call_at.contains_key(shared_agent));
+        // team_a の entry は消えるが、team_b の entry (binding / diagnostics) は残る。
+        assert!(s.agent_entry(team_a, shared_agent).is_none());
+        let entry_b = s
+            .agent_entry(team_b, shared_agent)
+            .expect("shared agent entry for team_b must survive");
+        assert_eq!(entry_b.active_role(), Some("programmer"));
+        assert!(entry_b.last_status_call_at.is_some());
     }
 
-    /// Issue #829 (本 issue の支配的経路の回帰テスト):
-    /// recruit grant で member_diagnostics / roster を生やした agent が、`clear_team` より
-    /// **先に** dismiss / record_agent_process_exit / recruit timeout で `agent_role_bindings`
-    /// を失う (= teardown 前に exit/dismiss されるという通常運用) と、旧 `clear_team` は掃除
-    /// 対象 agent を binding の逆引きでしか導出しないため逆引きで届かず、member_diagnostics /
-    /// last_status_call_at が Hub 再起動まで永久 leak していた。
-    ///
-    /// binding と独立した `team_agent_roster` を正本に reclaim する修正後は、binding 消滅後でも
-    /// `clear_team` が両 map を解放する。**この修正を当てる前は fail し、当てた後に pass する**。
-    /// production の挿入経路 (`try_register_pending_recruit`) と削除経路
+    /// Issue #829 (旧支配的経路の回帰テスト) → #934:
+    /// recruit grant で entry を生やした agent が、`clear_team` より **先に**
+    /// dismiss / record_agent_process_exit で role binding を失効する (= teardown 前に
+    /// exit/dismiss されるという通常運用) ケース。旧実装は agent-keyed map を binding の
+    /// 逆引きでしか掃除できず永久 leak していた (#829 は roster 追加で対症療法)。
+    /// AgentEntry 統合後は binding 失効が Active → Exited の遷移になり (entry は診断保持の
+    /// ため残る)、clear_team の team prefix retain が entry ごと回収する。
+    /// production の挿入経路 (`try_register_pending_recruit` → handshake) と失効経路
     /// (`remove_agent_role_binding` = dismiss / 終了が呼ぶ glue) を使って実運用を忠実に再現する。
     #[tokio::test]
-    async fn clear_team_reclaims_diagnostics_when_binding_removed_before_teardown() {
+    async fn clear_team_reclaims_entry_when_binding_retired_before_teardown() {
         let hub = make_hub();
         let team_id = "team-829-orphan";
         let agent_id = "vc-829-orphan";
 
         s_register_active_team(&hub, team_id).await;
 
-        // (1) recruit grant: member_diagnostics + team_agent_roster に agent を挿入する
-        // production 経路 (try_register_pending_recruit)。
+        // (1) recruit grant: AgentEntry (Granted) を挿入する production 経路。
         hub.try_register_pending_recruit(
             agent_id.to_string(),
             team_id.to_string(),
@@ -677,71 +577,54 @@ mod clear_team_release_tests {
         .await
         .expect("pending recruit grant should be registered");
 
-        // handshake 成立で binding が確立した状態を再現 (resolve_pending_recruit が
-        // app_handle 依存なしで通せるので直接呼ぶ)。
+        // handshake 成立で Granted → Active{role} へ遷移した状態を再現。
         assert!(
             hub.resolve_pending_recruit(agent_id, team_id, "programmer")
                 .await,
             "handshake should succeed for the granted recruit"
         );
 
-        // team_status 呼び出し相当で last_status_call_at にも entry を生やす。
+        // team_status 呼び出し相当で last_status_call_at にも値を生やす。
         {
             let mut s = hub.state.lock().await;
-            s.last_status_call_at
-                .insert(agent_id.to_string(), Instant::now());
+            s.agent_entry_mut(team_id, agent_id).last_status_call_at = Some(Instant::now());
         }
 
-        // 前提: diagnostics / last_status / binding / roster が全て積まれている。
+        // 前提: entry が Active で diagnostics / last_status も積まれている。
         {
             let s = hub.state.lock().await;
-            assert!(s.member_diagnostics.contains_key(agent_id));
-            assert!(s.last_status_call_at.contains_key(agent_id));
-            assert!(s
-                .agent_role_bindings
-                .contains_key(&(team_id.to_string(), agent_id.to_string())));
-            assert!(s
-                .team_agent_roster
-                .get(team_id)
-                .is_some_and(|set| set.contains(agent_id)));
+            let entry = s.agent_entry(team_id, agent_id).expect("entry exists");
+            assert_eq!(entry.active_role(), Some("programmer"));
+            assert!(entry.last_status_call_at.is_some());
+            assert!(!entry.diagnostics.recruited_at.is_empty());
         }
 
-        // (2) clear_team **より先に** binding を失う = 通常運用 (dismiss /
-        // record_agent_process_exit / recruit timeout)。remove_agent_role_binding は
-        // dismiss と record_agent_process_exit が共有する production の binding 削除経路。
+        // (2) clear_team **より先に** binding を失効 = 通常運用 (dismiss /
+        // record_agent_process_exit)。remove_agent_role_binding は dismiss と
+        // record_agent_process_exit が共有する production の失効経路。
         assert!(
             hub.remove_agent_role_binding(team_id, agent_id).await,
-            "binding should exist and be removed before teardown"
+            "binding should exist and be retired before teardown"
         );
         {
             let s = hub.state.lock().await;
-            // binding は消えたが diagnostics は意図的に残る (旧バグの再現条件)。
-            assert!(!s
-                .agent_role_bindings
-                .contains_key(&(team_id.to_string(), agent_id.to_string())));
-            assert!(
-                s.member_diagnostics.contains_key(agent_id),
-                "diagnostics survive binding removal (this is the leak precondition)"
-            );
-            assert!(s.last_status_call_at.contains_key(agent_id));
+            let entry = s.agent_entry(team_id, agent_id).expect("entry survives retire");
+            // binding (Active) は失効したが entry は診断保持のため残る。
+            assert_eq!(entry.active_role(), None);
         }
 
         // (3) teardown。
         hub.clear_team(team_id).await;
 
         let s = hub.state.lock().await;
-        // 修正後: roster を正本に reclaim され、両 agent-keyed map が空になる。
+        // 修正後: team prefix retain が entry ごと回収する (掃除漏れの余地が無い)。
         assert!(
-            !s.member_diagnostics.contains_key(agent_id),
-            "member_diagnostics must be reclaimed even though the binding was gone before clear_team"
+            s.agent_entry(team_id, agent_id).is_none(),
+            "AgentEntry must be reclaimed even though the binding was retired before clear_team"
         );
         assert!(
-            !s.last_status_call_at.contains_key(agent_id),
-            "last_status_call_at must be reclaimed even though the binding was gone before clear_team"
-        );
-        assert!(
-            !s.team_agent_roster.contains_key(team_id),
-            "roster for the cleared team must be dropped"
+            !s.agents.keys().any(|(tid, _)| tid == team_id),
+            "no agent entry for the cleared team may remain"
         );
     }
 

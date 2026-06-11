@@ -184,7 +184,7 @@ async fn verify_recruit_liveness(
         return Ok(());
     }
 
-    let diag = hub.get_member_diagnostics(agent_id).await;
+    let diag = hub.get_member_diagnostics(team_id, agent_id).await;
     let elapsed_ms = started.elapsed().as_millis() as u64;
     let code = if diag
         .as_ref()
@@ -650,7 +650,7 @@ pub async fn team_recruit(
             // Issue #342 Phase 3 (3.6): 成功時に recruitedAt / handshakeAt を返す。
             // recruited_at は registry 登録時刻、handshakeAt は handshake 完了時刻。
             // どちらも `resolve_pending_recruit` で member_diagnostics に書き込み済み。
-            let diag = hub.get_member_diagnostics(&outcome.agent_id).await;
+            let diag = hub.get_member_diagnostics(&ctx.team_id, &outcome.agent_id).await;
             let recruited_at = diag
                 .as_ref()
                 .map(|d| d.recruited_at.clone())

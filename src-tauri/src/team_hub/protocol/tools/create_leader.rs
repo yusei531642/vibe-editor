@@ -254,7 +254,7 @@ pub async fn team_create_leader(
     let handshake_timeout = recruit_handshake_timeout_duration();
     match tokio::time::timeout(handshake_timeout, rx).await {
         Ok(Ok(outcome)) => {
-            let diag = hub.get_member_diagnostics(&outcome.agent_id).await;
+            let diag = hub.get_member_diagnostics(&ctx.team_id, &outcome.agent_id).await;
             let recruited_at = diag
                 .as_ref()
                 .map(|d| d.recruited_at.clone())
