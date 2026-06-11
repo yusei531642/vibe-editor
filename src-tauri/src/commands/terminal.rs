@@ -4,6 +4,7 @@
 // terminal:data:{id} / terminal:exit:{id} イベントを emit する。
 
 pub(crate) mod command_validation;
+pub(crate) mod shell_policy;
 mod paste_image;
 mod prompt_files;
 
@@ -309,14 +310,16 @@ pub async fn terminal_create(
             ..Default::default()
         });
     }
-    if let Some(reason) = command_validation::reject_immediate_exec_args(&command, &args) {
+    // Issue #933: シェルは対話セッション起動のみ許可 (allowlist 契約 / shell_policy.rs)
+    let registered = shell_policy::settings_registered_command_lines();
+    if let Some(reason) = shell_policy::reject_non_interactive_shell_args(&command, &args, &registered) {
         return Ok(TerminalCreateResult {
             ok: false,
-            error: Some(reason.to_string()),
+            error: Some(reason),
             ..Default::default()
         });
     }
-    let sanctioned_flags = command_validation::settings_sanctioned_danger_flags();
+    let sanctioned_flags = command_validation::settings_sanctioned_danger_flags(&command);
     if let Some(reason) = command_validation::reject_danger_flags(&args, &sanctioned_flags) {
         return Ok(TerminalCreateResult {
             ok: false,

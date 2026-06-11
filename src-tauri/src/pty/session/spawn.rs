@@ -10,7 +10,7 @@
 
 use crate::pty::batcher::{spawn_batcher, PtyOutputObserver};
 use crate::pty::scrollback::{new_scrollback, scrollback_to_string, WriteBudget};
-use crate::{commands::terminal::command_validation, util::log_redact::redact_home};
+use crate::{commands::terminal::command_validation, commands::terminal::shell_policy, util::log_redact::redact_home};
 use anyhow::{anyhow, Result};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Serialize;
@@ -141,10 +141,12 @@ pub(crate) fn prepare_spawn_command(opts: &SpawnOptions) -> Result<PreparedSpawn
             "command is not allowed at spawn boundary: {command}"
         ));
     }
-    if let Some(reason) = command_validation::reject_immediate_exec_args(&command, &args) {
+    // Issue #933: シェルは対話セッション起動のみ許可 (allowlist 契約 / shell_policy.rs)
+    let registered = shell_policy::settings_registered_command_lines();
+    if let Some(reason) = shell_policy::reject_non_interactive_shell_args(&command, &args, &registered) {
         return Err(anyhow!("{reason}"));
     }
-    let sanctioned_flags = command_validation::settings_sanctioned_danger_flags();
+    let sanctioned_flags = command_validation::settings_sanctioned_danger_flags(&command);
     if let Some(reason) = command_validation::reject_danger_flags(&args, &sanctioned_flags) {
         return Err(anyhow!("{reason}"));
     }
@@ -762,12 +764,12 @@ mod prepare_spawn_command_boundary_tests {
     #[test]
     fn still_rejects_immediate_exec_flags_at_boundary() {
         // Issue #827: 再 normalize を廃止しても defense-in-depth の再チェックは維持する。
-        // 正規化済み形 (command=cmd, args=[/c, ...]) を渡し /c が弾かれることを確認する。
+        // Issue #933: cmd /c は対話モード限定 allowlist 契約で弾かれる。
         let o = opts("cmd".to_string(), &["/c", "echo", "unsafe"]);
         let err =
             prepare_spawn_command(&o).expect_err("cmd immediate-exec must be rejected at boundary");
         assert!(
-            err.to_string().contains("cmd immediate-exec flags"),
+            err.to_string().contains("interactive-session allowlist"),
             "unexpected error: {err}"
         );
     }
