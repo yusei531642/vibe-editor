@@ -67,13 +67,10 @@ function clampZoom(zoom: number): number {
   return Math.min(Math.max(zoom, VIEWPORT_MIN_ZOOM), VIEWPORT_MAX_ZOOM);
 }
 
-function stripTransientNodeState(raw: Record<string, unknown>): Partial<Node<CardData>> {
-  const node: Record<string, unknown> = { ...raw };
-  delete node.dragging;
-  delete node.selected;
-  delete node.resizing;
-  return node as Partial<Node<CardData>>;
-}
+// Issue #938: 旧 `stripTransientNodeState` (raw を丸ごと spread して dragging/selected/
+// resizing を delete する除外方式) は撤廃。normalize は下の明示構築 (pick 方式) で
+// 「列挙したフィールドしか復元されない」形にし、ランタイムフィールドの取りこぼし
+// (#894/#895 の measured / width drift 等) を症状別パッチではなく構造で塞ぐ。
 
 /**
  * crypto.randomUUID() ベースの安定 ID 生成。
@@ -136,23 +133,31 @@ export function normalizeCanvasState(input: unknown): NormalizedCanvasState {
             Math.abs(rawY) > VIEWPORT_RESCUE_DISTANCE
               ? Math.floor(index / 6) * (NODE_H + 32)
               : rawY;
-          return {
-            ...stripTransientNodeState(raw),
+          // Issue #938: 明示構築 (pick)。永続化データに何が混ざっていても、
+          // ここに列挙したフィールドだけが React Flow ノードとして復元される。
+          // top-level width/height は NodeResizer の手動リサイズ値 (意図的な永続データ)
+          // なので有限値のときだけ引き継ぐ。
+          const node: Node<CardData> = {
             id: typeof raw.id === 'string' && raw.id ? raw.id : newId(type),
             type,
             position: { x: safeX, y: safeY },
             data: {
-              ...data,
               cardType: type,
               title,
               payload: data.payload
-            },
+            } as CardData,
             style: {
-              ...styleRaw,
               width: finiteOr(styleRaw.width, NODE_W),
               height: finiteOr(styleRaw.height, NODE_H)
             }
           };
+          if (typeof raw.width === 'number' && Number.isFinite(raw.width)) {
+            node.width = raw.width;
+          }
+          if (typeof raw.height === 'number' && Number.isFinite(raw.height)) {
+            node.height = raw.height;
+          }
+          return node;
         })
         .filter((n): n is Node<CardData> => n !== null)
     : [];

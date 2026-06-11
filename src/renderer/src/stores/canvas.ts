@@ -1,8 +1,9 @@
 /**
  * Canvas store — React Flow の nodes/edges を保持し localStorage 永続化する。
  *
- * Phase 2 では「Card 配置の自由レイアウト」だけを支える最小実装。
- * Phase 3 以降で agent ノード / hand-off エッジを正規化していく。
+ * Issue #938: カード状態の所有権規約 (store が正本 / persist はキャッシュ /
+ * team-history は射影 / TeamHub はランタイムレジストリ) と、agentId reconcile・
+ * `PersistedCardNode` 永続化スキーマの詳細は `stores/canvas-card-identity.ts` を参照。
  */
 import { create } from 'zustand';
 import { persist, subscribeWithSelector } from 'zustand/middleware';
@@ -22,6 +23,14 @@ import {
 } from '../lib/canvas-migrations';
 import type { AgentPayload } from '../components/canvas/cards/AgentNodeCard/types';
 import type { PersistStorage, StorageValue } from 'zustand/middleware';
+import {
+  findReconcileTarget,
+  makeCardNode,
+  nextFallbackCardPosition,
+  reconcileCardNode,
+  toPersistedCardNode,
+  type PersistedCardNode
+} from './canvas-card-identity';
 
 export type CardType = 'terminal' | 'agent' | 'editor' | 'diff' | 'fileTree' | 'changes';
 
@@ -307,8 +316,8 @@ let canvasPersistPaused = false;
 
 type CanvasPersistState = Pick<
   CanvasState,
-  'nodes' | 'viewport' | 'stageView' | 'teamLocks' | 'arrangeGap'
->;
+  'viewport' | 'stageView' | 'teamLocks' | 'arrangeGap'
+> & { nodes: PersistedCardNode[] };
 
 function canvasStorage(): Storage | null {
   if (typeof window === 'undefined') return null;
@@ -342,49 +351,6 @@ const canvasPersistStorage: PersistStorage<CanvasPersistState> = {
  *  この export を使って壊れた localStorage 入力 / 極端な viewport などの境界条件を確認する。
  *  実体は `lib/canvas-migrations.ts` 側に移し、こちらは互換維持のための re-export。 */
 export const __testables = MIGRATION_TESTABLES;
-
-/**
- * Issue #732: `addCard` / `addCards` 共通の `Node<CardData>` 生成ヘルパ。
- * `type` と `payload` は呼び出し側 (generic / `CardSpec`) で対応付けて渡されるため、
- * 構築する `data` は実体として `CardDataOf<T>` (= `CardData` のいずれかの variant)。
- * generic `T` を union member へ静的に絞れないので `data` 構築の 1 箇所だけ cast する
- * (構造は変えず、判別 tag `cardType` と payload の対応は呼び出し側の型で保証される)。
- */
-function makeCardNode<T extends CardType>(
-  id: string,
-  type: T,
-  position: { x: number; y: number },
-  title: string,
-  payload: CardPayloadMap[T] | undefined
-): Node<CardData> {
-  return {
-    id,
-    type,
-    position,
-    data: { cardType: type, title, payload } as CardData,
-    style: { width: NODE_W, height: NODE_H }
-  };
-}
-
-function nextFallbackCardPosition(nodes: Node<CardData>[]): { x: number; y: number } {
-  const cols = 6;
-  const stepX = NODE_W + 32;
-  const stepY = NODE_H + 32;
-  const occupied = new Set(
-    nodes.map((node) => `${Math.round(node.position.x)},${Math.round(node.position.y)}`)
-  );
-
-  for (let slot = 0; slot <= nodes.length; slot++) {
-    const x = (slot % cols) * stepX;
-    const y = Math.floor(slot / cols) * stepY;
-    if (!occupied.has(`${x},${y}`)) return { x, y };
-  }
-
-  return {
-    x: ((nodes.length + 1) % cols) * stepX,
-    y: Math.floor((nodes.length + 1) / cols) * stepY
-  };
-}
 
 export const useCanvasStore = create<CanvasState>()(
   /**
@@ -420,8 +386,20 @@ export const useCanvasStore = create<CanvasState>()(
         set({ isDragging });
       },
       addCard: ({ type, title, payload, position }) => {
-        const id = newId(type);
         const existing = get().nodes;
+        // Issue #938: 同 type + 同 agentId のカードがあれば append せず reconcile する。
+        const target = findReconcileTarget(existing, type, payload);
+        if (target) {
+          set({
+            nodes: existing.map((n) =>
+              n.id === target.id
+                ? reconcileCardNode(n, title, payload as Record<string, unknown> | undefined)
+                : n
+            )
+          });
+          return target.id;
+        }
+        const id = newId(type);
         let pos = position;
         if (!pos) {
           // Issue #840: 削除後に existing.length だけを見ると既存カードと座標が重なる。
@@ -435,12 +413,25 @@ export const useCanvasStore = create<CanvasState>()(
       },
       addCards: (cards) => {
         const ids: string[] = [];
-        const newNodes: Node<CardData>[] = cards.map((c) => {
-          const id = newId(c.type);
-          ids.push(id);
-          return makeCardNode(id, c.type, c.position, c.title, c.payload);
-        });
-        set({ nodes: [...get().nodes, ...newNodes] });
+        // Issue #938: working copy に対して逐次 reconcile することで、
+        // 「store 上の既存カード」とも「同一バッチ内の重複 spec」とも upsert で照合される。
+        let working = [...get().nodes];
+        for (const c of cards) {
+          const target = findReconcileTarget(working, c.type, c.payload);
+          if (target) {
+            working = working.map((n) =>
+              n.id === target.id
+                ? reconcileCardNode(n, c.title, c.payload as Record<string, unknown> | undefined)
+                : n
+            );
+            ids.push(target.id);
+          } else {
+            const id = newId(c.type);
+            working.push(makeCardNode(id, c.type, c.position, c.title, c.payload));
+            ids.push(id);
+          }
+        }
+        set({ nodes: working });
         return ids;
       },
       removeCard: (id, options) =>
@@ -569,8 +560,11 @@ export const useCanvasStore = create<CanvasState>()(
       },
       // 永続化: nodes / viewport / stageView / teamLocks / arrangeGap。
       // edges は一時的な hand-off アニメに使うので含めない。
+      // Issue #938: nodes は PersistedCardNode へ明示変換 (pick) してから保存する。
+      // dragging / selected / measured 等の React Flow ランタイムフィールドは
+      // スキーマに列挙されていないため構造的に localStorage へ到達しない (#894/#895 の恒久化)。
       partialize: (s) => ({
-        nodes: s.nodes,
+        nodes: s.nodes.map(toPersistedCardNode),
         viewport: s.viewport,
         stageView: s.stageView,
         teamLocks: s.teamLocks,
