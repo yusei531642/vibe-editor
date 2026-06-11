@@ -16,6 +16,7 @@
     "test": "vitest run",
     "lint:safe-load": "node build/check-safe-load.mjs",
     "lint:file-size": "node build/check-file-size-ratchet.mjs",
+    "lint:command-result": "node build/check-command-result.mjs",
     "test:watch": "vitest",
     "icons": "node build/generate-icons.mjs"
   },

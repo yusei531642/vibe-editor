@@ -3,7 +3,7 @@
  *
  * 役割:
  * - `import { api } from './tauri-api'` で namespaced な API を提供
- * - 内部では `@tauri-apps/api/core` の `invoke()` と `listen()` を呼ぶ
+ * - 内部では `@tauri-apps/api/core` の `invokeCommand()` と `listen()` を呼ぶ
  * - `window.api` にも同じインスタンスを割り当てている (旧コードパスとの互換のため)
  *
  * Phase 5 (Issue #373): 各領域の実装を `./tauri-api/<area>.ts` に分割し、本ファイルは
@@ -11,7 +11,7 @@
  * 外部 API (`api` / `Api` / `isTauri` / `RoleProfileSummary`) は 1 文字も変えない。
  */
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeCommand } from './tauri-api/command-error';
 
 import { app } from './tauri-api/app';
 import { dialog } from './tauri-api/dialog';
@@ -44,7 +44,7 @@ export { CommandError } from './tauri-api/command-error';
 // terminal.* event ハンドラ (onData / onExit / ...) からのみ参照される。
 
 export const api = {
-  ping: (): Promise<string> => invoke('ping'),
+  ping: (): Promise<string> => invokeCommand('ping'),
 
   app,
   git,

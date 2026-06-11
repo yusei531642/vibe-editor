@@ -1,9 +1,14 @@
 //! Centralized error type for IPC commands.
 //!
-//! Renderer 側 (`src/renderer/src/lib/tauri-api.ts`) は `Err` payload を string として
-//! 受け取り続ける必要があるため、`Serialize` impl は意図的に variant tag を含めず
-//! `message` のみをシリアライズする。新規 variant を追加する際は同じ契約を維持すること。
-use serde::ser::{Serialize, Serializer};
+//! Issue #931: `Serialize` impl は `{ code, message }` の構造化オブジェクトを返す。
+//! renderer 側は `tauri-api/command-error.ts` の `invokeCommand()` が reject 値を
+//! `CommandError` (code / message を必ず持つ Error subclass) に正規化する契約。
+//! 失敗理由の機械判別は **code フィールドのみ** で行い、message (人間向け表示文字列)
+//! への `includes` / `===` / `startsWith` 分岐を書かないこと (#888 の dead branch の轍)。
+//!
+//! 旧契約 (message 文字列のみ serialize + JSON-in-string ハック) は #737 の部分適用で
+//! 止まっていたもので、本 PR で正式フィールドに昇格した。
+use serde::ser::{Serialize, SerializeStruct, Serializer};
 use std::fmt;
 
 #[derive(Debug)]
@@ -16,6 +21,10 @@ pub enum CommandError {
     /// Issue #600 (Tier A-2): authorization 失敗 (例: renderer から渡された project_root が
     /// active project_root と一致しないなど cross-project leak の阻止)。
     Authz(String),
+    /// Issue #931: variant 分類より細かい machine-readable code を明示したいエラー
+    /// (旧 `{"code":"...","message":"..."}` JSON-in-string ハックの後継)。
+    /// code は `snake_case` の安定識別子 (例: `retry_unknown_team`)。
+    Coded { code: String, message: String },
 }
 
 impl CommandError {
@@ -36,6 +45,28 @@ impl CommandError {
         Self::Authz(message.into())
     }
 
+    /// Issue #931: 明示 code 付きエラー。renderer は `err.code` で分岐する。
+    pub fn coded(code: impl Into<String>, message: impl Into<String>) -> Self {
+        Self::Coded {
+            code: code.into(),
+            message: message.into(),
+        }
+    }
+
+    /// IPC 境界を越える machine-readable な失敗分類。
+    /// renderer (`command-error.ts`) はこの値を `CommandError.code` として公開する。
+    pub fn code(&self) -> &str {
+        match self {
+            Self::Io(_) => "io",
+            Self::Parse(_) => "parse",
+            Self::Validation(_) => "validation",
+            Self::NotFound(_) => "not_found",
+            Self::Internal(_) => "internal",
+            Self::Authz(_) => "authz",
+            Self::Coded { code, .. } => code,
+        }
+    }
+
     fn message(&self) -> &str {
         match self {
             Self::Io(message)
@@ -43,7 +74,8 @@ impl CommandError {
             | Self::Validation(message)
             | Self::NotFound(message)
             | Self::Internal(message)
-            | Self::Authz(message) => message,
+            | Self::Authz(message)
+            | Self::Coded { message, .. } => message,
         }
     }
 }
@@ -61,8 +93,13 @@ impl Serialize for CommandError {
     where
         S: Serializer,
     {
-        // 既存 IPC の Err payload は文字列だったため、互換性を優先して message のみ返す。
-        serializer.serialize_str(self.message())
+        // Issue #931: `{ code, message }` の構造化オブジェクト。renderer 側の
+        // `CommandError.from()` は object 形を最優先で解釈する (旧 string 形も
+        // 後方互換で parse できるが、新規コードは必ずこの形で返す)。
+        let mut s = serializer.serialize_struct("CommandError", 2)?;
+        s.serialize_field("code", self.code())?;
+        s.serialize_field("message", self.message())?;
+        s.end()
     }
 }
 

@@ -6,18 +6,18 @@
 //   - teamPresets = 永続化されたテンプレ (CRUD)
 // と意味が分かれるため。
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeCommand } from './command-error';
 import type {
   TeamPreset,
   TeamPresetMutationResult
 } from '../../../../types/shared';
 
 export const teamPresets = {
-  list: (): Promise<TeamPreset[]> => invoke('team_presets_list'),
+  list: (): Promise<TeamPreset[]> => invokeCommand('team_presets_list'),
   load: (id: string): Promise<TeamPreset | null> =>
-    invoke('team_presets_load', { id }),
+    invokeCommand('team_presets_load', { id }),
   save: (preset: TeamPreset): Promise<TeamPresetMutationResult> =>
-    invoke('team_presets_save', { preset }),
+    invokeCommand('team_presets_save', { preset }),
   delete: (id: string): Promise<TeamPresetMutationResult> =>
-    invoke('team_presets_delete', { id })
+    invokeCommand('team_presets_delete', { id })
 };

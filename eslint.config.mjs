@@ -99,7 +99,33 @@ export default tseslint.config(
       'no-control-regex': 'off',
       'no-useless-escape': 'off',
       'prefer-const': 'warn',
-      'no-constant-condition': ['warn', { checkLoops: false }]
+      'no-constant-condition': ['warn', { checkLoops: false }],
+
+      // Issue #931: raw `invoke` の直叩きを禁止する。IPC 失敗の正規化
+      // (`{ code, message }` の CommandError 化) は tauri-api/command-error.ts の
+      // `invokeCommand()` に集約されており、raw invoke を使うと reject 値の型が
+      // 経路ごとに揺れてエラー種別の機械判別が壊れる (#737 の部分適用の再発防止)。
+      // `convertFileSrc` / `listen` 等 invoke 以外の import は制限しない。
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: '@tauri-apps/api/core',
+              importNames: ['invoke'],
+              message:
+                'raw invoke は禁止。tauri-api/command-error.ts の invokeCommand() を使うこと (Issue #931)。'
+            }
+          ]
+        }
+      ]
+    }
+  },
+  // Issue #931: invokeCommand の実装本体だけは raw invoke を import してよい。
+  {
+    files: ['src/renderer/src/lib/tauri-api/command-error.ts'],
+    rules: {
+      'no-restricted-imports': 'off'
     }
   },
   // Issue #939: i18n ハードコード検知。renderer 内の「日本語を含む文字列リテラル / JSX テキスト」

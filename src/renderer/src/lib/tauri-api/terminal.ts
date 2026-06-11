@@ -1,6 +1,6 @@
 // tauri-api/terminal.ts — terminal.* IPC namespace (Phase 5 / Issue #373)
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeCommand } from './command-error';
 import { subscribeEvent, subscribeEventReady } from '../subscribe-event';
 import type {
   TerminalCreateOptions,
@@ -16,14 +16,14 @@ interface SavePastedImageResult {
 
 export const terminal = {
   create: (opts: TerminalCreateOptions): Promise<TerminalCreateResult> =>
-    invoke('terminal_create', { opts }),
+    invokeCommand('terminal_create', { opts }),
   write: (id: string, data: string): Promise<void> =>
-    invoke('terminal_write', { id, data }),
+    invokeCommand('terminal_write', { id, data }),
   resize: (id: string, cols: number, rows: number): Promise<void> =>
-    invoke('terminal_resize', { id, cols, rows }),
-  kill: (id: string): Promise<void> => invoke('terminal_kill', { id }),
+    invokeCommand('terminal_resize', { id, cols, rows }),
+  kill: (id: string): Promise<void> => invokeCommand('terminal_kill', { id }),
   savePastedImage: (base64: string, mimeType: string): Promise<SavePastedImageResult> =>
-    invoke('terminal_save_pasted_image', { base64, mimeType }),
+    invokeCommand('terminal_save_pasted_image', { base64, mimeType }),
 
   onData: (id: string, cb: (data: string) => void): (() => void) =>
     subscribeEvent<string>(`terminal:data:${id}`, cb),

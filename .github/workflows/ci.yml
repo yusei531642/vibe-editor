@@ -77,6 +77,13 @@ jobs:
       - name: File-size ratchet
         run: npm run lint:file-size
 
+      # Issue #931: #[tauri::command] の戻り値を CommandResult<T> ({ code, message } の
+      # 構造化エラー) に強制する。旧 3 流派 (Option<T> / ok+error 埋め込み) は baseline
+      # 免除で固定し、新規 command が旧流派をコピーしたら fail させる。
+      # 例外は直前行の `// command-result-exempt: <理由>` で明示 opt-out。
+      - name: CommandResult lint (IPC error contract)
+        run: npm run lint:command-result
+
       # Issue #721: renderer の単体テスト (vitest) を CI で実行する。
       # 従来は package.json に test スクリプトと vitest.config.ts があるのに
       # CI で一度も走らず、renderer のリグレッションがフリーパスだった。
