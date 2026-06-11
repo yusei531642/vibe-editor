@@ -33,7 +33,7 @@ pub struct AppState {
 /// 呼び出し側が `MutexGuard` ではなく値そのものを欲しがるパターン (`.clone()` /
 /// `.unwrap_or_default()`) しか存在しなかったため、値を直接返す形に簡素化している。
 pub fn current_project_root(slot: &ArcSwapOption<String>) -> Option<String> {
-    slot.load().as_deref().map(|s| s.clone())
+    slot.load().as_deref().cloned()
 }
 
 /// Issue #739: project_root を更新する。`Some("")` のような空文字はそのまま保持する

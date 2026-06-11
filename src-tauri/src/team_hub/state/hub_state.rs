@@ -260,13 +260,9 @@ impl EnginePolicy {
     /// 違反が無ければ `Ok(())`。
     pub fn validate(&self, engine: &str) -> Result<(), String> {
         match (self.kind, engine) {
-            (EnginePolicyKind::ClaudeOnly, "codex") => Err(format!(
-                "team engine policy is ClaudeOnly, cannot recruit with engine='codex'"
-            )),
-            (EnginePolicyKind::CodexOnly, "claude") => Err(format!(
-                "team engine policy is CodexOnly, cannot recruit with engine='claude' \
-                 (this prevents accidental Claude recruitment into a Codex-only team)"
-            )),
+            (EnginePolicyKind::ClaudeOnly, "codex") => Err("team engine policy is ClaudeOnly, cannot recruit with engine='codex'".to_string()),
+            (EnginePolicyKind::CodexOnly, "claude") => Err("team engine policy is CodexOnly, cannot recruit with engine='claude' \
+                 (this prevents accidental Claude recruitment into a Codex-only team)".to_string()),
             _ => Ok(()),
         }
     }

@@ -201,8 +201,8 @@ pub(super) async fn validate_and_register_dynamic_role(
 /// `register_team` 経路で「該当 team_id の entry だけ」を抽出して `replay_persisted_dynamic_roles_for_team`
 /// に渡し、Hub の `dynamic_roles` map を再構成する。
 ///
-/// Issue #604 (Security): 永続化済みでも `instruction_lint::lint_all` の **deny** チェック
-/// + 長さ上限は replay 時に必ず再実行する。`role-profiles.json` は user-writable plain JSON
+/// Issue #604 (Security): 永続化済みでも `instruction_lint::lint_all` の **deny** チェックと
+/// 長さ上限は replay 時に必ず再実行する。`role-profiles.json` は user-writable plain JSON
 /// のため、攻撃者 (or 過去の緩い lint 版で書かれた entry) が手書きで deny 句入り instructions を
 /// 仕込めば worker prompt に直接注入される経路があった。Lint warn (軽微) と template
 /// validation は forward-compat 維持のため引き続き skip する (= 旧 entry を一斉に弾かない)。

@@ -188,8 +188,8 @@ fn parse_iso8601_to_ms(s: &str) -> Option<i64> {
     }
     let leap = is_leap_year(year);
     let mdays = [31u32, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    for m in 0..(month - 1) as usize {
-        days += mdays[m] as i64;
+    for &md in mdays.iter().take((month - 1) as usize) {
+        days += md as i64;
     }
     days += (day as i64) - 1;
     let secs = days * 86_400 + (hour as i64) * 3600 + (minute as i64) * 60 + (second as i64);
@@ -237,7 +237,7 @@ fn decide_should_warn(now_ms: i64, last_ms: Option<i64>) -> bool {
     if now_ms <= 0 {
         return true;
     }
-    last_ms.map_or(true, |prev| {
+    last_ms.is_none_or(|prev| {
         now_ms < prev || now_ms.saturating_sub(prev) >= COOLDOWN_MS
     })
 }

@@ -261,6 +261,9 @@ pub async fn files_read(app: AppHandle, project_root: String, rel_path: String) 
     }
 }
 
+// Issue #939: tauri command は renderer から渡る引数を 1:1 で受けるため引数が多くなるのは
+// 構造上不可避 (引数を struct にまとめると IPC 契約 / shared.ts 側も書き換えが必要)。
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn files_write(
     app: AppHandle,

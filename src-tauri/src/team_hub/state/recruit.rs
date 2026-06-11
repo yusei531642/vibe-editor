@@ -806,6 +806,10 @@ mod recruit_rescue_tests {
             .clone()
     }
 
+    // Issue #939: `ENV_LOCK` は env var をテスト間で直列化する std Mutex で、テスト全体を
+    // 1 つの critical section にするため意図的に await 跨ぎで保持する (current_thread flavor +
+    // 単独 test なので deadlock しない)。production の lock ではないので at-site で allow。
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test(flavor = "current_thread")]
     async fn timed_out_ack_within_grace_is_rescued_and_emits_event() {
         let _env_guard = ENV_LOCK.lock().expect("env lock poisoned");
@@ -847,6 +851,8 @@ mod recruit_rescue_tests {
         std::env::remove_var("VIBE_TEAM_RECRUIT_GRACE_MS");
     }
 
+    // Issue #939: 上記同様、env 直列化用 std Mutex を意図的に await 跨ぎ保持 (test 専用)。
+    #[allow(clippy::await_holding_lock)]
     #[tokio::test(flavor = "current_thread")]
     async fn grace_zero_removes_pending_immediately_and_late_ack_is_not_found() {
         let _env_guard = ENV_LOCK.lock().expect("env lock poisoned");

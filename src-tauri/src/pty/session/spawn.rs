@@ -230,7 +230,7 @@ fn resolve_spawn_command(
 pub(crate) fn build_cmd_label(prepared: &PreparedSpawnCommand) -> String {
     let basename = prepared
         .resolved_command
-        .rsplit(|c: char| c == '/' || c == '\\')
+        .rsplit(['/', '\\'])
         .next()
         .filter(|s| !s.is_empty())
         .unwrap_or(prepared.requested_command.as_str())
@@ -348,7 +348,7 @@ pub fn spawn_session(
         Err(err) => {
             let err_string = err.to_string();
             log_spawn_outcome(&cmd_label, engine, platform, elapsed_ms, Some(&err_string));
-            return Err(err.into());
+            return Err(err);
         }
     };
     drop(pair.slave);
