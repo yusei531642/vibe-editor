@@ -10,6 +10,8 @@
 
 pub mod bridge;
 pub mod error;
+// Issue #930: Tauri イベント payload の名前付き struct 集約 (shared.ts と同期)。
+pub mod events;
 // Issue #526: vibe-team の advisory file locks (worker のファイル編集衝突を warn する)。
 pub mod file_locks;
 pub mod inject;
@@ -20,6 +22,8 @@ pub mod role_lint;
 // inject 本文を「summary + attached: <path>」に置換する spool 機構。
 pub mod spool;
 pub mod state;
+// Issue #935: タスク status ドメイン値の SSOT (許容値 / alias 正規化 / open・done 判定)。
+pub mod task_status;
 
 /// Issue #494: TeamHub 周辺の integration test を集約する test-only module。
 /// `protocol::permissions` の matrix 検証等を `tests/permissions.rs` に置く。
@@ -772,8 +776,8 @@ mod handshake_auth_tests {
         hub.state
             .lock()
             .await
-            .agent_role_bindings
-            .contains_key(&(team_id.to_string(), agent_id.to_string()))
+            .bound_role(team_id, agent_id)
+            .is_some()
     }
 
     async fn has_pending(hub: &TeamHub, agent_id: &str) -> bool {
@@ -820,6 +824,7 @@ mod handshake_auth_tests {
         let read_res = timeout(Duration::from_secs(5), reader.read_line(&mut line)).await;
         let outcome = match read_res {
             Ok(Ok(0)) | Ok(Err(_)) | Err(_) => None,
+            // safe-load-exempt: socket プロトコル行 (テスト) の parse。永続化ファイルではない。
             Ok(Ok(_)) => serde_json::from_str::<serde_json::Value>(line.trim()).ok(),
         };
 

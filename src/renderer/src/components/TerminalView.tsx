@@ -13,6 +13,7 @@ import { useAutoInitialMessage } from '../lib/use-auto-initial-message';
 import { useFitToContainer } from '../lib/use-fit-to-container';
 import { useCanvasTerminalPointerNormalizer } from '../lib/use-canvas-terminal-pointer-normalizer';
 import type { CellSize } from '../lib/measure-cell-size';
+import type { TerminalRuntimeStatus } from '../lib/terminal-status';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu';
 
 /**
@@ -61,7 +62,7 @@ interface TerminalViewProps {
   /** Codex 起動時にシステム指示として渡す文字列（main で一時ファイル化） */
   codexInstructions?: string;
   /** 起動中 / エラー表示用のコールバック */
-  onStatus?: (status: string) => void;
+  onStatus?: (status: TerminalRuntimeStatus) => void;
   /** 出力イベント（非可視時のバッジ表示用） */
   onActivity?: () => void;
   /** プロセス終了通知 */

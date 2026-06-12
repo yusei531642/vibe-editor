@@ -87,8 +87,20 @@ export function useProjectLoader(
       if (projectRoot && projectRoot !== root && !(await optsRef.current.confirmDiscardEditorTabs())) {
         return false;
       }
+      // Issue #954: backend の active project_root を先に確定させる。git_status / files_list
+      // 等の read 系 IPC は active root とのゲート照合 (#932 の read 側拡張) を通るため、
+      // 確定前に fetch を発火すると transient reject でパネルが空振りする。
+      // setProjectRoot は fs_watch 付け替え / asset scope 許可も担う既存 IPC で冪等
+      // (settings-context 側の同期 effect が後から同じ root で呼んでも無害)。
+      // 失敗 (system 領域 reject 等) 時はロード自体を中止してステータスに表示する。
+      try {
+        await window.api.app.setProjectRoot(root);
+      } catch (err) {
+        useUiStore.getState().setStatus(t('project.loadError', { error: String(err) }));
+        return false;
+      }
       setProjectRoot(root);
-      useUiStore.getState().setStatus('プロジェクト読み込み中…');
+      useUiStore.getState().setStatus(t('project.loading'));
       setGitLoading(true);
 
       try {
@@ -124,13 +136,13 @@ export function useProjectLoader(
         }
         return true;
       } catch (err) {
-        useUiStore.getState().setStatus(`読み込みエラー: ${String(err)}`);
+        useUiStore.getState().setStatus(t('project.loadError', { error: String(err) }));
         return false;
       } finally {
         setGitLoading(false);
       }
     },
-    [projectRoot, mcpAutoSetup, recentProjects, updateSettings]
+    [projectRoot, mcpAutoSetup, recentProjects, updateSettings, t]
   );
 
   // 初回ロード — lastOpenedRoot (前回開いたルート) があれば復元、なければフォルダ選択ダイアログ。
@@ -163,6 +175,18 @@ export function useProjectLoader(
           root = picked;
         }
         if (cancelled) return;
+        // Issue #954 (PR #962 auto-review): 起動復元パスも loadProject と同様に backend の
+        // active project_root を await で確定させてから git/sessions の fetch を発火する。
+        // ゲート (#932 read 側拡張) は active root 未設定時に reject するため、これが無いと
+        // 起動時の git パネルが transient reject で空振りする。
+        try {
+          await window.api.app.setProjectRoot(root);
+        } catch (err) {
+          useUiStore.getState().setStatus(t('project.initError', { error: String(err) }));
+          setGitLoading(false);
+          return;
+        }
+        if (cancelled) return;
         setProjectRoot(root);
         if (root !== lastOpenedRoot) {
           void updateSettings({ lastOpenedRoot: root });
@@ -185,7 +209,7 @@ export function useProjectLoader(
         optsRef.current.onLoaded({ gitStatus: gs, sessions: sess });
         useUiStore.getState().setStatus(root.split(/[\\/]/).pop() ?? root);
       } catch (err) {
-        useUiStore.getState().setStatus(`初期化エラー: ${String(err)}`);
+        useUiStore.getState().setStatus(t('project.initError', { error: String(err) }));
         setGitLoading(false);
       }
     })();
@@ -227,39 +251,39 @@ export function useProjectLoader(
 
   const handleNewProject = useCallback(async () => {
     const folder = await window.api.dialog.openFolder(
-      '新規プロジェクト: 空フォルダを選択/作成'
+      t('project.newDialogTitle')
     );
     if (!folder) return;
     const empty = await window.api.dialog.isFolderEmpty(folder);
     const loaded = await loadProject(folder);
     if (!loaded) return;
     if (!empty) {
-      optsRef.current.showToast('フォルダが空ではありません。既存として開きます', {
+      optsRef.current.showToast(t('project.newFolderNotEmpty'), {
         tone: 'warning'
       });
     } else {
-      optsRef.current.showToast('新規プロジェクトを作成', { tone: 'success' });
+      optsRef.current.showToast(t('project.created'), { tone: 'success' });
     }
-  }, [loadProject]);
+  }, [loadProject, t]);
 
   const handleOpenFolder = useCallback(async () => {
-    const folder = await window.api.dialog.openFolder('既存プロジェクトを開く');
+    const folder = await window.api.dialog.openFolder(t('project.openExistingDialogTitle'));
     if (!folder) return;
     await loadProject(folder);
-  }, [loadProject]);
+  }, [loadProject, t]);
 
   const handleOpenFile = useCallback(async () => {
-    const file = await window.api.dialog.openFile('ファイルを開く');
+    const file = await window.api.dialog.openFile(t('appMenu.openFileDialogTitle'));
     if (!file) return;
     const parent = file.replace(/[\\/][^\\/]+$/, '');
     const loaded = await loadProject(parent);
     if (loaded) {
       optsRef.current.showToast(
-        `${file} の親フォルダをプロジェクトとして読み込みました`,
+        t('project.fileParentLoaded', { file }),
         { tone: 'info' }
       );
     }
-  }, [loadProject]);
+  }, [loadProject, t]);
 
   const handleOpenRecent = useCallback(
     async (path: string) => {
@@ -270,10 +294,10 @@ export function useProjectLoader(
 
   const handleClearRecent = useCallback(() => {
     void updateSettings({ recentProjects: [] });
-    optsRef.current.showToast('最近のプロジェクト履歴をクリアしました', {
+    optsRef.current.showToast(t('project.recentCleared'), {
       tone: 'info'
     });
-  }, [updateSettings]);
+  }, [updateSettings, t]);
 
   const handleAddWorkspaceFolder = useCallback(async () => {
     const folder = await window.api.dialog.openFolder(

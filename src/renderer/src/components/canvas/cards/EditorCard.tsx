@@ -16,6 +16,9 @@ import { EditorView } from '../../EditorView';
 import { detectLanguage } from '../../../lib/language';
 import { registerEditorCardDirty } from '../../../lib/editor-card-dirty-registry';
 import type { CardDataOf, EditorCardPayload } from '../../../stores/canvas';
+import { useNativeConfirm } from '../../../lib/use-native-confirm';
+import { useT } from '../../../lib/i18n';
+import { useToast } from '../../../lib/toast-context';
 
 // Issue #732: payload 型は canvas store の判別可能 union に集約。`NodeProps` を
 // `Node<CardDataOf<'editor'>>` で具体化することで `data.payload` が `EditorCardPayload`
@@ -31,26 +34,56 @@ function EditorCardImpl({ id, data }: NodeProps<Node<CardDataOf<'editor'>>>): JS
     () => (relPath ? detectLanguage(relPath) === 'image' : false),
     [relPath]
   );
+  const t = useT();
+  const confirm = useNativeConfirm();
+  const { showToast } = useToast();
+  const tRef = useRef(t);
+  const showToastRef = useRef(showToast);
+  useEffect(() => {
+    tRef.current = t;
+    showToastRef.current = showToast;
+  }, [showToast, t]);
 
   const [content, setContent] = useState('');
   const [original, setOriginal] = useState('');
   const [isBinary, setIsBinary] = useState(false);
+  const [lossyEncoding, setLossyEncoding] = useState(false);
+  const [encoding, setEncoding] = useState('utf-8');
+  const [mtimeMs, setMtimeMs] = useState<number | undefined>(undefined);
+  const [sizeBytes, setSizeBytes] = useState<number | undefined>(undefined);
+  const [contentHash, setContentHash] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     if (!projectRoot || !relPath) {
+      setContent('');
+      setOriginal('');
+      setIsBinary(false);
+      setLossyEncoding(false);
+      setEncoding('utf-8');
+      setMtimeMs(undefined);
+      setSizeBytes(undefined);
+      setContentHash(undefined);
       setLoading(false);
       return;
     }
     // Issue #325: 画像ファイルは files.read を呼ばず ImagePreview に委ねる。
     // バイナリを丸ごと UTF-8 lossy で読むコストを避けるため早期 return する。
     if (isImage) {
+      setError(null);
+      setLossyEncoding(false);
       setLoading(false);
       return;
     }
     setLoading(true);
+    setError(null);
+    setLossyEncoding(false);
+    setEncoding('utf-8');
+    setMtimeMs(undefined);
+    setSizeBytes(undefined);
+    setContentHash(undefined);
     void window.api.files
       .read(projectRoot, relPath)
       .then((res) => {
@@ -58,10 +91,21 @@ function EditorCardImpl({ id, data }: NodeProps<Node<CardDataOf<'editor'>>>): JS
         if (!res.ok) {
           setError(res.error ?? 'failed to read');
         } else {
+          const lossy = res.encoding === 'lossy';
           setContent(res.content);
           setOriginal(res.content);
           setIsBinary(res.isBinary);
+          setLossyEncoding(lossy);
+          setEncoding(res.encoding || 'utf-8');
+          setMtimeMs(res.mtimeMs);
+          setSizeBytes(res.sizeBytes);
+          setContentHash(res.contentHash);
           setError(null);
+          if (lossy) {
+            showToastRef.current(tRef.current('editor.nonUtf8Warning', { path: relPath }), {
+              tone: 'warning'
+            });
+          }
         }
       })
       .catch((e) => !cancelled && setError(String(e)))
@@ -87,13 +131,69 @@ function EditorCardImpl({ id, data }: NodeProps<Node<CardDataOf<'editor'>>>): JS
 
   const onSave = useCallback(async () => {
     if (!dirty) return;
-    const res = await window.api.files.write(projectRoot, relPath, content);
-    if (res.ok) {
-      setOriginal(content);
-    } else {
-      setError(res.error ?? 'failed to save');
+    if (!projectRoot || !relPath || isBinary) return;
+    if (lossyEncoding) {
+      showToast(t('editor.nonUtf8SaveBlocked', { path: relPath }), { tone: 'warning' });
+      return;
     }
-  }, [dirty, projectRoot, relPath, content]);
+    try {
+      let res = await window.api.files.write(
+        projectRoot,
+        relPath,
+        content,
+        mtimeMs,
+        sizeBytes,
+        encoding,
+        contentHash
+      );
+      if (res.conflict) {
+        const overwrite = await confirm(t('editor.externalChangeConfirm', { path: relPath }));
+        if (!overwrite) {
+          showToast(t('editor.saveAborted', { path: relPath }), { tone: 'warning' });
+          return;
+        }
+        res = await window.api.files.write(
+          projectRoot,
+          relPath,
+          content,
+          undefined,
+          undefined,
+          encoding,
+          undefined
+        );
+      }
+      if (!res.ok) {
+        const message = res.error ?? 'failed to save';
+        setError(message);
+        showToast(t('editor.saveFailed', { error: message }), { tone: 'error' });
+        return;
+      }
+      setOriginal(content);
+      setMtimeMs(res.mtimeMs);
+      setSizeBytes(res.sizeBytes);
+      setContentHash(res.contentHash);
+      setError(null);
+      showToast(t('editor.saved', { path: relPath }), { tone: 'success' });
+    } catch (err) {
+      const message = String(err);
+      setError(message);
+      showToast(t('editor.saveFailed', { error: message }), { tone: 'error' });
+    }
+  }, [
+    dirty,
+    projectRoot,
+    relPath,
+    isBinary,
+    lossyEncoding,
+    content,
+    mtimeMs,
+    sizeBytes,
+    encoding,
+    contentHash,
+    confirm,
+    showToast,
+    t
+  ]);
 
   return (
     <>
@@ -107,6 +207,8 @@ function EditorCardImpl({ id, data }: NodeProps<Node<CardDataOf<'editor'>>>): JS
           isBinary={isBinary}
           loading={loading}
           error={error}
+          readOnly={lossyEncoding}
+          readOnlyReason={lossyEncoding ? t('editor.nonUtf8ReadOnly') : undefined}
           onChange={setContent}
           onSave={() => void onSave()}
         />

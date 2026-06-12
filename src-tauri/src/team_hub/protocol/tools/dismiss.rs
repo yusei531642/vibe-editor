@@ -49,7 +49,7 @@ pub async fn team_dismiss(
     // Issue #342 Phase 3 (3.6): dismiss 直前に被 dismiss 側の last_seen_at / 既存 recruited_at を
     // スナップしておき、戻り値に `lastSeenAt` を載せる (= 最後の生存時刻)。
     let last_seen_at = hub
-        .get_member_diagnostics(&agent_id)
+        .get_member_diagnostics(&ctx.team_id, &agent_id)
         .await
         .and_then(|d| d.last_seen_at);
     // Renderer に閉じてもらう

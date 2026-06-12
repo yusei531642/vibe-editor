@@ -37,18 +37,26 @@ import { ackRecruit, type RecruitAckPhase } from './recruit-ack';
  *   - Unix:          "No such file or directory" / "ENOENT"
  *   - which::which:  "cannot find binary path"
  *
+ * Issue #931: Windows では binary-missing が spawn 到達前に
+ * `pty/session/windows_resolve.rs::resolve_windows_spawn_command` の段階で捕捉され、
+ * `"command executable was not found: ..."` という **Rust 側ハードコードの英語** メッセージで
+ * 返る (= OS ロケールに依存しない安定マーカー)。従来のヒューリスティックはこの文字列を
+ * 拾えず Windows の binary-missing を汎用 `spawn` に誤分類していたため、安定マーカー
+ * `"executable was not found"` を追加する。OS ロケール依存の文字列は fallback として温存。
+ *
  * 上記のいずれかにマッチすれば `engine_binary_missing` で返す。マッチしなければ
  * 汎用 `spawn` (= PTY allocation failure / 権限エラー / 環境変数 escape 失敗等)
- * として扱う。Phase 1 ではこのヒューリスティックで十分 (Rust 側で構造化エラー化
- * するのは Phase 3 のスコープ)。
+ * として扱う。Rust 側で構造化エラーコード (errorCode) を返すのは #931 の残スコープ。
  */
-function classifySpawnPhase(error: string): RecruitAckPhase {
+export function classifySpawnPhase(error: string): RecruitAckPhase {
   const e = error.toLowerCase();
   if (
     e.includes('enoent') ||
     e.includes('no such file or directory') ||
     e.includes('cannot find the file') ||
     e.includes('cannot find binary') ||
+    // Issue #931: Rust 側 resolve エラーのロケール非依存な安定マーカー
+    e.includes('executable was not found') ||
     e.includes('program not found') ||
     e.includes('command not found') ||
     e.includes('not recognized') ||

@@ -18,7 +18,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 
-use super::member_diagnostics::MemberDiagnostics;
 use super::recruit::PendingRecruit;
 
 pub(crate) struct HubState {
@@ -38,14 +37,14 @@ pub(crate) struct HubState {
     /// pending を含められるようにする (旧実装は registry の handshake 済みだけを見ていたため
     /// 並行 recruit で上限超過や singleton 重複が起きえた)。
     pub(crate) pending_recruits: HashMap<String, PendingRecruit>,
-    /// Issue #183: agent_id を初回 handshake で確定した role に bind する。
-    /// 別プロセスが同 agent_id で接続してきても異なる role を主張できなくする。
+    /// Issue #934: agent ライフサイクルの統合 entry。key は `(team_id, agent_id)`。
     ///
-    /// Issue #637: key を `(team_id, agent_id)` の tuple に拡張。同一 `agent_id` が
-    /// 別 team で再 handshake された場合に古い team の binding を上書きしないよう、
-    /// team 次元を持たせる (cross-team で role 上書きの race を遮断)。
-    /// in-memory only (Hub 再起動で全 clear)、永続化レイヤーは無いので migration 不要。
-    pub(crate) agent_role_bindings: HashMap<(String, String), String>,
+    /// 旧 4 並行 map (`agent_role_bindings` #183/#637 / `member_diagnostics` #342 /
+    /// `last_status_call_at` #634 / `team_agent_roster` #829) を統合した。
+    /// roster は entry の存在そのもの、teardown は entry 単位、clear_team は
+    /// team prefix retain 一発。遷移は `state::agent_entry` の accessor 経由のみ。
+    /// in-memory only (Hub 再起動で全 clear)。
+    pub(crate) agents: super::agent_entry::AgentMap,
     /// renderer から同期された role profile 一覧 (team_list_role_profiles で返す)
     pub(crate) role_profile_summary: Vec<RoleProfileSummary>,
     /// Leader が team_create_role / team_recruit(role_definition=...) で動的に生成した
@@ -53,10 +52,6 @@ pub(crate) struct HubState {
     /// renderer 側で worker テンプレに instructions を流し込み、最終的な system prompt を組み立てる。
     /// プロセス再起動で消えるが、canvas restore 時に renderer が再投入する想定。
     pub(crate) dynamic_roles: HashMap<String, HashMap<String, DynamicRole>>,
-    /// Issue #342 Phase 3 (3.2): agent_id 単位の診断 timestamp / counter。
-    /// `team_diagnostics` MCP ツールが leader/hr の権限ガード越しに返す。
-    /// in-memory only (プロセス再起動でリセット、計画の受け入れ基準で明記済み)。
-    pub(crate) member_diagnostics: HashMap<String, MemberDiagnostics>,
     /// Issue #526: vibe-team の advisory file lock 表 (team_id × normalized_path → FileLock)。
     /// `team_lock_files` で取得、`team_unlock_files` で解放、`team_assign_task` の
     /// `target_paths` 引数で peek (競合検知)。in-memory only (Hub 再起動で全 clear)、
@@ -71,23 +66,6 @@ pub(crate) struct HubState {
     /// permit 数は `VIBE_TEAM_RECRUIT_CONCURRENCY` 環境変数で `1..=RECRUIT_MAX_CONCURRENCY` の
     /// 範囲に tunable (既定 `RECRUIT_DEFAULT_CONCURRENCY`)。team 単位で lazy 初期化される。
     pub(crate) recruit_semaphores: HashMap<String, Arc<Semaphore>>,
-    /// Issue #634: `team_status` の rate limit 用、agent_id → 最終呼び出し Instant。
-    /// `MIN_STATUS_INTERVAL` 以内の連続呼び出しは silent reject し、
-    /// `last_status_at` / `last_seen_at` も更新しない (autoStale 偽装防止)。
-    /// in-memory only (Hub 再起動で clear)。
-    pub(crate) last_status_call_at: HashMap<String, std::time::Instant>,
-    /// Issue #829: team_id → その team で recruit / handshake された agent_id 集合。
-    ///
-    /// `member_diagnostics` / `last_status_call_at` は agent_id 単体キーで team 次元を持たない。
-    /// これらの解放を `agent_role_bindings` の逆引きに頼ると、binding が
-    /// dismiss / record_agent_process_exit / recruit timeout で先に消えた agent は
-    /// `clear_team` 到達時に逆引きで届かず、両 map が Hub 再起動まで leak する
-    /// (本 issue の支配的経路)。binding と独立した「team の在籍記録」をここに持ち、
-    /// binding が消えた後でも `clear_team` が当該 team の agent を網羅して両 map を
-    /// reclaim できるようにする。team-keyed なので `clear_team` の team prefix retain で
-    /// 一括解放でき、cross-team 共有 agent の防御 (他 team がまだ参照するなら残す) も維持する。
-    /// in-memory only (Hub 再起動で clear)。
-    pub(crate) team_agent_roster: HashMap<String, std::collections::HashSet<String>>,
 }
 
 /// Issue #342 Phase 3 (3.11): tracing-appender が書き出すログファイルの絶対パスを
@@ -260,13 +238,9 @@ impl EnginePolicy {
     /// 違反が無ければ `Ok(())`。
     pub fn validate(&self, engine: &str) -> Result<(), String> {
         match (self.kind, engine) {
-            (EnginePolicyKind::ClaudeOnly, "codex") => Err(format!(
-                "team engine policy is ClaudeOnly, cannot recruit with engine='codex'"
-            )),
-            (EnginePolicyKind::CodexOnly, "claude") => Err(format!(
-                "team engine policy is CodexOnly, cannot recruit with engine='claude' \
-                 (this prevents accidental Claude recruitment into a Codex-only team)"
-            )),
+            (EnginePolicyKind::ClaudeOnly, "codex") => Err("team engine policy is ClaudeOnly, cannot recruit with engine='codex'".to_string()),
+            (EnginePolicyKind::CodexOnly, "claude") => Err("team engine policy is CodexOnly, cannot recruit with engine='claude' \
+                 (this prevents accidental Claude recruitment into a Codex-only team)".to_string()),
             _ => Ok(()),
         }
     }
@@ -328,6 +302,10 @@ pub struct TeamTask {
     pub id: u32,
     pub assigned_to: String,
     pub description: String,
+    /// Issue #935: 通常は `task_status::TaskStatus::as_str()` の canonical 値。
+    /// 永続化済み legacy データには alias / 任意文字列が残りうるため String のまま、
+    /// 書き込みは受信境界 (update_task / assign_task) で必ず正規化する。
+    /// 判定 (open / done) は `task_status` module 経由のみとし、`matches!` を散らさない。
     pub status: String,
     pub created_by: String,
     pub created_at: String,
@@ -501,14 +479,11 @@ impl TeamHub {
                 token: String::new(),
                 bridge_path: PathBuf::new(),
                 pending_recruits: HashMap::new(),
-                agent_role_bindings: HashMap::new(),
+                agents: HashMap::new(),
                 role_profile_summary: Vec::new(),
                 dynamic_roles: HashMap::new(),
-                member_diagnostics: HashMap::new(),
                 file_locks: HashMap::new(),
                 recruit_semaphores: HashMap::new(),
-                last_status_call_at: HashMap::new(),
-                team_agent_roster: HashMap::new(),
             })),
             app_handle: Arc::new(Mutex::new(None)),
             inflight,

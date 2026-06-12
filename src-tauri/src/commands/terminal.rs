@@ -4,6 +4,7 @@
 // terminal:data:{id} / terminal:exit:{id} イベントを emit する。
 
 pub(crate) mod command_validation;
+pub(crate) mod shell_policy;
 mod paste_image;
 mod prompt_files;
 
@@ -309,14 +310,16 @@ pub async fn terminal_create(
             ..Default::default()
         });
     }
-    if let Some(reason) = command_validation::reject_immediate_exec_args(&command, &args) {
+    // Issue #933: シェルは対話セッション起動のみ許可 (allowlist 契約 / shell_policy.rs)
+    let registered = shell_policy::settings_registered_command_lines();
+    if let Some(reason) = shell_policy::reject_non_interactive_shell_args(&command, &args, &registered) {
         return Ok(TerminalCreateResult {
             ok: false,
-            error: Some(reason.to_string()),
+            error: Some(reason),
             ..Default::default()
         });
     }
-    let sanctioned_flags = command_validation::settings_sanctioned_danger_flags();
+    let sanctioned_flags = command_validation::settings_sanctioned_danger_flags(&command);
     if let Some(reason) = command_validation::reject_danger_flags(&args, &sanctioned_flags) {
         return Ok(TerminalCreateResult {
             ok: false,
@@ -527,6 +530,11 @@ pub async fn terminal_create(
 
     // チーム所属端末なら TeamHub の socket/token と team/agent/role を env に注入
     let mut env = opts.env.unwrap_or_default();
+    // Issue #889: renderer (信頼境界外) 由来の env は VIBE_* のみ許可。
+    // NODE_OPTIONS / LD_PRELOAD 等の注入による command allowlist 迂回を遮断する。
+    // この直後に Rust が信頼境界内で insert する VIBE_TEAM_* / VIBE_AGENT_ID と、
+    // spawn 側の TERM/COLORTERM 注入には影響しない。
+    env.retain(|k, _| crate::pty::session::env_allowlist::is_safe_renderer_env_key(k));
     if let Some(team_id) = &opts.team_id {
         let (socket, token, _) = state.team_hub.info().await;
         env.insert("VIBE_TEAM_SOCKET".into(), socket);
@@ -694,18 +702,24 @@ pub async fn terminal_write(
     data: String,
 ) -> crate::commands::error::CommandResult<()> {
     if let Some(s) = state.pty_registry.get(&id) {
-        match s.user_write(data.as_bytes()).map_err(|e| e.to_string())? {
+        let data_len = data.len();
+        let data_bytes = data.into_bytes();
+        let outcome = tokio::task::spawn_blocking(move || s.user_write(&data_bytes))
+            .await
+            .map_err(|e| format!("[terminal] terminal_write spawn_blocking failed for {id}: {e}"))?
+            .map_err(|e| e.to_string())?;
+        match outcome {
             UserWriteOutcome::Written | UserWriteOutcome::SuppressedInjecting => {}
             UserWriteOutcome::DroppedTooLarge => {
                 tracing::warn!(
                     "[terminal] dropped oversized terminal_write payload for {id}: {} bytes",
-                    data.len()
+                    data_len
                 );
             }
             UserWriteOutcome::DroppedRateLimited => {
                 tracing::warn!(
                     "[terminal] rate-limited terminal_write for {id}: {} bytes",
-                    data.len()
+                    data_len
                 );
             }
         }
@@ -721,11 +735,15 @@ pub async fn terminal_resize(
     rows: u32,
 ) -> crate::commands::error::CommandResult<()> {
     if let Some(s) = state.pty_registry.get(&id) {
+        let cols = cols.min(u32::from(u16::MAX)) as u16;
+        let rows = rows.min(u32::from(u16::MAX)) as u16;
         // resize 失敗は無害なので握りつぶす (旧実装と同じ)
-        let _ = s.resize(
-            cols.min(u32::from(u16::MAX)) as u16,
-            rows.min(u32::from(u16::MAX)) as u16,
-        );
+        match tokio::task::spawn_blocking(move || s.resize(cols, rows)).await {
+            Ok(Ok(())) | Ok(Err(_)) => {}
+            Err(e) => {
+                tracing::warn!("[terminal] terminal_resize spawn_blocking failed for {id}: {e}");
+            }
+        }
     }
     Ok(())
 }

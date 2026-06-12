@@ -373,9 +373,7 @@ pub async fn voice_get_active_target(
 
     // role binding lookup (通常 "leader")。
     let role = hub_state
-        .agent_role_bindings
-        .get(&(team_id.clone(), agent_id.clone()))
-        .cloned()
+        .bound_role(&team_id, &agent_id)
         .unwrap_or_else(|| "leader".to_string());
 
     // display name (UI 表示用)。先頭 8 文字だけ取り出して短い id を見せる。

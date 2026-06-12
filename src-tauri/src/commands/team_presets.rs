@@ -156,8 +156,14 @@ pub async fn team_presets_load(id: String) -> Option<TeamPreset> {
     }
     let _g = LOCK.lock().await;
     let path = preset_path(&id);
-    let bytes = fs::read(&path).await.ok()?;
-    let preset: TeamPreset = serde_json::from_slice(&bytes).ok()?;
+    // Issue #936: 旧実装は `fs::read(...).ok()?` + `from_slice(...).ok()?` で破損も不在も
+    // 黙って None に丸め、次回 save で正常データを backup 無しに上書き消失させていた。
+    // 共通ヘルパで「default に倒す前に必ず原本を退避」する。instructions は injection-prone
+    // なので退避も 0o600 (save 側 atomic_write_with_mode と同じ)。
+    let preset: TeamPreset =
+        crate::commands::safe_load::safe_load_or_quarantine(&path, Some(0o600))
+            .await
+            .into_option()?;
     if preset.id != id {
         return None;
     }

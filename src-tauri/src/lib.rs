@@ -325,8 +325,17 @@ pub fn run() {
             let app_handle_for_root = app.handle().clone();
             spawn_observed("settings_restore", async move {
                 // Issue #493: settings_load は Settings struct を返すようになった。
+                // Issue #905: 一時的な読み取り不能は default 扱いせず Err にする。
+                // ここで復元を諦めることで、原本 settings.json が default で上書きされる
+                // 経路を起動直後から作らない。
                 // last_opened_root を優先し、空なら claudeCwd を fallback。
-                let settings = commands::settings::settings_load().await;
+                let settings = match commands::settings::settings_load().await {
+                    Ok(settings) => settings,
+                    Err(e) => {
+                        tracing::warn!("[setup] settings restore skipped: {e}");
+                        return;
+                    }
+                };
                 let root = Some(settings.last_opened_root.clone())
                     .filter(|s| !s.trim().is_empty())
                     .or_else(|| Some(settings.claude_cwd.clone()).filter(|s| !s.trim().is_empty()));
@@ -466,7 +475,15 @@ pub fn run() {
                                     "[lifecycle] in-flight inject drain timeout — proceeding to kill_all (was={inflight_before}, remaining={remaining})"
                                 );
                             }
-                            state.pty_registry.kill_all();
+                            // Issue #951: 旧実装の kill_all() は taskkill を detached thread に
+                            // 逃がして即返るため、直後の exit(0) が taskkill より先に自プロセスを
+                            // 消して子プロセスが孤児化する競合があった。blocking 版で全 session の
+                            // process-tree kill 完了 (上限 2s) を待ってから exit する。
+                            let registry = state.pty_registry.clone();
+                            let _ = tauri::async_runtime::spawn_blocking(move || {
+                                registry.kill_all_blocking(std::time::Duration::from_secs(2));
+                            })
+                            .await;
                             // MCP エントリは残しておく (次回起動時に reclaim されるので副作用なし)
                             // team-bridge.js は ~/.vibe-editor/ に置いたまま (再利用のため)
                             app_for_drain.exit(0);

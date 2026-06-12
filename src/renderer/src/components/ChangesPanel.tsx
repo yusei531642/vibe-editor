@@ -87,9 +87,7 @@ export function ChangesPanel({
 
       {!loading && status && !status.ok && (
         <p className="sidebar__note sidebar__note--error">
-          {status.error === 'Gitリポジトリではありません'
-            ? t('sidebar.notGitRepo')
-            : status.error}
+          {status.notGitRepo ? t('sidebar.notGitRepo') : status.error}
         </p>
       )}
 

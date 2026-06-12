@@ -15,6 +15,7 @@
 //! - [`persistence`] — チーム登録 (`register_team`) / 破棄 (`clear_team`) / orchestration state
 //!   の永続化 (`persist_team_state` / `record_handoff_lifecycle`) と動的ロール復元。
 
+mod agent_entry;
 mod file_locks_glue;
 mod hub_state;
 mod member_diagnostics;

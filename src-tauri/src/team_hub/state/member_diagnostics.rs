@@ -51,14 +51,17 @@ pub struct MemberDiagnostics {
 
 impl TeamHub {
     /// Issue #342 Phase 3 (3.3): `team_diagnostics` で見える member_diagnostics エントリを返す。
-    /// agent_id が未登録なら None。
-    pub async fn get_member_diagnostics(&self, agent_id: &str) -> Option<MemberDiagnostics> {
+    /// 未登録なら None。Issue #934: 診断は `(team_id, agent_id)` の AgentEntry に統合された。
+    pub async fn get_member_diagnostics(
+        &self,
+        team_id: &str,
+        agent_id: &str,
+    ) -> Option<MemberDiagnostics> {
         self.state
             .lock()
             .await
-            .member_diagnostics
-            .get(agent_id)
-            .cloned()
+            .agent_entry(team_id, agent_id)
+            .map(|e| e.diagnostics.clone())
     }
 
     /// PTY の子プロセス終了を TeamHub 側の診断・整合性情報へ反映する。
@@ -86,10 +89,7 @@ impl TeamHub {
         };
         {
             let mut s = self.state.lock().await;
-            let diag = s
-                .member_diagnostics
-                .entry(agent_id.to_string())
-                .or_default();
+            let diag = s.diagnostics_mut(team_id, agent_id);
             if diag.recruited_at.is_empty() {
                 diag.recruited_at = now_iso.clone();
             }
@@ -97,8 +97,9 @@ impl TeamHub {
             diag.last_exit_code = Some(exit_code);
             diag.last_exit_reason = reason;
             diag.last_exit_session_id = session_id;
-            s.agent_role_bindings
-                .remove(&(team_id.to_string(), agent_id.to_string()));
+            // Issue #934: binding 失効は Active → Exited の型付き遷移。診断 (last_exit_*) は
+            // entry ごと clear_team まで保持される。
+            s.retire_agent(team_id, agent_id);
         }
 
         let released_lock_count = self

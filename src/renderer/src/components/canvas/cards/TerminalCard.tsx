@@ -15,6 +15,7 @@ import type { CardDataOf } from '../../../stores/canvas';
 import { useUiStore } from '../../../stores/ui';
 import { useCanvasTerminalFit } from '../../../lib/use-canvas-terminal-fit';
 import { useXtermScrollToBottomOnResize } from '../../../lib/use-xterm-scroll-on-resize';
+import type { TerminalRuntimeStatus } from '../../../lib/terminal-status';
 
 // Issue #732: payload 型 (旧ローカル `TerminalPayload`) は canvas store の判別可能 union
 // 側 `TerminalCardPayload` に集約。`NodeProps` を `Node<CardDataOf<'terminal'>>` で具体化し、
@@ -28,7 +29,7 @@ function TerminalCardImpl({ id, data }: NodeProps<Node<CardDataOf<'terminal'>>>)
   const { settings } = useSettings();
   const payload = data?.payload ?? {};
   const title = (data?.title as string) ?? 'Terminal';
-  const [, setStatus] = useState<string>('');
+  const [, setStatus] = useState<TerminalRuntimeStatus | null>(null);
   const setCardPayload = useCanvasStore((s) => s.setCardPayload);
   const isCanvasActive = useUiStore((s) => s.viewMode === 'canvas');
   // Issue #253: Canvas zoom 下でも論理 px ベースで cols/rows を確定させる

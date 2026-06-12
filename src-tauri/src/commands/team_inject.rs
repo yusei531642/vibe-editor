@@ -18,7 +18,6 @@ use crate::state::AppState;
 use crate::team_hub::inject;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tauri::{AppHandle, Emitter, State};
 
 #[derive(Deserialize)]
@@ -48,15 +47,13 @@ pub struct RetryInjectResult {
     pub failed_at: Option<String>,
 }
 
-/// `team_send_retry_inject` が `Err` で返す構造化エラー (JSON object) を組み立てる。
+/// `team_send_retry_inject` が `Err` で返す構造化エラーを組み立てる。
 ///
-/// Issue #737: 戻り値を `CommandResult<RetryInjectResult>` に統一した後も、renderer に届く
-/// payload は従来どおり `{"code":"retry_*","message":"..."}` の JSON 文字列を保つ。
-/// `CommandError` の `Serialize` は message をそのまま文字列化するため、`CommandError::internal`
-/// に JSON 文字列を載せれば旧 `Err(String)` と完全同一の wire 出力になる。
+/// Issue #931: `CommandError::Coded` で `{ code: "retry_*", message }` を正式フィールドとして
+/// 返す。旧実装は `CommandError::internal` に `{"code":...}` の JSON 文字列を載せる
+/// JSON-in-string ハックだった (renderer 側 `CommandError.from()` は object 形を直接解釈する)。
 fn retry_err(code: &str, message: String) -> crate::commands::error::CommandError {
-    let payload = json!({ "code": code, "message": message });
-    crate::commands::error::CommandError::internal(payload.to_string())
+    crate::commands::error::CommandError::coded(code, message)
 }
 
 /// `team_send` の partial failure に対する手動リトライ。同じ team / message / agent を 1 件単位で再 inject する。
@@ -139,17 +136,18 @@ pub async fn team_send_retry_inject(
             }
             // Canvas 側 UI が「retry で配達成功」を視覚化するため team:handoff を emit する。
             // from_role は元 sender の role を保つ (UI が「誰からの message か」を再描画できるように)。
-            let payload = json!({
-                "teamId": args.team_id,
-                "fromAgentId": from_agent_id,
-                "fromRole": from_role,
-                "toAgentId": args.agent_id,
-                "toRole": "",
-                "preview": preview,
-                "messageId": args.message_id,
-                "timestamp": delivered_at,
-                "retried": true,
-            });
+            // Issue #930: payload は events.rs の名前付き struct (retried=true で再送を区別)。
+            let payload = crate::team_hub::events::HandoffEventPayload {
+                team_id: args.team_id.clone(),
+                from_agent_id: from_agent_id.clone(),
+                from_role: from_role.clone(),
+                to_agent_id: args.agent_id.clone(),
+                to_role: String::new(),
+                preview: preview.clone(),
+                message_id: args.message_id,
+                timestamp: delivered_at.clone(),
+                retried: true,
+            };
             if let Err(e) = app.emit("team:handoff", payload) {
                 tracing::warn!("[retry_inject] emit team:handoff failed: {e}");
             }
@@ -171,18 +169,19 @@ pub async fn team_send_retry_inject(
                 reason_message
             );
             // 再失敗時も `team:inject_failed` を emit して UI が state 更新できるようにする。
-            let payload = json!({
-                "teamId": args.team_id,
-                "fromAgentId": from_agent_id,
-                "fromRole": from_role,
-                "toAgentId": args.agent_id,
-                "toRole": "",
-                "messageId": args.message_id,
-                "reasonCode": reason_code,
-                "reasonMessage": reason_message,
-                "failedAt": failed_at,
-                "retried": true,
-            });
+            // Issue #959/#930: payload は events.rs の named struct (retried=true で再失敗を区別)。
+            let payload = crate::team_hub::events::InjectFailedEventPayload {
+                team_id: args.team_id.clone(),
+                from_agent_id: from_agent_id.clone(),
+                from_role: from_role.clone(),
+                to_agent_id: args.agent_id.clone(),
+                to_role: String::new(),
+                message_id: args.message_id,
+                reason_code: reason_code.to_string(),
+                reason_message: reason_message.clone(),
+                failed_at: failed_at.clone(),
+                retried: true,
+            };
             if let Err(e) = app.emit("team:inject_failed", payload) {
                 tracing::warn!("[retry_inject] emit team:inject_failed failed: {e}");
             }

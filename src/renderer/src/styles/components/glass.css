@@ -76,9 +76,10 @@
 
 /*
  * Glass テーマでも UI overlay 系 (menubar dropdown / app-menu dropdown / context menu /
- * canvas のチーム起動 popover) は読みやすさを優先して bg を高めに保つ。tokens.css の
- * `--bg-panel` (alpha ~0.52) のままだと背後の壁紙やドットグリッドが透けてラベルが
- * 読めない (Issue #806)。
+ * canvas のチーム起動 popover / タブ作成メニュー / Leader 閉じ確認バー) は読みやすさを
+ * 優先して bg を高めに保つ。tokens.css の `--bg-panel` (alpha ~0.52) のままだと背後の
+ * 壁紙やドットグリッド、xterm のターミナル文字が透けてラベルが読めない
+ * (Issue #806 / #886)。
  *   - 不透明度 0.92 の濃いブルーグレーで「読み物として成立する」濃度に。
  *   - backdrop-filter は当てて、テーマの一体感は維持。
  *   - border / shadow も glass 系トークンに揃えて浮かせる。
@@ -89,7 +90,9 @@
 :root[data-theme='glass'] .app-menu__dropdown,
 :root[data-theme='glass'] .user-menu__dropdown,
 :root[data-theme='glass'] .context-menu,
-:root[data-theme='glass'] .canvas-popover {
+:root[data-theme='glass'] .canvas-popover,
+:root[data-theme='glass'] .tab-create-menu,
+:root[data-theme='glass'] .team-close-confirm {
   background: rgba(15, 18, 28, 0.92);
   border-color: var(--glass-border, rgba(255, 255, 255, 0.10));
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))

@@ -9,8 +9,8 @@
 //! 一切変えていない。Windows 専用のパス解決は `super::windows_resolve` に分離した。
 
 use crate::pty::batcher::{spawn_batcher, PtyOutputObserver};
-use crate::pty::scrollback::{new_scrollback, WriteBudget};
-use crate::{commands::terminal::command_validation, util::log_redact::redact_home};
+use crate::pty::scrollback::{new_scrollback, scrollback_to_string, WriteBudget};
+use crate::{commands::terminal::command_validation, commands::terminal::shell_policy, util::log_redact::redact_home};
 use anyhow::{anyhow, Result};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Serialize;
@@ -19,7 +19,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
@@ -141,10 +141,12 @@ pub(crate) fn prepare_spawn_command(opts: &SpawnOptions) -> Result<PreparedSpawn
             "command is not allowed at spawn boundary: {command}"
         ));
     }
-    if let Some(reason) = command_validation::reject_immediate_exec_args(&command, &args) {
+    // Issue #933: シェルは対話セッション起動のみ許可 (allowlist 契約 / shell_policy.rs)
+    let registered = shell_policy::settings_registered_command_lines();
+    if let Some(reason) = shell_policy::reject_non_interactive_shell_args(&command, &args, &registered) {
         return Err(anyhow!("{reason}"));
     }
-    let sanctioned_flags = command_validation::settings_sanctioned_danger_flags();
+    let sanctioned_flags = command_validation::settings_sanctioned_danger_flags(&command);
     if let Some(reason) = command_validation::reject_danger_flags(&args, &sanctioned_flags) {
         return Err(anyhow!("{reason}"));
     }
@@ -230,7 +232,7 @@ fn resolve_spawn_command(
 pub(crate) fn build_cmd_label(prepared: &PreparedSpawnCommand) -> String {
     let basename = prepared
         .resolved_command
-        .rsplit(|c: char| c == '/' || c == '\\')
+        .rsplit(['/', '\\'])
         .next()
         .filter(|s| !s.is_empty())
         .unwrap_or(prepared.requested_command.as_str())
@@ -348,13 +350,22 @@ pub fn spawn_session(
         Err(err) => {
             let err_string = err.to_string();
             log_spawn_outcome(&cmd_label, engine, platform, elapsed_ms, Some(&err_string));
-            return Err(err.into());
+            return Err(err);
         }
     };
     drop(pair.slave);
 
     let process_id = child.process_id();
     let killer = child.clone_killer();
+
+    // Issue #950: child を kill-on-close Job Object に bind し、vibe-editor 本体の
+    // クラッシュ / 強制終了でも OS が handle close 経由で子プロセスツリーを回収できる
+    // ようにする。作成 / assign 失敗は warn のみ (従来の taskkill 経路で回収継続)。
+    #[cfg(windows)]
+    let job = process_id
+        .and_then(|pid| {
+            crate::pty::win_job_object::KillOnCloseJob::create().filter(|job| job.assign_pid(pid))
+        });
 
     // reader thread (blocking IO -> mpsc)
     let mut reader = pair.master.try_clone_reader()?;
@@ -425,8 +436,15 @@ pub fn spawn_session(
     // closure 内 dedup: 1 秒間隔でしか hub.state lock を取らない。flush は最短 32ms 間隔
     // (FLUSH_INTERVAL_MS) で起こり得るので、生の flush ごとに lock 取得すると `inject` /
     // `team_send` 等の MCP tool と競合して latency 悪化を招く。
-    let on_output: Option<PtyOutputObserver> = opts.agent_id.as_ref().map(|aid| {
+    // Issue #934: 診断は (team_id, agent_id) の AgentEntry に統合されたため、
+    // team_id が無い PTY (単発ターミナル等) は observer 自体を張らない。
+    let on_output: Option<PtyOutputObserver> = opts
+        .agent_id
+        .as_ref()
+        .zip(opts.team_id.as_ref())
+        .map(|(aid, tid)| {
         let aid = aid.clone();
+        let tid = tid.clone();
         let app_for_obs = app.clone();
         let last_update: Arc<Mutex<Option<Instant>>> = Arc::new(Mutex::new(None));
         Arc::new(move || {
@@ -447,6 +465,7 @@ pub fn spawn_session(
             }
             // hub.state.lock() は async なので tokio task に逃がす (flush は同期 callback)
             let aid = aid.clone();
+            let tid = tid.clone();
             let app = app_for_obs.clone();
             tauri::async_runtime::spawn(async move {
                 let state = match app.try_state::<crate::state::AppState>() {
@@ -461,13 +480,13 @@ pub fn spawn_session(
                 let hub = state.team_hub.clone();
                 let now_iso = chrono::Utc::now().to_rfc3339();
                 let mut s = hub.state.lock().await;
-                let diag = s.member_diagnostics.entry(aid).or_default();
+                let diag = s.diagnostics_mut(&tid, &aid);
                 diag.last_pty_output_at = Some(now_iso);
             });
         }) as PtyOutputObserver
     });
 
-    spawn_batcher(app.clone(), data_event, rx, scrollback.clone(), on_output);
+    let batcher_done = spawn_batcher(app.clone(), data_event, rx, scrollback.clone(), on_output);
 
     // exit watcher (blocking child.wait → emit exit event)
     // Issue #152: child.wait() の後に registry からも remove して、孤立 entry が
@@ -485,27 +504,50 @@ pub fn spawn_session(
                 .unwrap_or(-1),
             signal: None,
         };
-        if let Err(e) = app_for_exit.emit(&exit_event_clone, info.clone()) {
-            tracing::warn!("emit {exit_event_clone} failed: {e}");
-        }
         // child.wait() が返った時点で kill 不要だが、registry::remove は handle.kill() を呼ぶ。
         // SessionHandle::kill() は何度呼んでも安全 (ChildKiller 内部で no-op)。
         let removed = registry_for_exit.remove(&id_for_exit);
-        if let Some(handle) = removed {
+        let exit_record = removed.as_ref().and_then(|handle| {
             if let (Some(team_id), Some(agent_id)) =
                 (handle.team_id.clone(), handle.agent_id.clone())
             {
-                let output_tail = handle.scrollback_snapshot();
-                let app = app_for_exit.clone();
-                tauri::async_runtime::spawn(async move {
-                    let Some(state) = app.try_state::<crate::state::AppState>() else {
-                        return;
-                    };
-                    let hub = state.team_hub.clone();
-                    hub.record_agent_process_exit(&team_id, &agent_id, info.exit_code, output_tail)
-                        .await;
-                });
+                Some((team_id, agent_id, handle.scrollback.clone()))
+            } else {
+                None
             }
+        });
+        // Windows ConPTY は master drop 後に reader EOF → batcher final flush となる。
+        // `removed` を保持したまま待つと master も残り、final flush が進まない。
+        drop(removed);
+
+        let exit_flush_wait_timeout = Duration::from_secs(2);
+        match batcher_done.recv_timeout(exit_flush_wait_timeout) {
+            Ok(()) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                tracing::warn!(
+                    "[pty] timed out waiting for final data flush before exit event: {exit_event_clone}"
+                );
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
+        }
+
+        let output_tail = exit_record
+            .as_ref()
+            .and_then(|(_, _, scrollback)| scrollback_to_string(scrollback));
+
+        if let Err(e) = app_for_exit.emit(&exit_event_clone, info.clone()) {
+            tracing::warn!("emit {exit_event_clone} failed: {e}");
+        }
+        if let Some((team_id, agent_id, _)) = exit_record {
+            let app = app_for_exit.clone();
+            tauri::async_runtime::spawn(async move {
+                let Some(state) = app.try_state::<crate::state::AppState>() else {
+                    return;
+                };
+                let hub = state.team_hub.clone();
+                hub.record_agent_process_exit(&team_id, &agent_id, info.exit_code, output_tail)
+                    .await;
+            });
         }
     });
 
@@ -528,6 +570,8 @@ pub fn spawn_session(
         scrollback,
         // Issue #632: watcher cancel token は session 起動と同寿命。kill() / Drop で flip。
         watcher_cancel: Arc::new(AtomicBool::new(false)),
+        #[cfg(windows)]
+        job,
     })
 }
 
@@ -591,7 +635,10 @@ mod resolve_valid_cwd_tests {
             w.params.get("requested").map(String::as_str),
             Some("/definitely/does/not/exist/vibe")
         );
-        assert_eq!(w.params.get("fallback").map(String::as_str), Some(fb.as_str()));
+        assert_eq!(
+            w.params.get("fallback").map(String::as_str),
+            Some(fb.as_str())
+        );
     }
 
     #[test]
@@ -613,12 +660,18 @@ mod resolve_valid_cwd_tests {
             Some("/also/not/exists/vibe"),
         );
         let w = warning.expect("expected warning when both invalid");
-        assert_eq!(w.message_key, "terminal.cwd.invalidFallbackToProcessDefault");
+        assert_eq!(
+            w.message_key,
+            "terminal.cwd.invalidFallbackToProcessDefault"
+        );
         assert_eq!(
             w.params.get("requested").map(String::as_str),
             Some("/definitely/does/not/exist/vibe")
         );
-        assert_eq!(w.params.get("fallback").map(String::as_str), Some(cwd.as_str()));
+        assert_eq!(
+            w.params.get("fallback").map(String::as_str),
+            Some(cwd.as_str())
+        );
     }
 
     #[test]
@@ -638,8 +691,14 @@ mod resolve_valid_cwd_tests {
             "expected i18n key in payload, got {json}"
         );
         // params keys are passed as-is from Rust callsite (`requested` / `fallback`).
-        assert!(json.contains("\"requested\""), "params.requested missing in {json}");
-        assert!(json.contains("\"fallback\""), "params.fallback missing in {json}");
+        assert!(
+            json.contains("\"requested\""),
+            "params.requested missing in {json}"
+        );
+        assert!(
+            json.contains("\"fallback\""),
+            "params.fallback missing in {json}"
+        );
     }
 }
 
@@ -713,12 +772,12 @@ mod prepare_spawn_command_boundary_tests {
     #[test]
     fn still_rejects_immediate_exec_flags_at_boundary() {
         // Issue #827: 再 normalize を廃止しても defense-in-depth の再チェックは維持する。
-        // 正規化済み形 (command=cmd, args=[/c, ...]) を渡し /c が弾かれることを確認する。
+        // Issue #933: cmd /c は対話モード限定 allowlist 契約で弾かれる。
         let o = opts("cmd".to_string(), &["/c", "echo", "unsafe"]);
-        let err = prepare_spawn_command(&o)
-            .expect_err("cmd immediate-exec must be rejected at boundary");
+        let err =
+            prepare_spawn_command(&o).expect_err("cmd immediate-exec must be rejected at boundary");
         assert!(
-            err.to_string().contains("cmd immediate-exec flags"),
+            err.to_string().contains("interactive-session allowlist"),
             "unexpected error: {err}"
         );
     }

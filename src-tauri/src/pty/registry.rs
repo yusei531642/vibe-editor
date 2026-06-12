@@ -199,6 +199,10 @@ impl SessionRegistry {
     ///   - `Ok(())`: 採用された (id は registry に登録済み)
     ///   - `Err(handle)`: 既存 PTY と id が衝突。caller の handle はそのまま返却される
     ///     ので、caller 側で `handle.kill()` してから別 id で retry する責務がある。
+    ///
+    /// Issue #939: `Err` に大きな `SessionHandle` を載せるのは「衝突時に handle を呼び出し元へ
+    /// 返して回収させる」という設計上の意図 (Box 化すると毎回ヒープ確保が増える)。許容する。
+    #[allow(clippy::result_large_err)]
     pub fn insert_if_absent(&self, id: String, handle: SessionHandle) -> Result<(), SessionHandle> {
         let mut g = recover(self.inner.lock());
         if g.by_id.contains_key(&id) {
@@ -350,27 +354,112 @@ impl SessionRegistry {
         removed
     }
 
-    /// アプリ終了 (window CloseRequested → `app.exit(0)` 直前) に全 PTY を kill する。
+    /// Issue #951: アプリ終了 (window CloseRequested → `app.exit(0)`) / 再起動経路専用の
+    /// **同期** 全 PTY kill。
     ///
-    /// Issue #834: 旧実装は各 session で `cleanup_codex_broker_after_kill()` を**同期直列**に
-    /// 呼んでおり、これが `git`/`tasklist` 子プロセス spawn + (broker 生存時) 250ms sleep を
-    /// 伴うため、codex タブ数ぶんアプリ終了がブロックされていた (#630 で inject drain を
-    /// 非同期化した狙いが相殺されていた)。
+    /// 旧 `kill_all()` (非 blocking) の `SessionHandle::kill()` は Windows で process-tree
+    /// kill (taskkill) を detached thread に逃がして即返るため、直後に `app.exit(0)` /
+    /// `app.restart()` で自プロセスごと消えると taskkill が走り切る前に殺され、子プロセス
+    /// (claude/codex + その配下の MCP) が孤児として残る競合があった。本メソッドは各 session の
+    /// process-tree kill を並列 thread で実行し、全完了 (または `timeout`) まで呼び出し thread を
+    /// ブロックして待つ。blocking なので async context からは `spawn_blocking` 経由で呼ぶこと。
+    /// (Issue #939: 非 blocking 版 `kill_all` は本メソッド導入後に呼び出し元が消えて dead code に
+    ///  なったため削除した。)
     ///
-    /// 終了経路では broker の stale state 掃除を**スキップ**する。掃除は best-effort な
-    /// state file の後始末に過ぎず、残っても次回起動時の spawn 前 cleanup
-    /// (`cleanup_codex_broker_if_stale`) で確実に回収できる。ここでは `s.kill()` による
-    /// 子プロセス停止だけを直列で確実に行い (これは速い)、即座に呼び出し元へ返す。
-    pub fn kill_all(&self) {
+    /// Issue #834: 終了経路では broker の stale state 掃除を**スキップ**する (掃除は best-effort で
+    /// 次回起動時の spawn 前 cleanup `cleanup_codex_broker_if_stale` で回収できる)。ここでは
+    /// process-tree kill だけを確実に行う。
+    pub fn kill_all_blocking(&self, timeout: Duration) {
         let sessions: Vec<Arc<SessionHandle>> = {
             let mut g = recover(self.inner.lock());
             g.by_agent.clear();
             g.by_session_key.clear();
             g.by_id.drain().map(|(_, s)| s).collect()
         };
-        for s in sessions {
-            let _ = s.kill();
+        if sessions.is_empty() {
+            return;
         }
+        let total = sessions.len();
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        for s in sessions {
+            let tx = tx.clone();
+            std::thread::spawn(move || {
+                s.kill_blocking();
+                let _ = tx.send(());
+            });
+        }
+        drop(tx);
+        let deadline = Instant::now() + timeout;
+        let mut done = 0usize;
+        while done < total {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match rx.recv_timeout(remaining) {
+                Ok(()) => done += 1,
+                Err(_) => break, // timeout または全 sender drop
+            }
+        }
+        if done < total {
+            tracing::warn!(
+                "[pty] kill_all_blocking timeout: {done}/{total} sessions confirmed killed \
+                 within {timeout:?} — proceeding with shutdown"
+            );
+        } else {
+            tracing::info!("[pty] kill_all_blocking finished ({done}/{total})");
+        }
+    }
+
+    /// Issue #937: チーム解散 (`app_cleanup_team_mcp` → `clear_team`) 時に、当該 `team_id` に
+    /// 属する PTY を **backend 側で確実に回収** する。回収した session 数を返す。
+    ///
+    /// 従来 `clear_team` は hub state / MCP 設定だけを消し、`pty_registry` に一切触れて
+    /// いなかった。PTY kill は renderer の React unmount (`use-xterm-bind.ts` の `terminal.kill`)
+    /// 一極依存で、UI フリーズ/クラッシュ時にチームの PTY と claude CLI が spawn した MCP node
+    /// 群が孤児化していた (#864 / #829)。本メソッドで kill 発火点を backend にも置く。
+    ///
+    /// [`Self::remove`] と同じく by_id / by_agent / by_session_key の 3 index を同期して外し、
+    /// `kill()` (Windows は detached thread で `taskkill /T`、Unix は killer 経由) と
+    /// codex broker 掃除 (これも detached: #834) を行う。どちらも即 return するので、本メソッドは
+    /// `remove` と同じ非ブロッキング特性を持ち、async command から直接呼んでよい。
+    pub fn kill_team(&self, team_id: &str) -> usize {
+        let sessions: Vec<Arc<SessionHandle>> = {
+            let mut g = recover(self.inner.lock());
+            let ids: Vec<String> = g
+                .by_id
+                .iter()
+                .filter(|(_, s)| s.team_id.as_deref() == Some(team_id))
+                .map(|(id, _)| id.clone())
+                .collect();
+            let mut collected = Vec::with_capacity(ids.len());
+            for id in ids {
+                if let Some(handle) = g.by_id.remove(&id) {
+                    // Issue #42 と同じ index 同期: agent_id / session_key の逆引きも掃除する。
+                    if let Some(aid) = &handle.agent_id {
+                        if g.by_agent.get(aid).map(String::as_str) == Some(id.as_str()) {
+                            g.by_agent.remove(aid);
+                        }
+                    }
+                    if let Some(skey) = &handle.session_key {
+                        if g.by_session_key.get(skey).map(String::as_str) == Some(id.as_str()) {
+                            g.by_session_key.remove(skey);
+                        }
+                    }
+                    collected.push(handle);
+                }
+            }
+            collected
+        };
+        let count = sessions.len();
+        for handle in &sessions {
+            let _ = handle.kill();
+            handle.cleanup_codex_broker_after_kill();
+        }
+        if count > 0 {
+            tracing::info!("[registry] kill_team({team_id}) reclaimed {count} PTY session(s)");
+        }
+        count
     }
 }
 
@@ -609,5 +698,135 @@ mod attach_lookup_tests {
         // 片方のみ Some → false (片側のみ team 紐付けが残っている状況は cross-team risk)
         assert!(!team_ids_match(Some("team-a"), None));
         assert!(!team_ids_match(None, Some("team-b")));
+    }
+}
+
+#[cfg(test)]
+mod kill_all_blocking_tests {
+    //! Issue #951: `kill_all_blocking` が「返った時点で全 session の kill が完了している」
+    //! ことを検証する。detached thread に逃がす `kill_all` と違い、直後に exit(0) /
+    //! restart してもプロセス回収が走り切っている保証が欲しい経路 (シャットダウン) 用。
+    use super::*;
+    use crate::pty::session::test_support::handle_with;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[test]
+    fn kill_all_blocking_kills_all_sessions_before_returning() {
+        let reg = SessionRegistry::new();
+        let k1 = Arc::new(AtomicUsize::new(0));
+        let k2 = Arc::new(AtomicUsize::new(0));
+        assert!(reg
+            .insert_if_absent(
+                "s1".to_string(),
+                handle_with(Some("a1"), Some("k1"), None, k1.clone()),
+            )
+            .is_ok());
+        assert!(reg
+            .insert_if_absent(
+                "s2".to_string(),
+                handle_with(Some("a2"), Some("k2"), None, k2.clone()),
+            )
+            .is_ok());
+
+        reg.kill_all_blocking(Duration::from_secs(5));
+
+        // 返った時点で各 session の killer が呼ばれている (>=1 は Drop 経由の冪等二重 kill 許容)
+        assert!(k1.load(Ordering::SeqCst) >= 1, "s1 must be killed before return");
+        assert!(k2.load(Ordering::SeqCst) >= 1, "s2 must be killed before return");
+        assert!(reg.get("s1").is_none());
+        assert!(reg.get("s2").is_none());
+    }
+
+    #[test]
+    fn kill_all_blocking_on_empty_registry_returns_immediately() {
+        let reg = SessionRegistry::new();
+        // session 0 件なら channel 待ちに入らず即返る (hang しないことの smoke)
+        reg.kill_all_blocking(Duration::from_millis(50));
+    }
+}
+
+#[cfg(test)]
+mod kill_team_tests {
+    //! Issue #937: `kill_team` がチームスコープの PTY だけを kill + index から除去し、
+    //! 他チーム / team 無し PTY を巻き込まないことを検証する。実 PTY は起動せず、
+    //! `handle.rs` の test_support の mock killer 付き handle を registry に挿入する。
+    use super::*;
+    use crate::pty::session::test_support::handle_with;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    // insert_if_absent の Err 型は SessionHandle (Debug 未実装) なので `.expect` は使えない。
+    // `is_ok()` で採用成功を assert する。
+    #[test]
+    fn kill_team_reclaims_only_matching_team_and_cleans_indices() {
+        let reg = SessionRegistry::new();
+        let kills_a1 = Arc::new(AtomicUsize::new(0));
+        let kills_a2 = Arc::new(AtomicUsize::new(0));
+        let kills_b1 = Arc::new(AtomicUsize::new(0));
+
+        // team-a に 2 セッション (agent_id + session_key 付き)、team-b に 1 セッション。
+        assert!(reg
+            .insert_if_absent(
+                "s1".to_string(),
+                handle_with(Some("a1"), Some("k1"), Some("team-a"), kills_a1.clone()),
+            )
+            .is_ok());
+        assert!(reg
+            .insert_if_absent(
+                "s2".to_string(),
+                handle_with(Some("a2"), Some("k2"), Some("team-a"), kills_a2.clone()),
+            )
+            .is_ok());
+        assert!(reg
+            .insert_if_absent(
+                "s3".to_string(),
+                handle_with(Some("b1"), Some("k3"), Some("team-b"), kills_b1.clone()),
+            )
+            .is_ok());
+
+        let reclaimed = reg.kill_team("team-a");
+        assert_eq!(reclaimed, 2, "team-a の 2 セッションだけ回収されること");
+
+        // by_id から team-a の 2 件が消え、team-b は残る。
+        assert!(reg.get("s1").is_none());
+        assert!(reg.get("s2").is_none());
+        assert!(reg.get("s3").is_some());
+
+        // list_team_members も team 単位で同期されている。
+        assert!(reg.list_team_members("team-a").is_empty());
+        assert_eq!(reg.list_team_members("team-b").len(), 1);
+
+        // team-a の handle は kill() が呼ばれ (明示 kill + 最後の Arc drop 時の Drop kill で
+        // 2 回入りうる。remove と同じ冪等な二重 kill 特性)、team-b は一切呼ばれていない。
+        assert!(kills_a1.load(Ordering::SeqCst) >= 1);
+        assert!(kills_a2.load(Ordering::SeqCst) >= 1);
+        assert_eq!(kills_b1.load(Ordering::SeqCst), 0);
+
+        // by_agent / by_session_key index も掃除済み: 同じ agent_id/session_key で再 insert
+        // しても旧 entry と衝突せず採用される (stale index が残っていない証跡)。
+        assert!(
+            reg.insert_if_absent(
+                "s1b".to_string(),
+                handle_with(Some("a1"), Some("k1"), Some("team-a"), Arc::new(AtomicUsize::new(0))),
+            )
+            .is_ok(),
+            "re-insert with reclaimed agent/session key must succeed"
+        );
+        assert!(reg.get("s1b").is_some());
+    }
+
+    #[test]
+    fn kill_team_no_match_is_noop() {
+        let reg = SessionRegistry::new();
+        let kills = Arc::new(AtomicUsize::new(0));
+        assert!(reg
+            .insert_if_absent(
+                "s1".to_string(),
+                handle_with(Some("a1"), None, Some("team-a"), kills.clone()),
+            )
+            .is_ok());
+
+        assert_eq!(reg.kill_team("team-x"), 0, "未知 team は 0 件");
+        assert!(reg.get("s1").is_some(), "他チームの PTY は残る");
+        assert_eq!(kills.load(Ordering::SeqCst), 0);
     }
 }

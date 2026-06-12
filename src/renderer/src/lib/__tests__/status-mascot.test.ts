@@ -29,16 +29,24 @@ describe('getStatusMascotState', () => {
     expect(
       getStatusMascotState({
         ...base,
-        terminals: [{ status: '', exited: false, hasActivity: true }]
+        terminals: [{ status: null, exited: false, hasActivity: true }]
       })
     ).toBe('working');
   });
 
-  it('returns working for starting / reconnect status', () => {
+  it('returns working for starting / reconnect status kind', () => {
     expect(
       getStatusMascotState({
         ...base,
-        terminals: [{ status: 'starting', exited: false, hasActivity: false }]
+        terminals: [{ status: { kind: 'starting', command: 'claude' }, exited: false, hasActivity: false }]
+      })
+    ).toBe('working');
+    expect(
+      getStatusMascotState({
+        ...base,
+        terminals: [
+          { status: { kind: 'reconnecting', command: 'claude' }, exited: false, hasActivity: false }
+        ]
       })
     ).toBe('working');
   });
@@ -48,7 +56,7 @@ describe('getStatusMascotState', () => {
       getStatusMascotState({
         ...base,
         terminals: [
-          { status: '', exited: false, hasActivity: false, awaitingResponse: true }
+          { status: null, exited: false, hasActivity: false, awaitingResponse: true }
         ]
       })
     ).toBe('thinking');
@@ -59,18 +67,22 @@ describe('getStatusMascotState', () => {
       getStatusMascotState({
         ...base,
         terminals: [
-          { status: '', exited: false, hasActivity: true, awaitingResponse: true }
+          { status: null, exited: false, hasActivity: true, awaitingResponse: true }
         ]
       })
     ).toBe('working');
   });
 
-  it('returns error when a terminal failed', () => {
+  it('returns error when a terminal failed by status kind', () => {
     expect(
       getStatusMascotState({
         ...base,
         terminals: [
-          { status: '起動失敗: command not found', exited: false, hasActivity: true }
+          {
+            status: { kind: 'spawn_failed', error: 'command not found' },
+            exited: false,
+            hasActivity: true
+          }
         ]
       })
     ).toBe('error');
@@ -80,7 +92,7 @@ describe('getStatusMascotState', () => {
     expect(
       getStatusMascotState({
         ...base,
-        terminals: [{ status: '', exited: true, hasActivity: true }]
+        terminals: [{ status: null, exited: true, hasActivity: true }]
       })
     ).toBe('error');
   });
@@ -90,8 +102,8 @@ describe('getStatusMascotState', () => {
       getStatusMascotState({
         ...base,
         terminals: [
-          { status: 'exception', exited: false, hasActivity: true },
-          { status: '', exited: false, hasActivity: true, awaitingResponse: true }
+          { status: { kind: 'exception', error: 'boom' }, exited: false, hasActivity: true },
+          { status: null, exited: false, hasActivity: true, awaitingResponse: true }
         ]
       })
     ).toBe('error');

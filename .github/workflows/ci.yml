@@ -31,6 +31,8 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-04-26
         with:
           toolchain: stable
+          # Issue #939: clippy ゲート用。dtolnay/rust-toolchain は minimal profile なので明示する。
+          components: clippy
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
@@ -63,6 +65,25 @@ jobs:
       - name: ESLint
         run: npm run lint
 
+      # Issue #948: 永続化ファイルの生 serde parse 握りつぶし (`serde_json::from_*(...).ok()`)
+      # を検出して fail させる。読込は safe_load 共通基盤 (#936) 経由を強制する。
+      # 例外は該当行直前の `// safe-load-exempt: <理由>` で明示 opt-out。
+      - name: Safe-load lint (persistence parse guard)
+        run: npm run lint:safe-load
+
+      # Issue #939: ファイルサイズ ratchet。god-file 分割後の再肥大化 (recruit.rs 等) を止める。
+      # 新規ファイルは 500 行以下、既存の超過ファイルは build/file-size-baseline.json の
+      # 行数を上限として固定し、悪化のみ fail させる。縮小時は baseline 引き下げを促す。
+      - name: File-size ratchet
+        run: npm run lint:file-size
+
+      # Issue #931: #[tauri::command] の戻り値を CommandResult<T> ({ code, message } の
+      # 構造化エラー) に強制する。旧 3 流派 (Option<T> / ok+error 埋め込み) は baseline
+      # 免除で固定し、新規 command が旧流派をコピーしたら fail させる。
+      # 例外は直前行の `// command-result-exempt: <理由>` で明示 opt-out。
+      - name: CommandResult lint (IPC error contract)
+        run: npm run lint:command-result
+
       # Issue #721: renderer の単体テスト (vitest) を CI で実行する。
       # 従来は package.json に test スクリプトと vitest.config.ts があるのに
       # CI で一度も走らず、renderer のリグレッションがフリーパスだった。
@@ -74,6 +95,12 @@ jobs:
 
       - name: Cargo check
         run: cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets
+
+      # Issue #939: clippy を品質ゲートに追加。warning を deny して新規の clippy lint 違反で
+      # CI を fail させる (`grep -c clippy ci.yml = 0` だった監査指摘の解消)。現時点の警告 0 件を
+      # baseline とし、許容できない lint は at-site `#[allow(...)]` + 理由コメントで明示 opt-out する。
+      - name: Cargo clippy (-D warnings)
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
       - name: Cargo test
         run: cargo test --locked --manifest-path src-tauri/Cargo.toml
@@ -123,6 +150,8 @@ jobs:
         uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-04-26
         with:
           toolchain: stable
+          # Issue #939: cfg-gated コード (win_job_object 等の #[cfg(windows)]) も clippy 検査する。
+          components: clippy
 
       - name: Restore Rust cache
         uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3 # v2.7.7
@@ -131,6 +160,11 @@ jobs:
 
       - name: Cargo check (cfg-gated build)
         run: cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets
+
+      # Issue #939: Linux verify job の clippy は cfg(windows)/cfg(macos) コードを検査しないため、
+      # 各 OS でも clippy を走らせて cfg-gated コードの lint 違反を捕捉する。
+      - name: Cargo clippy (cfg-gated, -D warnings)
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 
   # Issue #745: 既存の `npm audit` / `cargo audit` は advisory DB ベースの依存脆弱性検査で、
   # 「うっかり API key / token / 暗号鍵をコミットした」を検知できない。

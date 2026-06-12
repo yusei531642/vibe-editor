@@ -47,6 +47,10 @@ import {
 import { useAgentActivityStore } from '../../../../stores/agent-activity';
 import { useConfirmRemoveCard } from '../../../../lib/use-confirm-remove-card';
 import {
+  formatTerminalRuntimeStatus,
+  type TerminalRuntimeStatus
+} from '../../../../lib/terminal-status';
+import {
   renderSystemPrompt,
   useRoleProfiles
 } from '../../../../lib/role-profiles-context';
@@ -91,7 +95,7 @@ function AgentNodeCardImpl({
   const accent = visual.agentAccent;
   const organizationAccent = visual.organizationAccent;
   const title = data?.title ?? visual.label;
-  const [status, setStatus] = useState<string>('');
+  const [status, setStatus] = useState<TerminalRuntimeStatus | null>(null);
   const [activity, setActivityState] = useState<AgentStatus>('idle');
 
   // Issue #521: agent-activity store に書き出して StageHud 側からも観測できるようにする。
@@ -330,7 +334,7 @@ function AgentNodeCardImpl({
   const healthRow = payload.agentId
     ? healthSnapshot.byAgentId[payload.agentId] ?? null
     : null;
-  const health = useMemo(() => deriveHealth(healthRow), [healthRow]);
+  const health = useMemo(() => deriveHealth(healthRow, nowTick), [healthRow, nowTick]);
   const hasHealthRow = healthRow !== null;
   const unreadInboxCount = hasHealthRow
     ? health.pendingInboxCount
@@ -348,6 +352,7 @@ function AgentNodeCardImpl({
     }),
     [health]
   );
+  const terminalStatus = useMemo(() => formatTerminalRuntimeStatus(status, t), [status, t]);
 
   const handleClose = useCallback(
     () => void confirmRemoveCard(id),
@@ -376,7 +381,7 @@ function AgentNodeCardImpl({
           glyph={profile.visual.glyph}
           organizationName={payload.organization?.name}
           activity={activity}
-          status={status}
+          status={terminalStatus}
           handoff={
             <CardHandoff
               cardId={id}

@@ -130,19 +130,21 @@ export function useTeamHistorySync(
       } = optsRef.current;
       if (!projectRoot) return;
       if (!entry.members || entry.members.length === 0) {
-        showToast('チームメンバー情報が空のため復元できません', { tone: 'warning' });
+        showToast(t('teamHistory.resume.emptyMembers'), { tone: 'warning' });
         return;
       }
       if (entry.projectRoot && entry.projectRoot !== projectRoot) {
         showToast(
-          `このチームは別プロジェクト(${entry.projectRoot.split(/[\\/]/).pop()})の履歴です`,
+          t('teamHistory.resume.otherProject', {
+            project: entry.projectRoot.split(/[\\/]/).pop() ?? entry.projectRoot
+          }),
           { tone: 'warning' }
         );
         return;
       }
       // 容量チェック: 既存タブ + メンバー数 が上限を超えるなら断念
       if (terminalTabs.length + entry.members.length > MAX_TERMINALS) {
-        showToast(`ターミナル上限(${MAX_TERMINALS})を超えるため復元できません`, {
+        showToast(t('teamHistory.resume.terminalLimit', { max: MAX_TERMINALS }), {
           tone: 'warning'
         });
         return;
@@ -190,7 +192,7 @@ export function useTeamHistorySync(
         setTerminalTabs((prev) =>
           prev.map((tab) =>
             tab.agent === 'claude' && !tab.exited
-              ? { ...tab, version: tab.version + 1, status: '' }
+              ? { ...tab, version: tab.version + 1, status: null }
               : tab
           )
         );

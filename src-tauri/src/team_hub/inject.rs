@@ -235,6 +235,7 @@ impl std::fmt::Display for InjectError {
 ///   - 受信端末: OSC 52 (クリップボード書換) / OSC 2 (タイトル偽装) / CSI 2J (画面消去)
 ///   - LLM 側: ZWSP / RTL Override / U+2028/2029 が deny 句マッチをすり抜け、
 ///     prompt injection / lint bypass / レビュアー目視回避を成立させる
+///
 /// など、任意の端末乗っ取り / プロンプト乗っ取り経路が成立する。bracketed paste で囲んでも
 /// 内側の ESC は端末によっては解釈されてしまう (PT mode の実装差異)。
 ///

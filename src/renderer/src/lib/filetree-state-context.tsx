@@ -39,6 +39,7 @@ import {
   useSettingsLoading,
   useSettingsValue
 } from './settings-context';
+import { useT } from './i18n';
 
 const KEY_SEP_CHAR = '\0';
 
@@ -129,6 +130,7 @@ function serializeExpanded(set: Set<string>): Record<string, string[]> {
 }
 
 export function FileTreeStateProvider({ children }: { children: ReactNode }): JSX.Element {
+  const t = useT();
   // settings の他フィールド (テーマ / フォント等) の変化で Provider が re-render しない
   // ように、必要なフィールドだけ細粒度 selector で購読する。
   const settingsLoading = useSettingsLoading();
@@ -289,7 +291,7 @@ export function FileTreeStateProvider({ children }: { children: ReactNode }): JS
           const next = new Map(prev);
           next.set(dirKey(rootPath, relPath), {
             loading: false,
-            error: 'アプリを再起動してください（preload 更新のため）',
+            error: t('filetree.preloadRestartRequired'),
             entries: []
           });
           return next;
@@ -346,7 +348,7 @@ export function FileTreeStateProvider({ children }: { children: ReactNode }): JS
       pendingPromisesRef.current.set(key, promise);
       return promise;
     },
-    [drainQueue, pruneOnLoadFailure]
+    [drainQueue, pruneOnLoadFailure, t]
   );
 
   // Issue #478: expandedRef を toggleDir より前に配置し、クリック時点の最新 expanded を

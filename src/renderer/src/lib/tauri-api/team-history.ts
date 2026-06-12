@@ -1,6 +1,6 @@
 // tauri-api/team-history.ts — teamHistory.* IPC namespace (Phase 5 / Issue #373)
 
-import { invoke } from '@tauri-apps/api/core';
+import { invokeCommand } from './command-error';
 import type { TeamHistoryEntry } from '../../../../types/shared';
 
 export interface MutationResult {
@@ -18,11 +18,11 @@ export interface MutationResult {
 
 export const teamHistory = {
   list: (projectRoot: string): Promise<TeamHistoryEntry[]> =>
-    invoke('team_history_list', { projectRoot }),
+    invokeCommand('team_history_list', { projectRoot }),
   save: (entry: TeamHistoryEntry): Promise<MutationResult> =>
-    invoke('team_history_save', { entry }),
+    invokeCommand('team_history_save', { entry }),
   /** Issue #132: 複数チームを 1 IPC + 1 disk write でまとめて保存する */
   saveBatch: (entries: TeamHistoryEntry[]): Promise<MutationResult> =>
-    invoke('team_history_save_batch', { entries }),
-  delete: (id: string): Promise<MutationResult> => invoke('team_history_delete', { id })
+    invokeCommand('team_history_save_batch', { entries }),
+  delete: (id: string): Promise<MutationResult> => invokeCommand('team_history_delete', { id })
 };

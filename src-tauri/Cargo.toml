@@ -1,6 +1,6 @@
 [package]
 name = "vibe-editor"
-version = "1.6.3"
+version = "1.6.4"
 description = "Electron→Tauri 移行版 vibe-editor (Claude Code / Codex 専用エディタ)"
 authors = ["yusei <yusei@yuseilab.com>"]
 edition = "2021"
@@ -85,6 +85,8 @@ windows-sys = { version = "0.59", features = [
     "Win32_System_Pipes",
     "Win32_System_Threading",
     "Win32_Security",
+    # Issue #950: PTY child の kill-on-close Job Object
+    "Win32_System_JobObjects",
 ] }
 
 [dev-dependencies]

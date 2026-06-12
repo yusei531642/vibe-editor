@@ -33,6 +33,52 @@ function row(overrides: Partial<TeamDiagnosticsMemberRow> = {}): TeamDiagnostics
 }
 
 describe('deriveHealth', () => {
+  it('recomputes age from stable RFC3339 timestamps', () => {
+    const health = deriveHealth(
+      row({
+        lastStatusAt: '2026-05-16T00:00:00Z',
+        lastStatusAgeMs: 1,
+        lastPtyOutputAt: '2026-05-16T00:01:00Z',
+        lastPtyActivityAgeMs: 1
+      }),
+      Date.parse('2026-05-16T00:02:30Z')
+    );
+
+    expect(health.state).toBe('alive');
+    expect(health.ageMs).toBe(90_000);
+  });
+
+  it('can become dead from timestamp age even when the frozen row age was fresh', () => {
+    const health = deriveHealth(
+      row({
+        lastStatusAt: '2026-05-16T00:00:00Z',
+        lastStatusAgeMs: 1,
+        lastPtyOutputAt: '2026-05-16T00:00:00Z',
+        lastPtyActivityAgeMs: 1
+      }),
+      Date.parse('2026-05-16T00:16:00Z')
+    );
+
+    expect(health.state).toBe('dead');
+    expect(health.ageMs).toBe(960_000);
+  });
+
+  it('keeps never-observed diagnostics unknown when the hub has not marked them stale', () => {
+    const health = deriveHealth(
+      row({
+        lastStatusAt: null,
+        lastStatusAgeMs: null,
+        lastPtyOutputAt: null,
+        lastPtyActivityAgeMs: null,
+        autoStale: false
+      }),
+      Date.parse('2026-05-16T00:16:00Z')
+    );
+
+    expect(health.state).toBe('unknown');
+    expect(health.ageMs).toBeNull();
+  });
+
   it('passes through pending inbox diagnostics for unread badge rendering', () => {
     const health = deriveHealth(
       row({

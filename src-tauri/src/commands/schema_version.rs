@@ -30,6 +30,10 @@ pub const TEAM_STATE_SCHEMA_VERSION: u32 = 1;
 /// 旧実装は `handoffs.rs` 内に `schema_version: 1` の直書きリテラルだった。
 pub const HANDOFF_SCHEMA_VERSION: u32 = 1;
 
+/// `~/.vibe-editor/terminal-tabs.json` の現行 schema version。
+/// renderer 側 `TERMINAL_TABS_SCHEMA_VERSION` と同期。
+pub const TERMINAL_TABS_SCHEMA_VERSION: u32 = 1;
+
 /// 永続化ストア 1 つ分の schema version 情報。`current` (= この build がネイティブに扱える
 /// 版数) と、互換性ガードの reject メッセージ / ログに使う `store_label` を束ねる。
 #[derive(Clone, Copy, Debug)]
@@ -45,6 +49,12 @@ impl SchemaVersion {
     pub const SETTINGS: SchemaVersion = SchemaVersion {
         current: SETTINGS_SCHEMA_VERSION,
         store_label: "settings.json",
+    };
+
+    /// IDE terminal tabs 永続化ファイル用の `SchemaVersion`。
+    pub const TERMINAL_TABS: SchemaVersion = SchemaVersion {
+        current: TERMINAL_TABS_SCHEMA_VERSION,
+        store_label: "terminal-tabs.json",
     };
 
     /// 永続化前 (= save 直前) の schema version 互換性チェック。
@@ -146,7 +156,10 @@ mod tests {
             msg.contains("newer vibe-editor"),
             "error message must hint at update: got {msg}"
         );
-        assert!(msg.contains("settings.json"), "message must name the store: got {msg}");
+        assert!(
+            msg.contains("settings.json"),
+            "message must name the store: got {msg}"
+        );
     }
 
     /// renderer から未来バージョンが渡された場合は reject。
@@ -169,7 +182,9 @@ mod tests {
             current: TEAM_STATE_SCHEMA_VERSION,
             store_label: "team-state",
         };
-        assert!(team_state.check_compat(Some(TEAM_STATE_SCHEMA_VERSION), None).is_ok());
+        assert!(team_state
+            .check_compat(Some(TEAM_STATE_SCHEMA_VERSION), None)
+            .is_ok());
         let r = team_state.check_compat(Some(TEAM_STATE_SCHEMA_VERSION + 1), None);
         assert!(r.is_err());
         assert!(format!("{}", r.unwrap_err()).contains("team-state"));

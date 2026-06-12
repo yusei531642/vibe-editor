@@ -70,6 +70,7 @@ import {
   canRenderTerminalForAgent,
   shouldShowGlobalClaudeCheck
 } from '../lib/terminal-render-gate';
+import { formatTerminalRuntimeStatus } from '../lib/terminal-status';
 import { useProject, useTabs, useTeam } from '../lib/app-state-context';
 
 export interface AppShellProps {
@@ -289,10 +290,12 @@ export function AppShell({
   const handleResumeSession = useCallback(
     (session: SessionInfo) => {
       setActiveSessionId(session.id);
-      showToast(`セッションに復帰: ${session.title.slice(0, 40)}`, { tone: 'info' });
+      showToast(t('toast.sessionResumed', { title: session.title.slice(0, 40) }), {
+        tone: 'info'
+      });
       addTerminalTab({ resumeSessionId: session.id });
     },
-    [showToast, addTerminalTab]
+    [showToast, addTerminalTab, t]
   );
 
   // Phase 1-9 (Issue #373): コマンドパレット用 Command[] 構築は lib/app-commands.ts に集約。
@@ -561,7 +564,7 @@ export function AppShell({
         className="resize-handle resize-handle--sidebar"
         onMouseDown={onSidebarResizeStart}
         onDoubleClick={onSidebarResizeDouble}
-        title="ドラッグでサイドバー幅を調整 / ダブルクリックでリセット"
+        title={t('layout.sidebarResizeTitle')}
         role="separator"
         aria-orientation="vertical"
       />
@@ -615,7 +618,7 @@ export function AppShell({
         <div
           className="resize-handle"
           onMouseDown={onClaudePanelResizeStart}
-          title="ドラッグで IDE モードパネルの幅を調整"
+          title={t('layout.idePanelResizeTitle')}
           role="separator"
           aria-orientation="vertical"
         />
@@ -901,7 +904,9 @@ export function AppShell({
                 {tab.exited && (
                   <div className="terminal-pane__exit-banner" onClick={(e) => e.stopPropagation()}>
                     <span className="terminal-pane__exit-banner-text">
-                      {t('terminal.exitedBanner', { status: tab.status || t('terminal.exited') })}
+                      {t('terminal.exitedBanner', {
+                        status: formatTerminalRuntimeStatus(tab.status, t) || t('terminal.exited')
+                      })}
                     </span>
                     <button
                       className="terminal-pane__exit-banner-btn"

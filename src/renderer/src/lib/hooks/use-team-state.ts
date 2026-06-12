@@ -88,7 +88,7 @@ export function useTeamState(opts: UseTeamStateOptions): UseTeamStateResult {
             role: null,
             teamId: null,
             agentId: `agent-${newId}`,
-            status: '',
+            status: null,
             exited: false,
             resumeSessionId: null,
             freshSessionId: true,

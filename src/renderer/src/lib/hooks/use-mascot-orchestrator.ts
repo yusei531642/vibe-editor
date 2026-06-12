@@ -6,10 +6,6 @@ import type { StatusMascotState } from '../status-mascot';
  */
 const SLEEP_THRESHOLD_MS = 3 * 60 * 1000;
 /**
- * `sleep` 判定のための tick 間隔。閾値より十分短くする。
- */
-const SLEEP_TICK_INTERVAL_MS = 10 * 1000;
-/**
  * `excited` (クリック) 状態の自動復帰時間。
  */
 const EXCITED_DURATION_MS = 1200;
@@ -18,10 +14,10 @@ const EXCITED_DURATION_MS = 1200;
  */
 const DONE_DURATION_MS = 1600;
 /**
- * 入力イベントによる force re-render の throttle。
- * mousemove が高頻度に発火しても、500ms に 1 回しか setState しない。
+ * 入力イベントによる sleep timer 再予約の throttle。
+ * mousemove が高頻度に発火しても、500ms に 1 回しか timer を張り直さない。
  */
-const INPUT_TICK_THROTTLE_MS = 500;
+const INPUT_TIMER_THROTTLE_MS = 500;
 
 export interface MascotOrchestrator {
   /** 最終的に StatusMascot に渡すべき state */
@@ -47,25 +43,79 @@ interface OneShot {
  *    一時的に上書き。base が `error` 以外で base よりも oneShot を優先
  *  - base が `idle` のとき、最後の入力から 3 分超で `sleep` に置き換える
  *
- * 入力監視: window 全体の mousemove / mousedown / keydown / wheel / touchstart を
- * 500ms throttle で `lastInputAt` 更新 + sleep 判定再評価のための tick。
+ * 入力監視: window 全体の mousemove / mousedown / keydown / wheel / touchstart で
+ * `lastInputAt` を更新し、sleep timer だけを再予約する。入力中に React state を
+ * 更新しないことで、AppShell 全体の再レンダーを避ける。
  *
  * Issue #717.
  */
 export function useMascotOrchestrator(baseState: StatusMascotState): MascotOrchestrator {
   const lastInputAtRef = useRef<number>(Date.now());
-  const lastInputTickRef = useRef<number>(0);
-  const [, forceTick] = useState(0);
+  const lastInputTimerRef = useRef<number>(0);
+  const sleepTimerRef = useRef<number | null>(null);
+  const baseStateRef = useRef<StatusMascotState>(baseState);
+  const oneShotRef = useRef<OneShot | null>(null);
+  const sleepingRef = useRef(false);
+  const [sleeping, setSleepingState] = useState(false);
   const [oneShot, setOneShot] = useState<OneShot | null>(null);
 
-  // 入力監視: lastInputAt 更新 + (throttle して) 再 render
+  baseStateRef.current = baseState;
+  oneShotRef.current = oneShot;
+  sleepingRef.current = sleeping;
+
+  const clearSleepTimer = useCallback(() => {
+    if (sleepTimerRef.current !== null) {
+      window.clearTimeout(sleepTimerRef.current);
+      sleepTimerRef.current = null;
+    }
+  }, []);
+
+  const setSleeping = useCallback((next: boolean) => {
+    sleepingRef.current = next;
+    setSleepingState((prev) => (prev === next ? prev : next));
+  }, []);
+
+  const scheduleSleepTimer = useCallback(() => {
+    clearSleepTimer();
+    if (baseStateRef.current !== 'idle' || sleepingRef.current) return;
+
+    const remaining = SLEEP_THRESHOLD_MS - (Date.now() - lastInputAtRef.current);
+    if (remaining <= 0) {
+      if (!oneShotRef.current) setSleeping(true);
+      return;
+    }
+
+    sleepTimerRef.current = window.setTimeout(() => {
+      sleepTimerRef.current = null;
+      if (baseStateRef.current !== 'idle' || sleepingRef.current) return;
+
+      const nextRemaining = SLEEP_THRESHOLD_MS - (Date.now() - lastInputAtRef.current);
+      if (nextRemaining <= 0 && !oneShotRef.current) {
+        setSleeping(true);
+      } else {
+        scheduleSleepTimer();
+      }
+    }, remaining);
+  }, [clearSleepTimer, setSleeping]);
+
+  useEffect(() => {
+    if (baseState !== 'idle') {
+      setSleeping(false);
+      clearSleepTimer();
+      return;
+    }
+    scheduleSleepTimer();
+  }, [baseState, clearSleepTimer, scheduleSleepTimer, setSleeping]);
+
+  // 入力監視: lastInputAt 更新 + sleep timer 再予約。React state は sleep 解除時だけ更新する。
   useEffect(() => {
     const mark = (): void => {
       const now = Date.now();
       lastInputAtRef.current = now;
-      if (now - lastInputTickRef.current > INPUT_TICK_THROTTLE_MS) {
-        lastInputTickRef.current = now;
-        forceTick((n) => n + 1);
+      if (sleepingRef.current) setSleeping(false);
+      if (now - lastInputTimerRef.current > INPUT_TIMER_THROTTLE_MS) {
+        lastInputTimerRef.current = now;
+        scheduleSleepTimer();
       }
     };
     const events: Array<keyof WindowEventMap> = [
@@ -82,20 +132,28 @@ export function useMascotOrchestrator(baseState: StatusMascotState): MascotOrche
       for (const e of events) {
         window.removeEventListener(e, mark);
       }
+      clearSleepTimer();
     };
-  }, []);
+  }, [clearSleepTimer, scheduleSleepTimer, setSleeping]);
 
-  // 一定間隔で再 render して sleep 判定を更新する
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      forceTick((n) => n + 1);
-    }, SLEEP_TICK_INTERVAL_MS);
-    return () => window.clearInterval(id);
+  const onMascotClick = useCallback(() => {
+    // クリック自体も「入力」として扱い、sleep を解除
+    lastInputAtRef.current = Date.now();
+    setSleeping(false);
+    scheduleSleepTimer();
+    setOneShot({ state: 'excited', until: Date.now() + EXCITED_DURATION_MS });
+  }, [scheduleSleepTimer, setSleeping]);
+
+  const triggerDone = useCallback(() => {
+    setOneShot({ state: 'done', until: Date.now() + DONE_DURATION_MS });
   }, []);
 
   // oneShot の自動解除
   useEffect(() => {
-    if (!oneShot) return;
+    if (!oneShot) {
+      scheduleSleepTimer();
+      return;
+    }
     const remaining = oneShot.until - Date.now();
     if (remaining <= 0) {
       setOneShot(null);
@@ -103,17 +161,7 @@ export function useMascotOrchestrator(baseState: StatusMascotState): MascotOrche
     }
     const id = window.setTimeout(() => setOneShot(null), remaining);
     return () => window.clearTimeout(id);
-  }, [oneShot]);
-
-  const onMascotClick = useCallback(() => {
-    // クリック自体も「入力」として扱い、sleep を解除
-    lastInputAtRef.current = Date.now();
-    setOneShot({ state: 'excited', until: Date.now() + EXCITED_DURATION_MS });
-  }, []);
-
-  const triggerDone = useCallback(() => {
-    setOneShot({ state: 'done', until: Date.now() + DONE_DURATION_MS });
-  }, []);
+  }, [oneShot, scheduleSleepTimer]);
 
   let state: StatusMascotState = baseState;
 
@@ -123,11 +171,8 @@ export function useMascotOrchestrator(baseState: StatusMascotState): MascotOrche
   }
 
   // base が idle のときだけ、長時間入力なしを sleep に格上げする
-  if (state === 'idle') {
-    const idleMs = Date.now() - lastInputAtRef.current;
-    if (idleMs >= SLEEP_THRESHOLD_MS) {
-      state = 'sleep';
-    }
+  if (state === 'idle' && sleeping) {
+    state = 'sleep';
   }
 
   return { state, onMascotClick, triggerDone };

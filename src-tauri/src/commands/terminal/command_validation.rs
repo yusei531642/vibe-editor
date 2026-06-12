@@ -40,7 +40,7 @@ pub fn command_basename(command: &str) -> String {
         .to_string()
 }
 
-fn split_command_line(input: &str) -> Vec<String> {
+pub(crate) fn split_command_line(input: &str) -> Vec<String> {
     let mut parts = Vec::new();
     let mut current = String::new();
     let mut quote: Option<char> = None;
@@ -59,6 +59,10 @@ fn split_command_line(input: &str) -> Vec<String> {
             }
             '\\' => {
                 let next = chars.peek().copied();
+                // Issue #939: 2 つの分岐は「同じ動作・別条件」で意図的に分けている
+                // (quote 内のエスケープ規則 vs quote 外の規則)。条件の意味が別なので
+                // `||` で潰さず分けたまま allow する (将来どちらかの動作を変える余地を残す)。
+                #[allow(clippy::if_same_then_else)]
                 if quote.is_some() && next == quote {
                     current.push(chars.next().unwrap_or(ch));
                 } else if quote.is_none() && matches!(next, Some('"') | Some('\'')) {
@@ -241,31 +245,75 @@ fn canonical_danger_flag(token: &str) -> Option<&'static str> {
 /// `customAgents[].args` にユーザーが明示的に書いた危険フラグを canonical 形で集める。
 /// ここに含まれるフラグは「ユーザー自身が opt-in したもの」として spawn を許可する。
 ///
+/// Issue #933: sanction は「どの args 欄に書いたか」に対応するバイナリへスコープする。
+/// 旧実装は全 args 欄を 1 つの global 集合に潰していたため、codexArgs に書いた opt-in が
+/// claude の spawn にも効いてしまっていた (登録した覚えのない組合せへの漏れ)。
+///
 /// settings.json が無い / parse 失敗の場合は空集合 (= 何も sanction しない) を返す。
 /// `terminal_create` / spawn 境界から spawn 直前にだけ呼ぶ想定 (1 spawn = 1 file read)。
-pub fn settings_sanctioned_danger_flags() -> HashSet<String> {
-    let mut out = HashSet::new();
+pub fn settings_sanctioned_danger_flags(command: &str) -> HashSet<String> {
     let path = crate::util::config_paths::settings_path();
     let Ok(bytes) = std::fs::read(path) else {
-        return out;
+        return HashSet::new();
     };
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
-        return out;
+        return HashSet::new();
     };
-    let mut collect = |raw: Option<&str>| {
-        if let Some(s) = raw {
-            for token in split_command_line(s) {
-                if let Some(flag) = canonical_danger_flag(&token) {
-                    out.insert(flag.to_string());
-                }
+    sanctioned_danger_flags_from_value(&value, command)
+}
+
+/// settings 値の args 欄 1 つから canonical 危険フラグを `out` に集める。
+fn collect_danger_flags(out: &mut HashSet<String>, raw: Option<&str>) {
+    if let Some(s) = raw {
+        for token in split_command_line(s) {
+            if let Some(flag) = canonical_danger_flag(&token) {
+                out.insert(flag.to_string());
             }
         }
+    }
+}
+
+/// 設定された command 文字列 (inline args 込みで書かれていることもある) の先頭 token の
+/// basename が、spawn しようとしている command の basename と一致するか。
+fn configured_command_matches(configured: Option<&str>, spawn_basename: &str) -> bool {
+    let Some(c) = configured.map(str::trim).filter(|s| !s.is_empty()) else {
+        return false;
     };
-    collect(value.get("claudeArgs").and_then(|v| v.as_str()));
-    collect(value.get("codexArgs").and_then(|v| v.as_str()));
+    let first = split_command_line(c).into_iter().next().unwrap_or_default();
+    command_basename(&first) == spawn_basename
+}
+
+/// [`settings_sanctioned_danger_flags`] の純関数部 (テスト用に分離)。
+pub fn sanctioned_danger_flags_from_value(
+    value: &serde_json::Value,
+    command: &str,
+) -> HashSet<String> {
+    let basename = command_basename(command);
+    let mut out = HashSet::new();
+    if basename == "claude"
+        || configured_command_matches(
+            value.get("claudeCommand").and_then(|v| v.as_str()),
+            &basename,
+        )
+    {
+        collect_danger_flags(&mut out, value.get("claudeArgs").and_then(|v| v.as_str()));
+    }
+    if is_codex_command(command)
+        || configured_command_matches(
+            value.get("codexCommand").and_then(|v| v.as_str()),
+            &basename,
+        )
+    {
+        collect_danger_flags(&mut out, value.get("codexArgs").and_then(|v| v.as_str()));
+    }
     if let Some(custom) = value.get("customAgents").and_then(|v| v.as_array()) {
         for agent in custom {
-            collect(agent.get("args").and_then(|v| v.as_str()));
+            if configured_command_matches(
+                agent.get("command").and_then(|v| v.as_str()),
+                &basename,
+            ) {
+                collect_danger_flags(&mut out, agent.get("args").and_then(|v| v.as_str()));
+            }
         }
     }
     out
@@ -284,46 +332,9 @@ pub fn reject_danger_flags(args: &[String], sanctioned: &HashSet<String>) -> Opt
     None
 }
 
-pub fn reject_immediate_exec_args(command: &str, args: &[String]) -> Option<&'static str> {
-    let basename = command_basename(command);
-    let lower_args: Vec<String> = args.iter().map(|a| a.trim().to_ascii_lowercase()).collect();
-    let has_any = |candidates: &[&str]| {
-        lower_args
-            .iter()
-            .any(|arg| candidates.contains(&arg.as_str()))
-    };
-    match basename.as_str() {
-        "bash" | "sh" | "zsh" | "fish" => {
-            if has_any(&["-c", "-lc"]) {
-                Some("shell immediate-exec flags (-c / -lc) are blocked")
-            } else {
-                None
-            }
-        }
-        "pwsh" | "powershell" => {
-            if has_any(&["-c", "-command", "/command", "-encodedcommand", "-file"]) {
-                Some("PowerShell immediate-exec flags (-Command / -EncodedCommand / -File) are blocked")
-            } else {
-                None
-            }
-        }
-        "cmd" => {
-            if has_any(&["/c", "/k"]) {
-                Some("cmd immediate-exec flags (/c /k) are blocked")
-            } else {
-                None
-            }
-        }
-        "nu" => {
-            if has_any(&["-c", "--commands"]) {
-                Some("nushell immediate-exec flags (-c / --commands) are blocked")
-            } else {
-                None
-            }
-        }
-        _ => None,
-    }
-}
+// Issue #933: 旧 `reject_immediate_exec_args` (即時実行フラグの denylist 列挙、#890) は
+// 「対話モード限定 allowlist」契約 (`shell_policy::reject_non_interactive_shell_args`) に
+// 置き換えられた。シェル引数の安全判定は shell_policy.rs 側を参照。
 
 /// command が codex 系か判定 (パス形式や *.exe も拾う)
 ///
@@ -574,7 +585,7 @@ mod codex_command_tests {
 mod command_normalization_tests {
     use super::{
         canonical_danger_flag, normalize_terminal_command, reject_danger_flags,
-        reject_immediate_exec_args, split_command_line,
+        sanctioned_danger_flags_from_value, split_command_line,
     };
     use std::collections::HashSet;
 
@@ -702,16 +713,21 @@ mod command_normalization_tests {
         );
     }
 
+    // Issue #933: 旧 reject_immediate_exec_args (denylist) のテスト群は
+    // shell_policy.rs の対話モード限定 allowlist テストに移行した。
+    // 正規化との結合だけここで担保する (normalize 後の args で拒否されること)。
     #[test]
-    fn immediate_exec_rejection_runs_after_normalization() {
+    fn shell_policy_rejection_runs_after_normalization() {
         let (command, args) =
             normalize_terminal_command(Some("cmd /c echo unsafe".to_string()), None);
 
         assert_eq!(command, "cmd");
-        assert_eq!(
-            reject_immediate_exec_args(&command, &args),
-            Some("cmd immediate-exec flags (/c /k) are blocked")
-        );
+        assert!(super::super::shell_policy::reject_non_interactive_shell_args(
+            &command,
+            &args,
+            &HashSet::new()
+        )
+        .is_some());
     }
 
     // Issue #743: --dangerously-* フラグの拒否
@@ -849,5 +865,51 @@ mod command_normalization_tests {
         );
         assert_eq!(canonical_danger_flag(""), None);
         assert_eq!(canonical_danger_flag("--"), None);
+    }
+
+    // Issue #933: sanction は args 欄に対応するバイナリへスコープされる
+    #[test]
+    fn sanctioned_flags_are_scoped_per_binary() {
+        let settings = serde_json::json!({
+            "claudeArgs": "--dangerously-skip-permissions",
+            "codexArgs": "--dangerously-bypass-approvals-and-sandbox"
+        });
+        // claude spawn には claudeArgs の sanction だけが効く
+        let claude = sanctioned_danger_flags_from_value(&settings, "claude");
+        assert!(claude.contains("--dangerously-skip-permissions"));
+        assert!(!claude.contains("--dangerously-bypass-approvals-and-sandbox"));
+        // codex spawn (パス形式含む) には codexArgs の sanction だけが効く
+        let codex = sanctioned_danger_flags_from_value(&settings, r"C:\tools\codex.exe");
+        assert!(codex.contains("--dangerously-bypass-approvals-and-sandbox"));
+        assert!(!codex.contains("--dangerously-skip-permissions"));
+        // どの args 欄にも対応しないバイナリには何も sanction されない
+        assert!(sanctioned_danger_flags_from_value(&settings, "bash").is_empty());
+    }
+
+    #[test]
+    fn sanctioned_flags_match_configured_command_basename() {
+        // claudeCommand をパス形式で設定していても basename で対応付く
+        let settings = serde_json::json!({
+            "claudeCommand": r"C:\bin\claude-nightly.exe",
+            "claudeArgs": "--dangerously-skip-permissions"
+        });
+        let nightly =
+            sanctioned_danger_flags_from_value(&settings, r"C:\bin\claude-nightly.exe");
+        assert!(nightly.contains("--dangerously-skip-permissions"));
+        // 既定の "claude" basename も常に claudeArgs の対象 (組み込み allowlist 経路)
+        let plain = sanctioned_danger_flags_from_value(&settings, "claude");
+        assert!(plain.contains("--dangerously-skip-permissions"));
+    }
+
+    #[test]
+    fn sanctioned_flags_from_custom_agent_apply_to_that_command_only() {
+        let settings = serde_json::json!({
+            "customAgents": [
+                { "command": "my-agent", "args": "--dangerously-skip-permissions" }
+            ]
+        });
+        let agent = sanctioned_danger_flags_from_value(&settings, "my-agent");
+        assert!(agent.contains("--dangerously-skip-permissions"));
+        assert!(sanctioned_danger_flags_from_value(&settings, "claude").is_empty());
     }
 }

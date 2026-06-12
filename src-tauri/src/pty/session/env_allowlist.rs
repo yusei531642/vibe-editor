@@ -5,7 +5,8 @@
 
 /// Issue #211:
 /// 親プロセス env を denylist ではなく allowlist で継承する。
-/// TeamHub 用の内部 env は `opts.env` から明示注入されたものだけが後段で渡る。
+/// renderer 由来の `opts.env` は信頼境界 (`commands/terminal.rs` の terminal_create) で
+/// `is_safe_renderer_env_key` により濾過され、通過したものだけが後段で渡る (Issue #889)。
 pub(crate) fn should_inherit_env(key: &str) -> bool {
     let upper = key.to_ascii_uppercase();
     if upper.starts_with("LC_") || upper.starts_with("XDG_") {
@@ -51,4 +52,14 @@ pub(crate) fn should_inherit_env(key: &str) -> bool {
             | "WSLENV"
             | "WSL_DISTRO_NAME"
     )
+}
+
+/// Issue #889: renderer (信頼境界外) が `opts.env` 経由で子プロセスへ渡してよいキーか。
+/// TeamHub 用の `VIBE_*` のみ許可する allowlist。`NODE_OPTIONS` / `LD_PRELOAD` /
+/// `DYLD_INSERT_LIBRARIES` 等の任意コード実行に繋がる env を一律ブロックする。
+/// Windows の env 名は case 非依存のため大文字化して判定する。
+/// 将来 renderer が `VIBE_*` 以外の env を正規に渡したくなった場合は、ここへ
+/// 明示追加する (denylist 化はしない)。
+pub(crate) fn is_safe_renderer_env_key(key: &str) -> bool {
+    key.to_ascii_uppercase().starts_with("VIBE_")
 }

@@ -480,10 +480,7 @@ impl MessageInsertionGuard {
             }
         }
         // Issue #342 Phase 3 (3.3): 受信側 diagnostics 更新
-        let recipient_diag = state
-            .member_diagnostics
-            .entry(target_aid.to_string())
-            .or_default();
+        let recipient_diag = state.diagnostics_mut(team_id, target_aid);
         record_recipient_delivery_diagnostics(recipient_diag, delivered_at);
     }
 }
@@ -573,10 +570,7 @@ async fn insert_team_message(
         }
     }
     // Issue #342 Phase 3 (3.3): 送信者自身の last_message_out_at / messages_out_count / last_seen_at を更新
-    let sender_diag = state
-        .member_diagnostics
-        .entry(ctx.agent_id.clone())
-        .or_default();
+    let sender_diag = state.diagnostics_mut(&ctx.team_id, &ctx.agent_id);
     sender_diag.last_message_out_at = Some(timestamp.clone());
     sender_diag.last_seen_at = Some(timestamp.clone());
     sender_diag.messages_out_count = sender_diag.messages_out_count.saturating_add(1);
@@ -720,17 +714,19 @@ async fn dispatch_injects(
                         .record_delivery(hub, &ctx.team_id, &target_aid, &delivered_at)
                         .await;
                     // Phase 3: hand-off イベントを Canvas にブロードキャスト
+                    // (Issue #930: payload は events.rs の名前付き struct。初回配送なので retried=false)
                     if let Some(app) = app {
-                        let payload = json!({
-                            "teamId": ctx.team_id,
-                            "fromAgentId": ctx.agent_id,
-                            "fromRole": ctx.role,
-                            "toAgentId": target_aid,
-                            "toRole": target_role,
-                            "preview": preview,
-                            "messageId": guard.msg_id,
-                            "timestamp": guard.timestamp,
-                        });
+                        let payload = crate::team_hub::events::HandoffEventPayload {
+                            team_id: ctx.team_id.clone(),
+                            from_agent_id: ctx.agent_id.clone(),
+                            from_role: ctx.role.clone(),
+                            to_agent_id: target_aid.clone(),
+                            to_role: target_role.clone(),
+                            preview: preview.clone(),
+                            message_id: guard.msg_id,
+                            timestamp: guard.timestamp.clone(),
+                            retried: false,
+                        };
                         if let Err(e) = app.emit("team:handoff", payload) {
                             tracing::warn!("emit team:handoff failed: {e}");
                         }
@@ -774,17 +770,20 @@ async fn dispatch_injects(
                     // skill の guidelines 参照): inject_failed は send 後にしか来ないため、
                     // listener 登録前に emit が走る race は構造的に発生しない。
                     if let Some(app) = app {
-                        let payload = json!({
-                            "teamId": ctx.team_id,
-                            "fromAgentId": ctx.agent_id,
-                            "fromRole": ctx.role,
-                            "toAgentId": target_aid,
-                            "toRole": target_role,
-                            "messageId": guard.msg_id,
-                            "reasonCode": reason_code,
-                            "reasonMessage": reason_message,
-                            "failedAt": failed_at,
-                        });
+                        // Issue #959/#930: payload は events.rs の named struct。初回配送の
+                        // inject 失敗なので retried=false で team_inject.rs と形状を統一。
+                        let payload = crate::team_hub::events::InjectFailedEventPayload {
+                            team_id: ctx.team_id.clone(),
+                            from_agent_id: ctx.agent_id.clone(),
+                            from_role: ctx.role.clone(),
+                            to_agent_id: target_aid.clone(),
+                            to_role: target_role.clone(),
+                            message_id: guard.msg_id,
+                            reason_code: reason_code.to_string(),
+                            reason_message: reason_message.clone(),
+                            failed_at: failed_at.clone(),
+                            retried: false,
+                        };
                         if let Err(e) = app.emit("team:inject_failed", payload) {
                             tracing::warn!("emit team:inject_failed failed: {e}");
                         }

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, Plus, Search, X } from 'lucide-react';
 import type { AgentConfig, AppSettings } from '../../../types/shared';
-import { DEFAULT_SETTINGS } from '../../../types/shared';
+import { resetPreferencesToDefaults } from '../../../types/shared';
 import { useT } from '../lib/i18n';
 import { useToast } from '../lib/toast-context';
 import { useSpringMount } from '../lib/use-animated-mount';
@@ -161,10 +161,12 @@ export function SettingsModal({
     }, 380);
   };
 
-  // Issue #28: Reset は draft だけを DEFAULT_SETTINGS に戻す。
+  // Issue #28: Reset は draft だけを既定値に戻す。
   // 永続化は Apply / Cancel のタイミングに揃える (footer の 2 ボタンと整合)。
+  // Issue #885: リセット範囲は preference キー (RESETTABLE_SETTING_KEYS) のみ。
+  // notepad / recentProjects / onboarding 等の runtime 状態と customAgents は温存する。
   const handleReset = (): void => {
-    setDraft({ ...DEFAULT_SETTINGS });
+    setDraft((d) => resetPreferencesToDefaults(d));
   };
 
   const customAgents = draft.customAgents ?? [];

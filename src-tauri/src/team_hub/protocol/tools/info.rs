@@ -23,12 +23,8 @@ pub async fn team_info(hub: &TeamHub, ctx: &CallContext) -> Result<Value, ToolEr
     let team_entry = state.teams.get(&ctx.team_id);
     let name = team_entry.map(|t| t.name.clone()).unwrap_or_default();
     let engine_policy = team_entry.map(|t| t.engine_policy.clone()).unwrap_or_default();
-    let bindings_snapshot: HashMap<String, String> = state
-        .agent_role_bindings
-        .iter()
-        .filter(|((team_id, _), _)| team_id == &ctx.team_id)
-        .map(|((_, agent_id), role)| (agent_id.clone(), role.clone()))
-        .collect();
+    let bindings_snapshot: HashMap<String, String> =
+        state.team_member_roles(&ctx.team_id).into_iter().collect();
     drop(state);
     let members: Vec<_> = hub
         .registry

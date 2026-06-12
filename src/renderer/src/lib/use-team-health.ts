@@ -31,6 +31,7 @@ interface Snapshot {
 interface RegistryEntry {
   refCount: number;
   snapshot: Snapshot | null;
+  stableSignature: string | null;
   listeners: Set<(snap: Snapshot | null) => void>;
   timer: number | null;
   /** in-flight な fetch があれば true (同時多重を防ぐ) */
@@ -42,6 +43,33 @@ const registry = new Map<string, RegistryEntry>();
 function notify(entry: RegistryEntry): void {
   for (const fn of entry.listeners) fn(entry.snapshot);
 }
+
+function stableRowForSignature(row: TeamDiagnosticsMemberRow): Omit<
+  TeamDiagnosticsMemberRow,
+  'lastStatusAgeMs' | 'lastPtyActivityAgeMs' | 'oldestPendingInboxAgeMs'
+> {
+  const {
+    lastStatusAgeMs: _lastStatusAgeMs,
+    lastPtyActivityAgeMs: _lastPtyActivityAgeMs,
+    oldestPendingInboxAgeMs: _oldestPendingInboxAgeMs,
+    ...stable
+  } = row;
+  return stable;
+}
+
+function snapshotSignature(
+  byAgentId: Record<string, TeamDiagnosticsMemberRow>
+): string {
+  return JSON.stringify(
+    Object.entries(byAgentId)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([agentId, row]) => [agentId, stableRowForSignature(row)])
+  );
+}
+
+export const __teamHealthTest = {
+  snapshotSignature
+};
 
 async function fetchOnce(teamId: string, entry: RegistryEntry): Promise<void> {
   if (entry.inflight) return;
@@ -58,7 +86,10 @@ async function fetchOnce(teamId: string, entry: RegistryEntry): Promise<void> {
     const res = await window.api.team.diagnosticsRead(teamId);
     const byAgentId: Record<string, TeamDiagnosticsMemberRow> = {};
     for (const m of res.members) byAgentId[m.agentId] = m;
+    const nextSignature = snapshotSignature(byAgentId);
+    if (entry.stableSignature === nextSignature) return;
     entry.snapshot = { byAgentId, fetchedAt: Date.now() };
+    entry.stableSignature = nextSignature;
     notify(entry);
   } catch (err) {
     // Issue #802: team-health poll は best-effort。失敗 (Hub 未起動 / 復元された stale
@@ -105,6 +136,7 @@ export function useTeamHealth(
       entry = {
         refCount: 0,
         snapshot: null,
+        stableSignature: null,
         listeners: new Set(),
         timer: null,
         inflight: false
@@ -192,6 +224,7 @@ export function useTeamHealthMulti(teamIds: readonly string[]): {
         entry = {
           refCount: 0,
           snapshot: null,
+          stableSignature: null,
           listeners: new Set(),
           timer: null,
           inflight: false
@@ -207,7 +240,11 @@ export function useTeamHealthMulti(teamIds: readonly string[]): {
       };
       entry.listeners.add(listener);
       // 既存スナップショットがあれば即座に反映 (poll を待たない)。
-      setSnapshots((prev) => ({ ...prev, [teamId]: entry?.snapshot ?? null }));
+      setSnapshots((prev) => {
+        const snap = entry?.snapshot ?? null;
+        if (prev[teamId] === snap) return prev;
+        return { ...prev, [teamId]: snap };
+      });
       ensurePoll(teamId, entry);
 
       const onVisibility = () => {

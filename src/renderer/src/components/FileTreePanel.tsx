@@ -2,6 +2,7 @@ import {
   useEffect,
   useId,
   useMemo,
+  useRef,
   useState,
   useCallback
 } from 'react';
@@ -508,6 +509,105 @@ export function FileTreePanel({
   );
 
   /** ルートディレクトリ右クリックメニュー。ワークスペースから外す + 新規ファイル/フォルダ + paste。 */
+  // ---------- Issue #908: WAI-ARIA tree (roving tabindex + 矢印キー移動) ----------
+  // 行は全て tabIndex=-1 で render される (FileTreeNode 参照)。「どの行が tab stop か」は
+  // React state にせず DOM 直接操作で管理する。state にすると focus 移動のたびに
+  // ツリー全体が再レンダーされ、Issue #129 の memo 最適化が無効化されるため。
+  const treeBodyRef = useRef<HTMLDivElement | null>(null);
+
+  const getTreeRows = useCallback((): HTMLButtonElement[] => {
+    const body = treeBodyRef.current;
+    if (!body) return [];
+    return Array.from(body.querySelectorAll<HTMLButtonElement>('[role="treeitem"]'));
+  }, []);
+
+  // focus を受けた行を唯一の tab stop にする (クリック / 矢印キー / Tab 進入の全経路)。
+  // focus event は bubble しないが React の onFocus は focusin 相当で container に届く。
+  const handleTreeFocus = useCallback(
+    (e: React.FocusEvent<HTMLDivElement>) => {
+      const row = (e.target as HTMLElement).closest<HTMLButtonElement>('[role="treeitem"]');
+      if (!row) return;
+      for (const r of getTreeRows()) {
+        if (r !== row && r.tabIndex === 0) r.tabIndex = -1;
+      }
+      row.tabIndex = 0;
+    },
+    [getTreeRows]
+  );
+
+  const handleTreeKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      // rename / 新規作成 input 内の矢印キーは奪わない (input は treeitem の外)
+      const target = (e.target as HTMLElement).closest<HTMLButtonElement>('[role="treeitem"]');
+      if (!target) return;
+      const rows = getTreeRows();
+      const idx = rows.indexOf(target);
+      if (idx < 0) return;
+      const levelOf = (el: HTMLElement): number => Number(el.getAttribute('aria-level') ?? '1');
+      const focusRow = (row: HTMLButtonElement | undefined): void => {
+        row?.focus(); // tabindex の付け替えは handleTreeFocus が行う
+      };
+      switch (e.key) {
+        case 'ArrowDown':
+          focusRow(rows[idx + 1]);
+          break;
+        case 'ArrowUp':
+          focusRow(rows[idx - 1]);
+          break;
+        case 'Home':
+          focusRow(rows[0]);
+          break;
+        case 'End':
+          focusRow(rows[rows.length - 1]);
+          break;
+        case 'ArrowRight': {
+          // 折りたたみ dir → 展開 / 展開済み dir → 最初の子へ / ファイル → no-op
+          const expandedAttr = target.getAttribute('aria-expanded');
+          if (expandedAttr === 'false') {
+            target.click();
+          } else if (expandedAttr === 'true') {
+            const next = rows[idx + 1];
+            if (next && levelOf(next) > levelOf(target)) focusRow(next);
+          }
+          break;
+        }
+        case 'ArrowLeft': {
+          // 展開済み dir → 折りたたみ / それ以外 → 親 dir へ
+          if (target.getAttribute('aria-expanded') === 'true') {
+            target.click();
+          } else {
+            const lv = levelOf(target);
+            for (let i = idx - 1; i >= 0; i--) {
+              if (levelOf(rows[i]) < lv) {
+                focusRow(rows[i]);
+                break;
+              }
+            }
+          }
+          break;
+        }
+        default:
+          return; // Enter/Space は <button> ネイティブ挙動 (click) に任せる
+      }
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    [getTreeRows]
+  );
+
+  // roving tabindex の不変式「treeitem のうち丁度 1 行が tabIndex=0」を維持する。
+  // 行は tabIndex=-1 で mount されるため、初回表示・tab stop 行の unmount (折りたたみ /
+  // リネーム置換 / refresh) 後にここで復元する。active 行があればそれを優先する。
+  useEffect(() => {
+    const rows = getTreeRows();
+    if (rows.length === 0) return;
+    const stops = rows.filter((r) => r.tabIndex === 0);
+    if (stops.length === 1) return;
+    for (const r of stops) r.tabIndex = -1;
+    const preferred = rows.find((r) => r.classList.contains('is-active')) ?? rows[0];
+    preferred.tabIndex = 0;
+  });
+
   const handleRootContextMenu = useCallback(
     (e: React.MouseEvent, rootPath: string) => {
       e.preventDefault();
@@ -581,7 +681,15 @@ export function FileTreePanel({
           <RefreshCw size={12} strokeWidth={1.75} />
         </button>
       </div>
-      <div className="filetree__body">
+      <div
+        className="filetree__body"
+        // Issue #908: WAI-ARIA tree。行 (treeitem) は FileTreeNode 側で付与。
+        role="tree"
+        aria-label={t('filetree.treeLabel')}
+        ref={treeBodyRef}
+        onFocus={handleTreeFocus}
+        onKeyDown={handleTreeKeyDown}
+      >
         {roots.length === 0 && (
           <div className="filetree__empty" style={{ paddingLeft: 12 }}>
             —

@@ -84,31 +84,53 @@ fn is_claimed(session_id: &str) -> bool {
 /// 旧実装は cwd が読めない / 空文字のとき fail-open で true を返していたため、jsonl 作成
 /// 直後の不完全状態と watcher polling が重なると別 project の sessionId を誤 claim していた。
 ///
-/// 新方針: 「明示的に同 project と確認できたケースのみ true」。具体的には:
-///   - cwd が読めて normalize 一致 → true
-///   - cwd が読めて不一致 / 空文字 → false
-///   - 8 行以内に cwd フィールドが現れない → false (= fail-closed)
-///   - file open 失敗 → false (= fail-closed)
-fn jsonl_matches_project(jsonl_path: &Path, expected_norm: &str) -> bool {
+/// 新方針: 「明示的に同 project と確認できたケースのみ Match」。具体的には:
+///   - cwd が読めて normalize 一致 → Match
+///   - cwd が読めて不一致 / 空文字 → Mismatch
+///   - file open 失敗 / 空ファイル / partial JSON / 8 行未満で cwd 未発見 → Retry
+///   - 8 行読んでも cwd フィールドが現れない → Mismatch (= fail-closed)
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProjectMatchOutcome {
+    Match,
+    Mismatch,
+    Retry,
+}
+
+fn jsonl_project_outcome(jsonl_path: &Path, expected_norm: &str) -> ProjectMatchOutcome {
     use std::io::{BufRead, BufReader};
     let file = match std::fs::File::open(jsonl_path) {
         Ok(f) => f,
-        Err(_) => return false,
+        Err(_) => return ProjectMatchOutcome::Retry,
     };
     let reader = BufReader::new(file);
-    for line in reader.lines().take(8).flatten() {
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-            if let Some(c) = v.get("cwd").and_then(|c| c.as_str()) {
-                let trimmed = c.trim();
-                if trimmed.is_empty() {
-                    return false;
-                }
-                return super::path_norm::normalize_project_root(trimmed) == expected_norm;
+    let mut lines_read = 0;
+    for line_result in reader.lines().take(8) {
+        let Ok(line) = line_result else {
+            return ProjectMatchOutcome::Retry;
+        };
+        lines_read += 1;
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
+            return ProjectMatchOutcome::Retry;
+        };
+        if let Some(c) = v.get("cwd").and_then(|c| c.as_str()) {
+            let trimmed = c.trim();
+            if trimmed.is_empty() {
+                return ProjectMatchOutcome::Mismatch;
             }
+            return if super::path_norm::normalize_project_root(trimmed) == expected_norm {
+                ProjectMatchOutcome::Match
+            } else {
+                ProjectMatchOutcome::Mismatch
+            };
         }
     }
-    // cwd を含む行が無い → 不完全 jsonl の可能性が高い。fail-closed で claim させない。
-    false
+    if lines_read < 8 {
+        // cwd を含む行がまだ無い → 不完全 jsonl の可能性が高いので再評価する。
+        ProjectMatchOutcome::Retry
+    } else {
+        // 8 行読んでも cwd が無い → Claude transcript としては採用しない。
+        ProjectMatchOutcome::Mismatch
+    }
 }
 
 fn projects_dir(project_root: &str) -> PathBuf {
@@ -191,6 +213,46 @@ fn emit_session_id(app: &AppHandle, terminal_id: &str, session_id: &str) -> bool
     }
 }
 
+/// 1 候補 jsonl を処理した結果。
+enum CandidateOutcome {
+    /// claim + emit に成功 → watcher は return すべき。
+    Emitted,
+    /// 確定的に解決済み (cwd 不一致 / 他 watcher が claim 済み / claim 競合敗北 / emit 失敗)
+    /// → snapshot に入れて再走査しない。
+    Consumed,
+    /// cwd 行がまだ読めない (partial write) → snapshot に入れず次イベントで再 check。
+    Retry,
+}
+
+fn process_candidate(
+    app: &AppHandle,
+    terminal_id: &str,
+    session_id: &str,
+    path: &Path,
+    expected_norm: &str,
+) -> CandidateOutcome {
+    if is_claimed(session_id) {
+        return CandidateOutcome::Consumed;
+    }
+    match jsonl_project_outcome(path, expected_norm) {
+        ProjectMatchOutcome::Match => {}
+        ProjectMatchOutcome::Mismatch => {
+            tracing::debug!("[claude_watcher] skip {} (cwd mismatch)", session_id);
+            return CandidateOutcome::Consumed;
+        }
+        ProjectMatchOutcome::Retry => return CandidateOutcome::Retry,
+    }
+    if !try_claim(session_id) {
+        return CandidateOutcome::Consumed;
+    }
+    if emit_session_id(app, terminal_id, session_id) {
+        CandidateOutcome::Emitted
+    } else {
+        // emit 失敗。既に claim 済みなので二重 emit を避けるため Consumed 扱い。
+        CandidateOutcome::Consumed
+    }
+}
+
 /// 1 つの terminal セッションに対して watch を開始する。
 ///
 /// Issue #632: 旧実装は `is_alive` 閉包を 500ms 間隔で polling していた (deadline 60 秒固定)。
@@ -216,7 +278,9 @@ pub fn spawn_watcher(
     spawned_at: SystemTime,
     watcher_cancel: Arc<AtomicBool>,
 ) {
-    std::thread::spawn(move || run_watcher_loop(app, terminal_id, project_root, spawned_at, watcher_cancel));
+    std::thread::spawn(move || {
+        run_watcher_loop(app, terminal_id, project_root, spawned_at, watcher_cancel)
+    });
 }
 
 /// Issue #632: watcher の本体ループ。`spawn_watcher` から std::thread で起動される。
@@ -275,21 +339,19 @@ fn run_watcher_loop(
     // snapshot 済みでも 1 度だけ claim を試す。
     let expected_norm = super::path_norm::normalize_project_root(&project_root);
     for candidate in list_recent_session_candidates(&dir, spawned_at) {
-        if is_claimed(&candidate.id) {
-            continue;
-        }
-        if !jsonl_matches_project(&candidate.path, &expected_norm) {
-            tracing::debug!(
-                "[claude_watcher] skip recent {} (cwd mismatch)",
-                candidate.id
-            );
-            continue;
-        }
-        if !try_claim(&candidate.id) {
-            continue;
-        }
-        if emit_session_id(&app, &terminal_id, &candidate.id) {
-            return;
+        match process_candidate(
+            &app,
+            &terminal_id,
+            &candidate.id,
+            &candidate.path,
+            &expected_norm,
+        ) {
+            CandidateOutcome::Emitted => return,
+            CandidateOutcome::Consumed => {}
+            CandidateOutcome::Retry => {
+                // cwd 行未到達の partial write。初期 snapshot から外して次イベントで再評価する。
+                snapshot.remove(&candidate.id);
+            }
         }
     }
 
@@ -332,32 +394,36 @@ fn run_watcher_loop(
                 let current = list_session_ids(&dir);
                 // Issue #30: 既に他 watcher が claim 済みの id は除外し、未 claim の
                 // 新規 id から 1 個だけ atomically に占有する。
-                let mut new_ids: Vec<&String> = current
+                let mut new_ids: Vec<String> = current
                     .difference(&snapshot)
                     .filter(|sid| !is_claimed(sid))
+                    .cloned()
                     .collect();
                 // 順序を安定化 (どの watcher が先に claim してもデテルミニスティックに)
                 new_ids.sort();
                 // Issue #31 対策用 normalize。毎イベント再計算しても軽量 (canonicalize は
                 // 最初にキャッシュされる OS FS cache にヒットする)。
+                let mut retry_ids = HashSet::new();
                 for candidate in new_ids {
-                    // jsonl の cwd が一致しないなら別 project の衝突なのでスキップ
                     let candidate_path = dir.join(format!("{}.jsonl", candidate));
-                    if !jsonl_matches_project(&candidate_path, &expected_norm) {
-                        tracing::debug!("[claude_watcher] skip {} (cwd mismatch)", candidate);
-                        continue;
-                    }
-                    if !try_claim(candidate) {
-                        // 競合で claim できず → 次の候補へ
-                        continue;
-                    }
-                    if emit_session_id(&app, &terminal_id, candidate) {
-                        return;
+                    match process_candidate(
+                        &app,
+                        &terminal_id,
+                        &candidate,
+                        &candidate_path,
+                        &expected_norm,
+                    ) {
+                        CandidateOutcome::Emitted => return,
+                        CandidateOutcome::Consumed => {}
+                        CandidateOutcome::Retry => {
+                            // cwd 行未到達の partial write。snapshot に入れず次イベントで再評価する。
+                            retry_ids.insert(candidate);
+                        }
                     }
                 }
                 // まだ自分の番が来ていない → snapshot を更新して次イベントを待つ。
                 // (他の watcher が claim した id は snapshot に足し、次回の difference から除外する)
-                snapshot.extend(current);
+                snapshot.extend(current.into_iter().filter(|id| !retry_ids.contains(id)));
             }
             Ok(Err(_)) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
             Err(_) => break,
@@ -401,6 +467,108 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(ids, vec!["new-session"]);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn jsonl_project_outcome_retries_empty_partial_and_short_files_without_cwd() {
+        let dir = unique_temp_dir("claude-watcher-partial");
+        let expected_norm = super::super::path_norm::normalize_project_root(&dir.to_string_lossy());
+
+        let empty = dir.join("empty.jsonl");
+        fs::write(&empty, "").expect("write empty jsonl");
+        assert_eq!(
+            jsonl_project_outcome(&empty, &expected_norm),
+            ProjectMatchOutcome::Retry
+        );
+
+        let partial = dir.join("partial.jsonl");
+        fs::write(&partial, r#"{"cwd":"#).expect("write partial jsonl");
+        assert_eq!(
+            jsonl_project_outcome(&partial, &expected_norm),
+            ProjectMatchOutcome::Retry
+        );
+
+        let short_without_cwd = dir.join("short-without-cwd.jsonl");
+        fs::write(
+            &short_without_cwd,
+            format!("{}\n", serde_json::json!({ "type": "assistant" })),
+        )
+        .expect("write short jsonl");
+        assert_eq!(
+            jsonl_project_outcome(&short_without_cwd, &expected_norm),
+            ProjectMatchOutcome::Retry
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn jsonl_project_outcome_matches_only_same_cwd() {
+        let dir = unique_temp_dir("claude-watcher-cwd");
+        let expected = dir.join("project-a");
+        let other = dir.join("project-b");
+        let expected_norm =
+            super::super::path_norm::normalize_project_root(&expected.to_string_lossy());
+
+        let matching = dir.join("matching.jsonl");
+        fs::write(
+            &matching,
+            format!(
+                "{}\n",
+                serde_json::json!({ "cwd": expected.to_string_lossy() })
+            ),
+        )
+        .expect("write matching jsonl");
+        assert_eq!(
+            jsonl_project_outcome(&matching, &expected_norm),
+            ProjectMatchOutcome::Match
+        );
+
+        let mismatching = dir.join("mismatching.jsonl");
+        fs::write(
+            &mismatching,
+            format!(
+                "{}\n",
+                serde_json::json!({ "cwd": other.to_string_lossy() })
+            ),
+        )
+        .expect("write mismatching jsonl");
+        assert_eq!(
+            jsonl_project_outcome(&mismatching, &expected_norm),
+            ProjectMatchOutcome::Mismatch
+        );
+
+        let empty_cwd = dir.join("empty-cwd.jsonl");
+        fs::write(
+            &empty_cwd,
+            format!("{}\n", serde_json::json!({ "cwd": "" })),
+        )
+        .expect("write empty cwd jsonl");
+        assert_eq!(
+            jsonl_project_outcome(&empty_cwd, &expected_norm),
+            ProjectMatchOutcome::Mismatch
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn jsonl_project_outcome_consumes_eight_complete_lines_without_cwd() {
+        let dir = unique_temp_dir("claude-watcher-no-cwd");
+        let expected_norm = super::super::path_norm::normalize_project_root(&dir.to_string_lossy());
+        let path = dir.join("no-cwd.jsonl");
+        let lines = (0..8)
+            .map(|idx| serde_json::json!({ "type": "message", "idx": idx }).to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(&path, format!("{lines}\n")).expect("write no cwd jsonl");
+
+        assert_eq!(
+            jsonl_project_outcome(&path, &expected_norm),
+            ProjectMatchOutcome::Mismatch
+        );
+
         let _ = fs::remove_dir_all(dir);
     }
 

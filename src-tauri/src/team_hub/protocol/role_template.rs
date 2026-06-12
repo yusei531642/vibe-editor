@@ -185,9 +185,9 @@ fn find_sections(text: &str) -> Vec<SectionMatch> {
             Some("Inputs")
         } else if after.starts_with("Outputs") {
             Some("Outputs")
-        } else if after.starts_with("Done Criteria") {
-            Some("Done Criteria")
-        } else if DONE_CRITERIA_ALIASES.iter().any(|a| after.starts_with(a)) {
+        } else if after.starts_with("Done Criteria")
+            || DONE_CRITERIA_ALIASES.iter().any(|a| after.starts_with(a))
+        {
             Some("Done Criteria")
         } else {
             None
@@ -203,6 +203,9 @@ fn find_sections(text: &str) -> Vec<SectionMatch> {
             .map(|&(li, _)| li)
             .unwrap_or(lines.len());
         let mut bytes = 0;
+        // Issue #939: 範囲 (line_idx+1)..next_line で `lines` を走査しつつ break 条件も持つため、
+        // index ループのほうが読みやすい (iterator 化は zip/enumerate で冗長になる)。
+        #[allow(clippy::needless_range_loop)]
         for li in (line_idx + 1)..next_line {
             // 次の H2/H1 見出しでも区切る (緩い fence)
             let lt = lines[li].trim_start();
@@ -279,9 +282,7 @@ pub fn validate_template(
         findings.push(TemplateFinding {
             level: TemplateLevel::Deny,
             category: "missing_all_sections",
-            detail: format!(
-                "instructions must contain all 4 sections (`### Responsibilities` / `### Inputs` / `### Outputs` / `### Done Criteria`); none were found"
-            ),
+            detail: "instructions must contain all 4 sections (`### Responsibilities` / `### Inputs` / `### Outputs` / `### Done Criteria`); none were found".to_string(),
         });
         // 全欠ケースも他チェックは ノイズになるので早期 return。
         return TemplateReport { findings };

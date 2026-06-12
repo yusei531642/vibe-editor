@@ -1,4 +1,9 @@
 import type { ViewMode } from '../stores/ui';
+import {
+  terminalStatusIsBlocked,
+  terminalStatusIsWorking,
+  type TerminalRuntimeStatus
+} from './terminal-status';
 
 /**
  * Topbar マスコットの状態モデル (Issue #717)。
@@ -26,7 +31,7 @@ export type StatusMascotState =
   | 'excited';
 
 export interface StatusMascotTerminalSnapshot {
-  status: string;
+  status: TerminalRuntimeStatus | null;
   exited: boolean;
   hasActivity: boolean;
   /** terminal 出力が来てから一定時間止まっていれば LLM 応答待ち扱い */
@@ -54,12 +59,12 @@ export interface StatusMascotSnapshot {
  */
 export function getStatusMascotState(snapshot: StatusMascotSnapshot): StatusMascotState {
   const hasBlocked = snapshot.terminals.some(
-    (terminal) => terminal.exited || isBlockedStatus(terminal.status)
+    (terminal) => terminal.exited || terminalStatusIsBlocked(terminal.status)
   );
   if (hasBlocked) return 'error';
 
   const hasRunning = snapshot.terminals.some(
-    (terminal) => terminal.hasActivity || isStartingStatus(terminal.status)
+    (terminal) => terminal.hasActivity || terminalStatusIsWorking(terminal.status)
   );
   if (hasRunning) return 'working';
 
@@ -67,26 +72,4 @@ export function getStatusMascotState(snapshot: StatusMascotSnapshot): StatusMasc
   if (hasThinking) return 'thinking';
 
   return 'idle';
-}
-
-function isStartingStatus(status: string): boolean {
-  const normalized = status.toLowerCase();
-  return (
-    status.includes('起動中') ||
-    status.includes('再接続') ||
-    normalized.includes('starting') ||
-    normalized.includes('reconnect')
-  );
-}
-
-function isBlockedStatus(status: string): boolean {
-  const normalized = status.toLowerCase();
-  return (
-    status.includes('起動失敗') ||
-    status.includes('例外') ||
-    status.includes('終了') ||
-    normalized.includes('failed') ||
-    normalized.includes('exception') ||
-    normalized.includes('exit')
-  );
 }

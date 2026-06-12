@@ -15,6 +15,15 @@ export type Language = 'ja' | 'en';
 export type StatusMascotVariant = 'vibe' | 'spark' | 'mono' | 'coder' | 'custom';
 
 /**
+ * Issue #820: dialog_open_file に渡す拡張子フィルタ。
+ * extensions はドット無しの拡張子 (例: ['png', 'jpg'])。
+ */
+export interface DialogFileFilter {
+  name: string;
+  extensions: string[];
+}
+
+/**
  * Issue #75: AppSettings の現在スキーマ。
  * Issue #449 で claudeArgs / codexArgs / customAgents[].args の Unicode dash (U+2013 等)
  * を ASCII '-' に正規化する migration を追加し v10。
@@ -333,6 +342,53 @@ export const DEFAULT_SETTINGS: AppSettings = {
   terminalForceUtf8: true
 };
 
+/**
+ * Issue #885: 設定モーダルの「デフォルトに戻す」が初期化してよい preference キーの
+ * 単一情報源。設定 UI で編集可能なキーのみを列挙する。
+ *
+ * 設定 UI に編集可能キーを追加したらこの配列にも追加すること。
+ * runtime 状態 (`notepad` / `lastOpenedRoot` / `recentProjects` / `workspaceFolders` /
+ * `hasCompletedOnboarding` / `fileTreeExpanded` / `fileTreeCollapsedRoots` /
+ * `claudeCodePanelWidth` / `sidebarWidth`) とユーザーデータ (`customAgents`) は
+ * **入れない**。「温存キーの列挙」ではなく「リセット対象の列挙」を採るのは、
+ * 将来のキー追加漏れの失敗モードが「そのキーだけリセットされない」(安全側) になり、
+ * 新規状態キーが Reset で消える (危険側) 再発を構造的に防げるため。
+ */
+export const RESETTABLE_SETTING_KEYS = [
+  'language',
+  'theme',
+  'uiFontFamily',
+  'uiFontSize',
+  'editorFontFamily',
+  'editorFontSize',
+  'terminalFontFamily',
+  'terminalFontSize',
+  'density',
+  'statusMascotVariant',
+  'claudeCommand',
+  'claudeArgs',
+  'claudeCwd',
+  'codexCommand',
+  'codexArgs',
+  'mcpAutoSetup',
+  'terminalForceUtf8'
+] as const satisfies readonly (keyof AppSettings)[];
+
+/**
+ * Issue #885: 現在の設定のうち `RESETTABLE_SETTING_KEYS` のキーだけを
+ * `DEFAULT_SETTINGS` の値で上書きした新しいオブジェクトを返す純関数。
+ * runtime 状態とユーザーデータは `current` の値を温存する。
+ */
+export function resetPreferencesToDefaults(current: AppSettings): AppSettings {
+  const next: AppSettings = { ...current };
+  for (const key of RESETTABLE_SETTING_KEYS) {
+    // キーごとに値型が異なる union への代入は TS が静的検証できないため
+    // ここだけ Record 経由で書き込む (キー自体は keyof AppSettings に束縛済み)。
+    (next as unknown as Record<string, unknown>)[key] = DEFAULT_SETTINGS[key];
+  }
+  return next;
+}
+
 /** git status --porcelain のエントリ */
 export interface GitFileChange {
   path: string;
@@ -349,6 +405,12 @@ export interface GitFileChange {
 export interface GitStatus {
   ok: boolean;
   error?: string;
+  /**
+   * Issue #888: error が「git リポジトリではない」由来かどうかの構造化フラグ。
+   * renderer は raw stderr の文字列推測をせず、このフラグで i18n メッセージに引き当てる。
+   * Rust 側は常にシリアライズするが、TS 側で組み立てる既存コードの後方互換のため optional。
+   */
+  notGitRepo?: boolean;
   repoRoot?: string;
   branch?: string;
   files: GitFileChange[];
@@ -823,6 +885,21 @@ export interface TeamOrchestrationSummary {
 }
 
 /**
+ * Issue #935: タスク status の canonical 値。Rust 側 SSOT
+ * (`src-tauri/src/team_hub/task_status.rs` の `TaskStatus`) と同期する。
+ * 受信境界 (team_update_task) で legacy alias ("completed"/"complete"/"canceled")
+ * は canonical 値へ正規化されるため、新規データはこの union のみになる。
+ */
+export type TeamTaskStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'done'
+  | 'blocked'
+  | 'needs_input'
+  | 'failed'
+  | 'cancelled';
+
+/**
  * Issue #514: TeamHub orchestration state の TS 投影。
  * Rust 側 `commands/team_state.rs` の `TeamOrchestrationState` (camelCase) に揃える。
  * dashboard / 履歴復元 / 統合フェーズビューなど renderer 全体で参照する。
@@ -831,6 +908,11 @@ export interface TeamTaskSnapshot {
   id: number;
   assignedTo: string;
   description: string;
+  /**
+   * 通常は `TeamTaskStatus` の canonical 値。永続化済みの古いデータには
+   * legacy alias / 当時の任意文字列が残りうるため型は string のまま
+   * (判定は Rust 側 `task_status.rs` が正規化して行う)。
+   */
   status: string;
   createdBy: string;
   createdAt: string;
@@ -938,7 +1020,8 @@ export interface WorkerReportPayload {
  */
 export interface UpdateTaskArgs {
   taskId: number;
-  status: 'pending' | 'in_progress' | 'done' | 'completed' | 'blocked' | string;
+  /** Issue #935: trailing `| string` を撤去し canonical union のみ許可する */
+  status: TeamTaskStatus;
   summary?: string;
   blockedReason?: string;
   nextAction?: string;
@@ -1443,6 +1526,55 @@ export interface RecruitAckArgs {
   reason?: string | null;
   /** 失敗 phase。Rust 側は enum で受けるため `RecruitAckPhase` の値のみを送る。 */
   phase?: RecruitAckPhase | null;
+}
+
+/**
+ * Issue #930: `team:recruit-request` に同梱される動的ロール定義。
+ * Rust 側 `team_hub/events.rs` の `RecruitRequestDynamicRole` (camelCase) と同期。
+ */
+export interface RecruitRequestDynamicRole {
+  id: string;
+  label: string;
+  description: string;
+  instructions: string;
+  instructionsJa?: string | null;
+}
+
+/**
+ * Issue #930: `team:recruit-request` イベントの payload。
+ * Rust 側 `team_hub/events.rs` の `RecruitRequestPayload` (camelCase) と同期。
+ * emit 箇所は recruit.rs (worker 採用) と create_leader.rs (leader 生成) の 2 つで、
+ * leader 経路では waitPolicy キーが載らない。
+ */
+export interface RecruitRequestPayload {
+  teamId: string;
+  requesterAgentId: string;
+  requesterRole: string;
+  newAgentId: string;
+  roleProfileId: string;
+  engine: 'claude' | 'codex';
+  agentLabelHint?: string;
+  waitPolicy?: WaitPolicy;
+  /** Leader が team_recruit(role_definition=...) で 1 ステップ採用した場合に同梱される */
+  dynamicRole?: RecruitRequestDynamicRole | null;
+}
+
+/**
+ * Issue #930: `team:handoff` イベントの payload。
+ * Rust 側 `team_hub/events.rs` の `HandoffEventPayload` (camelCase) と同期。
+ * emit 箇所は send.rs (初回配送, retried=false) と team_inject.rs (再送, retried=true)。
+ */
+export interface HandoffPayload {
+  teamId: string;
+  fromAgentId: string;
+  fromRole: string;
+  toAgentId: string;
+  toRole: string;
+  preview: string;
+  messageId: number;
+  timestamp?: string;
+  /** retry 配送 (`app_team_retry_inject`) による再送なら true */
+  retried?: boolean;
 }
 
 // ---------- Window Effects (Issue #260) ----------

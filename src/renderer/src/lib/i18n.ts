@@ -44,6 +44,7 @@ const ja: Dict = {
   // Issue #729: MascotSection の isJa 三項 / settings-options.ts hardcode を i18n.ts に集約
   'settings.mascot.title': 'キャラクター',
   'settings.mascot.pickTitle': '相棒にする画像を選択',
+  'settings.mascot.imageFilterName': '画像',
   'settings.mascot.choose': '画像を選ぶ…',
   'settings.mascot.clear': 'クリア',
   'settings.mascot.hint':
@@ -88,6 +89,15 @@ const ja: Dict = {
   'appMenu.newDialogTitle': '新規プロジェクト',
   'appMenu.openFolderDialogTitle': 'フォルダを開く',
   'appMenu.openFileDialogTitle': 'ファイルを開く',
+  'project.newDialogTitle': '新規プロジェクト: 空フォルダを選択/作成',
+  'project.openExistingDialogTitle': '既存プロジェクトを開く',
+  'project.loading': 'プロジェクト読み込み中…',
+  'project.loadError': '読み込みエラー: {error}',
+  'project.initError': '初期化エラー: {error}',
+  'project.newFolderNotEmpty': 'フォルダが空ではありません。既存として開きます',
+  'project.created': '新規プロジェクトを作成',
+  'project.fileParentLoaded': '{file} の親フォルダをプロジェクトとして読み込みました',
+  'project.recentCleared': '最近のプロジェクト履歴をクリアしました',
   'appMenu.addWorkspaceDialogTitle': 'ワークスペースに追加',
   'appMenu.addToWorkspace': 'フォルダをワークスペースに追加…',
   'appMenu.addToWorkspaceHint': 'サイドバーに別ルートを並べる',
@@ -149,10 +159,12 @@ const ja: Dict = {
   // ---------- Team history ----------
   'teamHistory.resume': 'チーム「{name}」を復元',
   'teamHistory.resumed': 'チーム「{name}」を復元しました',
+  'teamHistory.alreadyOpen': 'チーム「{name}」は既に Canvas 上にあります',
   'teamHistory.delete': '履歴から削除',
 
   // ---------- File tree / Editor ----------
   'filetree.refresh': '再読込',
+  'filetree.treeLabel': 'ファイルツリー',
   'diff.loading': 'diff を読み込み中…',
   'diff.selectFile': '差分を表示するファイルを選択してください',
   'diff.error': 'エラー: {error}',
@@ -220,6 +232,7 @@ const ja: Dict = {
   'filetree.confirmDeleteFile': '"{name}" をゴミ箱に移動しますか？',
   'filetree.confirmDeleteFolder': '"{name}" とその中身をすべてゴミ箱に移動しますか？',
   'filetree.confirmDeletePermanent': '"{name}" を完全に削除しますか？この操作は元に戻せません。',
+  'filetree.preloadRestartRequired': 'アプリを再起動してください（preload 更新のため）',
   'canvasMenu.lockTeam': 'チームで一緒に動かす',
   'canvasMenu.unlockTeam': 'チーム固定を解除',
   'canvasMenu.deleteCard': 'カードを削除',
@@ -272,6 +285,8 @@ const ja: Dict = {
   'canvas.switchToIde.tooltip': 'IDE — エディタとターミナル中心の IDE モードへ切替',
   'canvas.modeToggle': 'Canvas モードに切り替え',
   'canvas.card.editor': 'エディタ',
+  'canvas.list.title': 'チーム',
+  'canvas.list.empty': 'まだエージェントが配置されていません',
 
   // ---------- Agent Card ----------
   'agentCard.close': 'カードを閉じる',
@@ -385,6 +400,8 @@ const ja: Dict = {
   'dashboard.empty.noMembers':
     'このチームにはまだメンバーがいません。Leader から `team_recruit` でメンバーを招集してください',
   'dashboard.banner.humanGate': 'Human gate が blocked: Leader の判断待ちです',
+  'dashboard.alert.leaderInput': 'Leader 入力待ち',
+  'dashboard.alert.staleOutput': '5 分以上出力なし',
   // Issue #615: dual / multi preset 対応の team section heading
   'dashboard.team.label': 'チーム {index}',
 
@@ -611,6 +628,7 @@ const ja: Dict = {
 
   // ---------- Toast ----------
   'toast.reviewRequested': '差分レビューを依頼: {path}',
+  'toast.sessionResumed': 'セッションに復帰: {title}',
   'toast.pathCopied': 'パスをクリップボードにコピー',
   'toast.copyFailed': 'クリップボードへのコピーに失敗しました',
   'toast.revealFailed': 'ファイルマネージャでの表示に失敗しました',
@@ -624,6 +642,10 @@ const ja: Dict = {
   'toast.fileOpFailed': 'ファイル操作に失敗しました: {error}',
   'toast.fileOpClipboardEmpty': 'クリップボードに対象がありません',
   'toast.terminalNotReady': 'ターミナルが起動していません',
+  'toast.settings.loadFailed':
+    '設定ファイルを読み込めなかったため、この起動中は設定の自動保存を停止しました: {error}',
+  'toast.settings.saveBlocked':
+    '設定ファイルを読み込めなかったため、設定の保存を停止しています。アプリを再起動してください。',
   'toast.settings.saveFailed': '設定の保存に失敗しました: {error}',
   'toast.settings.projectRootFailed': 'プロジェクトルートの反映に失敗しました: {error}',
   // Issue #578: Canvas 非表示中に recruit が走った件数を可視化時に警告する
@@ -699,8 +721,19 @@ const ja: Dict = {
   'terminal.exited': '終了',
   'terminal.exitedTitle': 'プロセスが終了しています',
   'terminal.exitedBanner': 'プロセスが終了しました ({status})',
+  'terminal.status.starting': '{command} を起動中…',
+  'terminal.status.running': '実行中: {command}',
+  'terminal.status.exited': '終了 (exitCode={exitCode})',
+  'terminal.status.spawnFailed': '起動失敗: {error}',
+  'terminal.status.reconnect': '再接続: {command}',
+  'terminal.status.reconnectRestored': '再接続 (出力復元): {command}',
+  'terminal.status.exception': '例外: {error}',
+  'terminal.limitReached': 'ターミナル上限（{max}）に達しました',
+  'terminal.limitWarning': 'ターミナル数が {threshold} に達しました（上限 {max}）',
   'terminal.restart': '再起動',
   'terminal.closeTab': '閉じる',
+  'layout.sidebarResizeTitle': 'ドラッグでサイドバー幅を調整 / ダブルクリックでリセット',
+  'layout.idePanelResizeTitle': 'ドラッグで IDE モードパネルの幅を調整',
   'cmd.settings.open': '設定を開く',
   'cmd.settings.cycleDensity': '情報密度を切り替え',
   'cmd.settings.cycleDensitySub': '現在: {density}',
@@ -776,9 +809,22 @@ const ja: Dict = {
   // ---------- Terminal タブ復元 (Issue #857) ----------
   'terminalTabs.restore.transcriptMissing':
     '過去の会話履歴が見つからず {count} 件のタブを新規会話で再起動しました',
+  'terminalTabs.saveFailed':
+    'ターミナルタブの保存に失敗しました: {error}',
 
   // ---------- Status ----------
   'status.noProject': 'プロジェクトが選択されていません',
+
+  // ---------- Image preview ----------
+  'imagePreview.devUnavailable': 'dev:vite モードでは画像プレビューを利用できません。',
+  'imagePreview.loadError': '画像を表示できません: {path}',
+
+  // ---------- Team history ----------
+  'teamHistory.resume.emptyMembers': 'チームメンバー情報が空のため復元できません',
+  'teamHistory.resume.otherProject':
+    'このチームは別プロジェクト({project})の履歴です',
+  'teamHistory.resume.terminalLimit':
+    'ターミナル上限({max})を超えるため復元できません',
 
   // ---------- Onboarding ----------
   'onboarding.back': '戻る',
@@ -850,6 +896,7 @@ const en: Dict = {
   // Issue #729: MascotSection isJa ternaries / settings-options.ts hardcode -> centralised in i18n.ts
   'settings.mascot.title': 'Character',
   'settings.mascot.pickTitle': 'Pick a mascot image',
+  'settings.mascot.imageFilterName': 'Images',
   'settings.mascot.choose': 'Choose image…',
   'settings.mascot.clear': 'Clear',
   'settings.mascot.hint':
@@ -893,6 +940,15 @@ const en: Dict = {
   'appMenu.newDialogTitle': 'New project',
   'appMenu.openFolderDialogTitle': 'Open folder',
   'appMenu.openFileDialogTitle': 'Open file',
+  'project.newDialogTitle': 'New project: choose or create an empty folder',
+  'project.openExistingDialogTitle': 'Open existing project',
+  'project.loading': 'Loading project…',
+  'project.loadError': 'Load error: {error}',
+  'project.initError': 'Initialization error: {error}',
+  'project.newFolderNotEmpty': 'Folder is not empty. Opening it as an existing project.',
+  'project.created': 'Created new project',
+  'project.fileParentLoaded': 'Loaded the parent folder of {file} as the project',
+  'project.recentCleared': 'Cleared recent project history',
   'appMenu.addWorkspaceDialogTitle': 'Add to workspace',
   'appMenu.openFileHint': 'Single file',
   'appMenu.addToWorkspace': 'Add folder to workspace…',
@@ -955,10 +1011,12 @@ const en: Dict = {
   // ---------- Team history ----------
   'teamHistory.resume': 'Resume team "{name}"',
   'teamHistory.resumed': 'Resumed team "{name}"',
+  'teamHistory.alreadyOpen': 'Team "{name}" is already open on the Canvas',
   'teamHistory.delete': 'Remove from history',
 
   // ---------- File tree / Editor ----------
   'filetree.refresh': 'Reload',
+  'filetree.treeLabel': 'File tree',
   'diff.loading': 'Loading diff…',
   'diff.selectFile': 'Select a file to view its diff',
   'diff.error': 'Error: {error}',
@@ -1026,6 +1084,7 @@ const en: Dict = {
   'filetree.confirmDeleteFile': 'Move "{name}" to the trash?',
   'filetree.confirmDeleteFolder': 'Move "{name}" and all of its contents to the trash?',
   'filetree.confirmDeletePermanent': 'Permanently delete "{name}"? This action cannot be undone.',
+  'filetree.preloadRestartRequired': 'Restart the app to apply the preload update',
   'canvasMenu.lockTeam': 'Move team together',
   'canvasMenu.unlockTeam': 'Unlock team movement',
   'canvasMenu.deleteCard': 'Delete card',
@@ -1078,6 +1137,8 @@ const en: Dict = {
   'canvas.switchToIde.tooltip': 'IDE — Return to the editor + terminal IDE mode',
   'canvas.modeToggle': 'Switch to Canvas mode',
   'canvas.card.editor': 'Editor',
+  'canvas.list.title': 'Team',
+  'canvas.list.empty': 'No agents have been placed yet',
 
   // ---------- Agent Card ----------
   'agentCard.close': 'Close card',
@@ -1193,6 +1254,8 @@ const en: Dict = {
   'dashboard.empty.noMembers':
     'This team has no members yet. Recruit members from the Leader using `team_recruit`.',
   'dashboard.banner.humanGate': 'Human gate blocked: waiting for leader decision',
+  'dashboard.alert.leaderInput': 'Awaiting Leader input',
+  'dashboard.alert.staleOutput': 'No output for 5+ minutes',
   // Issue #615: dual / multi preset support for team section heading
   'dashboard.team.label': 'Team {index}',
 
@@ -1420,6 +1483,7 @@ const en: Dict = {
 
   // ---------- Toast ----------
   'toast.reviewRequested': 'Review requested: {path}',
+  'toast.sessionResumed': 'Resumed session: {title}',
   'toast.pathCopied': 'Path copied to clipboard',
   'toast.copyFailed': 'Failed to copy to clipboard',
   'toast.revealFailed': 'Failed to reveal in file manager',
@@ -1433,6 +1497,10 @@ const en: Dict = {
   'toast.fileOpFailed': 'File operation failed: {error}',
   'toast.fileOpClipboardEmpty': 'Nothing to paste',
   'toast.terminalNotReady': 'Terminal is not ready',
+  'toast.settings.loadFailed':
+    'Failed to load settings, so automatic settings saves are disabled for this launch: {error}',
+  'toast.settings.saveBlocked':
+    'Settings were not loaded, so saving settings is disabled. Please restart the app.',
   'toast.settings.saveFailed': 'Failed to save settings: {error}',
   'toast.settings.projectRootFailed': 'Failed to apply project root: {error}',
   // Issue #578: Warn when recruits ran while canvas was hidden
@@ -1511,8 +1579,19 @@ const en: Dict = {
   'terminal.exited': 'exited',
   'terminal.exitedTitle': 'Process has exited',
   'terminal.exitedBanner': 'Process exited ({status})',
+  'terminal.status.starting': 'Starting {command}…',
+  'terminal.status.running': 'Running: {command}',
+  'terminal.status.exited': 'Exited (exitCode={exitCode})',
+  'terminal.status.spawnFailed': 'Start failed: {error}',
+  'terminal.status.reconnect': 'Reconnected: {command}',
+  'terminal.status.reconnectRestored': 'Reconnected (restored output): {command}',
+  'terminal.status.exception': 'Exception: {error}',
+  'terminal.limitReached': 'Terminal limit reached ({max})',
+  'terminal.limitWarning': 'Terminal count reached {threshold} (limit {max})',
   'terminal.restart': 'Restart',
   'terminal.closeTab': 'Close',
+  'layout.sidebarResizeTitle': 'Drag to resize the sidebar / double-click to reset',
+  'layout.idePanelResizeTitle': 'Drag to resize the IDE mode panel',
   'cmd.settings.open': 'Open settings',
   'cmd.settings.cycleDensity': 'Cycle density',
   'cmd.settings.cycleDensitySub': 'Current: {density}',
@@ -1591,8 +1670,20 @@ const en: Dict = {
   // ---------- Terminal tab restore (Issue #857) ----------
   'terminalTabs.restore.transcriptMissing':
     "Couldn't find past transcripts; restarted {count} tab(s) as new conversations.",
+  'terminalTabs.saveFailed': 'Stopped saving terminal tabs: {error}',
 
   'status.noProject': 'No project selected',
+
+  // ---------- Image preview ----------
+  'imagePreview.devUnavailable': 'Image preview is unavailable in dev:vite mode.',
+  'imagePreview.loadError': 'Unable to display image: {path}',
+
+  // ---------- Team history ----------
+  'teamHistory.resume.emptyMembers': 'Cannot resume because team member information is empty',
+  'teamHistory.resume.otherProject':
+    'This team history belongs to another project ({project})',
+  'teamHistory.resume.terminalLimit':
+    'Cannot resume because it would exceed the terminal limit ({max})',
 
   // ---------- Onboarding ----------
   'onboarding.back': 'Back',

@@ -101,6 +101,7 @@ describe('spawnTeams (Issue #611 / #612)', () => {
     expect(cards).toHaveLength(2);
     expect(cards[0].payload).toMatchObject({
       teamId: 'team-a',
+      teamName: 'Org A',
       agentId: 'leader-0-team-a',
       role: 'leader',
       roleProfileId: 'leader',
@@ -109,6 +110,7 @@ describe('spawnTeams (Issue #611 / #612)', () => {
     });
     expect(cards[1].payload).toMatchObject({
       teamId: 'team-a',
+      teamName: 'Org A',
       agentId: 'programmer-1-team-a',
       role: 'programmer',
       organization: ORG_A
@@ -135,6 +137,7 @@ describe('spawnTeams (Issue #611 / #612)', () => {
     expect(cards).toHaveLength(1);
     expect(cards[0].payload).toMatchObject({
       teamId: 'team-user-1',
+      teamName: 'My Preset',
       agentId: 'reviewer-0-team-user-1',
       customInstructions: 'review the diff carefully'
     });
@@ -163,6 +166,7 @@ describe('spawnTeams (Issue #611 / #612)', () => {
 
     expect(cards[0].payload).toMatchObject({
       teamId: 'team-hist-1',
+      teamName: 'Yesterdays team',
       latestHandoff: HANDOFF_REF,
       resumeSessionId: 'sess-abc'
     });
@@ -344,6 +348,7 @@ describe('spawnTeams (Issue #611 / #612)', () => {
     // どの経路でも全 agent に同一 teamId
     for (const card of builtinResult.cards) {
       expect(card.payload.teamId).toBe('team-equiv');
+      expect(card.payload.teamName).toBe('Equiv');
       expect(card.payload.agentId).toMatch(/^(leader|programmer)-\d-team-equiv$/);
       expect(card.payload.cwd).toBe('/repo');
     }

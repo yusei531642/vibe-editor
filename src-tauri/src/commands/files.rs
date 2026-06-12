@@ -10,8 +10,34 @@ mod path_safety;
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Manager};
 
+use crate::commands::error::CommandResult;
+use crate::state::AppState;
 use encoding::{detect_text_or_binary, encode_for_save};
+
+/// Issue #932 / #954 / #963: renderer 由来の `project_root` を検証する files_* 共通ゲート。
+///
+/// 当初 (#932) は write 系を active project との厳格一致で守っていたが、multi-root
+/// workspace (settings.workspaceFolders, Issue #4) の追加ルート内ファイル操作
+/// (新規作成 / リネーム / 削除 / 貼り付け) まで拒否してしまう退行があった (#963)。
+/// read 側 (#954) と同じ `assert_readable_project_root` (active root ∪ settings.json
+/// SSOT の workspaceFolders、workspace folder には `is_safe_watch_root` 検証を追加要求)
+/// に read/write とも統一する。
+///
+/// async command が `State` (参照入力) を取ると Tauri が `Result` 返却を強制するため、非 `Result`
+/// を返す既存 FS コマンド契約 (renderer は構造体をそのまま受ける) を保てない。owned/'static な
+/// `AppHandle` 経由で state を引くことでこの制約を回避し、既存の戻り値型を維持したまま
+/// ゲートを各コマンド先頭に挿せるようにする。
+async fn assert_workspace_project_root_via(
+    app: &AppHandle,
+    project_root: &str,
+) -> CommandResult<()> {
+    let state = app.state::<AppState>();
+    crate::commands::authz::assert_readable_project_root(&state.project_root, project_root)
+        .await
+        .map(|_| ())
+}
 use hash::{mtime_ms_of, sha256_hex};
 // safe_join は外部 (commands/git.rs) からも呼ばれるので pub use で再 export する。
 pub use path_safety::safe_join;
@@ -85,7 +111,16 @@ pub struct FileWriteResult {
 }
 
 #[tauri::command]
-pub async fn files_list(project_root: String, rel_path: String) -> FileListResult {
+pub async fn files_list(app: AppHandle, project_root: String, rel_path: String) -> FileListResult {
+    // Issue #954: read/probe 系も project_root ゲートに通す (任意ディレクトリ列挙の阻止)。
+    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
+        return FileListResult {
+            ok: false,
+            error: Some(e.to_string()),
+            dir: rel_path,
+            entries: vec![],
+        };
+    }
     let dir = safe_join(&project_root, &rel_path);
     let dir = match dir {
         Some(p) if p.is_dir() => p,
@@ -146,7 +181,16 @@ pub async fn files_list(project_root: String, rel_path: String) -> FileListResul
 }
 
 #[tauri::command]
-pub async fn files_read(project_root: String, rel_path: String) -> FileReadResult {
+pub async fn files_read(app: AppHandle, project_root: String, rel_path: String) -> FileReadResult {
+    // Issue #954: read/probe 系も project_root ゲートに通す (任意ファイル読取の阻止)。
+    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
+        return FileReadResult {
+            ok: false,
+            error: Some(e.to_string()),
+            path: rel_path,
+            ..Default::default()
+        };
+    }
     let Some(abs) = safe_join(&project_root, &rel_path) else {
         return FileReadResult {
             ok: false,
@@ -217,8 +261,12 @@ pub async fn files_read(project_root: String, rel_path: String) -> FileReadResul
     }
 }
 
+// Issue #939: tauri command は renderer から渡る引数を 1:1 で受けるため引数が多くなるのは
+// 構造上不可避 (引数を struct にまとめると IPC 契約 / shared.ts 側も書き換えが必要)。
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 pub async fn files_write(
+    app: AppHandle,
     project_root: String,
     rel_path: String,
     content: String,
@@ -233,6 +281,36 @@ pub async fn files_write(
     encoding: Option<String>,
     // Issue #119: 前回 read 時の SHA-256 (hex)。指定時は save 直前に現在ファイルの hash と比較し、
     // mtime/size を見逃した「同サイズ・1 秒以内」変更でも conflict を確定する。
+    expected_content_hash: Option<String>,
+) -> FileWriteResult {
+    // Issue #932: renderer 由来の project_root を active project と照合する共通ゲート。
+    // 未検証だと乗っ取られた renderer が active プロジェクト外の任意ファイルを上書きできた。
+    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
+        return FileWriteResult {
+            ok: false,
+            error: Some(e.to_string()),
+            ..Default::default()
+        };
+    }
+    files_write_inner(
+        project_root,
+        rel_path,
+        content,
+        expected_mtime_ms,
+        expected_size_bytes,
+        encoding,
+        expected_content_hash,
+    )
+    .await
+}
+
+async fn files_write_inner(
+    project_root: String,
+    rel_path: String,
+    content: String,
+    expected_mtime_ms: Option<u64>,
+    expected_size_bytes: Option<u64>,
+    encoding: Option<String>,
     expected_content_hash: Option<String>,
 ) -> FileWriteResult {
     let Some(abs) = safe_join(&project_root, &rel_path) else {
@@ -501,6 +579,20 @@ fn rel_from_abs(project_root: &str, abs: &Path) -> String {
 /// `name` は basename。`overwrite=false` のとき既存ファイルがあれば失敗を返す。
 #[tauri::command]
 pub async fn files_create(
+    app: AppHandle,
+    project_root: String,
+    rel_path: String,
+    name: String,
+    overwrite: Option<bool>,
+) -> FileMutationResult {
+    // Issue #932: active project と照合してから FS 操作を行う (任意ファイル作成を防ぐ)。
+    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
+        return FileMutationResult::err(rel_path, e.to_string());
+    }
+    files_create_inner(project_root, rel_path, name, overwrite).await
+}
+
+async fn files_create_inner(
     project_root: String,
     rel_path: String,
     name: String,
@@ -537,6 +629,19 @@ pub async fn files_create(
 /// Issue #592: 新規ディレクトリを作成する。親ディレクトリは存在している必要がある。
 #[tauri::command]
 pub async fn files_create_dir(
+    app: AppHandle,
+    project_root: String,
+    rel_path: String,
+    name: String,
+) -> FileMutationResult {
+    // Issue #932: active project と照合してから FS 操作を行う (任意ディレクトリ作成を防ぐ)。
+    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
+        return FileMutationResult::err(rel_path, e.to_string());
+    }
+    files_create_dir_inner(project_root, rel_path, name).await
+}
+
+async fn files_create_dir_inner(
     project_root: String,
     rel_path: String,
     name: String,
@@ -573,6 +678,21 @@ pub async fn files_create_dir(
 /// 既存パス上書きは `overwrite=true` のときのみ許可。
 #[tauri::command]
 pub async fn files_rename(
+    app: AppHandle,
+    project_root: String,
+    from_rel: String,
+    to_parent_rel: String,
+    new_name: String,
+    overwrite: Option<bool>,
+) -> FileMutationResult {
+    // Issue #932: active project と照合してから FS 操作を行う (任意ファイル rename/move を防ぐ)。
+    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
+        return FileMutationResult::err(from_rel, e.to_string());
+    }
+    files_rename_inner(project_root, from_rel, to_parent_rel, new_name, overwrite).await
+}
+
+async fn files_rename_inner(
     project_root: String,
     from_rel: String,
     to_parent_rel: String,
@@ -632,6 +752,19 @@ pub async fn files_rename(
 /// `permanent=false` (default) は OS のゴミ箱に送り、`true` なら完全削除する。
 #[tauri::command]
 pub async fn files_delete(
+    app: AppHandle,
+    project_root: String,
+    rel_path: String,
+    permanent: Option<bool>,
+) -> FileMutationResult {
+    // Issue #932: active project と照合してから FS 操作を行う (任意ファイル削除を防ぐ)。
+    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
+        return FileMutationResult::err(rel_path, e.to_string());
+    }
+    files_delete_inner(project_root, rel_path, permanent).await
+}
+
+async fn files_delete_inner(
     project_root: String,
     rel_path: String,
     permanent: Option<bool>,
@@ -676,6 +809,21 @@ pub async fn files_delete(
 /// `from_rel` 既存パス、`to_parent_rel` コピー先親ディレクトリ、`new_name` 新しい basename。
 #[tauri::command]
 pub async fn files_copy(
+    app: AppHandle,
+    project_root: String,
+    from_rel: String,
+    to_parent_rel: String,
+    new_name: String,
+    overwrite: Option<bool>,
+) -> FileMutationResult {
+    // Issue #932: active project と照合してから FS 操作を行う (任意ファイル複製を防ぐ)。
+    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
+        return FileMutationResult::err(from_rel, e.to_string());
+    }
+    files_copy_inner(project_root, from_rel, to_parent_rel, new_name, overwrite).await
+}
+
+async fn files_copy_inner(
     project_root: String,
     from_rel: String,
     to_parent_rel: String,
@@ -836,7 +984,7 @@ mod issue_592_tests {
     async fn files_create_creates_file_in_root() {
         let td = tempdir().unwrap();
         let root = root_str(&td);
-        let res = files_create(root.clone(), "".into(), "hello.txt".into(), None).await;
+        let res = files_create_inner(root.clone(), "".into(), "hello.txt".into(), None).await;
         assert!(res.ok, "{:?}", res.error);
         assert!(td.path().join("hello.txt").exists());
     }
@@ -845,7 +993,7 @@ mod issue_592_tests {
     async fn files_create_rejects_path_traversal_via_name() {
         let td = tempdir().unwrap();
         let root = root_str(&td);
-        let res = files_create(root, "".into(), "../escape.txt".into(), None).await;
+        let res = files_create_inner(root, "".into(), "../escape.txt".into(), None).await;
         assert!(!res.ok);
     }
 
@@ -853,9 +1001,9 @@ mod issue_592_tests {
     async fn files_create_rejects_existing_without_overwrite() {
         let td = tempdir().unwrap();
         let root = root_str(&td);
-        let r1 = files_create(root.clone(), "".into(), "x.txt".into(), None).await;
+        let r1 = files_create_inner(root.clone(), "".into(), "x.txt".into(), None).await;
         assert!(r1.ok);
-        let r2 = files_create(root.clone(), "".into(), "x.txt".into(), Some(false)).await;
+        let r2 = files_create_inner(root.clone(), "".into(), "x.txt".into(), Some(false)).await;
         assert!(!r2.ok);
     }
 
@@ -863,7 +1011,7 @@ mod issue_592_tests {
     async fn files_create_dir_creates_subdir() {
         let td = tempdir().unwrap();
         let root = root_str(&td);
-        let res = files_create_dir(root, "".into(), "subdir".into()).await;
+        let res = files_create_dir_inner(root, "".into(), "subdir".into()).await;
         assert!(res.ok, "{:?}", res.error);
         assert!(td.path().join("subdir").is_dir());
     }
@@ -872,9 +1020,9 @@ mod issue_592_tests {
     async fn files_rename_moves_file() {
         let td = tempdir().unwrap();
         let root = root_str(&td);
-        files_create(root.clone(), "".into(), "a.txt".into(), None).await;
+        files_create_inner(root.clone(), "".into(), "a.txt".into(), None).await;
         let res =
-            files_rename(root.clone(), "a.txt".into(), "".into(), "b.txt".into(), None).await;
+            files_rename_inner(root.clone(), "a.txt".into(), "".into(), "b.txt".into(), None).await;
         assert!(res.ok, "{:?}", res.error);
         assert!(!td.path().join("a.txt").exists());
         assert!(td.path().join("b.txt").exists());
@@ -884,8 +1032,8 @@ mod issue_592_tests {
     async fn files_rename_rejects_self_into_descendant() {
         let td = tempdir().unwrap();
         let root = root_str(&td);
-        files_create_dir(root.clone(), "".into(), "dir1".into()).await;
-        let res = files_rename(
+        files_create_dir_inner(root.clone(), "".into(), "dir1".into()).await;
+        let res = files_rename_inner(
             root.clone(),
             "dir1".into(),
             "dir1".into(),
@@ -900,9 +1048,9 @@ mod issue_592_tests {
     async fn files_copy_clones_file() {
         let td = tempdir().unwrap();
         let root = root_str(&td);
-        files_create(root.clone(), "".into(), "a.txt".into(), None).await;
+        files_create_inner(root.clone(), "".into(), "a.txt".into(), None).await;
         std::fs::write(td.path().join("a.txt"), b"hi").unwrap();
-        let res = files_copy(
+        let res = files_copy_inner(
             root.clone(),
             "a.txt".into(),
             "".into(),
@@ -918,11 +1066,11 @@ mod issue_592_tests {
     async fn files_copy_recurses_directory() {
         let td = tempdir().unwrap();
         let root = root_str(&td);
-        files_create_dir(root.clone(), "".into(), "src".into()).await;
+        files_create_dir_inner(root.clone(), "".into(), "src".into()).await;
         std::fs::write(td.path().join("src").join("a.txt"), b"a").unwrap();
         std::fs::create_dir(td.path().join("src").join("nested")).unwrap();
         std::fs::write(td.path().join("src").join("nested").join("b.txt"), b"b").unwrap();
-        let res = files_copy(root.clone(), "src".into(), "".into(), "dst".into(), None).await;
+        let res = files_copy_inner(root.clone(), "src".into(), "".into(), "dst".into(), None).await;
         assert!(res.ok, "{:?}", res.error);
         assert_eq!(std::fs::read(td.path().join("dst").join("a.txt")).unwrap(), b"a");
         assert_eq!(
@@ -935,8 +1083,8 @@ mod issue_592_tests {
     async fn files_copy_rejects_into_descendant() {
         let td = tempdir().unwrap();
         let root = root_str(&td);
-        files_create_dir(root.clone(), "".into(), "a".into()).await;
-        let res = files_copy(root.clone(), "a".into(), "a".into(), "inside".into(), None).await;
+        files_create_dir_inner(root.clone(), "".into(), "a".into()).await;
+        let res = files_copy_inner(root.clone(), "a".into(), "a".into(), "inside".into(), None).await;
         assert!(!res.ok);
     }
 
@@ -954,11 +1102,11 @@ mod issue_592_tests {
         let secret = outside.path().join("secret.txt");
         std::fs::write(&secret, b"TOP-SECRET").unwrap();
         // src/ ディレクトリに secret への symlink を仕込む (planted symlink 攻撃の再現)。
-        files_create_dir(root.clone(), "".into(), "src".into()).await;
+        files_create_dir_inner(root.clone(), "".into(), "src".into()).await;
         std::fs::write(td.path().join("src").join("normal.txt"), b"ok").unwrap();
         symlink(&secret, td.path().join("src").join("link-to-secret")).unwrap();
         // copy 実行
-        let res = files_copy(root.clone(), "src".into(), "".into(), "dst".into(), None).await;
+        let res = files_copy_inner(root.clone(), "src".into(), "".into(), "dst".into(), None).await;
         assert!(res.ok, "{:?}", res.error);
         // 通常ファイルはコピーされる
         assert_eq!(std::fs::read(td.path().join("dst").join("normal.txt")).unwrap(), b"ok");
@@ -975,13 +1123,13 @@ mod issue_592_tests {
         use std::os::unix::fs::symlink;
         let td = tempdir().unwrap();
         let root = root_str(&td);
-        files_create_dir(root.clone(), "".into(), "src".into()).await;
+        files_create_dir_inner(root.clone(), "".into(), "src".into()).await;
         let src = td.path().join("src");
         // a -> b, b -> a の symlink cycle を仕込む。
         symlink(src.join("b"), src.join("a")).unwrap();
         symlink(src.join("a"), src.join("b")).unwrap();
         // 無限ループにならず copy 完了することを timeout 付きで検証する。
-        let copy_fut = files_copy(root.clone(), "src".into(), "".into(), "dst".into(), None);
+        let copy_fut = files_copy_inner(root.clone(), "src".into(), "".into(), "dst".into(), None);
         let res = tokio::time::timeout(std::time::Duration::from_secs(5), copy_fut)
             .await
             .expect("copy_dir_recursive must terminate even with symlink cycle");
@@ -995,8 +1143,8 @@ mod issue_592_tests {
     async fn files_delete_permanent_removes_file() {
         let td = tempdir().unwrap();
         let root = root_str(&td);
-        files_create(root.clone(), "".into(), "g.txt".into(), None).await;
-        let res = files_delete(root.clone(), "g.txt".into(), Some(true)).await;
+        files_create_inner(root.clone(), "".into(), "g.txt".into(), None).await;
+        let res = files_delete_inner(root.clone(), "g.txt".into(), Some(true)).await;
         assert!(res.ok, "{:?}", res.error);
         assert!(!td.path().join("g.txt").exists());
     }
@@ -1005,7 +1153,7 @@ mod issue_592_tests {
     async fn files_delete_rejects_root() {
         let td = tempdir().unwrap();
         let root = root_str(&td);
-        let res = files_delete(root, "".into(), Some(true)).await;
+        let res = files_delete_inner(root, "".into(), Some(true)).await;
         assert!(!res.ok);
     }
 }
@@ -1039,7 +1187,7 @@ mod issue_828_tests {
         drop(f);
 
         // expected_content_hash のみ渡し、mtime/size 検証はスキップさせて hash 経路に入れる。
-        let res = files_write(
+        let res = files_write_inner(
             root,
             "huge.txt".into(),
             "new content".into(),
@@ -1069,7 +1217,7 @@ mod issue_828_tests {
         let path = td.path().join("s.txt");
         std::fs::write(&path, b"original").unwrap();
 
-        let res = files_write(
+        let res = files_write_inner(
             root,
             "s.txt".into(),
             "updated".into(),
@@ -1095,7 +1243,7 @@ mod issue_828_tests {
         std::fs::write(&path, b"original").unwrap();
         let expected = sha256_hex(b"original");
 
-        let res = files_write(
+        let res = files_write_inner(
             root,
             "s.txt".into(),
             "updated".into(),

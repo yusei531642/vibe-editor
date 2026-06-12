@@ -16,6 +16,8 @@ pub mod git;
 pub mod handoffs;
 pub mod logs;
 pub mod role_profiles;
+// Issue #936: 永続化ファイルの安全読み込み (破損時は default 前に原本退避) 共通基盤。
+pub mod safe_load;
 // Issue #739: 永続化 schema バージョン定数 + 互換性ガードの集約モジュール。
 pub mod schema_version;
 pub mod sessions;

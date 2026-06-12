@@ -44,7 +44,7 @@ fn sanitize_status_text(s: &str) -> String {
                 // CSI: `ESC [ <param-bytes>... <final-byte 0x40..=0x7E>`
                 Some('[') => {
                     chars.next();
-                    while let Some(p) = chars.next() {
+                    for p in chars.by_ref() {
                         if matches!(p, '@'..='~') {
                             break;
                         }
@@ -130,7 +130,11 @@ pub async fn team_status(
         let mut state = hub.state.lock().await;
         // Issue #634: rate limit。`MIN_STATUS_INTERVAL` 以内の再呼び出しは last_status_at /
         // last_seen_at も更新せず silent reject (= autoStale 偽装を成立させない)。
-        if let Some(last) = state.last_status_call_at.get(&ctx.agent_id) {
+        if let Some(last) = state
+            .agent_entry(&ctx.team_id, &ctx.agent_id)
+            .and_then(|e| e.last_status_call_at)
+            .as_ref()
+        {
             if now_instant.duration_since(*last) < MIN_STATUS_INTERVAL {
                 return Ok(json!({
                     "success": false,
@@ -140,13 +144,9 @@ pub async fn team_status(
                 }));
             }
         }
-        state
-            .last_status_call_at
-            .insert(ctx.agent_id.clone(), now_instant);
-        let diag = state
-            .member_diagnostics
-            .entry(ctx.agent_id.clone())
-            .or_default();
+        let entry = state.agent_entry_mut(&ctx.team_id, &ctx.agent_id);
+        entry.last_status_call_at = Some(now_instant);
+        let diag = &mut entry.diagnostics;
         diag.current_status = Some(sanitized.clone());
         diag.last_status_at = Some(now_iso.clone());
         diag.last_seen_at = Some(now_iso.clone());
@@ -187,10 +187,10 @@ mod tests {
         assert!(result["recordedAt"].as_str().is_some());
 
         let state = hub.state.lock().await;
-        let diag = state
-            .member_diagnostics
-            .get("agent-a")
-            .expect("diag entry created");
+        let diag = &state
+            .agent_entry(&ctx.team_id, "agent-a")
+            .expect("agent entry created")
+            .diagnostics;
         assert_eq!(diag.current_status.as_deref(), Some("running cargo test"));
         assert!(diag.last_status_at.is_some());
         assert!(diag.last_seen_at.is_some());
@@ -235,9 +235,9 @@ mod tests {
         let first_at = {
             let state = hub.state.lock().await;
             state
-                .member_diagnostics
-                .get("agent-rate")
+                .agent_entry(&ctx.team_id, "agent-rate")
                 .unwrap()
+                .diagnostics
                 .last_status_at
                 .clone()
                 .unwrap()
@@ -254,9 +254,9 @@ mod tests {
         let after = {
             let state = hub.state.lock().await;
             state
-                .member_diagnostics
-                .get("agent-rate")
+                .agent_entry(&ctx.team_id, "agent-rate")
                 .unwrap()
+                .diagnostics
                 .last_status_at
                 .clone()
                 .unwrap()

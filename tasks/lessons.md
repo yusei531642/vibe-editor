@@ -1,5 +1,13 @@
 # vibe-editor 教訓集
 
+## bot auto-merge は超大型 PR で停滞する / is_safe_watch_root verbatim bug (2026-06-10〜11)
+
+- **bot (vibe-editor-reviewer) は 60 ファイル級の大型 PR を APPROVED + CI green(CLEAN) + nitpick 0 でも auto-merge しないことがある** (#841 / PR #966)。小〜中規模 PR (#957〜#970) は APPROVED 後すぐ merge される。試した誘発策はすべて不発: (1) 軽微な no-op commit → 2 度目も APPROVED するだけ、(2) origin/main を merge して branch 最新化 + CI 再実行 → CLEAN になっても merge せず。**手動 merge は CLAUDE.md で禁止 → 停滞したら AskUserQuestion でユーザーに委ねる** (ユーザーが GitHub 上で手動 merge する判断もある)。教訓: typecheck 実効化のような本質的に大型な変更は、可能なら tsconfig 切替と型修正を別 PR に割る。
+- **#841 の旧 lessons「275 型エラーと同時でないと単独 merge 不可」は撤回**。検証済み旧ブランチ (d179a75) を現 main に cherry-pick + drift 15 件追加修正で typecheck 0 を達成し単一 PR で完結。cherry-pick 衝突は CanvasSidebar / use-team-dashboard の 2 ファイルのみ (HEAD 採用で解決)。
+- **`fs_watch::is_safe_watch_root` の verbatim-prefix 既存セキュリティバグ** (#963 で発見・修正): `Path::canonicalize` が Windows で返す `\\?\C:\...` を `to_string_lossy` のまま lowercase 比較 → denylist の `c:\windows` 前方一致・ドライブルート判定が常に false → **C:\Windows やドライブルートが「safe」と誤判定** (= #639 の project_root setter ガードも Windows で無効化されていた)。verbatim prefix (`\\?\` / `\\?\UNC\`) を剥がしてから比較する。`is_safe_watch_root` は raw path を渡す前提 (内部 canonicalize) なので canonicalize 済み path を渡すと二重に壊れる。
+- **typecheck 0 ファイル検査の間に実行時バグが蓄積**: `use-team-management` が `getClaudeInstructions` 露出漏れで IDE terminal 描画が実行時 TypeError になる経路を、tsc -b 実効化で初めて検出 (#841)。型ゲート実効化は予防だけでなく既存バグ発掘の効果がある。
+- **残った大型構造監査 issue (#955/#952/#939/#938/#934/#933 一部/#860/#958/#959 残部) は「安全な部分は既存 PR で対応済み」か「本質が挙動変更・ポリシー判断・大型」で、bounded slice 化が難しい**。無理に slice すると issue 中途半端 or 退行リスク。dedicated session + 設計レビュー向き。一方 #931/#959 は「多重 emit の struct 化 1 件」「Windows binary-missing の locale-independent 分類」のような実バグ 1 点を Refs で切り出せた。
+
 ## TeamHub / MCP 再発防止 (2026-05-04)
 
 - `team_send` の成功は「recipient terminal への delivery」であり、recipient が読んだ / 着手した ACK ではない。liveness 判定では `lastSeenAt` を delivery で更新しない。

@@ -36,8 +36,16 @@ export interface HealthDerived {
   stalledInbound: boolean;
 }
 
+function ageFromRfc3339(value: string | null | undefined, now: number): number | null {
+  if (!value) return null;
+  const ms = Date.parse(value);
+  if (!Number.isFinite(ms)) return null;
+  return Math.max(0, now - ms);
+}
+
 export function deriveHealth(
-  row: TeamDiagnosticsMemberRow | null | undefined
+  row: TeamDiagnosticsMemberRow | null | undefined,
+  now: number = Date.now()
 ): HealthDerived {
   if (!row) {
     return {
@@ -50,18 +58,32 @@ export function deriveHealth(
     };
   }
 
-  // 「最終出力 (= プロセスが本当に動いた最後の物理シグナル)」を最も信頼する。
-  // PTY 出力時刻が無いときは status 申告の age をフォールバック表示。
-  const ageMs = row.lastPtyActivityAgeMs ?? row.lastStatusAgeMs;
+  // Issue #910: use-team-health が age 系フィールドだけの変化では snapshot を固定する。
+  // 経過表示と stale/dead 判定が止まらないよう、安定な RFC3339 timestamp から
+  // クライアント側の now に対する age を再計算する。timestamp が読めない旧データだけ
+  // Hub が返した age にフォールバックする。
+  const lastStatusAgeMs =
+    ageFromRfc3339(row.lastStatusAt, now) ?? row.lastStatusAgeMs;
+  const lastPtyActivityAgeMs =
+    ageFromRfc3339(row.lastPtyOutputAt, now) ?? row.lastPtyActivityAgeMs;
+  const ageMs = lastPtyActivityAgeMs ?? lastStatusAgeMs;
+  const hasObservation =
+    lastPtyActivityAgeMs !== null || lastStatusAgeMs !== null;
+
+  const statusIsStale =
+    lastStatusAgeMs === null || lastStatusAgeMs >= row.stalenessThresholdMs;
+  const ptyIsRecentlyActive =
+    lastPtyActivityAgeMs !== null && lastPtyActivityAgeMs < row.stalenessThresholdMs;
+  const autoStale = hasObservation && statusIsStale && !ptyIsRecentlyActive;
 
   let state: HealthState;
-  if (row.lastPtyActivityAgeMs !== null && row.lastPtyActivityAgeMs >= DEAD_THRESHOLD_MS) {
+  if (lastPtyActivityAgeMs !== null && lastPtyActivityAgeMs >= DEAD_THRESHOLD_MS) {
     // PTY 出力が 15 分以上途絶 → dead。lastStatusAgeMs もチェックしないのは、
     // status 申告は agent が忘れがちなので、PTY の絶対沈黙が確定的シグナル。
     state = 'dead';
-  } else if (row.autoStale) {
+  } else if (row.autoStale || autoStale) {
     state = 'stale';
-  } else if (row.lastPtyActivityAgeMs !== null || row.lastStatusAgeMs !== null) {
+  } else if (hasObservation) {
     state = 'alive';
   } else {
     // 1 度も観測されていない (= recruit 直後の handshake 前) は unknown 扱い。

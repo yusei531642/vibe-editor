@@ -125,6 +125,130 @@ pub async fn assert_active_project_root(
     Ok(active_canon)
 }
 
+/// Issue #954 / #963: ファイル系 IPC (`files_*`) 用のゲート。
+///
+/// `assert_active_project_root` は active project との厳格一致だが、ファイルツリーは
+/// multi-root workspace (`settings.workspaceFolders`, Issue #4) で active 以外の追加
+/// ルートも正当に列挙・閲覧・編集するため、厳格一致だとこの機能が壊れる
+/// (#954 で read 側、#963 で write 側に適用)。本 helper は「active project root
+/// **または** settings.json に永続化された workspaceFolders のいずれか」に
+/// canonicalize 一致する場合のみ許可する。
+///
+/// - workspaceFolders の参照先は **Rust 側 settings.json (SSOT)** であり、呼び出しごとの
+///   renderer 引数ではない (renderer が任意 path を主張しても settings に無ければ reject)。
+/// - workspaceFolders 経由の許可は `fs_watch::is_safe_watch_root` (system 領域 / home /
+///   drive root の denylist) も併せて要求する (#963)。settings_save は workspaceFolders を
+///   無検証で受けるため、ここで通過させると write 系がシステム領域に届いてしまう。
+///   active root は `app_set_project_root` 入口で同検証済み (#639) なので再検証しない。
+/// - settings 読込は active 不一致のときだけ走る (primary root の通常フローでは I/O 追加なし)。
+/// - active が未設定 (起動直後) でも workspaceFolders 一致なら許可する (起動時の
+///   追加ルート列挙を transient reject しない)。
+pub async fn assert_readable_project_root(
+    project_root_slot: &ArcSwapOption<String>,
+    given: &str,
+) -> CommandResult<PathBuf> {
+    let trimmed = given.trim();
+    if trimmed.is_empty() {
+        tracing::warn!(
+            given = %clamp_for_log(given),
+            "[authz] assert_readable_project_root rejected: empty project_root"
+        );
+        return Err(CommandError::authz("project_root is empty"));
+    }
+    let req_canon = match tokio::fs::canonicalize(trimmed).await {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::warn!(
+                given = %clamp_for_log(given),
+                error = %e,
+                "[authz] assert_readable_project_root rejected: canonicalize requested project_root failed"
+            );
+            return Err(CommandError::authz(format!(
+                "canonicalize requested project_root failed: {e}"
+            )));
+        }
+    };
+
+    // 1. active project root と一致するか (最頻パス、settings I/O なし)
+    let active = current_project_root(project_root_slot).unwrap_or_default();
+    if !active.trim().is_empty() {
+        if let Ok(active_canon) = tokio::fs::canonicalize(active.trim()).await {
+            if req_canon == active_canon {
+                return Ok(active_canon);
+            }
+        }
+    }
+
+    // 2. settings.workspaceFolders (Rust 側 SSOT) に含まれるか
+    if let Ok(settings) = crate::commands::settings::settings_load().await {
+        if matches_any_workspace_folder(&req_canon, &settings.workspace_folders).await {
+            return Ok(req_canon);
+        }
+    }
+
+    tracing::warn!(
+        requested = %clamp_for_log(&req_canon.to_string_lossy()),
+        "[authz] assert_readable_project_root rejected: not active project nor workspace folder"
+    );
+    Err(CommandError::authz(
+        "project_root does not match active project or workspace folders",
+    ))
+}
+
+/// `req_canon` (canonicalize 済み) が `folders` のいずれかと canonicalize 一致し、かつ
+/// その folder が `is_safe_watch_root` (system 領域 / home / drive root denylist, #963)
+/// を通るか。存在しない / canonicalize できない / unsafe な folder エントリは skip する。
+///
+/// PR #962 auto-review: canonicalize は folder ごとに blocking I/O を伴うため、NFS/SMB 等の
+/// 低速マウントで folder 数分の直列待ちにならないよう `JoinSet` で並列実行し、
+/// 一致を見つけた時点で残りを打ち切る。
+async fn matches_any_workspace_folder(req_canon: &std::path::Path, folders: &[String]) -> bool {
+    let mut set = tokio::task::JoinSet::new();
+    for folder in folders {
+        let f = folder.trim();
+        if f.is_empty() {
+            continue;
+        }
+        let f = f.to_string();
+        set.spawn(async move {
+            // Issue #963: settings_save は workspaceFolders を無検証で受けるため、
+            // ゲート通過条件としてここで safe root 検証を要求する (write 系の防御)。
+            // `is_safe_watch_root` は **raw path を受け取り内部で canonicalize する**
+            // 設計 (app_set_project_root #639 と同じ呼び方)。canonicalize 済みの
+            // verbatim-prefix (`\\?\C:\...`) 付き path を渡すと Windows の denylist
+            // (`c:\windows` 前方一致) が素通りするため、raw `f` を渡すこと。
+            //
+            // PR #968 auto-review: `is_safe_watch_root` は同期 blocking I/O
+            // (`std::fs::canonicalize` + metadata) を含むため、Tokio ワーカースレッドを
+            // 塞がないよう spawn_blocking に逃がす。canonicalize も同 blocking task 内で
+            // 行い、async fs 呼び出しとの二重 I/O も避ける。
+            tokio::task::spawn_blocking(move || {
+                if !crate::commands::fs_watch::is_safe_watch_root(std::path::Path::new(&f)) {
+                    tracing::warn!(
+                        folder = %clamp_for_log(&f),
+                        "[authz] workspace folder skipped by safe-root check"
+                    );
+                    return None;
+                }
+                // 比較は canonicalize 後の path で行う (req_canon も canonicalize 済み)。
+                std::fs::canonicalize(&f).ok()
+            })
+            .await
+            .ok()
+            .flatten()
+        });
+    }
+    while let Some(res) = set.join_next().await {
+        if let Ok(Some(folder_canon)) = res {
+            if folder_canon == req_canon {
+                set.abort_all();
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Issue #601 (Tier A-3): renderer 由来の `team_id` が `TeamHub` の active set に含まれるかを
 /// 検証する。`team_diagnostics_read` (#601) のような **renderer がリーダー視点を impersonate
 /// する** IPC で、過去 / 別プロジェクト / 任意 fabricated な team_id を probe されないように
@@ -264,6 +388,71 @@ mod tests {
         assert_eq!(
             canon,
             std::fs::canonicalize(project.path()).expect("canonicalize"),
+        );
+    }
+
+    // ---------- Issue #954: assert_readable_project_root ----------
+
+    #[tokio::test]
+    async fn readable_accepts_active_project_root() {
+        let project = tempdir().expect("project");
+        let lock = make_lock(Some(project.path().to_string_lossy().into_owned()));
+        let canon =
+            assert_readable_project_root(&lock, project.path().to_string_lossy().as_ref())
+                .await
+                .expect("active root must be readable");
+        assert_eq!(canon, std::fs::canonicalize(project.path()).unwrap());
+    }
+
+    #[tokio::test]
+    async fn readable_rejects_empty_and_foreign_paths() {
+        let active = tempdir().expect("active");
+        let foreign = tempdir().expect("foreign");
+        let lock = make_lock(Some(active.path().to_string_lossy().into_owned()));
+
+        let err = assert_readable_project_root(&lock, "").await.unwrap_err();
+        assert!(matches!(err, CommandError::Authz(ref m) if m.contains("empty")));
+
+        // active でも workspace folder でもない実在 path → reject
+        // (テスト環境の settings.json に tempdir が登録されていることはない)
+        let err = assert_readable_project_root(&lock, foreign.path().to_string_lossy().as_ref())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, CommandError::Authz(ref m) if m.contains("workspace folders")),
+            "got: {err}"
+        );
+    }
+
+    /// Issue #963: settings_save は workspaceFolders を無検証で受けるため、system 領域が
+    /// 登録されていてもゲートは通さない (write 系がシステム領域に届くのを防ぐ)。
+    #[tokio::test]
+    async fn workspace_folder_in_system_area_is_skipped() {
+        #[cfg(windows)]
+        let sys = "C:\\Windows";
+        #[cfg(unix)]
+        let sys = "/etc";
+        let req = std::fs::canonicalize(sys).expect("system dir must exist");
+        assert!(
+            !matches_any_workspace_folder(&req, &[sys.to_string()]).await,
+            "system-area workspace folder must be rejected by safe-root check"
+        );
+    }
+
+    #[tokio::test]
+    async fn workspace_folder_matching_is_canonical_and_skips_missing() {
+        let folder = tempdir().expect("folder");
+        let req = std::fs::canonicalize(folder.path()).unwrap();
+        // 実在 folder は raw 表記が違っても canonicalize 一致で許可
+        let raw = format!("{}{}", folder.path().to_string_lossy(), std::path::MAIN_SEPARATOR);
+        assert!(matches_any_workspace_folder(&req, &[raw]).await);
+        // 存在しない folder / 空文字エントリは skip され、一致しない
+        assert!(
+            !matches_any_workspace_folder(
+                &req,
+                &["".into(), "   ".into(), folder.path().join("nope").to_string_lossy().into_owned()]
+            )
+            .await
         );
     }
 

@@ -166,6 +166,27 @@ describe('Glass CSS contract', () => {
     }
   });
 
+  it('Issue #806/#886: every glass overlay surface opts into the high-density background', () => {
+    const glass = stripCssComments(readComponentCss('glass.css'));
+
+    // overlay 高濃度ルール (rgba(15,18,28,0.92)) のセレクタリストを取り出す。
+    // 新しい overlay を追加したらこのリスト (glass.css) と本テストの両方に足すこと。
+    const overlayRule = glass.match(/([^{}]+)\{[^{}]*background:\s*rgba\(15,\s*18,\s*28,\s*0\.92\)/);
+    expect(overlayRule, 'glass.css must keep the #806 overlay density rule').not.toBeNull();
+
+    for (const selector of [
+      '.menubar__dropdown',
+      '.app-menu__dropdown',
+      '.user-menu__dropdown',
+      '.context-menu',
+      '.canvas-popover',
+      '.tab-create-menu',
+      '.team-close-confirm'
+    ]) {
+      expect(overlayRule![1]).toContain(`:root[data-theme='glass'] ${selector}`);
+    }
+  });
+
   it('index.css does not keep the legacy Issue #16 Glass surface whitelist', () => {
     const indexCss = stripCssComments(readRendererFile('index.css'));
 

@@ -75,48 +75,47 @@ function cardDataForType(
   switch (type) {
     case 'terminal':
       return {
-        ...data,
         cardType: type,
         title,
         payload: data.payload as Extract<CardData, { cardType: 'terminal' }>['payload']
       };
     case 'agent':
       return {
-        ...data,
         cardType: type,
         title,
         payload: data.payload as Extract<CardData, { cardType: 'agent' }>['payload']
       };
     case 'editor':
       return {
-        ...data,
         cardType: type,
         title,
         payload: data.payload as Extract<CardData, { cardType: 'editor' }>['payload']
       };
     case 'diff':
       return {
-        ...data,
         cardType: type,
         title,
         payload: data.payload as Extract<CardData, { cardType: 'diff' }>['payload']
       };
     case 'fileTree':
       return {
-        ...data,
         cardType: type,
         title,
         payload: data.payload as Extract<CardData, { cardType: 'fileTree' }>['payload']
       };
     case 'changes':
       return {
-        ...data,
         cardType: type,
         title,
         payload: data.payload as Extract<CardData, { cardType: 'changes' }>['payload']
       };
   }
 }
+
+// Issue #938: 旧 `stripTransientNodeState` (raw を丸ごと spread して dragging/selected/
+// resizing を delete する除外方式) は撤廃。normalize は下の明示構築 (pick 方式) で
+// 「列挙したフィールドしか復元されない」形にし、ランタイムフィールドの取りこぼし
+// (#894/#895 の measured / width drift 等) を症状別パッチではなく構造で塞ぐ。
 
 /**
  * crypto.randomUUID() ベースの安定 ID 生成。
@@ -179,18 +178,27 @@ export function normalizeCanvasState(input: unknown): NormalizedCanvasState {
             Math.abs(rawY) > VIEWPORT_RESCUE_DISTANCE
               ? Math.floor(index / 6) * (NODE_H + 32)
               : rawY;
-          return {
-            ...(raw as Partial<Node<CardData>>),
+          // Issue #938: 明示構築 (pick)。永続化データに何が混ざっていても、
+          // ここに列挙したフィールドだけが React Flow ノードとして復元される。
+          // top-level width/height は NodeResizer の手動リサイズ値 (意図的な永続データ)
+          // なので有限値のときだけ引き継ぐ。
+          const node: Node<CardData> = {
             id: typeof raw.id === 'string' && raw.id ? raw.id : newId(type),
             type,
             position: { x: safeX, y: safeY },
             data: cardDataForType(type, data, title),
             style: {
-              ...styleRaw,
               width: finiteOr(styleRaw.width, NODE_W),
               height: finiteOr(styleRaw.height, NODE_H)
             }
           };
+          if (typeof raw.width === 'number' && Number.isFinite(raw.width)) {
+            node.width = raw.width;
+          }
+          if (typeof raw.height === 'number' && Number.isFinite(raw.height)) {
+            node.height = raw.height;
+          }
+          return node;
         })
         .filter((n): n is Node<CardData> => n !== null)
     : [];

@@ -75,13 +75,27 @@ async fn run_setup_at(
         Ok(c) => changed |= c,
         Err(e) => {
             let mut error_msg = format!("claude mcp setup: {e:#}");
-            rollback_both(claude_path, claude_snap, codex_path, codex_snap, &mut error_msg).await;
+            rollback_both(
+                claude_path,
+                claude_snap,
+                codex_path,
+                codex_snap,
+                &mut error_msg,
+            )
+            .await;
             return Err(anyhow!(error_msg));
         }
     }
     if let Err(e) = crate::mcp_config::codex::setup_at(codex_path, bridge_path).await {
         let mut error_msg = format!("codex mcp setup: {e:#}");
-        rollback_both(claude_path, claude_snap, codex_path, codex_snap, &mut error_msg).await;
+        rollback_both(
+            claude_path,
+            claude_snap,
+            codex_path,
+            codex_snap,
+            &mut error_msg,
+        )
+        .await;
         return Err(anyhow!(error_msg));
     }
     Ok(changed)
@@ -101,13 +115,27 @@ async fn run_cleanup_at(claude_path: &Path, codex_path: &Path) -> Result<bool> {
         Ok(r) => removed |= r,
         Err(e) => {
             let mut error_msg = format!("claude mcp cleanup: {e:#}");
-            rollback_both(claude_path, claude_snap, codex_path, codex_snap, &mut error_msg).await;
+            rollback_both(
+                claude_path,
+                claude_snap,
+                codex_path,
+                codex_snap,
+                &mut error_msg,
+            )
+            .await;
             return Err(anyhow!(error_msg));
         }
     }
     if let Err(e) = crate::mcp_config::codex::cleanup_at(codex_path).await {
         let mut error_msg = format!("codex mcp cleanup: {e:#}");
-        rollback_both(claude_path, claude_snap, codex_path, codex_snap, &mut error_msg).await;
+        rollback_both(
+            claude_path,
+            claude_snap,
+            codex_path,
+            codex_snap,
+            &mut error_msg,
+        )
+        .await;
         return Err(anyhow!(error_msg));
     }
     Ok(removed)
@@ -180,8 +208,7 @@ pub async fn app_setup_team_mcp(
     // → app_install_vibe_team_skill と同じく req_canon == active_canon を検証してから install する。
     let trimmed = project_root.trim();
     if !trimmed.is_empty() {
-        let active =
-            crate::state::current_project_root(&state.project_root).unwrap_or_default();
+        let active = crate::state::current_project_root(&state.project_root).unwrap_or_default();
         if active.trim().is_empty() {
             tracing::warn!(
                 "[setup_team_mcp] skipping skill install: no active project_root configured"
@@ -252,6 +279,18 @@ pub async fn app_cleanup_team_mcp(
     team_id: String,
 ) -> crate::commands::error::CommandResult<CleanupTeamMcpResult> {
     let last = state.team_hub.clear_team(&team_id).await;
+
+    // Issue #937: 従来は hub state / MCP 設定だけを消し PTY registry に触れていなかったため、
+    // チームの PTY (と claude CLI が spawn した MCP node 群) は renderer の React unmount kill
+    // 一極依存で、UI フリーズ/クラッシュ時に孤児化していた (#864 / #829)。チーム解散の所有者で
+    // ある本コマンドが backend 側でも team スコープの PTY を確実に回収する (残チーム数に依らず実行)。
+    let reclaimed = state.pty_registry.kill_team(&team_id);
+    if reclaimed > 0 {
+        tracing::info!(
+            "[cleanup_team_mcp] reclaimed {reclaimed} PTY session(s) for team {team_id}"
+        );
+    }
+
     if !last {
         return Ok(CleanupTeamMcpResult {
             ok: true,
@@ -464,7 +503,10 @@ mod tests {
         });
 
         let res = run_setup_at(&claude_path, &codex_path, &desired, "/tmp/bridge.js").await;
-        assert!(res.is_err(), "codex setup should fail when parent is a file");
+        assert!(
+            res.is_err(),
+            "codex setup should fail when parent is a file"
+        );
         let msg = format!("{:#}", res.unwrap_err());
         assert!(
             msg.contains("codex mcp setup"),
@@ -481,6 +523,50 @@ mod tests {
         assert!(
             !codex_path.exists(),
             "codex file should not exist after failed setup"
+        );
+    }
+
+    #[tokio::test]
+    async fn setup_rolls_back_both_when_codex_config_is_not_utf8() {
+        let tmp = TempDir::new().unwrap();
+        let claude_path = tmp.path().join(".claude.json");
+        let original_claude = br#"{"mcpServers":{"other":{"command":"node"}}}"#.to_vec();
+        fs::write(&claude_path, &original_claude).await.unwrap();
+
+        let codex_path = tmp.path().join(".codex").join("config.toml");
+        fs::create_dir_all(codex_path.parent().unwrap())
+            .await
+            .unwrap();
+        let original_codex = b"[other]\n# invalid utf8: \x82\xa0\n".to_vec();
+        fs::write(&codex_path, &original_codex).await.unwrap();
+
+        let desired = json!({
+            "type": "stdio",
+            "command": "node",
+            "args": ["/tmp/bridge.js"]
+        });
+
+        let res = run_setup_at(&claude_path, &codex_path, &desired, "/tmp/bridge.js").await;
+
+        assert!(res.is_err(), "codex setup should reject non-UTF-8 config");
+        let msg = format!("{:#}", res.unwrap_err());
+        assert!(
+            msg.contains("codex mcp setup"),
+            "error should mention codex mcp setup, got: {msg}"
+        );
+        assert!(
+            msg.contains("not valid UTF-8"),
+            "error should mention UTF-8 decode failure, got: {msg}"
+        );
+        let claude_after = fs::read(&claude_path).await.unwrap();
+        assert_eq!(
+            claude_after, original_claude,
+            "claude must be rolled back after codex decode failure"
+        );
+        let codex_after = fs::read(&codex_path).await.unwrap();
+        assert_eq!(
+            codex_after, original_codex,
+            "codex invalid bytes must be preserved for manual repair"
         );
     }
 

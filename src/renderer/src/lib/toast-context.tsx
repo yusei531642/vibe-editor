@@ -35,6 +35,12 @@ export interface ToastOptions {
   action?: ToastAction;
   /** 種別: 情報/成功/警告/エラー（色分け） */
   tone?: 'info' | 'success' | 'warning' | 'error';
+  /**
+   * Issue #852: ユーザー操作 (close ボタン / action クリック) で閉じられたときだけ
+   * 呼ばれる callback。自動消滅 (duration 経過) やコードからの dismissToast() では
+   * 呼ばれない。「ユーザーが toast を認知した」ことを要求する通知 (署名警告等) に使う。
+   */
+  onUserDismiss?: () => void;
 }
 
 export interface Toast {
@@ -216,6 +222,7 @@ function ToastItem({
           className="toast__action"
           onClick={() => {
             toast.options.action?.onClick();
+            toast.options.onUserDismiss?.();
             onDismiss();
           }}
         >
@@ -225,7 +232,10 @@ function ToastItem({
       <button
         type="button"
         className="toast__close"
-        onClick={onDismiss}
+        onClick={() => {
+          toast.options.onUserDismiss?.();
+          onDismiss();
+        }}
         aria-label={t('common.close')}
       >
         <X size={14} strokeWidth={2} />

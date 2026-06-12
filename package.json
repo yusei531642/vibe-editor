@@ -1,6 +1,6 @@
 {
   "name": "vibe-editor",
-  "version": "1.6.3",
+  "version": "1.6.4",
   "private": true,
   "description": "Tauri ベースの Claude Code / Codex 専用エディタ",
   "engines": {
@@ -14,6 +14,9 @@
     "typecheck": "tsc -b --force",
     "lint": "eslint .",
     "test": "vitest run",
+    "lint:safe-load": "node build/check-safe-load.mjs",
+    "lint:file-size": "node build/check-file-size-ratchet.mjs",
+    "lint:command-result": "node build/check-command-result.mjs",
     "test:watch": "vitest",
     "icons": "node build/generate-icons.mjs"
   },

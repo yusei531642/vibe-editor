@@ -73,10 +73,7 @@ pub async fn team_read(
     }
     let count = out.len();
     // Issue #342 Phase 3 (3.3): team_read を打った agent の last_seen_at を更新 (heartbeat 兼)
-    let reader_diag = state
-        .member_diagnostics
-        .entry(ctx.agent_id.clone())
-        .or_default();
+    let reader_diag = state.diagnostics_mut(&ctx.team_id, &ctx.agent_id);
     reader_diag.last_seen_at = Some(now_iso.clone());
     drop(state);
     // Issue #509: 「読了」を Canvas 側 UI に live で通知する。

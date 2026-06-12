@@ -1,5 +1,9 @@
 .toast-container {
-  top: 18px;
+  /* Issue #884: position 宣言が無いと top/left/transform が効かず通常フローに
+   * 置かれたまま viewport 外へ押し出される。#307 と同様に Windows 最大化時の
+   * 不可視リサイズ境界 (--wf-top) を top に加算する。 */
+  position: fixed;
+  top: calc(18px + var(--wf-top, 0px));
   right: auto;
   bottom: auto;
   left: 50%;
@@ -15,6 +19,14 @@
  * 左端 2px のロール色バーで種別 (success/warning/error) を表現。
  */
 .toast {
+  /* Issue #884: 旧 index.css 定義からの移し漏れ復元。.toast__body の flex: 1 や
+   * media query の flex-wrap は .toast が flex container であることを前提とする。
+   * container 側は pointer-events: none (クリック透過) のため、toast 本体で
+   * auto に戻さないと close ボタンが押せない。 */
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: auto;
   width: 100%;
   min-width: 0;
   max-width: 100%;
@@ -123,7 +135,7 @@
 
 @media (max-width: 640px) {
   .toast-container {
-    top: 12px;
+    top: calc(12px + var(--wf-top, 0px));
     width: calc(100vw - 16px);
   }
 

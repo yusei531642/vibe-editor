@@ -50,15 +50,14 @@ impl TeamHub {
         crate::team_hub::file_locks::release_all_for_agent(&mut s.file_locks, team_id, agent_id)
     }
 
-    /// Issue #637: dismiss された (team_id, agent_id) の role binding を取り除く。
-    /// 取り除かないと「dismiss 済 worker の role 文字列」がメモリに残り続け、
+    /// Issue #637: dismiss された (team_id, agent_id) の role binding を失効させる。
+    /// 失効させないと「dismiss 済 worker の role 文字列」がメモリに残り続け、
     /// 同 agent_id を別 role で再 recruit したい時に role mismatch で接続拒否される。
     /// 別 team の binding は team_id 次元で分離されているので影響しない。
+    /// Issue #934: 実体は AgentEntry の Active → Exited 遷移 (診断は clear_team まで保持)。
     pub async fn remove_agent_role_binding(&self, team_id: &str, agent_id: &str) -> bool {
         let mut s = self.state.lock().await;
-        s.agent_role_bindings
-            .remove(&(team_id.to_string(), agent_id.to_string()))
-            .is_some()
+        s.retire_agent(team_id, agent_id)
     }
 
     /// `paths` の現在の lock 保持者一覧 (assign_task の競合検知用、agent_id_filter で自分宛除外可)。

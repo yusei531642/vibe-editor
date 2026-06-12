@@ -152,13 +152,15 @@ pub async fn team_diagnostics(hub: &TeamHub, ctx: &CallContext) -> Result<Value,
         // Issue #637: `agent_role_bindings` は `(team_id, agent_id)` 複合キー。
         // diagnostics は呼び出し元 team の inconsistent 判定にしか使わないので、
         // 当該 team_id のスコープを抽出した `agent_id -> role` マップに reduce する。
-        bindings_snapshot = state
-            .agent_role_bindings
+        bindings_snapshot = state.team_member_roles(&ctx.team_id).into_iter().collect();
+        // Issue #934: 診断も AgentEntry に統合されたため、当該 team scope の
+        // agent_id -> diagnostics に reduce して snapshot する。
+        diag_snapshot = state
+            .agents
             .iter()
             .filter(|((team_id, _), _)| team_id == &ctx.team_id)
-            .map(|((_, agent_id), role)| (agent_id.clone(), role.clone()))
+            .map(|((_, agent_id), e)| (agent_id.clone(), e.diagnostics.clone()))
             .collect();
-        diag_snapshot = state.member_diagnostics.clone();
         messages_snapshot = state
             .teams
             .get(&ctx.team_id)

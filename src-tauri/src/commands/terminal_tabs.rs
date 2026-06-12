@@ -9,6 +9,7 @@
 //   - byProject は raw projectRoot を key とし、検索/書込側で `normalize_project_root` 経由
 //   - cache + LOCK で disk I/O 最小化 (team_history.rs と同流儀)
 
+use crate::commands::schema_version::SchemaVersion;
 use crate::commands::team_history::MutationResult;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -17,7 +18,7 @@ use tokio::fs;
 use tokio::sync::Mutex;
 
 /// renderer 側 `TERMINAL_TABS_SCHEMA_VERSION` と一致させる
-pub const TERMINAL_TABS_SCHEMA_VERSION: u32 = 1;
+pub use crate::commands::schema_version::TERMINAL_TABS_SCHEMA_VERSION;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -99,18 +100,23 @@ fn store_path() -> PathBuf {
     crate::util::config_paths::terminal_tabs_path()
 }
 
-/// disk からロードする。schemaVersion 不一致は `None` を返して旧データを無視する。
+/// disk からロードする。parse 失敗時は原本 bytes を timestamped backup に退避する。
 async fn load_from_disk() -> Option<PersistedTerminalTabsFile> {
     let path = store_path();
-    let bytes = fs::read(&path).await.ok()?;
-    let file: PersistedTerminalTabsFile = match serde_json::from_slice(&bytes) {
-        Ok(f) => f,
-        Err(e) => {
-            tracing::warn!(
-                "[terminal_tabs] parse failed (treating as missing): {e}"
-            );
-            return None;
-        }
+    load_from_disk_at(&path).await
+}
+
+/// disk からロードする。schemaVersion 不一致は `None` を返して旧データを無視する。
+///
+/// Issue #947: parse 失敗時の退避 (default に倒す前に `.bak.<ts>` へコピー) は
+/// safe_load 共通基盤 (#936) に委譲する。退避規約は従来と同一で挙動等価。
+/// schemaVersion チェックは terminal_tabs 固有の関心事なので従来どおりここで行う。
+async fn load_from_disk_at(path: &Path) -> Option<PersistedTerminalTabsFile> {
+    use crate::commands::safe_load::{safe_load_or_quarantine, LoadOutcome};
+    let file = match safe_load_or_quarantine::<PersistedTerminalTabsFile>(path, Some(0o600)).await
+    {
+        LoadOutcome::Loaded(f) => f,
+        LoadOutcome::Absent | LoadOutcome::Corrupted => return None,
     };
     if file.schema_version != TERMINAL_TABS_SCHEMA_VERSION {
         tracing::info!(
@@ -264,14 +270,41 @@ async fn sanitize_missing_jsonl(
     dropped
 }
 
+/// disk にある `schemaVersion` だけを軽量に読む。
+///
+/// ファイル不在 / parse 失敗 / フィールド欠落は `None` として扱う。parse 失敗は
+/// `load_from_disk_at` 側で backup 済みの想定なので、save guard では未来 schema の検出に集中する。
+async fn read_disk_schema_version(path: &Path) -> Result<Option<u32>, String> {
+    let bytes = match fs::read(path).await {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    };
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return Ok(None);
+    };
+    Ok(value
+        .get("schemaVersion")
+        .and_then(|n| n.as_u64())
+        .map(|n| n as u32))
+}
+
 async fn save_to_disk(file: &PersistedTerminalTabsFile) -> Result<(), String> {
     let path = store_path();
+    save_to_disk_at(&path, file).await
+}
+
+async fn save_to_disk_at(path: &Path, file: &PersistedTerminalTabsFile) -> Result<(), String> {
+    let disk_schema_version = read_disk_schema_version(path).await?;
+    SchemaVersion::TERMINAL_TABS
+        .check_compat(disk_schema_version, Some(file.schema_version))
+        .map_err(|e| e.to_string())?;
     let json = serde_json::to_vec_pretty(file).map_err(|e| e.to_string())?;
     // Issue #608: terminal-tabs.json は Claude session id (UUID) と cwd を持ち、漏洩すると
     // `~/.claude/projects/<encoded>/<uuid>.jsonl` の会話履歴に間接アクセスできるため
     // 機密ファイル扱い。`~/.claude.json` / role-profiles 等と同じく 0o600 を強制する。
     // Windows では mode は no-op (Windows ACL 強制は別 issue で対応)。
-    crate::commands::atomic_write::atomic_write_with_mode(&path, &json, Some(0o600))
+    crate::commands::atomic_write::atomic_write_with_mode(path, &json, Some(0o600))
         .await
         .map_err(|e| e.to_string())
 }
@@ -311,13 +344,15 @@ pub async fn terminal_tabs_load() -> Option<TerminalTabsLoadResult> {
 pub async fn terminal_tabs_save(file: PersistedTerminalTabsFile) -> MutationResult {
     let _g = LOCK.lock().await;
     let mut cache = CACHE.lock().await;
-    *cache = Some(file.clone());
     match save_to_disk(&file).await {
-        Ok(()) => MutationResult {
-            ok: true,
-            error: None,
-            ..Default::default()
-        },
+        Ok(()) => {
+            *cache = Some(file);
+            MutationResult {
+                ok: true,
+                error: None,
+                ..Default::default()
+            }
+        }
         Err(e) => MutationResult {
             ok: false,
             error: Some(e),
@@ -377,6 +412,75 @@ mod tests {
         let f = PersistedTerminalTabsFile::default();
         assert_eq!(f.schema_version, TERMINAL_TABS_SCHEMA_VERSION);
         assert!(f.by_project.is_empty());
+    }
+
+    #[tokio::test]
+    async fn load_from_disk_backs_up_invalid_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("terminal-tabs.json");
+        let corrupt = b"{ not valid json";
+        fs::write(&path, corrupt).await.unwrap();
+
+        let loaded = load_from_disk_at(&path).await;
+
+        assert!(loaded.is_none(), "invalid JSON should load as missing");
+        let mut backups = Vec::new();
+        let mut entries = fs::read_dir(dir.path()).await.unwrap();
+        while let Some(entry) = entries.next_entry().await.unwrap() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if name.starts_with("terminal-tabs.json.bak.") {
+                backups.push(entry.path());
+            }
+        }
+        assert_eq!(backups.len(), 1, "exactly one backup should be written");
+        let backup_bytes = fs::read(&backups[0]).await.unwrap();
+        assert_eq!(backup_bytes, corrupt);
+    }
+
+    #[tokio::test]
+    async fn save_to_disk_rejects_future_disk_schema_without_overwrite() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("terminal-tabs.json");
+        let original = format!(
+            r#"{{"schemaVersion":{},"lastSavedAt":"future","byProject":{{"keep":{{"tabs":[],"activeTabId":null}}}}}}"#,
+            TERMINAL_TABS_SCHEMA_VERSION + 1
+        );
+        fs::write(&path, original.as_bytes()).await.unwrap();
+
+        let err = save_to_disk_at(&path, &PersistedTerminalTabsFile::default())
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.contains("newer vibe-editor"),
+            "error should explain update requirement: {err}"
+        );
+        let after = fs::read_to_string(&path).await.unwrap();
+        assert_eq!(
+            after, original,
+            "future schema file must not be overwritten"
+        );
+    }
+
+    #[tokio::test]
+    async fn save_to_disk_rejects_future_incoming_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("terminal-tabs.json");
+        let file = PersistedTerminalTabsFile {
+            schema_version: TERMINAL_TABS_SCHEMA_VERSION + 1,
+            ..Default::default()
+        };
+
+        let err = save_to_disk_at(&path, &file).await.unwrap_err();
+
+        assert!(
+            err.contains("future schema"),
+            "error should mention future schema: {err}"
+        );
+        assert!(
+            !path.exists(),
+            "rejected future incoming schema should not create a file"
+        );
     }
 
     #[test]
@@ -441,17 +545,12 @@ mod tests {
     // ---- Issue #702: sanitize_missing_jsonl tests ----
 
     fn unique_temp_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir()
-            .join(format!("vibe-editor-{name}-{}", uuid::Uuid::new_v4()));
+        let dir = std::env::temp_dir().join(format!("vibe-editor-{name}-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).expect("create temp dir");
         dir
     }
 
-    fn make_file_with_tab(
-        kind: &str,
-        cwd: &str,
-        sid: Option<&str>,
-    ) -> PersistedTerminalTabsFile {
+    fn make_file_with_tab(kind: &str, cwd: &str, sid: Option<&str>) -> PersistedTerminalTabsFile {
         let mut by_project = HashMap::new();
         by_project.insert(
             cwd.to_string(),
@@ -602,7 +701,10 @@ mod tests {
         let sid = "11112222-3333-4444-5555-666677778888";
         write_codex_rollout(&root, sid);
 
-        assert!(codex_rollout_exists_sync(&root, sid), "should find rollout by sid suffix");
+        assert!(
+            codex_rollout_exists_sync(&root, sid),
+            "should find rollout by sid suffix"
+        );
         assert!(
             !codex_rollout_exists_sync(&root, "no-such-id"),
             "unknown sid must not match"
@@ -700,7 +802,11 @@ mod tests {
         let dropped = sanitize_missing_jsonl(&mut file, &tmp, &codex_sessions_root_in(&tmp)).await;
 
         let tabs = &file.by_project[cwd].tabs;
-        assert_eq!(tabs[0].session_id.as_deref(), Some(sid_alive), "alive sid kept");
+        assert_eq!(
+            tabs[0].session_id.as_deref(),
+            Some(sid_alive),
+            "alive sid kept"
+        );
         assert!(tabs[1].session_id.is_none(), "dead sid dropped");
         assert_eq!(dropped.len(), 1, "only the dead tab is recorded");
         assert_eq!(dropped[0].tab_id, "2");

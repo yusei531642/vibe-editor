@@ -123,6 +123,7 @@ export async function spawnTeams(input: SpawnTeamsInput): Promise<SpawnTeamsResu
         roleProfileId: m.role,
         role: m.role,
         teamId: team.teamId,
+        teamName: team.teamName,
         agentId,
         cwd: input.cwd
       };

@@ -65,6 +65,17 @@ pub struct SessionHandle {
     /// 観測して即時 exit する。これにより「session が 1 秒で死んでも watcher が 60 秒
     /// 並走する」リソース蓄積を防ぐ。
     pub(super) watcher_cancel: Arc<AtomicBool>,
+    /// Issue #950: child プロセスツリーを bind した kill-on-close Job Object。
+    /// この handle の drop (= タブ close / kill_all / vibe-editor 異常死による OS の
+    /// handle 強制 close) で job 内の全プロセス (孫含む) が OS により kill される。
+    /// Job 作成 / assign に失敗した場合は None (taskkill 経路のみで回収)。
+    ///
+    /// Issue #939: フィールドは **保持していること自体 (RAII)** が目的で、明示的に読まれる
+    /// ことはない。SessionHandle の drop で `KillOnCloseJob::drop` (= CloseHandle) が走り、
+    /// KILL_ON_JOB_CLOSE が発火する。clippy の dead-code は Drop の副作用を認識しないため allow。
+    #[cfg(windows)]
+    #[allow(dead_code)]
+    pub(super) job: Option<crate::pty::win_job_object::KillOnCloseJob>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,6 +177,23 @@ impl SessionHandle {
         }
         let _ = k.kill();
         Ok(())
+    }
+
+    /// Issue #951: シャットダウン / 再起動経路専用の **同期** kill。
+    ///
+    /// `kill()` は Windows で taskkill を detached thread に逃がして即返るため、直後に
+    /// プロセスごと exit すると taskkill が走り切る前に殺され、子プロセスが孤児化する
+    /// 競合があった。本メソッドは process-tree kill を呼び出し thread 上で同期実行する。
+    /// 通常のタブ close では従来どおり `kill()` を使う (UI をブロックしないため)。
+    pub fn kill_blocking(&self) {
+        self.watcher_cancel.store(true, Ordering::Release);
+        #[cfg(windows)]
+        if let Some(pid) = self.process_id {
+            Self::kill_process_tree_best_effort(pid);
+        }
+        if let Ok(mut k) = lock_poisoned!(self.killer, "killer") {
+            let _ = k.kill();
+        }
     }
 
     /// Issue #632: claude_watcher が共有する cancel signal。`spawn_watcher` の caller
@@ -272,17 +300,23 @@ impl Drop for SessionHandle {
     }
 }
 
+/// テスト用の `SessionHandle` 構築サポート。実 PTY を起動せずに kill 回数を計数する
+/// mock killer 付き handle を作る。`handle.rs` の Drop/inject テストだけでなく、
+/// `pty::registry` の team/index 操作テスト (#937 の `kill_team`) からも再利用できるよう
+/// crate 内へ公開する (`pub(crate)`)。
 #[cfg(test)]
-mod drop_tests {
-    use super::*;
-    use portable_pty::PtySize;
+pub(crate) mod test_support {
+    use super::SessionHandle;
+    use crate::pty::scrollback::{new_scrollback, WriteBudget};
+    use portable_pty::{MasterPty, PtySize};
     use std::io::{Cursor, Read, Result as IoResult, Write};
-    use std::panic::{catch_unwind, AssertUnwindSafe};
-    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+    use std::time::Instant;
 
     #[derive(Debug, Clone)]
-    struct CountingKiller {
-        kills: Arc<AtomicUsize>,
+    pub(crate) struct CountingKiller {
+        pub(crate) kills: Arc<AtomicUsize>,
     }
 
     impl portable_pty::ChildKiller for CountingKiller {
@@ -296,7 +330,7 @@ mod drop_tests {
         }
     }
 
-    struct DummyMaster;
+    pub(crate) struct DummyMaster;
 
     impl MasterPty for DummyMaster {
         fn resize(&self, _size: PtySize) -> std::result::Result<(), anyhow::Error> {
@@ -338,14 +372,20 @@ mod drop_tests {
         }
     }
 
-    fn test_handle(kills: Arc<AtomicUsize>) -> SessionHandle {
+    /// `agent_id` / `session_key` / `team_id` を指定して mock killer 付き handle を作る。
+    pub(crate) fn handle_with(
+        agent_id: Option<&str>,
+        session_key: Option<&str>,
+        team_id: Option<&str>,
+        kills: Arc<AtomicUsize>,
+    ) -> SessionHandle {
         SessionHandle {
             writer: Mutex::new(Box::new(Vec::<u8>::new())),
             master: Mutex::new(Box::new(DummyMaster)),
             killer: Mutex::new(Box::new(CountingKiller { kills })),
-            agent_id: None,
-            session_key: None,
-            team_id: None,
+            agent_id: agent_id.map(str::to_string),
+            session_key: session_key.map(str::to_string),
+            team_id: team_id.map(str::to_string),
             role: None,
             cwd: String::new(),
             is_codex: false,
@@ -355,10 +395,25 @@ mod drop_tests {
                 window_started_at: Instant::now(),
                 bytes_in_window: 0,
             }),
-            scrollback: crate::pty::scrollback::new_scrollback(),
+            scrollback: new_scrollback(),
             watcher_cancel: Arc::new(AtomicBool::new(false)),
+            #[cfg(windows)]
+            job: None,
         }
     }
+
+    /// `team_id` 等を持たない最小 handle (handle.rs の Drop/inject テスト用)。
+    pub(crate) fn test_handle(kills: Arc<AtomicUsize>) -> SessionHandle {
+        handle_with(None, None, None, kills)
+    }
+}
+
+#[cfg(test)]
+mod drop_tests {
+    use super::test_support::test_handle;
+    use super::*;
+    use std::panic::{catch_unwind, AssertUnwindSafe};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn drop_recovers_poisoned_killer_mutex_and_kills_child() {

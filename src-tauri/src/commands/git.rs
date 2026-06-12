@@ -7,7 +7,21 @@
 // - 既存実装は status と diff のみで、シェル呼び出しのオーバーヘッドは無視できる
 
 use serde::Serialize;
+use tauri::{AppHandle, Manager};
 use tokio::process::Command;
+
+/// Issue #954: renderer 由来の `project_root` を active project と照合する read/probe ゲート。
+/// git パネル / DiffCard は active project (primary root) のみを対象とするため、
+/// files 系と違い workspaceFolders 許可は不要で厳格一致 (`assert_active_project_root`) を使う。
+async fn assert_project_root_via(
+    app: &AppHandle,
+    project_root: &str,
+) -> crate::commands::error::CommandResult<()> {
+    let state = app.state::<crate::state::AppState>();
+    crate::commands::authz::assert_active_project_root(&state.project_root, project_root)
+        .await
+        .map(|_| ())
+}
 
 /// Windows で GUI アプリ (Tauri) からコンソールプロセス (git.exe) を起動すると、
 /// 既定では一瞬コンソールウィンドウが表示されてしまう。
@@ -68,6 +82,9 @@ pub struct GitFileChange {
 pub struct GitStatus {
     pub ok: bool,
     pub error: Option<String>,
+    /// Issue #888: error が「git リポジトリではない」由来かどうかの構造化フラグ。
+    /// renderer は raw stderr の文字列推測をせず、このフラグで i18n メッセージに引き当てる。
+    pub not_git_repo: bool,
     pub repo_root: Option<String>,
     pub branch: Option<String>,
     pub files: Vec<GitFileChange>,
@@ -229,14 +246,36 @@ fn label_from_status(idx: char, wt: char) -> &'static str {
     }
 }
 
+/// Issue #888: git の stderr が「git リポジトリではない」エラーかを判定する。
+/// 典型形は `fatal: not a git repository (or any of the parent directories): .git`。
+/// 非英語ロケールでは stderr が翻訳され判定が外れうるが、その場合は従来どおり
+/// raw stderr の表示に fallback するだけで悪化はしない。
+fn is_not_git_repo_error(err: &str) -> bool {
+    err.to_ascii_lowercase().contains("not a git repository")
+}
+
 #[tauri::command]
-pub async fn git_status(project_root: String) -> GitStatus {
+pub async fn git_status(app: AppHandle, project_root: String) -> GitStatus {
+    // Issue #954: read/probe 系も project_root ゲートに通す (任意リポジトリ probe の阻止)。
+    if let Err(e) = assert_project_root_via(&app, &project_root).await {
+        return GitStatus {
+            ok: false,
+            error: Some(e.to_string()),
+            ..Default::default()
+        };
+    }
+    git_status_inner(project_root).await
+}
+
+/// ゲート通過後の本体 (#932 の files_write_inner と同じ分割。テストはこちらを呼ぶ)。
+pub(crate) async fn git_status_inner(project_root: String) -> GitStatus {
     // repo root
     let repo_root = match run_git(&["rev-parse", "--show-toplevel"], &project_root).await {
         Ok(s) => s.trim().to_string(),
         Err(e) => {
             return GitStatus {
                 ok: false,
+                not_git_repo: is_not_git_repo_error(&e),
                 error: Some(e),
                 ..Default::default()
             }
@@ -254,6 +293,7 @@ pub async fn git_status(project_root: String) -> GitStatus {
             Err(e) => {
                 return GitStatus {
                     ok: false,
+                    not_git_repo: is_not_git_repo_error(&e),
                     error: Some(e),
                     repo_root: Some(repo_root),
                     branch,
@@ -266,6 +306,7 @@ pub async fn git_status(project_root: String) -> GitStatus {
     GitStatus {
         ok: true,
         error: None,
+        not_git_repo: false,
         repo_root: Some(repo_root),
         branch,
         files,
@@ -274,10 +315,28 @@ pub async fn git_status(project_root: String) -> GitStatus {
 
 #[tauri::command]
 pub async fn git_diff(
+    app: AppHandle,
     project_root: String,
     rel_path: String,
     // Issue #19: rename の場合、HEAD 側 (移動前) のパス。UI (GitFileChange.originalPath) から渡す。
     // 未指定なら rel_path を両側に使う (通常の変更)。
+    original_rel_path: Option<String>,
+) -> GitDiffResult {
+    // Issue #954: read/probe 系も project_root ゲートに通す (任意リポジトリの差分 probe の阻止)。
+    if let Err(e) = assert_project_root_via(&app, &project_root).await {
+        return GitDiffResult {
+            ok: false,
+            error: Some(e.to_string()),
+            ..Default::default()
+        };
+    }
+    git_diff_inner(project_root, rel_path, original_rel_path).await
+}
+
+/// ゲート通過後の本体 (#932 の files_write_inner と同じ分割。テストはこちらを呼ぶ)。
+pub(crate) async fn git_diff_inner(
+    project_root: String,
+    rel_path: String,
     original_rel_path: Option<String>,
 ) -> GitDiffResult {
     // 旧実装と同じく `git diff -- <path>` ではなく、HEAD と worktree を別々に取って
@@ -408,6 +467,20 @@ pub async fn git_diff(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn not_git_repo_error_detection() {
+        // Issue #888: 典型 stderr で true
+        assert!(is_not_git_repo_error(
+            "fatal: not a git repository (or any of the parent directories): .git"
+        ));
+        // 大文字小文字差でも true
+        assert!(is_not_git_repo_error("fatal: Not a Git Repository"));
+        // 別種のエラーでは false
+        assert!(!is_not_git_repo_error("fatal: bad revision 'HEAD'"));
+        assert!(!is_not_git_repo_error("failed to spawn git: program not found"));
+        assert!(!is_not_git_repo_error(""));
+    }
 
     #[test]
     fn parse_rename_record() {
