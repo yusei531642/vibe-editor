@@ -589,7 +589,7 @@ impl TeamHub {
             });
             tracing::info!("[teamhub] listening on local unix socket");
             tracing::debug!("[teamhub] endpoint={endpoint}");
-            return Ok(());
+            Ok(())
         }
 
         #[cfg(windows)]

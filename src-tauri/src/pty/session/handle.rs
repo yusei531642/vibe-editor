@@ -49,8 +49,8 @@ pub struct SessionHandle {
     pub role: Option<String>,
     pub cwd: String,
     pub is_codex: bool,
-    /// OS child PID。Windows では `taskkill /T` で MCP 等の孤児化を防ぐために使う。
-    pub(super) process_id: Option<u32>,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(super) process_id: Option<u32>, // Windows の `taskkill /T` で MCP 等の孤児化を防ぐ。
     /// Issue #153: prompt injection 中はユーザー入力を抑止する。
     /// `inject_codex_prompt_to_pty` 等が begin/end で立て下げる。
     /// renderer 側からの terminal_write は user_write 経由でこのフラグを見る。

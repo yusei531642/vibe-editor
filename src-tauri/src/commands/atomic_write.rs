@@ -67,7 +67,7 @@ pub async fn atomic_write_with_mode(
         opts.write(true).create_new(true);
         #[cfg(unix)]
         {
-            use std::os::unix::fs::OpenOptionsExt;
+            use tokio::fs::OpenOptionsExt;
             // O_NOFOLLOW (linux: 0x20000, macOS: 0x100). libc クレートを使わずに数値で指定するのは
             // 非互換になりやすいので tokio が提供する custom_flags 経由を採用。
             // libc が無い場合でも O_EXCL で symlink → target file 上書きはほぼ防げる。
