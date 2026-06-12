@@ -8,7 +8,12 @@
 // 本物のフロントは `beforeBuildCommand` (= npm run build:vite) / `beforeDevCommand` が上書きする。
 fn main() {
     ensure_frontend_placeholder();
-    let mut tauri_attributes = tauri_build::Attributes::new();
+    let tauri_attributes = tauri_attributes();
+    tauri_build::try_build(tauri_attributes).expect("failed to run tauri build");
+}
+
+#[cfg(target_os = "windows")]
+fn tauri_attributes() -> tauri_build::Attributes {
     // Windows: main thread の stack reserve をデフォルト 1 MB → 8 MB に引き上げる。
     // v1.4.0 で起動 ~3 秒後に "thread 'main' has overflowed its stack" で死ぬ事象が出た。
     // 同じソースの debug build では再現しないので、release プロファイル特有の deep inline /
@@ -16,18 +21,19 @@ fn main() {
     // tauri::generate_handler! の dispatch + serde deserialize 連鎖が疑わしい)。
     // 根本原因の追跡は別 issue で行うが、当座のクラッシュ抑止としてリンカに /STACK を渡す。
     // 形式: /STACK:reserve[,commit]。reserve だけ指定すれば commit はそのまま (= 4 KiB)。
-    #[cfg(target_os = "windows")]
-    {
-        println!("cargo:rustc-link-arg-bins=/STACK:8388608");
-        let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("windows")
-            .join("common-controls-v6.manifest");
-        println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
-        println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
-        tauri_attributes = tauri_attributes
-            .windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest());
-    }
-    tauri_build::try_build(tauri_attributes).expect("failed to run tauri build");
+    println!("cargo:rustc-link-arg-bins=/STACK:8388608");
+    let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("windows")
+        .join("common-controls-v6.manifest");
+    println!("cargo:rustc-link-arg=/MANIFEST:EMBED");
+    println!("cargo:rustc-link-arg=/MANIFESTINPUT:{}", manifest.display());
+    tauri_build::Attributes::new()
+        .windows_attributes(tauri_build::WindowsAttributes::new_without_app_manifest())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn tauri_attributes() -> tauri_build::Attributes {
+    tauri_build::Attributes::new()
 }
 
 fn ensure_frontend_placeholder() {

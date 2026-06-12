@@ -25,14 +25,16 @@ import {
 } from 'lucide-react';
 import type { CardData, CardType } from '../stores/canvas';
 import { NODE_H, NODE_W } from '../stores/canvas';
-import type {
-  TeamHistoryEntry,
-  TeamOrganizationMeta,
-  TeamRole,
-  TerminalAgent
-} from '../../../types/shared';
+import type { TeamHistoryEntry, TeamOrganizationMeta } from '../../../types/shared';
 import { Canvas, type CanvasActions } from '../components/canvas/Canvas';
 import { CanvasSidebar } from '../components/canvas/CanvasSidebar';
+import {
+  AddItem,
+  AgentBadge,
+  BuiltinPresetItem,
+  RecentItem,
+  TabBtn
+} from '../components/canvas/CanvasSpawnItems';
 import { VoiceControlButton } from '../components/canvas/VoiceControlButton';
 import { Rail } from '../components/shell/Rail';
 import { Topbar } from '../components/shell/Topbar';
@@ -53,7 +55,7 @@ import {
   presetPosition,
   type WorkspacePreset
 } from '../lib/workspace-presets';
-import { ROLE_META, roleMetaFor } from '../lib/team-roles';
+import { ROLE_META } from '../lib/team-roles';
 import { useSettings } from '../lib/settings-context';
 import { useToast } from '../lib/toast-context';
 import {
@@ -727,179 +729,5 @@ export function CanvasLayout(): JSX.Element {
         }}
       />
     </div>
-  );
-}
-
-function RoleDot({
-  role,
-  agent
-}: {
-  role: TeamRole;
-  agent: TerminalAgent;
-}): JSX.Element {
-  // 動的ロール (Leader が team_create_role で作成した worker) は ROLE_META にエントリが
-  // 無く undefined になり .label/.color/.glyph 参照で TypeError を起こす (#220 系で報告)。
-  // roleMetaFor は不明 role に対して fallbackProfile を返してくれるので、これに切り替える。
-  const meta = ROLE_META[role] ?? roleMetaFor(role, 'en');
-  return (
-    <span
-      className="canvas-role-dot"
-      title={`${meta.label} (${agent})`}
-      style={{ ['--dot-color' as string]: meta.color } as React.CSSProperties}
-    >
-      {meta.glyph}
-    </span>
-  );
-}
-
-function BuiltinPresetItem({
-  preset,
-  label,
-  agentCountLabel,
-  onClick
-}: {
-  preset: WorkspacePreset;
-  label: string;
-  agentCountLabel: string;
-  onClick: () => void;
-}): JSX.Element {
-  return (
-    <button type="button" onClick={onClick} className="canvas-popover__preset">
-      <span className="canvas-popover__preset-title-row">
-        <span className="canvas-popover__preset-title">{label}</span>
-        <span className="canvas-popover__preset-sub">{agentCountLabel}</span>
-      </span>
-      <span className="canvas-popover__preset-roles">
-        {(preset.organizations ?? [{ id: 'primary', color: '', members: preset.members }]).map(
-          (org, orgIndex) => (
-            <span
-              key={org.id}
-              className="canvas-popover__preset-org"
-              style={
-                org.color
-                  ? ({ ['--org-color' as string]: org.color } as React.CSSProperties)
-                  : undefined
-              }
-            >
-              {org.members.map((m, i) => (
-                <RoleDot key={`${orgIndex}-${i}`} role={m.role} agent={m.agent} />
-              ))}
-            </span>
-          )
-        )}
-      </span>
-    </button>
-  );
-}
-
-function AgentBadge({ label, color }: { label: string; color: string }): JSX.Element {
-  return (
-    <span
-      aria-hidden="true"
-      className="canvas-role-dot"
-      style={
-        {
-          ['--dot-color' as string]: color,
-          width: 18,
-          height: 18,
-          borderRadius: 4,
-          fontSize: 10
-        } as React.CSSProperties
-      }
-    >
-      {label}
-    </span>
-  );
-}
-
-function TabBtn({
-  active,
-  onClick,
-  children
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}): JSX.Element {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`canvas-popover__tab${active ? ' canvas-popover__tab--active' : ''}`}
-      aria-pressed={active}
-    >
-      {children}
-    </button>
-  );
-}
-
-function AddItem({
-  icon,
-  label,
-  onClick
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onClick: () => void;
-}): JSX.Element {
-  return (
-    <button type="button" onClick={onClick} className="canvas-popover__item">
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function RecentItem({
-  entry,
-  fallbackName,
-  agentCountLabel,
-  lastUsedLabel,
-  onClick
-}: {
-  entry: TeamHistoryEntry;
-  fallbackName: string;
-  agentCountLabel: string;
-  lastUsedLabel: string;
-  onClick: () => void;
-}): JSX.Element {
-  const orchestration = entry.orchestration;
-  const stateLabel = orchestration?.blockedByHumanGate
-    ? `blocked_by_human_gate: ${
-        orchestration.requiredHumanDecision ?? orchestration.blockedReason ?? ''
-      }`
-    : orchestration?.latestHandoffStatus
-      ? `handoff: ${orchestration.latestHandoffStatus}`
-      : '';
-  return (
-    <button type="button" onClick={onClick} className="canvas-popover__preset">
-      <span className="canvas-popover__preset-title-row">
-        <span className="canvas-popover__preset-title">{entry.name || fallbackName}</span>
-        <span className="canvas-popover__preset-sub">{agentCountLabel}</span>
-      </span>
-      <span className="canvas-popover__preset-sub">{lastUsedLabel}</span>
-      {entry.organization && (
-        <span
-          className="canvas-popover__org-badge"
-          style={{ ['--org-color' as string]: entry.organization.color } as React.CSSProperties}
-        >
-          {entry.organization.name}
-        </span>
-      )}
-      {stateLabel && (
-        <span
-          className={`canvas-popover__preset-state ${
-            orchestration?.blockedByHumanGate ? 'is-blocked' : ''
-          }`}
-        >
-          {stateLabel}
-        </span>
-      )}
-      <span className="canvas-popover__preset-roles">
-        {entry.members.map((m, i) => (
-          <RoleDot key={i} role={m.role} agent={m.agent} />
-        ))}
-      </span>
-    </button>
   );
 }

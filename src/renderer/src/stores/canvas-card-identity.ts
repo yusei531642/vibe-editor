@@ -21,9 +21,10 @@
  * 同一 agentId のカード複製 → 同 agent_id 再 spawn → registry の旧 PTY kill (#893)
  * という事故経路が構造的に再生産されない。
  */
-import type { Node } from '@xyflow/react';
+import type { Node, Viewport } from '@xyflow/react';
+import type { ArrangeGap } from '../lib/canvas-arrange';
 import { NODE_W, NODE_H } from '../lib/canvas-migrations';
-import type { CardData, CardPayloadMap, CardType } from './canvas';
+import type { CardData, CardPayloadMap, CardType, StageView } from './canvas';
 
 type CardPayload = CardData['payload'];
 
@@ -170,4 +171,26 @@ export function toPersistedCardNode(n: Node<CardData>): PersistedCardNode {
     out.style = s;
   }
   return out;
+}
+
+export function toPersistedCanvasState(state: {
+  nodes: Node<CardData>[];
+  viewport: Viewport;
+  stageView: StageView;
+  teamLocks: Record<string, boolean>;
+  arrangeGap: ArrangeGap;
+}): {
+  nodes: PersistedCardNode[];
+  viewport: Viewport;
+  stageView: StageView;
+  teamLocks: Record<string, boolean>;
+  arrangeGap: ArrangeGap;
+} {
+  return {
+    nodes: state.nodes.map(toPersistedCardNode),
+    viewport: state.viewport,
+    stageView: state.stageView,
+    teamLocks: state.teamLocks,
+    arrangeGap: state.arrangeGap
+  };
 }

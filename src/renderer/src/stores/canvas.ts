@@ -28,7 +28,7 @@ import {
   makeCardNode,
   nextFallbackCardPosition,
   reconcileCardNode,
-  toPersistedCardNode,
+  toPersistedCanvasState,
   type PersistedCardNode
 } from './canvas-card-identity';
 
@@ -319,16 +319,6 @@ type CanvasPersistState = Pick<
   'viewport' | 'stageView' | 'teamLocks' | 'arrangeGap'
 > & { nodes: PersistedCardNode[] };
 
-function toCanvasPersistState(state: ReturnType<typeof normalizeCanvasState>): CanvasPersistState {
-  return {
-    nodes: state.nodes.map(toPersistedCardNode),
-    viewport: state.viewport,
-    stageView: state.stageView,
-    teamLocks: state.teamLocks,
-    arrangeGap: state.arrangeGap
-  };
-}
-
 function canvasStorage(): Storage | null {
   if (typeof window === 'undefined') return null;
   try {
@@ -560,7 +550,7 @@ export const useCanvasStore = create<CanvasState>()(
       // 同 version の rehydrate でも runtime に紛れ込んだ NaN viewport / 範囲外 zoom /
       // 壊れた node が掃除され、Canvas 真っ黒の症状を防ぐ。
       migrate: (persisted, fromVersion) =>
-        toCanvasPersistState(runCanvasMigration(persisted, fromVersion)),
+        toPersistedCanvasState(runCanvasMigration(persisted, fromVersion)),
       // Issue #385: 同 version でも rehydrate のたびに normalize を走らせる。
       // 旧実装は migrate 経由の正規化だけだったため、現バージョンで保存された
       // 不正値 (極端な viewport 等) を起動時に拾えず、Canvas 真っ黒の症状を引き起こしていた。
@@ -574,11 +564,7 @@ export const useCanvasStore = create<CanvasState>()(
       // dragging / selected / measured 等の React Flow ランタイムフィールドは
       // スキーマに列挙されていないため構造的に localStorage へ到達しない (#894/#895 の恒久化)。
       partialize: (s): CanvasPersistState => ({
-        nodes: s.nodes.map(toPersistedCardNode),
-        viewport: s.viewport,
-        stageView: s.stageView,
-        teamLocks: s.teamLocks,
-        arrangeGap: s.arrangeGap
+        ...toPersistedCanvasState(s)
       })
     }
     )
