@@ -167,7 +167,6 @@ async fn enforce_private_dir_mode(dir: &Path) {
 async fn write_private_file(path: &Path, content: &str) -> std::io::Result<()> {
     #[cfg(unix)]
     {
-        use std::os::unix::prelude::OpenOptionsExt;
         use tokio::io::AsyncWriteExt;
         let mut opts = tokio::fs::OpenOptions::new();
         opts.write(true).create(true).truncate(true).mode(0o600);
