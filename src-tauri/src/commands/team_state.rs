@@ -10,6 +10,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tokio::fs;
+use ts_rs::TS;
 
 use crate::commands::team_history::HandoffReference;
 
@@ -19,8 +20,9 @@ use crate::commands::team_history::HandoffReference;
 /// (`commands::team_state::TEAM_STATE_SCHEMA_VERSION`) は維持される。
 pub use crate::commands::schema_version::TEAM_STATE_SCHEMA_VERSION;
 
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase")]
 pub struct FileLockConflictSnapshot {
     pub path: String,
     pub holder_agent_id: String,

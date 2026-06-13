@@ -82,13 +82,13 @@ pub async fn team_read(
     if !newly_read_ids.is_empty() {
         let app = hub.app_handle.lock().await.clone();
         if let Some(app) = app {
-            let payload = json!({
-                "teamId": ctx.team_id,
-                "messageIds": newly_read_ids,
-                "readByAgentId": ctx.agent_id,
-                "readByRole": ctx.role,
-                "readAt": now_iso,
-            });
+            let payload = crate::team_hub::events::InboxReadEventPayload {
+                team_id: ctx.team_id.clone(),
+                message_ids: newly_read_ids,
+                read_by_agent_id: ctx.agent_id.clone(),
+                read_by_role: ctx.role.clone(),
+                read_at: now_iso.clone(),
+            };
             if let Err(e) = app.emit("team:inbox_read", payload) {
                 tracing::warn!("emit team:inbox_read failed: {e}");
             }

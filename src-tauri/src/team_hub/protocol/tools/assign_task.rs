@@ -458,14 +458,15 @@ pub async fn team_assign_task(
             let summary = boundary_report
                 .warn_message(&format!("タスク #{} の責務境界 warning", task_id))
                 .unwrap_or_default();
-            let payload = json!({
-                "teamId": ctx.team_id,
-                "source": "assign",
-                "taskId": task_id,
-                "assignee": assignee,
-                "message": summary,
-                "findings": boundary_report.findings,
-            });
+            let payload = crate::team_hub::events::RoleLintWarningPayload {
+                team_id: ctx.team_id.clone(),
+                source: "assign".to_string(),
+                role_id: None,
+                task_id: Some(task_id),
+                assignee: Some(assignee.to_string()),
+                message: summary,
+                findings: boundary_report.findings.clone(),
+            };
             if let Err(e) = app.emit("team:role-lint-warning", payload) {
                 tracing::warn!("emit team:role-lint-warning (assign) failed: {e}");
             }
@@ -488,14 +489,14 @@ pub async fn team_assign_task(
                 })
                 .collect::<Vec<_>>()
                 .join("; ");
-            let payload = json!({
-                "teamId": ctx.team_id,
-                "source": "assign",
-                "taskId": task_id,
-                "assignee": assignee,
-                "message": format!("タスク #{} の file lock 競合: {}", task_id, summary),
-                "conflicts": lock_conflict_snapshots.clone(),
-            });
+            let payload = crate::team_hub::events::FileLockConflictEventPayload {
+                team_id: ctx.team_id.clone(),
+                source: "assign".to_string(),
+                task_id,
+                assignee: assignee.to_string(),
+                message: format!("タスク #{} の file lock 競合: {}", task_id, summary),
+                conflicts: lock_conflict_snapshots.clone(),
+            };
             if let Err(e) = app.emit("team:file-lock-conflict", payload) {
                 tracing::warn!("emit team:file-lock-conflict failed: {e}");
             }

@@ -20,6 +20,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
   DynamicRoleEntry,
   Language,
+  RoleCreatedPayload,
   RoleProfile,
   RoleProfilesFile
 } from '../../../types/shared';
@@ -194,17 +195,7 @@ export function RoleProfilesProvider({ children }: { children: ReactNode }): JSX
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
     let disposed = false;
-    void listen<{
-      teamId: string;
-      role: {
-        id: string;
-        label: string;
-        description: string;
-        instructions: string;
-        instructionsJa?: string;
-        createdByRole?: string;
-      };
-    }>('team:role-created', (e) => {
+    void listen<RoleCreatedPayload>('team:role-created', (e) => {
       if (disposed) return;
       const { role, teamId } = e.payload;
       const createdAt = new Date().toISOString();
@@ -213,9 +204,9 @@ export function RoleProfilesProvider({ children }: { children: ReactNode }): JSX
         label: role.label,
         description: role.description,
         instructions: role.instructions,
-        instructionsJa: role.instructionsJa,
+        instructionsJa: role.instructionsJa ?? undefined,
         teamId,
-        createdByRole: role.createdByRole ?? 'leader',
+        createdByRole: role.createdByRole,
         createdAt
       };
       setDynamic((prev) => ({

@@ -20,6 +20,7 @@
 //! - `vague_keyword_findings(label, description, instructions)` — 単独 lint。
 
 use serde::Serialize;
+use ts_rs::TS;
 use std::collections::HashSet;
 
 /// Jaccard 類似度の WARN 閾値 (recruit 重複検出用)。
@@ -37,22 +38,26 @@ pub const ASSIGN_OVERLAP_THRESHOLD: f64 = 0.30;
 /// 短文同士の偽 1.0 を避ける。
 const MIN_CHARS_FOR_TRIGRAMS: usize = 8;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(rename_all = "lowercase")]
 pub enum RoleLintLevel {
     Warn,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 pub struct RoleLintFinding {
     pub level: RoleLintLevel,
+    #[ts(type = "string")]
     pub category: &'static str,
     pub detail: String,
     /// 0.0–1.0 の類似度。`vague_keyword` 系は None。
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
     pub similarity: Option<f64>,
     /// 衝突相手 (重複系のみ)。
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional = nullable)]
     pub other_role_id: Option<String>,
 }
 
