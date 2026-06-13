@@ -15,7 +15,7 @@
   "src-tauri/src/pty/claude_watcher.rs": 609,
   "src-tauri/src/pty/codex_broker.rs": 506,
   "src-tauri/src/pty/codex_watcher.rs": 626,
-  "src-tauri/src/pty/registry.rs": 833,
+  "src-tauri/src/pty/registry.rs": 818,
   "src-tauri/src/pty/session/handle.rs": 549,
   "src-tauri/src/pty/session/spawn.rs": 731,
   "src-tauri/src/team_hub/file_locks.rs": 781,

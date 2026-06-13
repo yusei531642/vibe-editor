@@ -18,9 +18,7 @@
 //     経由でない PTY)、(b) 旧 schema の永続化データで `--session-id` 注入未対応の tab、
 //     の 2 ケースで session id を後追い検出して renderer に届けること。
 //
-// 注意:
-//   - Claude Code 以外 (codex 等) は jsonl を作らないので呼び出さない (renderer 制御)
-//   - notify は OS の inotify/ReadDirectoryChangesW に依存。Windows でも動く
+// 注意: Claude Code 以外は呼び出さず、notify は OS backend に依存する。
 
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use once_cell::sync::Lazy;
@@ -269,8 +267,7 @@ fn process_candidate(
 /// これで「session が早期終了したら watcher も 100ms 以内に exit」「長期 session でも
 /// 60 秒の hard deadline は維持」の両立が成立する。
 ///
-/// 検出した sessionId は terminal_id 宛の `terminal:sessionId:{terminal_id}` event で
-/// 1 回だけ emit される (claim 機構で multi-watcher 競合は排他)。
+/// 検出した sessionId は terminal_id 宛に 1 回だけ emit される。
 pub fn spawn_watcher(
     app: AppHandle,
     terminal_id: String,
@@ -278,9 +275,12 @@ pub fn spawn_watcher(
     spawned_at: SystemTime,
     watcher_cancel: Arc<AtomicBool>,
 ) {
-    std::thread::spawn(move || {
-        run_watcher_loop(app, terminal_id, project_root, spawned_at, watcher_cancel)
-    });
+    crate::task_supervisor::spawn_app_thread(
+        app.clone(),
+        "claude-session-watcher",
+        watcher_cancel.clone(),
+        move || run_watcher_loop(app, terminal_id, project_root, spawned_at, watcher_cancel),
+    );
 }
 
 /// Issue #632: watcher の本体ループ。`spawn_watcher` から std::thread で起動される。
