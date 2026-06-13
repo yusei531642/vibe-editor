@@ -163,11 +163,18 @@ pub(crate) fn is_safe_watch_root(root: &Path) -> bool {
         if canon == Path::new("/") {
             return false;
         }
-        let lower = canon.to_string_lossy();
         for prefix in [
-            "/etc", "/sys", "/proc", "/dev", "/usr", "/bin", "/sbin", "/boot",
+            "/etc",
+            "/private/etc",
+            "/sys",
+            "/proc",
+            "/dev",
+            "/usr",
+            "/bin",
+            "/sbin",
+            "/boot",
         ] {
-            if lower.starts_with(prefix) {
+            if canon.starts_with(prefix) {
                 return false;
             }
         }

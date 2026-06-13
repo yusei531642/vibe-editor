@@ -22,15 +22,22 @@ import {
   normalizeCanvasState
 } from '../lib/canvas-migrations';
 import type { AgentPayload } from '../components/canvas/cards/AgentNodeCard/types';
-import type { PersistStorage, StorageValue } from 'zustand/middleware';
 import {
   findReconcileTarget,
   makeCardNode,
   nextFallbackCardPosition,
   reconcileCardNode,
-  toPersistedCanvasState,
-  type PersistedCardNode
+  toPersistedCanvasState
 } from './canvas-card-identity';
+import {
+  CANVAS_PERSIST_NAME,
+  CANVAS_PERSIST_VERSION,
+  canvasPersistPaused,
+  canvasPersistStorage,
+  flushCanvasPersistState,
+  setCanvasPersistPaused,
+  toCanvasPersistState
+} from './canvas-persistence';
 
 export type CardType = 'terminal' | 'agent' | 'editor' | 'diff' | 'fileTree' | 'changes';
 
@@ -216,7 +223,7 @@ export function cardRoleId(data: CardData | undefined): string | undefined {
   return undefined;
 }
 
-interface CanvasState {
+export interface CanvasState {
   nodes: Node<CardData>[];
   edges: Edge[];
   viewport: Viewport;
@@ -312,39 +319,6 @@ export const NODE_MIN_H = 280;
  *  - 大量 handoff 時の保留 timer 蓄積を抑える
  */
 const pulseTimers = new Map<string, number>();
-let canvasPersistPaused = false;
-
-type CanvasPersistState = Pick<
-  CanvasState,
-  'viewport' | 'stageView' | 'teamLocks' | 'arrangeGap'
-> & { nodes: PersistedCardNode[] };
-
-function canvasStorage(): Storage | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
-
-const canvasPersistStorage: PersistStorage<CanvasPersistState> = {
-  getItem: (name) => {
-    const raw = canvasStorage()?.getItem(name);
-    if (!raw) return null;
-    return JSON.parse(raw) as StorageValue<CanvasPersistState>;
-  },
-  setItem: (name, value) => {
-    // Issue #864/#835: drag 中は nodes が毎フレーム変わるため、localStorage への
-    // JSON.stringify が UI スレッドを詰まらせる。drag 終了時の setCanvasDragging(false)
-    // と直後の setNodes で最新状態が flush されるので、drag 中だけ丸ごと skip する。
-    if (canvasPersistPaused) return;
-    canvasStorage()?.setItem(name, JSON.stringify(value));
-  },
-  removeItem: (name) => {
-    canvasStorage()?.removeItem(name);
-  }
-};
 
 /** Issue #385: テストから直接 normalize の挙動を検証するための export。
  *  本体は zustand persist の migrate / merge から間接呼出しされるが、unit test では
@@ -382,8 +356,18 @@ export const useCanvasStore = create<CanvasState>()(
       setEdges: (edges) => set({ edges }),
       setViewport: (viewport) => set({ viewport }),
       setCanvasDragging: (isDragging) => {
-        canvasPersistPaused = isDragging;
+        if (isDragging) {
+          setCanvasPersistPaused(true);
+          set({ isDragging });
+          return;
+        }
+
+        const wasPaused = canvasPersistPaused();
         set({ isDragging });
+        setCanvasPersistPaused(false);
+        if (wasPaused) {
+          flushCanvasPersistState(get());
+        }
       },
       addCard: ({ type, title, payload, position }) => {
         const existing = get().nodes;
@@ -537,14 +521,14 @@ export const useCanvasStore = create<CanvasState>()(
         set((state) => ({ nodes: unifyTerminalSize(state.nodes) }))
     }),
     {
-      name: 'vibe-editor:canvas',
+      name: CANVAS_PERSIST_NAME,
       storage: canvasPersistStorage,
       // Issue #385: v4 で persisted state は必ず normalizeCanvasState を経由させる。
       // 同 version の rehydrate でも `merge` で再正規化するため、runtime で紛れ込んだ
       // NaN viewport / 範囲外 zoom / 壊れた node も次回起動時には掃除される。
       // Issue #497: v5 で旧既定 640x400 のカードを新既定 760x460 へ移行する
       // (>640 / >400 の手動拡大値は尊重)。詳細は `lib/canvas-migrations.ts` の v4 step。
-      version: 5,
+      version: CANVAS_PERSIST_VERSION,
       // 各 version の差分は `lib/canvas-migrations.ts` の `MIGRATION_STEPS` に集約。
       // ここでは「fromVersion → 最新」を 1 行で進めるだけ。最後に必ず normalize を通すので
       // 同 version の rehydrate でも runtime に紛れ込んだ NaN viewport / 範囲外 zoom /
@@ -563,9 +547,7 @@ export const useCanvasStore = create<CanvasState>()(
       // Issue #938: nodes は PersistedCardNode へ明示変換 (pick) してから保存する。
       // dragging / selected / measured 等の React Flow ランタイムフィールドは
       // スキーマに列挙されていないため構造的に localStorage へ到達しない (#894/#895 の恒久化)。
-      partialize: (s): CanvasPersistState => ({
-        ...toPersistedCanvasState(s)
-      })
+      partialize: toCanvasPersistState
     }
     )
   )
