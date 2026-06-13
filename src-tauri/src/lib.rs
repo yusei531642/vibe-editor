@@ -271,6 +271,15 @@ pub fn run() {
             commands::voice::voice_realtime_create_session,
             commands::voice::voice_get_active_target,
             commands::voice::voice_send_to_leader,
+            // ---- API agents (Issue #994) ----
+            commands::api_agents::api_agent_provider_set_key,
+            commands::api_agents::api_agent_provider_clear_key,
+            commands::api_agents::api_agent_provider_has_key,
+            commands::api_agents::api_agent_session_create,
+            commands::api_agents::api_agent_session_load,
+            commands::api_agents::api_agent_session_delete,
+            commands::api_agents::api_agent_send,
+            commands::api_agents::api_agent_cancel,
         ])
         .setup(|app| {
             info!(

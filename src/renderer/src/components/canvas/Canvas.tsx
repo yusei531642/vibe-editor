@@ -26,6 +26,7 @@ import '@xyflow/react/dist/style.css';
 import { useTeamHandoff } from '../../lib/use-team-handoff';
 import TerminalCard from './cards/TerminalCard';
 import AgentNodeCard from './cards/AgentNodeCard';
+import ApiAgentChatCard from './cards/ApiAgentChatCard';
 import EditorCard from './cards/EditorCard';
 import DiffCard from './cards/DiffCard';
 import FileTreeCard from './cards/FileTreeCard';
@@ -60,6 +61,7 @@ import { resolveAgentVisual, type AgentVisualPayload } from '../../lib/agent-vis
 const nodeTypes = {
   terminal: TerminalCard,
   agent: AgentNodeCard,
+  apiAgent: ApiAgentChatCard,
   editor: EditorCard,
   diff: DiffCard,
   fileTree: FileTreeCard,
@@ -92,6 +94,7 @@ const MIN_RECRUIT_ZOOM = 0.7;
 export interface CanvasActions {
   addClaude: () => void;
   addCodex: () => void;
+  addApiAgent: () => void;
   addFileTree: () => void;
   addChanges: () => void;
   addEditor: () => void;
@@ -320,6 +323,10 @@ function FlowApp({ actions }: FlowAppProps): JSX.Element {
         {
           label: t('canvasMenu.addCodexHere'),
           action: actions.addCodex
+        },
+        {
+          label: 'Add API agent here',
+          action: actions.addApiAgent
         },
         {
           label: t('canvasMenu.addFileTreeHere'),

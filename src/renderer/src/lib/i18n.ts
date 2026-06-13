@@ -760,6 +760,20 @@ const ja: Dict = {
   'settings.customAgents.cwdLabel': '作業ディレクトリ（空なら現在のプロジェクトルート）',
   'settings.customAgents.cwdUnset': '（未設定）',
   'settings.customAgents.accentColor': 'アクセントカラー（任意）',
+  'settings.customAgents.runtime': '実行方式',
+  'settings.customAgents.provider': 'Provider',
+  'settings.customAgents.baseUrl': 'Base URL',
+  'settings.customAgents.model': 'Model',
+  'settings.customAgents.apiKey': 'API key',
+  'settings.customAgents.apiKeySaved': '保存済み（値は表示されません）',
+  'settings.customAgents.apiKeyClearConfirm': '保存済み API key を削除しますか？',
+  'settings.customAgents.toolMode': 'Tool mode',
+  'settings.customAgents.toolAuto': 'Auto',
+  'settings.customAgents.toolReadOnly': 'Read-only chat',
+  'settings.customAgents.systemPrompt': 'System prompt override',
+  'settings.customAgents.apiNote': 'TeamHub tool は provider/model が対応する場合のみ有効です。',
+  'settings.customAgents.readOnlyNote':
+    'この provider/model は tool calling を read-only chat に degrade します。',
   'settings.customAgents.applyNote': '変更後、Canvas で該当エージェントのカードを作り直すと反映されます。',
 
   // ---------- MCP tab ----------
@@ -1619,6 +1633,20 @@ const en: Dict = {
   'settings.customAgents.cwdLabel': 'Working directory (blank = current project root)',
   'settings.customAgents.cwdUnset': '(unset)',
   'settings.customAgents.accentColor': 'Accent color (optional)',
+  'settings.customAgents.runtime': 'Runtime',
+  'settings.customAgents.provider': 'Provider',
+  'settings.customAgents.baseUrl': 'Base URL',
+  'settings.customAgents.model': 'Model',
+  'settings.customAgents.apiKey': 'API key',
+  'settings.customAgents.apiKeySaved': 'Saved (value is hidden)',
+  'settings.customAgents.apiKeyClearConfirm': 'Delete the saved API key?',
+  'settings.customAgents.toolMode': 'Tool mode',
+  'settings.customAgents.toolAuto': 'Auto',
+  'settings.customAgents.toolReadOnly': 'Read-only chat',
+  'settings.customAgents.systemPrompt': 'System prompt override',
+  'settings.customAgents.apiNote': 'TeamHub tools are enabled only when the provider/model supports them.',
+  'settings.customAgents.readOnlyNote':
+    'This provider/model degrades to read-only chat because tool calling is unavailable.',
   'settings.customAgents.applyNote': 'Recreate the agent card in Canvas to apply changes.',
 
   // ---------- MCP tab ----------

@@ -20,7 +20,7 @@ use crate::commands::error::{CommandError, CommandResult};
 /// `~/.vibe-editor/settings.json` の現行 schema version。
 /// renderer 側 `src/types/shared.ts` の `APP_SETTINGS_SCHEMA_VERSION` と同期。
 /// Issue #75 / #449 / #618 で bump されてきた。
-pub const SETTINGS_SCHEMA_VERSION: u32 = 11;
+pub const SETTINGS_SCHEMA_VERSION: u32 = 12;
 
 /// `~/.vibe-editor/team-state/*.json` (TeamHub orchestration state) の現行 schema version。
 /// Issue #470 で導入。

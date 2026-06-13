@@ -48,6 +48,11 @@ pub fn terminal_tabs_path() -> PathBuf {
     vibe_root().join("terminal-tabs.json")
 }
 
+/// Issue #994: API agent の会話履歴保存先 `~/.vibe-editor/api-agent-sessions`。
+pub fn api_agent_sessions_dir() -> PathBuf {
+    vibe_root().join("api-agent-sessions")
+}
+
 /// Issue #609 (Security): updater の minisign 署名検証失敗を「24h に 1 度だけ」ユーザーに
 /// 通知するための最終警告タイムスタンプ永続化先 `~/.vibe-editor/updater-warned.json` のパス。
 ///

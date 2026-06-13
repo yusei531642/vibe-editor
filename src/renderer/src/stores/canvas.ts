@@ -39,7 +39,14 @@ import {
   toCanvasPersistState
 } from './canvas-persistence';
 
-export type CardType = 'terminal' | 'agent' | 'editor' | 'diff' | 'fileTree' | 'changes';
+export type CardType =
+  | 'terminal'
+  | 'agent'
+  | 'apiAgent'
+  | 'editor'
+  | 'diff'
+  | 'fileTree'
+  | 'changes';
 
 /**
  * Issue #732: カード種別ごとの payload 型。
@@ -73,6 +80,16 @@ export interface CardPayloadBase {
 
 /** agent カード payload: 既存 `AgentPayload` に共通 base を合成したもの。 */
 export type AgentCardPayload = AgentPayload & CardPayloadBase;
+
+/** apiAgent カード: API 駆動 Chat session への参照だけを payload に持つ。 */
+export interface ApiAgentCardPayload extends CardPayloadBase {
+  agentId: string;
+  sessionId?: string;
+  providerId?: string;
+  model?: string;
+  toolMode?: 'auto' | 'readOnly';
+  configured?: boolean;
+}
 
 /** terminal カード: 単発の Claude/Codex/シェル端末を起動するための payload。 */
 export interface TerminalCardPayload extends CardPayloadBase {
@@ -117,6 +134,7 @@ export interface ChangesCardPayload extends CardPayloadBase {
 export interface CardPayloadMap {
   terminal: TerminalCardPayload;
   agent: AgentCardPayload;
+  apiAgent: ApiAgentCardPayload;
   editor: EditorCardPayload;
   diff: DiffCardPayload;
   fileTree: FileTreeCardPayload;
@@ -143,6 +161,7 @@ export type CardDataOf<T extends CardType> = {
 export type CardData =
   | CardDataOf<'terminal'>
   | CardDataOf<'agent'>
+  | CardDataOf<'apiAgent'>
   | CardDataOf<'editor'>
   | CardDataOf<'diff'>
   | CardDataOf<'fileTree'>
@@ -162,6 +181,7 @@ export type CardSpecOf<T extends CardType> = {
 export type CardSpec =
   | CardSpecOf<'terminal'>
   | CardSpecOf<'agent'>
+  | CardSpecOf<'apiAgent'>
   | CardSpecOf<'editor'>
   | CardSpecOf<'diff'>
   | CardSpecOf<'fileTree'>
@@ -186,12 +206,12 @@ export function cardTeamName(data: CardData | undefined): string | undefined {
 
 /**
  * Issue #732: 任意の `CardData` から agentId を取り出すヘルパ。
- * agentId を持つのは agent / terminal カードのみ (TeamHub の宛先解決に使う)。
+ * agentId を持つのは agent / apiAgent / terminal カードのみ (TeamHub の宛先解決に使う)。
  * 旧コードの `(payload as { agentId?: string }).agentId` 局所 cast を置き換える。
  */
 export function cardAgentId(data: CardData | undefined): string | undefined {
   if (!data) return undefined;
-  if (data.cardType === 'agent' || data.cardType === 'terminal') {
+  if (data.cardType === 'agent' || data.cardType === 'apiAgent' || data.cardType === 'terminal') {
     return data.payload?.agentId;
   }
   return undefined;

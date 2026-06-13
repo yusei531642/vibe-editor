@@ -126,10 +126,19 @@ async fn agent_config_full_entry_round_trips() {
         custom_agents: Some(vec![AgentConfig {
             id: "claude-dev".into(),
             name: "Claude (dev)".into(),
+            runtime: "cli".into(),
             command: "claude".into(),
             args: "--debug".into(),
             cwd: Some("/tmp".into()),
             color: Some("#ff0000".into()),
+            provider_id: None,
+            custom_base_url: None,
+            model: None,
+            temperature: None,
+            max_output_tokens: None,
+            system_prompt: None,
+            skill_ids: None,
+            tool_mode: None,
         }]),
         ..Settings::default()
     };

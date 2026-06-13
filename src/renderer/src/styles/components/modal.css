@@ -388,6 +388,41 @@
 .custom-agent__header h3 {
   margin: 0;
 }
+
+.custom-agent__key-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.segmented-control {
+  display: inline-grid;
+  grid-auto-flow: column;
+  gap: 2px;
+  width: fit-content;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface-muted);
+}
+
+.segmented-control button {
+  min-width: 56px;
+  height: 26px;
+  padding: 0 10px;
+  color: var(--muted);
+  background: transparent;
+  border: 0;
+  border-radius: calc(var(--radius-sm, 6px) - 2px);
+  font: inherit;
+  font-size: 12px;
+}
+
+.segmented-control button.is-active {
+  color: var(--fg);
+  background: var(--surface);
+}
 .toolbar__btn--danger {
   color: var(--warning, #d4a27f);
 }
@@ -690,7 +725,9 @@
 
 .modal--settings .modal__label input[type='text'],
 .modal--settings .modal__label input[type='number'],
-.modal--settings .modal__label select {
+.modal--settings .modal__label input[type='password'],
+.modal--settings .modal__label select,
+.modal--settings .modal__label textarea {
   min-height: 38px;
   padding: 0 12px;
   border-radius: 10px;
@@ -699,6 +736,12 @@
     background-color 120ms cubic-bezier(0.25, 1, 0.5, 1),
     border-color 120ms cubic-bezier(0.25, 1, 0.5, 1),
     box-shadow 180ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.modal--settings .modal__label textarea {
+  min-height: 92px;
+  resize: vertical;
+  line-height: 1.5;
 }
 
 /* Issue #825: select の chevron は OS デフォルトを潰してカスタム SVG にする。
@@ -721,7 +764,9 @@
 
 .modal--settings .modal__label input[type='text']:focus-visible,
 .modal--settings .modal__label input[type='number']:focus-visible,
-.modal--settings .modal__label select:focus-visible {
+.modal--settings .modal__label input[type='password']:focus-visible,
+.modal--settings .modal__label select:focus-visible,
+.modal--settings .modal__label textarea:focus-visible {
   /* Claude 公式風: brand 色 border + glow の単一 ring */
   border-color: var(--claude-brand, var(--accent));
   box-shadow: 0 0 0 3px var(--claude-brand-glow, rgba(217, 119, 87, 0.12));

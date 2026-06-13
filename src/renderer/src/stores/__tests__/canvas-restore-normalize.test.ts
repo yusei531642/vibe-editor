@@ -61,6 +61,29 @@ describe('normalizeCanvasState (Issue #385)', () => {
     expect(out.viewport.y).toBe(0);
   });
 
+  it('apiAgent card type を復元対象として保持する', () => {
+    const out = normalizeCanvasState({
+      nodes: [
+        {
+          id: 'api-agent-1',
+          type: 'apiAgent',
+          position: { x: 10, y: 20 },
+          data: {
+            cardType: 'apiAgent',
+            title: 'OpenRouter Worker',
+            payload: { agentId: 'openrouter-worker', sessionId: 'session-1' }
+          },
+          style: { width: 760, height: 460 }
+        }
+      ],
+      viewport: { x: 0, y: 0, zoom: 1 }
+    });
+
+    expect(out.nodes).toHaveLength(1);
+    expect(out.nodes[0]?.type).toBe('apiAgent');
+    expect(out.nodes[0]?.data.cardType).toBe('apiAgent');
+  });
+
   it('nodes が空のときは極端な viewport 値はそのまま (= 操作で復帰可能)', () => {
     const out = normalizeCanvasState({
       nodes: [],

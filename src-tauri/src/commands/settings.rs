@@ -176,18 +176,42 @@ impl std::fmt::Debug for VoiceSettings {
     }
 }
 
-/// shared.ts `AgentConfig` を mirror。`cwd` / `color` は optional。
+/// shared.ts `AgentConfig` を mirror。API key は OS keyring に保管し、この struct には持たない。
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentConfig {
     pub id: String,
     pub name: String,
+    #[serde(default = "default_agent_runtime")]
+    pub runtime: String,
+    #[serde(default)]
     pub command: String,
+    #[serde(default)]
     pub args: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_base_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_output_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_ids: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_mode: Option<String>,
+}
+
+fn default_agent_runtime() -> String {
+    "cli".to_string()
 }
 
 // `Settings::default()` は renderer の `DEFAULT_SETTINGS` と一致させる。
@@ -347,6 +371,7 @@ pub async fn settings_load() -> CommandResult<Settings> {
         // しない。renderer 側へ Err を返し、default ベースの auto-save で原本を上書きしない。
         return Ok(Settings::default());
     };
+    backup_pre_v12_settings_snapshot(&path, &bytes).await;
     match serde_json::from_slice::<Settings>(&bytes) {
         Ok(v) => Ok(v),
         Err(e) => {
@@ -369,6 +394,40 @@ pub async fn settings_load() -> CommandResult<Settings> {
             }
             Ok(Settings::default())
         }
+    }
+}
+
+async fn backup_pre_v12_settings_snapshot(path: &Path, bytes: &[u8]) {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return;
+    };
+    let schema_version = value
+        .get("schemaVersion")
+        .and_then(|n| n.as_u64())
+        .unwrap_or(0);
+    if schema_version >= APP_SETTINGS_SCHEMA_VERSION as u64 {
+        return;
+    }
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    let backup = parent.join("settings.v11.bak");
+    if fs::try_exists(&backup).await.unwrap_or(false) {
+        return;
+    }
+    if let Err(e) = fs::create_dir_all(parent).await {
+        tracing::warn!("[settings] failed to create settings backup dir: {e}");
+        return;
+    }
+    match fs::write(&backup, bytes).await {
+        Ok(()) => tracing::info!(
+            "[settings] wrote pre-v12 settings snapshot: {}",
+            backup.display()
+        ),
+        Err(e) => tracing::warn!(
+            "[settings] failed to write pre-v12 settings snapshot {}: {e}",
+            backup.display()
+        ),
     }
 }
 
@@ -681,10 +740,19 @@ mod tests {
             custom_agents: Some(vec![AgentConfig {
                 id: "claude".into(),
                 name: "Shadow Claude".into(),
+                runtime: "cli".into(),
                 command: "shadow".into(),
                 args: "".into(),
                 cwd: None,
                 color: None,
+                provider_id: None,
+                custom_base_url: None,
+                model: None,
+                temperature: None,
+                max_output_tokens: None,
+                system_prompt: None,
+                skill_ids: None,
+                tool_mode: None,
             }]),
             ..Settings::default()
         };
@@ -699,10 +767,19 @@ mod tests {
             custom_agents: Some(vec![AgentConfig {
                 id: "aider".into(),
                 name: "Aider".into(),
+                runtime: "cli".into(),
                 command: "aider".into(),
                 args: "".into(),
                 cwd: None,
                 color: None,
+                provider_id: None,
+                custom_base_url: None,
+                model: None,
+                temperature: None,
+                max_output_tokens: None,
+                system_prompt: None,
+                skill_ids: None,
+                tool_mode: None,
             }]),
             ..Settings::default()
         };

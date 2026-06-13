@@ -35,7 +35,15 @@ const LEGACY_NODE_H_V3 = 400;
 const LEGACY_NODE_W_THRESHOLD_V5 = LEGACY_NODE_W_V3;
 const LEGACY_NODE_H_THRESHOLD_V5 = LEGACY_NODE_H_V3;
 
-const CARD_TYPES: CardType[] = ['terminal', 'agent', 'editor', 'diff', 'fileTree', 'changes'];
+const CARD_TYPES: CardType[] = [
+  'terminal',
+  'agent',
+  'apiAgent',
+  'editor',
+  'diff',
+  'fileTree',
+  'changes'
+];
 const STAGE_VIEWS: StageView[] = ['stage', 'list', 'focus'];
 
 /**
@@ -84,6 +92,12 @@ function cardDataForType(
         cardType: type,
         title,
         payload: data.payload as Extract<CardData, { cardType: 'agent' }>['payload']
+      };
+    case 'apiAgent':
+      return {
+        cardType: type,
+        title,
+        payload: data.payload as Extract<CardData, { cardType: 'apiAgent' }>['payload']
       };
     case 'editor':
       return {
@@ -338,7 +352,10 @@ const MIGRATION_STEPS: Record<number, StepMigrator> = {
         };
       })
     };
-  }
+  },
+  // v5 → v6 (Issue #994): apiAgent card type の追加。
+  // 既存 persisted nodes は構造変換不要。normalize の CARD_TYPES 更新で復元可能にする。
+  5: (p) => p
 };
 
 /**
