@@ -38,9 +38,14 @@ pub async fn api_agent_skill_list(
         return Ok(Vec::new());
     }
     let dir = skills_root(root);
+    // symlink escape を防ぐため skills root を canonicalize し、配下封じ込めの基準にする。
+    let dir_canon = match fs::canonicalize(&dir).await {
+        Ok(p) => p,
+        Err(_) => return Ok(Vec::new()), // skills ディレクトリが無い
+    };
     let mut rd = match fs::read_dir(&dir).await {
         Ok(rd) => rd,
-        Err(_) => return Ok(Vec::new()), // skills ディレクトリが無い
+        Err(_) => return Ok(Vec::new()),
     };
     let mut out: Vec<ApiAgentSkillMeta> = Vec::new();
     while let Some(entry) = rd
@@ -53,10 +58,10 @@ pub async fn api_agent_skill_list(
             continue;
         }
         let md = entry.path().join("SKILL.md");
-        if !fs::try_exists(&md).await.unwrap_or(false) {
+        // SKILL.md (や中間ディレクトリ) が skills root 外を指す symlink なら読まない。
+        let Some(body) = read_skill_md_within(&dir_canon, &md).await else {
             continue;
-        }
-        let body = read_capped(&md).await.unwrap_or_default();
+        };
         let (name, description) = parse_skill_meta(&id, &body);
         out.push(ApiAgentSkillMeta {
             id,
@@ -85,17 +90,24 @@ pub(super) async fn load_skill_bodies(project_root: &str, skill_ids: &[String]) 
         ids.push(VIBE_TEAM_SKILL_ID.to_string());
     }
 
+    // symlink escape を防ぐため skills root を canonicalize して封じ込め基準にする。
+    let dir_canon = if root.is_empty() {
+        None
+    } else {
+        fs::canonicalize(skills_root(root)).await.ok()
+    };
+
     let mut out: Vec<ApiAgentSkill> = Vec::new();
     for id in ids {
-        let disk_body = if root.is_empty() {
-            None
-        } else {
-            read_capped(&skills_root(root).join(&id).join("SKILL.md"))
-                .await
-                .ok()
+        let disk_body = match &dir_canon {
+            Some(dc) => {
+                read_skill_md_within(dc, &skills_root(root).join(&id).join("SKILL.md")).await
+            }
+            None => None,
         };
         let body = match disk_body {
             Some(b) => b,
+            // vibe-team は disk に無い / 読めない / symlink 拒否のときバンドル本文へフォールバック。
             None if id == VIBE_TEAM_SKILL_ID => {
                 crate::commands::vibe_team_skill::bundled_vibe_team_skill_text()
             }
@@ -105,6 +117,22 @@ pub(super) async fn load_skill_bodies(project_root: &str, skill_ids: &[String]) 
         out.push(ApiAgentSkill { id, name, body });
     }
     out
+}
+
+/// `.claude/skills` (canonicalize 済み root) 配下に実体が収まる SKILL.md だけを読む。
+/// SKILL.md 自身や中間ディレクトリが root 外を指す symlink / traversal の場合は `None` を返し、
+/// **読み込まない**。canonicalize 後の実体パスを read するため、検査対象と読み込み対象が
+/// 一致し TOCTOU を避けられる (Issue #998 security review)。
+async fn read_skill_md_within(skills_root_canon: &Path, md_path: &Path) -> Option<String> {
+    let canon = fs::canonicalize(md_path).await.ok()?;
+    if !canon.starts_with(skills_root_canon) {
+        tracing::warn!(
+            "[api-agent] rejected skill path escaping skills root: {}",
+            md_path.display()
+        );
+        return None;
+    }
+    read_capped(&canon).await.ok()
 }
 
 async fn read_capped(path: &Path) -> CommandResult<String> {
@@ -251,6 +279,52 @@ mod tests {
         assert!(!skills.iter().any(|s| s.id.contains("..")));
         // vibe-team は自動追加
         assert!(skills.iter().any(|s| s.id == VIBE_TEAM_SKILL_ID));
+    }
+
+    /// security: SKILL.md が skills root 外を指す symlink の場合、本文を読み込まない。
+    /// 攻撃 repo を clone → API エージェント利用だけで任意ファイルが流出する経路を塞ぐ。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn load_skill_bodies_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        // プロジェクト内だが .claude/skills の外にある「秘密」ファイル
+        let secret = dir.path().join("secret.txt");
+        tokio::fs::write(&secret, "TOP SECRET KEY").await.unwrap();
+        // SKILL.md を秘密ファイルへの symlink にした悪意ある skill
+        let skill_dir = skills_root(&root).join("evil");
+        tokio::fs::create_dir_all(&skill_dir).await.unwrap();
+        symlink(&secret, skill_dir.join("SKILL.md")).unwrap();
+
+        let skills = load_skill_bodies(&root, &["evil".to_string()]).await;
+        // evil は拒否され、どの skill 本文にも秘密が混入しない
+        assert!(!skills.iter().any(|s| s.id == "evil"));
+        assert!(!skills.iter().any(|s| s.body.contains("TOP SECRET")));
+        // vibe-team の自動追加は維持される (バンドル本文)
+        assert!(skills.iter().any(|s| s.id == VIBE_TEAM_SKILL_ID));
+    }
+
+    /// security: skills root 内に収まる正当な symlink は許可される (dotfiles 運用等)。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn load_skill_bodies_allows_symlink_within_root() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        let real_dir = skills_root(&root).join("real");
+        tokio::fs::create_dir_all(&real_dir).await.unwrap();
+        tokio::fs::write(real_dir.join("SKILL.md"), "inside body")
+            .await
+            .unwrap();
+        // skills root 内で real/SKILL.md を指す symlink ファイル
+        let alias_dir = skills_root(&root).join("alias");
+        tokio::fs::create_dir_all(&alias_dir).await.unwrap();
+        symlink(real_dir.join("SKILL.md"), alias_dir.join("SKILL.md")).unwrap();
+
+        let skills = load_skill_bodies(&root, &["alias".to_string()]).await;
+        let alias = skills.iter().find(|s| s.id == "alias").unwrap();
+        assert!(alias.body.contains("inside body"));
     }
 
     #[tokio::test]
