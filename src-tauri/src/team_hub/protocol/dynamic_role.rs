@@ -10,9 +10,9 @@
 //!
 //! 既存 builtin (summary 上) と被る role_id は拒否、上限超過も拒否、長さ上限も拒否する。
 
+use crate::team_hub::events::{RoleCreatedPayload, RoleCreatedRolePayload};
 use crate::team_hub::{CallContext, DynamicRole, TeamHub};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 use tauri::Emitter;
 
 use super::consts::{
@@ -173,18 +173,18 @@ pub(super) async fn validate_and_register_dynamic_role(
     // renderer に通知 (UI 更新 + role-profiles-context 内のメモリキャッシュへ反映)
     let app = hub.app_handle.lock().await.clone();
     if let Some(app) = &app {
-        let payload = json!({
-            "teamId": role.team_id,
-            "role": {
-                "id": role.id,
-                "label": role.label,
-                "description": role.description,
-                "instructions": role.instructions,
-                "instructionsJa": role.instructions_ja,
-                "teamId": role.team_id,
-                "createdByRole": role.created_by_role,
-            }
-        });
+        let payload = RoleCreatedPayload {
+            team_id: role.team_id.clone(),
+            role: RoleCreatedRolePayload {
+                id: role.id.clone(),
+                label: role.label.clone(),
+                description: role.description.clone(),
+                instructions: role.instructions.clone(),
+                instructions_ja: role.instructions_ja.clone(),
+                team_id: role.team_id.clone(),
+                created_by_role: role.created_by_role.clone(),
+            },
+        };
         if let Err(e) = app.emit("team:role-created", payload) {
             tracing::warn!("emit team:role-created failed: {e}");
         }

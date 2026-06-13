@@ -30,6 +30,8 @@ import { useRoleProfiles } from './role-profiles-context';
 import { ackRecruit } from './recruit-ack';
 import { findRecruitPosition } from './canvas-recruit-position';
 import type {
+  DismissRequestPayload,
+  RecruitCancelledPayload,
   RecruitRequestPayload,
   RecruitRescuedPayload,
   WaitPolicy
@@ -63,16 +65,6 @@ function resolveHiddenThresholdMs(): number {
 // team_hub/events.rs の同名 struct と同期する。旧ローカル定義にあった
 // customInstructions は Rust 側のどの emit にも存在しないファントムフィールド
 // (常に undefined) だったため削除した。
-interface DismissRequestPayload {
-  teamId: string;
-  agentId: string;
-}
-
-interface RecruitCancelledPayload {
-  newAgentId: string;
-  reason: string;
-}
-
 function waitPolicyInstructions(policy: WaitPolicy | undefined): string {
   const resolved = policy ?? 'strict';
   const header = `--- Worker wait_policy: ${resolved} ---`;

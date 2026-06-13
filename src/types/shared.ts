@@ -1,4 +1,5 @@
 // main/preload/renderer で共有する型定義
+import type { FileLockConflictSnapshot } from './generated/team-events';
 
 export type ThemeName =
   | 'claude-dark'
@@ -930,13 +931,6 @@ export interface TeamTaskSnapshot {
   doneEvidence?: TaskDoneEvidence[];
 }
 
-export interface FileLockConflictSnapshot {
-  path: string;
-  holderAgentId: string;
-  holderRole: string;
-  acquiredAt: string;
-}
-
 export interface HumanGateState {
   blocked?: boolean;
   reason?: string | null;
@@ -1558,6 +1552,8 @@ export interface RecruitRequestPayload {
   /** Leader が team_recruit(role_definition=...) で 1 ステップ採用した場合に同梱される */
   dynamicRole?: RecruitRequestDynamicRole | null;
 }
+
+export type { DismissRequestPayload, FileLockConflictEventPayload, FileLockConflictSnapshot, RecruitCancelledPayload, RoleCreatedPayload, RoleLintFinding, RoleLintWarningPayload } from './generated/team-events';
 
 /**
  * Issue #930: `team:handoff` イベントの payload。

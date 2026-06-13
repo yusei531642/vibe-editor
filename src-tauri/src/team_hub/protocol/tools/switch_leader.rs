@@ -122,9 +122,13 @@ pub async fn team_switch_leader(
         if let Some(app_handle) = app_handle_lock {
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(2)).await;
+                let payload = crate::team_hub::events::DismissRequestPayload {
+                    team_id,
+                    agent_id: old_agent_id,
+                };
                 if let Err(e) = app_handle.emit(
                     "team:dismiss-request",
-                    json!({ "teamId": team_id, "agentId": old_agent_id }),
+                    payload,
                 ) {
                     tracing::warn!("emit team:dismiss-request (switch_leader) failed: {e}");
                 }

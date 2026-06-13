@@ -12,6 +12,10 @@ import { X } from 'lucide-react';
 import { useT } from './i18n';
 import { registerToastBridge } from './toast-bridge';
 import { subscribeEvent } from './subscribe-event';
+import type {
+  FileLockConflictEventPayload,
+  RoleLintWarningPayload
+} from '../../../types/shared';
 
 /**
  * グローバルなトースト通知（Undoアクション付き）基盤。
@@ -141,7 +145,7 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
   // warning (recruit / assign 両方) を warning tone のトーストで可視化する。
   // 表示時間を長め (8s) にして Leader が読み取りやすくする。
   useEffect(() => {
-    return subscribeEvent<{ message?: string; source?: string }>(
+    return subscribeEvent<RoleLintWarningPayload>(
       'team:role-lint-warning',
       (payload) => {
         const message = payload?.message ?? '';
@@ -154,7 +158,7 @@ export function ToastProvider({ children }: { children: ReactNode }): JSX.Elemen
   // Issue #525: Rust TeamHub の `team:file-lock-conflict` を購読し、
   // 複数 worker が同じ target path を触る危険を Leader が見落とさないようにする。
   useEffect(() => {
-    return subscribeEvent<{ message?: string; source?: string }>(
+    return subscribeEvent<FileLockConflictEventPayload>(
       'team:file-lock-conflict',
       (payload) => {
         const message = payload?.message ?? '';

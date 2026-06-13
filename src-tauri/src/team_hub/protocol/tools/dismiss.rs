@@ -55,10 +55,11 @@ pub async fn team_dismiss(
     // Renderer に閉じてもらう
     let app = hub.app_handle.lock().await.clone();
     if let Some(app) = &app {
-        let _ = app.emit(
-            "team:dismiss-request",
-            json!({ "teamId": ctx.team_id, "agentId": agent_id }),
-        );
+        let payload = crate::team_hub::events::DismissRequestPayload {
+            team_id: ctx.team_id.clone(),
+            agent_id: agent_id.clone(),
+        };
+        let _ = app.emit("team:dismiss-request", payload);
     }
     // Issue #342 Phase 2: dismiss 時に pending_recruits の同 agent_id エントリも掃除する。
     // 旧実装は emit のみで Hub 状態を直接触らなかったため、handshake 完了前に

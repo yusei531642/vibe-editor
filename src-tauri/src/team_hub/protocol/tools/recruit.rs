@@ -393,13 +393,15 @@ pub async fn team_recruit(
             let summary = boundary_report
                 .warn_message("採用時の責務境界 warning")
                 .unwrap_or_default();
-            let payload = json!({
-                "teamId": ctx.team_id,
-                "source": "recruit",
-                "roleId": role_profile_id,
-                "message": summary,
-                "findings": boundary_report.findings,
-            });
+            let payload = crate::team_hub::events::RoleLintWarningPayload {
+                team_id: ctx.team_id.clone(),
+                source: "recruit".to_string(),
+                role_id: Some(role_profile_id.clone()),
+                task_id: None,
+                assignee: None,
+                message: summary,
+                findings: boundary_report.findings.clone(),
+            };
             if let Err(e) = app.emit("team:role-lint-warning", payload) {
                 tracing::warn!("emit team:role-lint-warning failed: {e}");
             }
@@ -575,10 +577,11 @@ pub async fn team_recruit(
                     .unwrap_or_else(|| "unknown".to_string());
                 let reason = ack.reason.unwrap_or_default();
                 if let Some(app) = &app {
-                    let _ = app.emit(
-                        "team:recruit-cancelled",
-                        json!({ "newAgentId": new_agent_id, "reason": phase_str }),
-                    );
+                    let payload = crate::team_hub::events::RecruitCancelledPayload {
+                        new_agent_id: new_agent_id.clone(),
+                        reason: phase_str.clone(),
+                    };
+                    let _ = app.emit("team:recruit-cancelled", payload);
                 }
                 let message = if reason.is_empty() {
                     format!("recruit failed (phase={phase_str})")
@@ -593,10 +596,11 @@ pub async fn team_recruit(
                 // ack_tx が drop された (renderer 側が pending を resolve せずに崩壊) — 緊急 cancel 扱い
                 hub.cancel_pending_recruit(&new_agent_id).await;
                 if let Some(app) = &app {
-                    let _ = app.emit(
-                        "team:recruit-cancelled",
-                        json!({ "newAgentId": new_agent_id, "reason": "ack_dropped" }),
-                    );
+                    let payload = crate::team_hub::events::RecruitCancelledPayload {
+                        new_agent_id: new_agent_id.clone(),
+                        reason: "ack_dropped".to_string(),
+                    };
+                    let _ = app.emit("team:recruit-cancelled", payload);
                 }
                 return Err(RecruitError::new(
                     "recruit_ack_dropped",
@@ -615,10 +619,11 @@ pub async fn team_recruit(
                 );
                 hub.cancel_pending_recruit(&new_agent_id).await;
                 if let Some(app) = &app {
-                    let _ = app.emit(
-                        "team:recruit-cancelled",
-                        json!({ "newAgentId": new_agent_id, "reason": "ack_timeout" }),
-                    );
+                    let payload = crate::team_hub::events::RecruitCancelledPayload {
+                        new_agent_id: new_agent_id.clone(),
+                        reason: "ack_timeout".to_string(),
+                    };
+                    let _ = app.emit("team:recruit-cancelled", payload);
                 }
                 return Err(RecruitError::new(
                     "recruit_ack_timeout",
@@ -714,10 +719,11 @@ pub async fn team_recruit(
             hub.cancel_pending_recruit(&new_agent_id).await;
             // renderer にも cancel イベントを emit してカードを撤収させる
             if let Some(app) = &app {
-                let _ = app.emit(
-                    "team:recruit-cancelled",
-                    json!({ "newAgentId": new_agent_id, "reason": "handshake_timeout" }),
-                );
+                let payload = crate::team_hub::events::RecruitCancelledPayload {
+                    new_agent_id: new_agent_id.clone(),
+                    reason: "handshake_timeout".to_string(),
+                };
+                let _ = app.emit("team:recruit-cancelled", payload);
             }
             // Issue #342 Phase 1: 構造化エラー化
             // Issue #811: env override で延長可能であることを message に明示する
