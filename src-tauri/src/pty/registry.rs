@@ -380,27 +380,12 @@ impl SessionRegistry {
             return;
         }
         let total = sessions.len();
-        let (tx, rx) = std::sync::mpsc::channel::<()>();
-        for s in sessions {
-            let tx = tx.clone();
-            std::thread::spawn(move || {
-                s.kill_blocking();
-                let _ = tx.send(());
-            });
-        }
-        drop(tx);
-        let deadline = Instant::now() + timeout;
-        let mut done = 0usize;
-        while done < total {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                break;
-            }
-            match rx.recv_timeout(remaining) {
-                Ok(()) => done += 1,
-                Err(_) => break, // timeout または全 sender drop
-            }
-        }
+        let done = crate::task_supervisor::TaskSupervisor::join_blocking_jobs(
+            "pty-kill-worker",
+            sessions,
+            timeout,
+            |session| session.kill_blocking(),
+        );
         if done < total {
             tracing::warn!(
                 "[pty] kill_all_blocking timeout: {done}/{total} sessions confirmed killed \

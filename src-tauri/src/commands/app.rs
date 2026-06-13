@@ -89,19 +89,21 @@ pub fn app_set_project_root(
     Ok(())
 }
 
-/// Issue #951: 旧実装は `app.restart()` を直接呼ぶだけで、in-flight inject の待機も PTY の
+/// Issue #951 / #952: 旧実装は `app.restart()` を直接呼ぶだけで、background task の
 /// kill も行わず、旧プロセスの子 (claude/codex + 配下 MCP) が回収されないまま新プロセスと
 /// 並走していた。CloseRequested handler (lib.rs) と同じ構造化シャットダウン
-/// (inject drain → blocking kill_all) を通してから restart する。
+/// (task supervisor shutdown → blocking kill_all) を通してから restart する。
 #[tauri::command]
 pub async fn app_restart(app: tauri::AppHandle) {
     let state = app.state::<crate::state::AppState>();
     let drained = state
-        .pty_inflight
-        .wait_idle(std::time::Duration::from_secs(3))
+        .task_supervisor
+        .shutdown(std::time::Duration::from_secs(3))
         .await;
     if !drained {
-        tracing::warn!("[lifecycle] app_restart: inject drain timeout — proceeding to kill_all");
+        tracing::warn!(
+            "[lifecycle] app_restart: background task drain timeout — proceeding to kill_all"
+        );
     }
     let registry = state.pty_registry.clone();
     let _ = tauri::async_runtime::spawn_blocking(move || {

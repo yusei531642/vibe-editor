@@ -1,6 +1,7 @@
 // アプリ全体の共有 state
 
 use crate::pty::{InFlightTracker, SessionRegistry};
+use crate::task_supervisor::TaskSupervisor;
 use crate::team_hub::TeamHub;
 use arc_swap::ArcSwapOption;
 use std::sync::Arc;
@@ -19,6 +20,9 @@ pub struct AppState {
     pub project_root: ArcSwapOption<String>,
     pub pty_registry: Arc<SessionRegistry>,
     pub team_hub: TeamHub,
+    /// Issue #952: watcher / cleanup / poller / inject 系 background task の共通 supervisor。
+    /// shutdown 時はここで cancel token を立て、bounded wait してから PTY process-tree kill に進む。
+    pub task_supervisor: Arc<TaskSupervisor>,
     /// Issue #630: 進行中の PTY inject task (codex 初期 prompt 注入 / team_send 経由 inject /
     /// retry inject) の件数を追跡する tracker。CloseRequested handler が `wait_idle(timeout)`
     /// を await して in-flight task の自然完了を待ってから kill_all() を呼ぶため、SessionHandle
@@ -45,7 +49,8 @@ pub fn set_project_root(slot: &ArcSwapOption<String>, value: Option<String>) {
 impl AppState {
     pub fn new() -> Self {
         let pty_registry = Arc::new(SessionRegistry::new());
-        let pty_inflight = InFlightTracker::new();
+        let task_supervisor = TaskSupervisor::new();
+        let pty_inflight: Arc<InFlightTracker> = task_supervisor.clone();
         // Issue #630: TeamHub と AppState で同じ tracker Arc を共有することで、
         // `team_send` 経由の inject::inject も `terminal_create` 経由の codex 注入も
         // 同一 counter で wait_idle できる。
@@ -54,6 +59,7 @@ impl AppState {
             project_root: ArcSwapOption::from(None),
             pty_registry,
             team_hub,
+            task_supervisor,
             pty_inflight,
         }
     }

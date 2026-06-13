@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::mpsc::sync_channel;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
+use tauri::Manager;
 use tauri::{AppHandle, Emitter};
 
 /// 監視除外ディレクトリ名 (basename 一致)
@@ -229,8 +230,14 @@ pub fn start_for_root(app: AppHandle, root: String) {
         return; // 同 root 同 generation が既に動いているので no-op
     };
 
+    let supervisor = app
+        .state::<crate::state::AppState>()
+        .task_supervisor
+        .clone();
+    let cancel_token = supervisor.cancellation_token();
     let my_root = root;
-    std::thread::spawn(move || {
+    let my_root_for_rollback = my_root.clone();
+    let spawn_result = supervisor.spawn_thread("fs-watch", cancel_token, move |cancel_token| {
         let root_path = PathBuf::from(&my_root);
         if !root_path.exists() {
             tracing::debug!("[fs_watch] root does not exist: {my_root}");
@@ -277,7 +284,7 @@ pub fn start_for_root(app: AppHandle, root: String) {
         loop {
             // アクティブ世代が自分でなくなったら即終了 (Watcher を drop してカーネル枠を解放)
             let (active_gen, _) = current_active();
-            if active_gen != my_generation {
+            if cancel_token.is_cancelled() || active_gen != my_generation {
                 tracing::debug!("[fs_watch] stopping watcher for {my_root} (gen={my_generation})");
                 break;
             }
@@ -323,7 +330,7 @@ pub fn start_for_root(app: AppHandle, root: String) {
                 // Issue #146: emit 直前に再度 active 世代を確認。debounce 待ちの 300ms 中に
                 // root が切替えられた場合は旧 root のイベントを誤発火させない。
                 let (active_gen, _) = current_active();
-                if active_gen != my_generation {
+                if cancel_token.is_cancelled() || active_gen != my_generation {
                     tracing::debug!(
                         "[fs_watch] suppressing stale emit for {my_root} (gen={my_generation})"
                     );
@@ -336,6 +343,10 @@ pub fn start_for_root(app: AppHandle, root: String) {
         }
         // Watcher は drop で notify の OS 側 watch を unregister する。
     });
+    if let Err(e) = spawn_result {
+        tracing::warn!("[fs_watch] failed to spawn watcher thread: {e}");
+        rollback_active_if_current(my_generation, &my_root_for_rollback);
+    }
 }
 
 #[cfg(test)]

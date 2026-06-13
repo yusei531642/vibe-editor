@@ -8,6 +8,7 @@ mod commands;
 mod mcp_config;
 mod pty;
 mod state;
+mod task_supervisor;
 mod team_hub;
 mod util;
 
@@ -413,7 +414,7 @@ pub fn run() {
                 }
             }
 
-            // Issue #55 / #630: メイン window の CloseRequested で PTY と TeamHub を明示 cleanup する。
+            // Issue #55 / #630 / #952: メイン window の CloseRequested で PTY と TeamHub を明示 cleanup する。
             // portable-pty (Windows ConPTY) は親が落ちても子が残る場合があるので、
             // 明示的に kill_all を呼んで Claude / Codex プロセスが孤立しないようにする。
             //
@@ -424,8 +425,7 @@ pub fn run() {
             // 起こしていた。
             // 新実装は:
             //   1. `api.prevent_close()` で OS の close をいったん抑止し、
-            //   2. 非同期 task を spawn して `pty_inflight.wait_idle(3s)` で in-flight task の
-            //      自然完了を待ち、
+            //   2. 非同期 task を spawn して `task_supervisor.shutdown(3s)` で watcher / inject task を cancel しつつ自然完了を待ち、
             //   3. 完了 (または timeout) 後に kill_all() → app.exit(0) で終了する。
             // タイムアウトは 3 秒。inject() の最大処理時間 (32KiB / 64B チャンク × 15ms ≒ 7.7s) より
             // 短いが、Issue 本文の done criteria は 1 秒。実機 race の大半は 0.5-1.5s 帯で完了する
@@ -453,26 +453,26 @@ pub fn run() {
                             );
                             return;
                         }
-                        tracing::info!(
-                            "[lifecycle] window close requested — draining in-flight inject tasks (timeout 3s)"
-                        );
+                            tracing::info!(
+                                "[lifecycle] window close requested — draining background tasks (timeout 3s)"
+                            );
                         api.prevent_close();
                         let app_for_drain = app_handle.clone();
                         tauri::async_runtime::spawn(async move {
                             let state = app_for_drain.state::<state::AppState>();
-                            let inflight_before = state.pty_inflight.current();
+                            let tasks_before = state.task_supervisor.current();
                             let drained = state
-                                .pty_inflight
-                                .wait_idle(std::time::Duration::from_secs(3))
+                                .task_supervisor
+                                .shutdown(std::time::Duration::from_secs(3))
                                 .await;
-                            let remaining = state.pty_inflight.current();
+                            let remaining = state.task_supervisor.current();
                             if drained {
                                 tracing::info!(
-                                    "[lifecycle] in-flight inject tasks drained (was={inflight_before}, remaining={remaining})"
+                                    "[lifecycle] background tasks drained (was={tasks_before}, remaining={remaining})"
                                 );
                             } else {
                                 tracing::warn!(
-                                    "[lifecycle] in-flight inject drain timeout — proceeding to kill_all (was={inflight_before}, remaining={remaining})"
+                                    "[lifecycle] background task drain timeout — proceeding to kill_all (was={tasks_before}, remaining={remaining})"
                                 );
                             }
                             // Issue #951: 旧実装の kill_all() は taskkill を detached thread に

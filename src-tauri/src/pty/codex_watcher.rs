@@ -25,8 +25,7 @@
 //   5. claim 機構 (CODEX_CLAIMED_SESSIONS) は claude の sessionId 空間と衝突しないよう
 //      **codex 専用 static** を持つ。
 //
-// spawn_watcher のシグネチャ・deadline(60s)・poll(100ms)・cancel(AtomicBool) 設計は
-// claude_watcher と完全に揃えてある。
+// spawn_watcher の deadline / poll / cancel 設計は claude_watcher と揃える。
 
 use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use once_cell::sync::Lazy;
@@ -273,9 +272,7 @@ fn process_candidate(
 
 /// 1 つの terminal セッションに対して codex rollout watch を開始する。
 ///
-/// シグネチャ・cancel(AtomicBool)・deadline(60s)・poll(100ms) は claude_watcher と完全に揃える。
-/// 検出した sessionId は `terminal:sessionId:{terminal_id}` event で 1 回だけ emit される
-/// (claim 機構で multi-watcher 競合は排他)。
+/// claude_watcher と同じ cancel / deadline / poll で sessionId を terminal_id 宛に 1 回 emit する。
 pub fn spawn_watcher(
     app: AppHandle,
     terminal_id: String,
@@ -283,9 +280,12 @@ pub fn spawn_watcher(
     spawned_at: SystemTime,
     watcher_cancel: Arc<AtomicBool>,
 ) {
-    std::thread::spawn(move || {
-        run_watcher_loop(app, terminal_id, project_root, spawned_at, watcher_cancel)
-    });
+    crate::task_supervisor::spawn_app_thread(
+        app.clone(),
+        "codex-session-watcher",
+        watcher_cancel.clone(),
+        move || run_watcher_loop(app, terminal_id, project_root, spawned_at, watcher_cancel),
+    );
 }
 
 /// watcher 本体ループ。テストからの呼び出し利便のため関数として切り出す。
