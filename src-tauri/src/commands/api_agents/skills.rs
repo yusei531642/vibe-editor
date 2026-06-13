@@ -136,16 +136,19 @@ async fn read_skill_md_within(skills_root_canon: &Path, md_path: &Path) -> Optio
 }
 
 async fn read_capped(path: &Path) -> CommandResult<String> {
-    let bytes = fs::read(path)
+    use tokio::io::AsyncReadExt;
+    // サイズキャップを I/O 段階で効かせるため、ファイル全体ではなく先頭
+    // MAX_SKILL_FILE_BYTES だけを読む (巨大ファイルでの無駄な read / alloc を回避)。
+    let file = fs::File::open(path)
         .await
         .map_err(|e| CommandError::Io(e.to_string()))?;
-    let slice = if bytes.len() > MAX_SKILL_FILE_BYTES {
-        &bytes[..MAX_SKILL_FILE_BYTES]
-    } else {
-        &bytes[..]
-    };
+    let mut buf = Vec::new();
+    file.take(MAX_SKILL_FILE_BYTES as u64)
+        .read_to_end(&mut buf)
+        .await
+        .map_err(|e| CommandError::Io(e.to_string()))?;
     // 上限でのバイト境界切断は from_utf8_lossy が U+FFFD で吸収する。
-    Ok(String::from_utf8_lossy(slice).to_string())
+    Ok(String::from_utf8_lossy(&buf).to_string())
 }
 
 /// frontmatter (`---\nname: ...\ndescription: ...\n---`) から name / description を抽出。
