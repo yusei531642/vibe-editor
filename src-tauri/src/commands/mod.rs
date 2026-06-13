@@ -23,6 +23,8 @@ pub mod safe_load;
 pub mod schema_version;
 pub mod sessions;
 pub mod settings;
+// Issue #996: settings.json parse 失敗時の原本退避 + v11 スナップショット復旧。
+pub mod settings_recovery;
 pub mod team_diagnostics;
 pub mod team_history;
 pub mod team_inject;

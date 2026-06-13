@@ -239,3 +239,46 @@ fn usage_from_value(value: &Value) -> Option<ApiAgentUsage> {
         total_tokens: value["total_tokens"].as_u64().map(|n| n as u32),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preset_maps_known_providers_to_adapter_and_base_url() {
+        let openai = provider_preset("openai", None).unwrap();
+        assert_eq!(openai.adapter, "openai-compatible");
+        assert_eq!(openai.base_url, "https://api.openai.com/v1");
+        assert!(openai.supports_tools);
+
+        let anthropic = provider_preset("anthropic", None).unwrap();
+        assert_eq!(anthropic.adapter, "anthropic");
+        assert!(anthropic.supports_tools);
+
+        let gemini = provider_preset("gemini", None).unwrap();
+        assert_eq!(gemini.adapter, "gemini");
+
+        // tool calling 非対応として扱う preset
+        let groq = provider_preset("groq", None).unwrap();
+        assert!(!groq.supports_tools);
+    }
+
+    #[test]
+    fn preset_trims_trailing_slash_on_base_url() {
+        let custom = provider_preset("custom-openai-compatible", Some("https://x.example/v1/"))
+            .unwrap();
+        assert_eq!(custom.base_url, "https://x.example/v1");
+        assert_eq!(custom.adapter, "openai-compatible");
+    }
+
+    #[test]
+    fn custom_provider_requires_base_url() {
+        assert!(provider_preset("custom-openai-compatible", None).is_err());
+        assert!(provider_preset("custom-openai-compatible", Some("   ")).is_err());
+    }
+
+    #[test]
+    fn unknown_provider_is_rejected() {
+        assert!(provider_preset("does-not-exist", None).is_err());
+    }
+}
