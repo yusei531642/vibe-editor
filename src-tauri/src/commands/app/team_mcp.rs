@@ -207,51 +207,35 @@ pub async fn app_setup_team_mcp(
     // (#135 で app_install_vibe_team_skill だけに付けたガードが、setup 経路では空転していた)。
     // → app_install_vibe_team_skill と同じく req_canon == active_canon を検証してから install する。
     let trimmed = project_root.trim();
-    if !trimmed.is_empty() {
-        let active = crate::state::current_project_root(&state.project_root).unwrap_or_default();
-        if active.trim().is_empty() {
-            tracing::warn!(
-                "[setup_team_mcp] skipping skill install: no active project_root configured"
-            );
-        } else {
-            // canonicalize は async fn 内では tokio::fs を使う (network mount 等で blocking I/O が
-            // Tokio worker を塞ぐのを避けるため)。req と active は独立なので join で並列実行。
-            let (req_res, active_res) = tokio::join!(
-                tokio::fs::canonicalize(trimmed),
-                tokio::fs::canonicalize(active.trim())
-            );
-            match (req_res, active_res) {
-                (Ok(req_canon), Ok(active_canon)) if req_canon == active_canon => {
-                    crate::commands::vibe_team_skill::install_skill_best_effort(
-                        &req_canon.to_string_lossy(),
-                    )
+    let hook_project_root = if trimmed.is_empty() {
+        None
+    } else {
+        match crate::commands::authz::assert_active_project_root(&state.project_root, trimmed).await
+        {
+            Ok(project_root) => {
+                crate::commands::vibe_team_skill::install_skill_best_effort(project_root.as_str())
                     .await;
-                }
-                (Ok(req_canon), Ok(active_canon)) => {
-                    tracing::warn!(
-                        "[setup_team_mcp] skill install denied: requested {} != active {}",
-                        req_canon.display(),
-                        active_canon.display()
-                    );
-                }
-                (req_res, active_res) => {
-                    // どちらか / 両方失敗。両方分けて出すことで「片方だけ失敗 → ディスク破損疑い」
-                    // 「両方失敗 → 設定経路の不整合」のデバッグ材料を残す。
-                    if let Err(e) = req_res {
-                        tracing::warn!(
-                            "[setup_team_mcp] canonicalize requested project_root failed: {e}"
-                        );
-                    }
-                    if let Err(e) = active_res {
-                        tracing::warn!(
-                            "[setup_team_mcp] canonicalize active project_root failed: {e}"
-                        );
-                    }
-                }
+                Some(project_root.as_str().to_string())
+            }
+            Err(e) => {
+                tracing::warn!("[setup_team_mcp] skill install denied: {e}");
+                None
             }
         }
-    }
+    };
     let (socket, token, bridge_path) = hub.info().await;
+    if let Some(project_root) = hook_project_root.as_deref() {
+        let inbox_watch_path = crate::team_hub::inbox_watch::path_from_bridge(&bridge_path);
+        if let Err(e) =
+            crate::mcp_config::claude::setup_project_inbox_hook(project_root, &inbox_watch_path)
+                .await
+        {
+            tracing::warn!("[setup_team_mcp] inbox monitor hook setup failed: {e:#}");
+        }
+    } else if crate::team_hub::delivery_mode::DeliveryMode::from_env().should_install_monitor_hook()
+    {
+        tracing::warn!("[setup_team_mcp] inbox monitor hook setup skipped: project_root not authorized");
+    }
     let desired = crate::mcp_config::bridge_desired(&socket, &token, &bridge_path);
 
     // Issue #597: claude / codex の片肺 rollback を防止。両方 pre-snapshot → 失敗時両方 restore。
@@ -275,7 +259,7 @@ pub async fn app_setup_team_mcp(
 #[tauri::command]
 pub async fn app_cleanup_team_mcp(
     state: State<'_, AppState>,
-    _project_root: String,
+    project_root: String,
     team_id: String,
 ) -> crate::commands::error::CommandResult<CleanupTeamMcpResult> {
     let last = state.team_hub.clear_team(&team_id).await;
@@ -297,6 +281,20 @@ pub async fn app_cleanup_team_mcp(
             removed: Some(false),
             error: None,
         });
+    }
+    match crate::commands::authz::assert_active_project_root(&state.project_root, &project_root)
+        .await
+    {
+        Ok(project_root) => {
+            if let Err(e) =
+                crate::mcp_config::claude::cleanup_project_inbox_hook(project_root.as_str()).await
+            {
+                tracing::warn!("[cleanup_team_mcp] inbox monitor hook cleanup failed: {e:#}");
+            }
+        }
+        Err(e) => {
+            tracing::warn!("[cleanup_team_mcp] inbox monitor hook cleanup skipped: {e}");
+        }
     }
 
     // Issue #597: 残りアクティブチームが 0 になったら MCP 設定を削除。

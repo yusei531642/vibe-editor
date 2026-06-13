@@ -341,6 +341,10 @@ pub async fn inject(
     from_role: &str,
     text: &str,
 ) -> Result<(), InjectError> {
+    if crate::team_hub::delivery_mode::DeliveryMode::from_env().should_skip_pty_inject() {
+        tracing::debug!("[inject] PTY injection skipped for agent {agent_id}: monitor inbox mode");
+        return Ok(());
+    }
     let mut last_err: Option<InjectError> = None;
     for attempt in 0..=INJECT_MAX_RETRY {
         if attempt > 0 {
