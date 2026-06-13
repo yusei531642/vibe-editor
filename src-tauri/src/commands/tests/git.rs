@@ -7,6 +7,7 @@
 //! `git --version` を `which git` ではなく `Command::new("git").arg("--version").status()`
 //! で確認し、不在なら early return する (= "ok-skip" 扱い)。
 
+use crate::commands::authz::ProjectRoot;
 use crate::commands::git::{git_diff_inner as git_diff, git_status_inner as git_status};
 use std::path::Path;
 use std::process::Command;
@@ -37,6 +38,10 @@ fn init_fixture_repo(dir: &Path) {
     run(&["config", "user.name", "Test"]);
     run(&["config", "commit.gpgsign", "false"]);
     run(&["config", "tag.gpgsign", "false"]);
+}
+
+fn project_root(dir: &Path) -> ProjectRoot {
+    ProjectRoot::assume_canonical_for_test(dir.canonicalize().unwrap())
 }
 
 fn commit_all(dir: &Path, message: &str) {
@@ -75,8 +80,7 @@ async fn git_status_reports_modified_and_untracked_files() {
         .await
         .unwrap();
 
-    let project_root = dir.path().to_string_lossy().to_string();
-    let status = git_status(project_root).await;
+    let status = git_status(project_root(dir.path())).await;
     assert!(status.ok, "git_status failed: {:?}", status.error);
     assert!(status.repo_root.is_some());
     assert_eq!(status.branch.as_deref(), Some("main"));
@@ -105,12 +109,7 @@ async fn git_diff_returns_head_and_worktree_for_modified_file() {
         .await
         .unwrap();
 
-    let res = git_diff(
-        dir.path().to_string_lossy().to_string(),
-        "README.md".into(),
-        None,
-    )
-    .await;
+    let res = git_diff(project_root(dir.path()), "README.md".into(), None).await;
     assert!(res.ok);
     assert!(!res.is_new);
     assert!(!res.is_deleted);
@@ -137,12 +136,7 @@ async fn git_diff_marks_new_file_as_is_new() {
         .await
         .unwrap();
 
-    let res = git_diff(
-        dir.path().to_string_lossy().to_string(),
-        "new.txt".into(),
-        None,
-    )
-    .await;
+    let res = git_diff(project_root(dir.path()), "new.txt".into(), None).await;
     assert!(res.ok);
     assert!(res.is_new, "untracked file must be marked is_new");
     // is_new の場合 head は "(skipped: file too large or new)" になり original は空文字
@@ -163,12 +157,7 @@ async fn git_diff_rejects_path_traversal_attempt() {
     commit_all(dir.path(), "init");
 
     // Issue #134 で塞いだ traversal 攻撃 (rel_path = "../../.env" 等) を再現。
-    let res = git_diff(
-        dir.path().to_string_lossy().to_string(),
-        "../etc/passwd".into(),
-        None,
-    )
-    .await;
+    let res = git_diff(project_root(dir.path()), "../etc/passwd".into(), None).await;
     assert!(!res.ok, "traversal must reject");
     assert!(res.error.unwrap().contains("invalid"));
 }
@@ -187,7 +176,7 @@ async fn git_diff_rejects_head_path_starting_with_dash() {
 
     // CLI option 偽装: original_rel_path が "-foo" のようなとき early reject。
     let res = git_diff(
-        dir.path().to_string_lossy().to_string(),
+        project_root(dir.path()),
         "a.txt".into(),
         Some("-foo".into()),
     )
@@ -203,8 +192,7 @@ async fn git_status_returns_ok_false_on_non_repo_directory() {
     }
     // git init していない tempdir → rev-parse --show-toplevel が失敗するはず
     let dir = tempdir().unwrap();
-    let project_root = dir.path().to_string_lossy().to_string();
-    let status = git_status(project_root).await;
+    let status = git_status(project_root(dir.path())).await;
     assert!(!status.ok);
     assert!(status.error.is_some());
 }

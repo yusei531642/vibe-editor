@@ -1,8 +1,8 @@
 {
   "src-tauri/src/commands/app/team_mcp.rs": 684,
-  "src-tauri/src/commands/authz.rs": 571,
-  "src-tauri/src/commands/files.rs": 1261,
-  "src-tauri/src/commands/git.rs": 518,
+  "src-tauri/src/commands/authz.rs": 618,
+  "src-tauri/src/commands/files.rs": 1274,
+  "src-tauri/src/commands/git.rs": 529,
   "src-tauri/src/commands/handoffs.rs": 513,
   "src-tauri/src/commands/settings.rs": 780,
   "src-tauri/src/commands/team_history.rs": 1239,

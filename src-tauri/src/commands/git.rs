@@ -10,17 +10,17 @@ use serde::Serialize;
 use tauri::{AppHandle, Manager};
 use tokio::process::Command;
 
+use crate::commands::authz::ProjectRoot;
+
 /// Issue #954: renderer 由来の `project_root` を active project と照合する read/probe ゲート。
 /// git パネル / DiffCard は active project (primary root) のみを対象とするため、
 /// files 系と違い workspaceFolders 許可は不要で厳格一致 (`assert_active_project_root`) を使う。
 async fn assert_project_root_via(
     app: &AppHandle,
     project_root: &str,
-) -> crate::commands::error::CommandResult<()> {
+) -> crate::commands::error::CommandResult<ProjectRoot> {
     let state = app.state::<crate::state::AppState>();
-    crate::commands::authz::assert_active_project_root(&state.project_root, project_root)
-        .await
-        .map(|_| ())
+    crate::commands::authz::assert_active_project_root(&state.project_root, project_root).await
 }
 
 /// Windows で GUI アプリ (Tauri) からコンソールプロセス (git.exe) を起動すると、
@@ -257,20 +257,23 @@ fn is_not_git_repo_error(err: &str) -> bool {
 #[tauri::command]
 pub async fn git_status(app: AppHandle, project_root: String) -> GitStatus {
     // Issue #954: read/probe 系も project_root ゲートに通す (任意リポジトリ probe の阻止)。
-    if let Err(e) = assert_project_root_via(&app, &project_root).await {
-        return GitStatus {
-            ok: false,
-            error: Some(e.to_string()),
-            ..Default::default()
-        };
-    }
+    let project_root = match assert_project_root_via(&app, &project_root).await {
+        Ok(root) => root,
+        Err(e) => {
+            return GitStatus {
+                ok: false,
+                error: Some(e.to_string()),
+                ..Default::default()
+            }
+        }
+    };
     git_status_inner(project_root).await
 }
 
 /// ゲート通過後の本体 (#932 の files_write_inner と同じ分割。テストはこちらを呼ぶ)。
-pub(crate) async fn git_status_inner(project_root: String) -> GitStatus {
+pub(crate) async fn git_status_inner(project_root: ProjectRoot) -> GitStatus {
     // repo root
-    let repo_root = match run_git(&["rev-parse", "--show-toplevel"], &project_root).await {
+    let repo_root = match run_git(&["rev-parse", "--show-toplevel"], project_root.as_str()).await {
         Ok(s) => s.trim().to_string(),
         Err(e) => {
             return GitStatus {
@@ -281,14 +284,17 @@ pub(crate) async fn git_status_inner(project_root: String) -> GitStatus {
             }
         }
     };
-    let branch = run_git(&["rev-parse", "--abbrev-ref", "HEAD"], &project_root)
-        .await
-        .ok()
-        .map(|s| s.trim().to_string());
+    let branch = run_git(
+        &["rev-parse", "--abbrev-ref", "HEAD"],
+        project_root.as_str(),
+    )
+    .await
+    .ok()
+    .map(|s| s.trim().to_string());
     // Issue #19: -z (NUL 区切り) を使わないと rename が "old -> new" の 1 行として返り
     //            parser が解釈できない。`--porcelain=v1 -z` でバイト単位にパースする。
     let porcelain_bytes =
-        match run_git_bytes(&["status", "--porcelain=v1", "-z"], &project_root).await {
+        match run_git_bytes(&["status", "--porcelain=v1", "-z"], project_root.as_str()).await {
             Ok(b) => b,
             Err(e) => {
                 return GitStatus {
@@ -323,19 +329,22 @@ pub async fn git_diff(
     original_rel_path: Option<String>,
 ) -> GitDiffResult {
     // Issue #954: read/probe 系も project_root ゲートに通す (任意リポジトリの差分 probe の阻止)。
-    if let Err(e) = assert_project_root_via(&app, &project_root).await {
-        return GitDiffResult {
-            ok: false,
-            error: Some(e.to_string()),
-            ..Default::default()
-        };
-    }
+    let project_root = match assert_project_root_via(&app, &project_root).await {
+        Ok(root) => root,
+        Err(e) => {
+            return GitDiffResult {
+                ok: false,
+                error: Some(e.to_string()),
+                ..Default::default()
+            }
+        }
+    };
     git_diff_inner(project_root, rel_path, original_rel_path).await
 }
 
 /// ゲート通過後の本体 (#932 の files_write_inner と同じ分割。テストはこちらを呼ぶ)。
 pub(crate) async fn git_diff_inner(
-    project_root: String,
+    project_root: ProjectRoot,
     rel_path: String,
     original_rel_path: Option<String>,
 ) -> GitDiffResult {
@@ -380,10 +389,10 @@ pub(crate) async fn git_diff_inner(
     // Issue #154 #1: project_root が submodule / worktree 内のとき、cwd を project_root に
     // して `git show HEAD:` を回すと git は親リポを見て head_path 不在として誤判定する。
     // `git rev-parse --show-toplevel` で「このリポの本物のトップ」を求めて cwd にする。
-    let repo_root = run_git(&["rev-parse", "--show-toplevel"], &project_root)
+    let repo_root = run_git(&["rev-parse", "--show-toplevel"], project_root.as_str())
         .await
         .map(|s| s.trim().to_string())
-        .unwrap_or_else(|_| project_root.clone());
+        .unwrap_or_else(|_| project_root.as_str().to_string());
 
     // git の HEAD blob path は repo_root 相対なので、project_root → repo_root の差分を埋める。
     // safe_join 後に repo_root に含まれるかどうかを確認し、相対化する。
@@ -478,7 +487,9 @@ mod tests {
         assert!(is_not_git_repo_error("fatal: Not a Git Repository"));
         // 別種のエラーでは false
         assert!(!is_not_git_repo_error("fatal: bad revision 'HEAD'"));
-        assert!(!is_not_git_repo_error("failed to spawn git: program not found"));
+        assert!(!is_not_git_repo_error(
+            "failed to spawn git: program not found"
+        ));
         assert!(!is_not_git_repo_error(""));
     }
 

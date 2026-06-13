@@ -15,13 +15,48 @@
 //! lock-free な `ArcSwapOption<String>` へ移したため、本 helper も `ArcSwapOption` を
 //! 受け取る形に追従する (deadlock 経路の構造的排除)。
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use arc_swap::ArcSwapOption;
 
 use crate::commands::error::{CommandError, CommandResult};
 use crate::state::current_project_root;
 use crate::team_hub::TeamHub;
+
+/// canonicalize 済み、かつ AppState の active project_root あるいは許可済み workspace folder と
+/// 照合済みの project root。FS helper はこの型を要求することで、renderer 由来の生文字列が
+/// authz gate を通らずにファイル操作へ届く経路を型で塞ぐ。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProjectRoot {
+    canonical: PathBuf,
+    display: String,
+}
+
+impl ProjectRoot {
+    fn from_canonical(canonical: PathBuf) -> Self {
+        let display = canonical.to_string_lossy().into_owned();
+        Self { canonical, display }
+    }
+
+    pub fn as_path(&self) -> &Path {
+        &self.canonical
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.display
+    }
+
+    #[cfg(test)]
+    pub(crate) fn assume_canonical_for_test(path: PathBuf) -> Self {
+        Self::from_canonical(path)
+    }
+}
+
+impl AsRef<Path> for ProjectRoot {
+    fn as_ref(&self) -> &Path {
+        self.as_path()
+    }
+}
 
 /// 監査ログに raw path を出すときの clamp (制御文字を `?` に置換 + 240 文字で truncate)。
 /// renderer 由来の project_root に改行や ESC が混じっていても tracing 行を破壊しないようにする。
@@ -57,7 +92,7 @@ fn clamp_team_id_for_log(raw: &str) -> String {
 pub async fn assert_active_project_root(
     project_root_slot: &ArcSwapOption<String>,
     given: &str,
-) -> CommandResult<PathBuf> {
+) -> CommandResult<ProjectRoot> {
     let trimmed = given.trim();
     if trimmed.is_empty() {
         tracing::warn!(
@@ -122,7 +157,7 @@ pub async fn assert_active_project_root(
         ));
     }
 
-    Ok(active_canon)
+    Ok(ProjectRoot::from_canonical(active_canon))
 }
 
 /// Issue #954 / #963: ファイル系 IPC (`files_*`) 用のゲート。
@@ -146,7 +181,7 @@ pub async fn assert_active_project_root(
 pub async fn assert_readable_project_root(
     project_root_slot: &ArcSwapOption<String>,
     given: &str,
-) -> CommandResult<PathBuf> {
+) -> CommandResult<ProjectRoot> {
     let trimmed = given.trim();
     if trimmed.is_empty() {
         tracing::warn!(
@@ -174,7 +209,7 @@ pub async fn assert_readable_project_root(
     if !active.trim().is_empty() {
         if let Ok(active_canon) = tokio::fs::canonicalize(active.trim()).await {
             if req_canon == active_canon {
-                return Ok(active_canon);
+                return Ok(ProjectRoot::from_canonical(active_canon));
             }
         }
     }
@@ -182,7 +217,7 @@ pub async fn assert_readable_project_root(
     // 2. settings.workspaceFolders (Rust 側 SSOT) に含まれるか
     if let Ok(settings) = crate::commands::settings::settings_load().await {
         if matches_any_workspace_folder(&req_canon, &settings.workspace_folders).await {
-            return Ok(req_canon);
+            return Ok(ProjectRoot::from_canonical(req_canon));
         }
     }
 
@@ -270,9 +305,7 @@ pub async fn assert_active_team(hub: &TeamHub, team_id: &str) -> CommandResult<(
             team_id = %clamp_team_id_for_log(team_id),
             "[authz] assert_active_team rejected: empty team_id"
         );
-        return Err(CommandError::authz(
-            "team is not active or does not exist",
-        ));
+        return Err(CommandError::authz("team is not active or does not exist"));
     }
 
     let state = hub.state.lock().await;
@@ -288,9 +321,7 @@ pub async fn assert_active_team(hub: &TeamHub, team_id: &str) -> CommandResult<(
             active_count,
             "[authz] assert_active_team rejected: team_id not in active set"
         );
-        return Err(CommandError::authz(
-            "team is not active or does not exist",
-        ));
+        return Err(CommandError::authz("team is not active or does not exist"));
     }
     Ok(())
 }
@@ -308,9 +339,7 @@ mod tests {
     #[tokio::test]
     async fn rejects_empty_given() {
         let lock = make_lock(Some("/tmp/whatever".to_string()));
-        let err = assert_active_project_root(&lock, "")
-            .await
-            .unwrap_err();
+        let err = assert_active_project_root(&lock, "").await.unwrap_err();
         assert!(
             matches!(err, CommandError::Authz(ref m) if m.contains("empty")),
             "got: {err}"
@@ -366,10 +395,9 @@ mod tests {
         let lock = make_lock(Some(project_a.path().to_string_lossy().into_owned()));
 
         // 攻撃: renderer から project_b を渡す → canonicalize 比較で reject
-        let err =
-            assert_active_project_root(&lock, project_b.path().to_string_lossy().as_ref())
-                .await
-                .unwrap_err();
+        let err = assert_active_project_root(&lock, project_b.path().to_string_lossy().as_ref())
+            .await
+            .unwrap_err();
         assert!(
             matches!(err, CommandError::Authz(ref m) if m.contains("does not match active project")),
             "got: {err}"
@@ -386,8 +414,10 @@ mod tests {
             .await
             .expect("matching paths should pass");
         assert_eq!(
-            canon,
-            std::fs::canonicalize(project.path()).expect("canonicalize"),
+            canon.as_path(),
+            std::fs::canonicalize(project.path())
+                .expect("canonicalize")
+                .as_path(),
         );
     }
 
@@ -397,11 +427,13 @@ mod tests {
     async fn readable_accepts_active_project_root() {
         let project = tempdir().expect("project");
         let lock = make_lock(Some(project.path().to_string_lossy().into_owned()));
-        let canon =
-            assert_readable_project_root(&lock, project.path().to_string_lossy().as_ref())
-                .await
-                .expect("active root must be readable");
-        assert_eq!(canon, std::fs::canonicalize(project.path()).unwrap());
+        let canon = assert_readable_project_root(&lock, project.path().to_string_lossy().as_ref())
+            .await
+            .expect("active root must be readable");
+        assert_eq!(
+            canon.as_path(),
+            std::fs::canonicalize(project.path()).unwrap().as_path()
+        );
     }
 
     #[tokio::test]
@@ -444,13 +476,21 @@ mod tests {
         let folder = tempdir().expect("folder");
         let req = std::fs::canonicalize(folder.path()).unwrap();
         // 実在 folder は raw 表記が違っても canonicalize 一致で許可
-        let raw = format!("{}{}", folder.path().to_string_lossy(), std::path::MAIN_SEPARATOR);
+        let raw = format!(
+            "{}{}",
+            folder.path().to_string_lossy(),
+            std::path::MAIN_SEPARATOR
+        );
         assert!(matches_any_workspace_folder(&req, &[raw]).await);
         // 存在しない folder / 空文字エントリは skip され、一致しない
         assert!(
             !matches_any_workspace_folder(
                 &req,
-                &["".into(), "   ".into(), folder.path().join("nope").to_string_lossy().into_owned()]
+                &[
+                    "".into(),
+                    "   ".into(),
+                    folder.path().join("nope").to_string_lossy().into_owned()
+                ]
             )
             .await
         );
@@ -471,7 +511,12 @@ mod tests {
         let canon = assert_active_project_root(&lock, &given)
             .await
             .expect("trailing separator should canonicalize equal");
-        assert_eq!(canon, std::fs::canonicalize(project.path()).expect("canon"));
+        assert_eq!(
+            canon.as_path(),
+            std::fs::canonicalize(project.path())
+                .expect("canon")
+                .as_path()
+        );
     }
 
     // ===== Issue #601 (Tier A-3): assert_active_team helper =====
@@ -521,7 +566,9 @@ mod tests {
 
             let err_empty = assert_active_team(&hub, "").await.unwrap_err();
             let err_whitespace = assert_active_team(&hub, "   ").await.unwrap_err();
-            let err_unknown = assert_active_team(&hub, "team-unknown-xyz").await.unwrap_err();
+            let err_unknown = assert_active_team(&hub, "team-unknown-xyz")
+                .await
+                .unwrap_err();
 
             // 全部同じ generic message にすることで「team_id がそもそも空」と
             // 「team_id が active set に居ない」を caller から区別できなくする。

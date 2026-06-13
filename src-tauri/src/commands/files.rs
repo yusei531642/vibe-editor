@@ -12,6 +12,7 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
+use crate::commands::authz::ProjectRoot;
 use crate::commands::error::CommandResult;
 use crate::state::AppState;
 use encoding::{detect_text_or_binary, encode_for_save};
@@ -32,11 +33,9 @@ use encoding::{detect_text_or_binary, encode_for_save};
 async fn assert_workspace_project_root_via(
     app: &AppHandle,
     project_root: &str,
-) -> CommandResult<()> {
+) -> CommandResult<ProjectRoot> {
     let state = app.state::<AppState>();
-    crate::commands::authz::assert_readable_project_root(&state.project_root, project_root)
-        .await
-        .map(|_| ())
+    crate::commands::authz::assert_readable_project_root(&state.project_root, project_root).await
 }
 use hash::{mtime_ms_of, sha256_hex};
 // safe_join は外部 (commands/git.rs) からも呼ばれるので pub use で再 export する。
@@ -113,14 +112,17 @@ pub struct FileWriteResult {
 #[tauri::command]
 pub async fn files_list(app: AppHandle, project_root: String, rel_path: String) -> FileListResult {
     // Issue #954: read/probe 系も project_root ゲートに通す (任意ディレクトリ列挙の阻止)。
-    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
-        return FileListResult {
-            ok: false,
-            error: Some(e.to_string()),
-            dir: rel_path,
-            entries: vec![],
-        };
-    }
+    let project_root = match assert_workspace_project_root_via(&app, &project_root).await {
+        Ok(root) => root,
+        Err(e) => {
+            return FileListResult {
+                ok: false,
+                error: Some(e.to_string()),
+                dir: rel_path,
+                entries: vec![],
+            }
+        }
+    };
     let dir = safe_join(&project_root, &rel_path);
     let dir = match dir {
         Some(p) if p.is_dir() => p,
@@ -149,10 +151,7 @@ pub async fn files_list(app: AppHandle, project_root: String, rel_path: String) 
     // prefix は raw の project_root ではなく同じく canonicalize された root を使う必要がある。
     // Windows の junction / symlink / 大文字小文字違いで raw と real が食い違うと strip_prefix
     // が失敗して entry.path が空文字に落ちる。
-    let canonical_root = Path::new(&project_root).canonicalize().ok();
-    let root_ref = canonical_root
-        .as_deref()
-        .unwrap_or_else(|| Path::new(&project_root));
+    let root_ref = project_root.as_path();
     while let Ok(Some(entry)) = rd.next_entry().await {
         let p = entry.path();
         let is_dir = p.is_dir();
@@ -183,14 +182,17 @@ pub async fn files_list(app: AppHandle, project_root: String, rel_path: String) 
 #[tauri::command]
 pub async fn files_read(app: AppHandle, project_root: String, rel_path: String) -> FileReadResult {
     // Issue #954: read/probe 系も project_root ゲートに通す (任意ファイル読取の阻止)。
-    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
-        return FileReadResult {
-            ok: false,
-            error: Some(e.to_string()),
-            path: rel_path,
-            ..Default::default()
-        };
-    }
+    let project_root = match assert_workspace_project_root_via(&app, &project_root).await {
+        Ok(root) => root,
+        Err(e) => {
+            return FileReadResult {
+                ok: false,
+                error: Some(e.to_string()),
+                path: rel_path,
+                ..Default::default()
+            }
+        }
+    };
     let Some(abs) = safe_join(&project_root, &rel_path) else {
         return FileReadResult {
             ok: false,
@@ -285,13 +287,16 @@ pub async fn files_write(
 ) -> FileWriteResult {
     // Issue #932: renderer 由来の project_root を active project と照合する共通ゲート。
     // 未検証だと乗っ取られた renderer が active プロジェクト外の任意ファイルを上書きできた。
-    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
-        return FileWriteResult {
-            ok: false,
-            error: Some(e.to_string()),
-            ..Default::default()
-        };
-    }
+    let project_root = match assert_workspace_project_root_via(&app, &project_root).await {
+        Ok(root) => root,
+        Err(e) => {
+            return FileWriteResult {
+                ok: false,
+                error: Some(e.to_string()),
+                ..Default::default()
+            }
+        }
+    };
     files_write_inner(
         project_root,
         rel_path,
@@ -305,7 +310,7 @@ pub async fn files_write(
 }
 
 async fn files_write_inner(
-    project_root: String,
+    project_root: ProjectRoot,
     rel_path: String,
     content: String,
     expected_mtime_ms: Option<u64>,
@@ -539,8 +544,8 @@ fn validate_basename(name: &str) -> Result<(), String> {
         .map_or(name, |(stem, _)| stem)
         .to_uppercase();
     const RESERVED: &[&str] = &[
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7",
-        "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
     if RESERVED.iter().any(|r| *r == stem_upper) {
         return Err(format!("'{name}' is a reserved name on Windows"));
@@ -553,7 +558,7 @@ fn validate_basename(name: &str) -> Result<(), String> {
 
 /// 親ディレクトリ rel_path 配下に basename を足した絶対パスを `safe_join` で得る。
 /// basename invalid もしくは safe_join 失敗 (= ルート脱出 / canonicalize 不能) で None。
-fn join_child(project_root: &str, parent_rel: &str, name: &str) -> Option<PathBuf> {
+fn join_child(project_root: &ProjectRoot, parent_rel: &str, name: &str) -> Option<PathBuf> {
     validate_basename(name).ok()?;
     let combined = if parent_rel.is_empty() {
         name.to_string()
@@ -565,12 +570,8 @@ fn join_child(project_root: &str, parent_rel: &str, name: &str) -> Option<PathBu
 
 /// canonicalize 済みの project_root から見た相対パス (POSIX 区切り) を返す。
 /// frontend のキャッシュキー (FileNode.path) と整合させるための helper。
-fn rel_from_abs(project_root: &str, abs: &Path) -> String {
-    let canonical_root = match Path::new(project_root).canonicalize() {
-        Ok(p) => p,
-        Err(_) => return abs.to_string_lossy().into_owned(),
-    };
-    abs.strip_prefix(&canonical_root)
+fn rel_from_abs(project_root: &ProjectRoot, abs: &Path) -> String {
+    abs.strip_prefix(project_root.as_path())
         .map(|r| r.to_string_lossy().replace('\\', "/"))
         .unwrap_or_default()
 }
@@ -586,14 +587,15 @@ pub async fn files_create(
     overwrite: Option<bool>,
 ) -> FileMutationResult {
     // Issue #932: active project と照合してから FS 操作を行う (任意ファイル作成を防ぐ)。
-    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
-        return FileMutationResult::err(rel_path, e.to_string());
-    }
+    let project_root = match assert_workspace_project_root_via(&app, &project_root).await {
+        Ok(root) => root,
+        Err(e) => return FileMutationResult::err(rel_path, e.to_string()),
+    };
     files_create_inner(project_root, rel_path, name, overwrite).await
 }
 
 async fn files_create_inner(
-    project_root: String,
+    project_root: ProjectRoot,
     rel_path: String,
     name: String,
     overwrite: Option<bool>,
@@ -635,14 +637,15 @@ pub async fn files_create_dir(
     name: String,
 ) -> FileMutationResult {
     // Issue #932: active project と照合してから FS 操作を行う (任意ディレクトリ作成を防ぐ)。
-    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
-        return FileMutationResult::err(rel_path, e.to_string());
-    }
+    let project_root = match assert_workspace_project_root_via(&app, &project_root).await {
+        Ok(root) => root,
+        Err(e) => return FileMutationResult::err(rel_path, e.to_string()),
+    };
     files_create_dir_inner(project_root, rel_path, name).await
 }
 
 async fn files_create_dir_inner(
-    project_root: String,
+    project_root: ProjectRoot,
     rel_path: String,
     name: String,
 ) -> FileMutationResult {
@@ -686,14 +689,15 @@ pub async fn files_rename(
     overwrite: Option<bool>,
 ) -> FileMutationResult {
     // Issue #932: active project と照合してから FS 操作を行う (任意ファイル rename/move を防ぐ)。
-    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
-        return FileMutationResult::err(from_rel, e.to_string());
-    }
+    let project_root = match assert_workspace_project_root_via(&app, &project_root).await {
+        Ok(root) => root,
+        Err(e) => return FileMutationResult::err(from_rel, e.to_string()),
+    };
     files_rename_inner(project_root, from_rel, to_parent_rel, new_name, overwrite).await
 }
 
 async fn files_rename_inner(
-    project_root: String,
+    project_root: ProjectRoot,
     from_rel: String,
     to_parent_rel: String,
     new_name: String,
@@ -758,14 +762,15 @@ pub async fn files_delete(
     permanent: Option<bool>,
 ) -> FileMutationResult {
     // Issue #932: active project と照合してから FS 操作を行う (任意ファイル削除を防ぐ)。
-    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
-        return FileMutationResult::err(rel_path, e.to_string());
-    }
+    let project_root = match assert_workspace_project_root_via(&app, &project_root).await {
+        Ok(root) => root,
+        Err(e) => return FileMutationResult::err(rel_path, e.to_string()),
+    };
     files_delete_inner(project_root, rel_path, permanent).await
 }
 
 async fn files_delete_inner(
-    project_root: String,
+    project_root: ProjectRoot,
     rel_path: String,
     permanent: Option<bool>,
 ) -> FileMutationResult {
@@ -817,14 +822,15 @@ pub async fn files_copy(
     overwrite: Option<bool>,
 ) -> FileMutationResult {
     // Issue #932: active project と照合してから FS 操作を行う (任意ファイル複製を防ぐ)。
-    if let Err(e) = assert_workspace_project_root_via(&app, &project_root).await {
-        return FileMutationResult::err(from_rel, e.to_string());
-    }
+    let project_root = match assert_workspace_project_root_via(&app, &project_root).await {
+        Ok(root) => root,
+        Err(e) => return FileMutationResult::err(from_rel, e.to_string()),
+    };
     files_copy_inner(project_root, from_rel, to_parent_rel, new_name, overwrite).await
 }
 
 async fn files_copy_inner(
-    project_root: String,
+    project_root: ProjectRoot,
     from_rel: String,
     to_parent_rel: String,
     new_name: String,
@@ -857,10 +863,7 @@ async fn files_copy_inner(
         return FileMutationResult::err(from_rel, "destination escapes parent directory");
     }
     if to_abs.starts_with(&from_abs) {
-        return FileMutationResult::err(
-            from_rel,
-            "cannot copy into the source or its descendant",
-        );
+        return FileMutationResult::err(from_rel, "cannot copy into the source or its descendant");
     }
     if !overwrite && tokio::fs::metadata(&to_abs).await.is_ok() {
         return FileMutationResult::err(
@@ -947,12 +950,8 @@ mod issue_592_tests {
     use super::*;
     use tempfile::tempdir;
 
-    fn root_str(td: &tempfile::TempDir) -> String {
-        td.path()
-            .canonicalize()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned()
+    fn root_str(td: &tempfile::TempDir) -> ProjectRoot {
+        ProjectRoot::assume_canonical_for_test(td.path().canonicalize().unwrap())
     }
 
     #[test]
@@ -1021,8 +1020,14 @@ mod issue_592_tests {
         let td = tempdir().unwrap();
         let root = root_str(&td);
         files_create_inner(root.clone(), "".into(), "a.txt".into(), None).await;
-        let res =
-            files_rename_inner(root.clone(), "a.txt".into(), "".into(), "b.txt".into(), None).await;
+        let res = files_rename_inner(
+            root.clone(),
+            "a.txt".into(),
+            "".into(),
+            "b.txt".into(),
+            None,
+        )
+        .await;
         assert!(res.ok, "{:?}", res.error);
         assert!(!td.path().join("a.txt").exists());
         assert!(td.path().join("b.txt").exists());
@@ -1072,7 +1077,10 @@ mod issue_592_tests {
         std::fs::write(td.path().join("src").join("nested").join("b.txt"), b"b").unwrap();
         let res = files_copy_inner(root.clone(), "src".into(), "".into(), "dst".into(), None).await;
         assert!(res.ok, "{:?}", res.error);
-        assert_eq!(std::fs::read(td.path().join("dst").join("a.txt")).unwrap(), b"a");
+        assert_eq!(
+            std::fs::read(td.path().join("dst").join("a.txt")).unwrap(),
+            b"a"
+        );
         assert_eq!(
             std::fs::read(td.path().join("dst").join("nested").join("b.txt")).unwrap(),
             b"b"
@@ -1084,7 +1092,8 @@ mod issue_592_tests {
         let td = tempdir().unwrap();
         let root = root_str(&td);
         files_create_dir_inner(root.clone(), "".into(), "a".into()).await;
-        let res = files_copy_inner(root.clone(), "a".into(), "a".into(), "inside".into(), None).await;
+        let res =
+            files_copy_inner(root.clone(), "a".into(), "a".into(), "inside".into(), None).await;
         assert!(!res.ok);
     }
 
@@ -1109,10 +1118,15 @@ mod issue_592_tests {
         let res = files_copy_inner(root.clone(), "src".into(), "".into(), "dst".into(), None).await;
         assert!(res.ok, "{:?}", res.error);
         // 通常ファイルはコピーされる
-        assert_eq!(std::fs::read(td.path().join("dst").join("normal.txt")).unwrap(), b"ok");
+        assert_eq!(
+            std::fs::read(td.path().join("dst").join("normal.txt")).unwrap(),
+            b"ok"
+        );
         // symlink 経由の機密ファイルは dst 配下に複製されてはならない
-        assert!(!td.path().join("dst").join("link-to-secret").exists(),
-                "symlink (or its target) must NOT be copied into the project");
+        assert!(
+            !td.path().join("dst").join("link-to-secret").exists(),
+            "symlink (or its target) must NOT be copied into the project"
+        );
     }
 
     /// PR #695 review (Correctness): symlink cycle (a -> b, b -> a) を含む directory を
@@ -1165,12 +1179,8 @@ mod issue_828_tests {
     use super::*;
     use tempfile::tempdir;
 
-    fn root_str(td: &tempfile::TempDir) -> String {
-        td.path()
-            .canonicalize()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned()
+    fn root_str(td: &tempfile::TempDir) -> ProjectRoot {
+        ProjectRoot::assume_canonical_for_test(td.path().canonicalize().unwrap())
     }
 
     /// save 直前にディスク上のファイルが 50MB を超えている場合、hash 全読込せず
@@ -1191,14 +1201,17 @@ mod issue_828_tests {
             root,
             "huge.txt".into(),
             "new content".into(),
-            None,                      // expected_mtime_ms
-            None,                      // expected_size_bytes
-            None,                      // encoding
-            Some("deadbeef".into()),   // expected_content_hash
+            None,                    // expected_mtime_ms
+            None,                    // expected_size_bytes
+            None,                    // encoding
+            Some("deadbeef".into()), // expected_content_hash
         )
         .await;
 
-        assert!(!res.ok, "oversized file must not be written via hash-check path");
+        assert!(
+            !res.ok,
+            "oversized file must not be written via hash-check path"
+        );
         assert!(
             res.conflict,
             "oversized-at-save file must be reported as conflict"

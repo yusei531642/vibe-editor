@@ -5,6 +5,8 @@
 
 use std::path::{Component, Path, PathBuf};
 
+use crate::commands::authz::ProjectRoot;
+
 /// 相対パスを root 配下に閉じ込める形で解決する。
 ///
 /// 旧実装は `joined.canonicalize()` が失敗 (= 未作成ファイル) したとき `joined` をそのまま
@@ -22,8 +24,8 @@ use std::path::{Component, Path, PathBuf};
 /// 多段ネストした未作成パス」で親 (`link/new-dir`) が canonicalize 失敗 → raw path の
 /// starts_with だけで素通りしていた。本実装では「存在する最深祖先」まで遡って canonicalize し、
 /// 祖先解決後のパスが root 配下かどうかで判定する。
-pub fn safe_join(root: &str, rel: &str) -> Option<PathBuf> {
-    let root = Path::new(root).canonicalize().ok()?;
+pub fn safe_join(root: &ProjectRoot, rel: &str) -> Option<PathBuf> {
+    let root = root.as_path();
     let rel_path = Path::new(rel);
 
     // (1) 絶対パス混入を拒否
@@ -47,14 +49,14 @@ pub fn safe_join(root: &str, rel: &str) -> Option<PathBuf> {
     }
 
     // 正規化後の joined パス (fs 実体は未作成かもしれない)
-    let mut joined = root.clone();
+    let mut joined = root.to_path_buf();
     for c in &stack {
         joined.push(c);
     }
 
     // (3) 可能なら symlink 展開後も root 配下であることを再確認
     if let Ok(canonical) = joined.canonicalize() {
-        if canonical.starts_with(&root) {
+        if canonical.starts_with(root) {
             return Some(canonical);
         }
         return None;
@@ -69,7 +71,7 @@ pub fn safe_join(root: &str, rel: &str) -> Option<PathBuf> {
     loop {
         match probe.canonicalize() {
             Ok(canonical) => {
-                if !canonical.starts_with(&root) {
+                if !canonical.starts_with(root) {
                     return None;
                 }
                 let mut result = canonical;
@@ -99,38 +101,35 @@ mod safe_join_tests {
     use super::*;
     use std::fs;
 
-    fn tempdir() -> PathBuf {
+    fn temp_root() -> ProjectRoot {
         let d = std::env::temp_dir().join(format!("vibe-safe-join-{}", std::process::id()));
         let _ = fs::create_dir_all(&d);
-        d.canonicalize().unwrap()
+        ProjectRoot::assume_canonical_for_test(d.canonicalize().unwrap())
     }
 
     #[test]
     fn rejects_parent_escape() {
-        let root = tempdir();
-        let root_str = root.to_string_lossy();
-        assert!(safe_join(&root_str, "../outside.txt").is_none());
-        assert!(safe_join(&root_str, "a/../../outside.txt").is_none());
+        let root = temp_root();
+        assert!(safe_join(&root, "../outside.txt").is_none());
+        assert!(safe_join(&root, "a/../../outside.txt").is_none());
     }
 
     #[test]
     fn rejects_absolute() {
-        let root = tempdir();
-        let root_str = root.to_string_lossy();
+        let root = temp_root();
         if cfg!(windows) {
-            assert!(safe_join(&root_str, "C:\\Windows\\notepad.exe").is_none());
+            assert!(safe_join(&root, "C:\\Windows\\notepad.exe").is_none());
         } else {
-            assert!(safe_join(&root_str, "/etc/passwd").is_none());
+            assert!(safe_join(&root, "/etc/passwd").is_none());
         }
     }
 
     #[test]
     fn allows_inside() {
-        let root = tempdir();
-        let root_str = root.to_string_lossy();
-        assert!(safe_join(&root_str, "sub/file.txt").is_some());
-        assert!(safe_join(&root_str, "a/../b.txt").is_some()); // 中間の .. は OK
-        assert!(safe_join(&root_str, "./nested/./file.txt").is_some());
+        let root = temp_root();
+        assert!(safe_join(&root, "sub/file.txt").is_some());
+        assert!(safe_join(&root, "a/../b.txt").is_some()); // 中間の .. は OK
+        assert!(safe_join(&root, "./nested/./file.txt").is_some());
     }
 
     /// Issue #101: symlink 配下にある「未作成」のネストパスが、symlink 先 (= 外部)
@@ -140,14 +139,10 @@ mod safe_join_tests {
     fn rejects_uncreated_path_under_symlink_to_outside() {
         use std::os::unix::fs::symlink as unix_symlink;
 
-        let root = std::env::temp_dir().join(format!(
-            "vibe-safe-join-symlink-{}",
-            std::process::id()
-        ));
-        let outside = std::env::temp_dir().join(format!(
-            "vibe-safe-join-outside-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("vibe-safe-join-symlink-{}", std::process::id()));
+        let outside =
+            std::env::temp_dir().join(format!("vibe-safe-join-outside-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&outside);
         fs::create_dir_all(&root).unwrap();
@@ -157,12 +152,12 @@ mod safe_join_tests {
         let link = root.join("link");
         unix_symlink(&outside, &link).unwrap();
 
-        let root_str = root.canonicalize().unwrap().to_string_lossy().into_owned();
+        let root = ProjectRoot::assume_canonical_for_test(root.canonicalize().unwrap());
 
         // link は外部を指すので link/new-dir/file.txt は拒否されるべき
-        assert!(safe_join(&root_str, "link/new-dir/file.txt").is_none());
+        assert!(safe_join(&root, "link/new-dir/file.txt").is_none());
         // link 自体も外部解決されるので拒否
-        assert!(safe_join(&root_str, "link/file.txt").is_none());
+        assert!(safe_join(&root, "link/file.txt").is_none());
 
         let _ = fs::remove_dir_all(&root);
         let _ = fs::remove_dir_all(&outside);
@@ -171,9 +166,8 @@ mod safe_join_tests {
     /// 多段ネストの未作成パスが root 配下なら通ること (Issue #101 修正の non-regression)。
     #[test]
     fn allows_uncreated_nested_path_inside_root() {
-        let root = tempdir();
-        let root_str = root.to_string_lossy();
+        let root = temp_root();
         // root 配下に未作成のディレクトリ階層を含むパス
-        assert!(safe_join(&root_str, "a/b/c/file.txt").is_some());
+        assert!(safe_join(&root, "a/b/c/file.txt").is_some());
     }
 }
