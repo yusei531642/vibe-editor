@@ -159,21 +159,27 @@ function ApiAgentChatCardImpl({
         createdAt: new Date().toISOString()
       }
     ]);
-    const result = await window.api.apiAgents.send({
-      sessionId,
-      cardInstanceId: id,
-      generationId,
-      agent: apiAgent,
-      message: text,
-      systemPrompt: apiAgent.systemPrompt,
-      skills: buildApiAgentSkills(apiAgent),
-      depth: 0,
-      turnBudget: 6
-    });
-    if (!result.ok) {
+    try {
+      const result = await window.api.apiAgents.send({
+        sessionId,
+        cardInstanceId: id,
+        generationId,
+        agent: apiAgent,
+        message: text,
+        systemPrompt: apiAgent.systemPrompt,
+        skills: buildApiAgentSkills(apiAgent),
+        depth: 0,
+        turnBudget: 6
+      });
+      if (!result.ok) {
+        generationRef.current = null;
+        setStreaming(false);
+        setStatus(result.error ?? 'send failed');
+      }
+    } catch (err) {
       generationRef.current = null;
       setStreaming(false);
-      setStatus(result.error ?? 'send failed');
+      setStatus(err instanceof Error ? err.message : String(err));
     }
   }, [apiAgent, draft, id, sessionId, streaming]);
 

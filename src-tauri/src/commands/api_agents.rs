@@ -193,6 +193,8 @@ struct ApiAgentErrorEvent {
 
 static SEND_LOCKS: once_cell::sync::Lazy<Mutex<HashMap<String, Arc<Mutex<()>>>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
+static HTTP_CLIENT: once_cell::sync::Lazy<reqwest::Client> =
+    once_cell::sync::Lazy::new(reqwest::Client::new);
 
 #[tauri::command]
 pub async fn api_agent_provider_set_key(provider_id: String, key: String) -> CommandResult<()> {
@@ -558,7 +560,7 @@ async fn call_openai_compatible(
     if let Some(max) = agent.max_output_tokens {
         body["max_tokens"] = json!(max);
     }
-    let value: Value = reqwest::Client::new()
+    let value: Value = HTTP_CLIENT
         .post(format!("{}/chat/completions", provider.base_url))
         .bearer_auth(key)
         .json(&body)
@@ -601,7 +603,7 @@ async fn call_anthropic(
     if let Some(t) = agent.temperature {
         body["temperature"] = json!(t);
     }
-    let value: Value = reqwest::Client::new()
+    let value: Value = HTTP_CLIENT
         .post(format!("{}/messages", provider.base_url))
         .header("x-api-key", key)
         .header("anthropic-version", "2023-06-01")
@@ -653,11 +655,12 @@ async fn call_gemini(
     if !system_prompt.is_empty() {
         body["systemInstruction"] = json!({ "parts": [{ "text": system_prompt }] });
     }
-    let value: Value = reqwest::Client::new()
+    let value: Value = HTTP_CLIENT
         .post(format!(
-            "{}/models/{}:generateContent?key={}",
-            provider.base_url, agent.model, key
+            "{}/models/{}:generateContent",
+            provider.base_url, agent.model
         ))
+        .header("x-goog-api-key", key)
         .json(&body)
         .send()
         .await?
