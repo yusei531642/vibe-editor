@@ -44,7 +44,7 @@ pub(super) fn tool_defs() -> Value {
                         "type": "string",
                         "enum": ["advisory", "request", "report"],
                         "default": "advisory",
-                        "description": "Message intent. advisory = peer consultation, request = formal task/request and is automatically CCed to the active Leader, report = completion/progress report."
+                        "description": "Message intent. advisory = peer consultation, request = formal task/request and is automatically CCed to the active Leader, report = completion/progress report. The Hub uses this field for report bookkeeping; it does not infer reports from message text."
                     },
                     "handoff_id": {
                         "type": "string",
@@ -231,9 +231,18 @@ pub(super) fn tool_defs() -> Value {
                     "blocked_reason": { "type": "string" },
                     "next_action": { "type": "string" },
                     "artifact_path": { "type": "string" },
-                    "blocked_by_human_gate": { "type": "boolean" },
-                    "required_human_decision": { "type": "string" },
-                    "report_kind": { "type": "string" },
+                    "blocked_by_human_gate": {
+                        "type": "boolean",
+                        "description": "Explicitly mark this blocked task as waiting on a human/leader decision. The Hub does not infer this from blocked_reason text."
+                    },
+                    "required_human_decision": {
+                        "type": "string",
+                        "description": "Structured description of the decision needed. Providing this also marks the task as a human gate."
+                    },
+                    "report_kind": {
+                        "type": "string",
+                        "description": "Optional structured worker report kind; defaults to the canonical task status."
+                    },
                     "done_evidence": {
                         "type": "array",
                         "description": "Required when status is done for tasks with done_criteria.",

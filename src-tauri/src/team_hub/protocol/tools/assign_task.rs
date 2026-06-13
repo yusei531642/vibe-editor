@@ -651,12 +651,12 @@ pub(super) fn build_task_notification(
     format!(
         "[Task #{task_id}]\n{description_fenced}{file_lock_section}{pre_approval_section}{done_section}\n\n\
          [Standard response protocol — follow even if not repeated in the task body]\n\
-         1. Reply immediately with `team_send(\"leader\", \"ACK: Task #{task_id} received, starting...\")`.\n\
-         2. Call `team_update_task({task_id}, \"in_progress\")`.\n\
-         3. For long-running steps, call `team_status(\"...short progress line...\")` every meaningful step \
+        1. Reply immediately with `team_send({{\"to\":\"leader\",\"kind\":\"report\",\"message\":\"ACK: Task #{task_id} received, starting...\"}})`.\n\
+        2. Call `team_update_task({{\"task_id\":{task_id},\"status\":\"in_progress\"}})`.\n\
+        3. For long-running steps, call `team_status({{\"status\":\"...short progress line...\"}})` every meaningful step \
          so the Leader can see you are alive via team_diagnostics.\n\
-         4. When done, send a `team_send(\"leader\", \"完了報告: ...\")` and call \
-         `team_update_task({task_id}, \"done\")` (or `\"blocked\"` if you cannot finish)."
+        4. When done, send `team_send({{\"to\":\"leader\",\"kind\":\"report\",\"message\":\"完了報告: ...\"}})` and call \
+        `team_update_task({{\"task_id\":{task_id},\"status\":\"done\",\"done_evidence\":{done_evidence_json}}})` (or status `\"blocked\"` if you cannot finish)."
     )
 }
 
@@ -681,9 +681,9 @@ mod tests {
         // プロトコル節 4 項目が含まれる
         assert!(msg.contains("Standard response protocol"));
         assert!(msg.contains("ACK: Task #42 received"));
-        assert!(msg.contains("team_update_task(42, \"in_progress\")"));
-        assert!(msg.contains("team_status("));
-        assert!(msg.contains("team_update_task(42, \"done\")"));
+        assert!(msg.contains(r#"team_update_task({"task_id":42,"status":"in_progress"})"#));
+        assert!(msg.contains(r#"team_status({"status":"#));
+        assert!(msg.contains(r#"team_update_task({"task_id":42,"status":"done""#));
         assert!(msg.contains("\"blocked\""));
     }
 

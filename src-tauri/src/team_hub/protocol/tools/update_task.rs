@@ -143,16 +143,6 @@ fn optional_report_payload(
     })
 }
 
-fn looks_like_human_gate(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    lower.contains("human")
-        || lower.contains("approval")
-        || lower.contains("approve")
-        || text.contains("承認")
-        || text.contains("人間")
-        || text.contains("判断")
-}
-
 /// Issue #833: `task_id` を厳格に `u32` へ解釈する。
 ///
 /// 旧実装は `args.get("task_id").and_then(|v| v.as_u64()).unwrap_or(0) as u32` で、
@@ -227,12 +217,7 @@ pub async fn team_update_task(
         optional_string(args, "required_human_decision", "requiredHumanDecision");
     let explicit_human_gate =
         optional_bool(args, "blocked_by_human_gate", "blockedByHumanGate").unwrap_or(false);
-    let blocked_by_human_gate = explicit_human_gate
-        || blocked_reason
-            .as_deref()
-            .map(looks_like_human_gate)
-            .unwrap_or(false)
-        || required_human_decision.is_some();
+    let blocked_by_human_gate = explicit_human_gate || required_human_decision.is_some();
     let now_iso = Utc::now().to_rfc3339();
     let mut state = hub.state.lock().await;
     {
@@ -593,6 +578,65 @@ mod tests {
             team.next_actions.back().map(String::as_str),
             Some("Wait for QA")
         );
+    }
+
+    #[tokio::test]
+    async fn update_task_does_not_infer_human_gate_from_blocked_reason_text() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let team_id = "team-human-gate-no-infer".to_string();
+        {
+            let mut state = hub.state.lock().await;
+            let team = state
+                .teams
+                .entry(team_id.clone())
+                .or_insert_with(TeamInfo::default);
+            team.tasks.push_back(TeamTask {
+                id: 8,
+                assigned_to: "worker".into(),
+                description: "ambiguous approval text".into(),
+                status: "pending".into(),
+                created_by: "leader".into(),
+                created_at: "2026-06-13T10:00:00Z".into(),
+                updated_at: None,
+                summary: None,
+                blocked_reason: None,
+                next_action: None,
+                artifact_path: None,
+                blocked_by_human_gate: false,
+                required_human_decision: None,
+                target_paths: Vec::new(),
+                lock_conflicts: Vec::new(),
+                pre_approval: None,
+                done_criteria: Vec::new(),
+                done_evidence: Vec::new(),
+            });
+        }
+
+        let ctx = CallContext {
+            team_id: team_id.clone(),
+            role: "worker".into(),
+            agent_id: "worker-8".into(),
+        };
+
+        team_update_task(
+            &hub,
+            &ctx,
+            &json!({
+                "task_id": 8,
+                "status": "blocked",
+                "summary": "Blocked on wording",
+                "blocked_reason": "approval wording appears in copied notes, but no decision is required"
+            }),
+        )
+        .await
+        .expect("team_update_task ok");
+
+        let state = hub.state.lock().await;
+        let team = state.teams.get(&team_id).unwrap();
+        let task = team.tasks.iter().find(|task| task.id == 8).unwrap();
+        assert!(!task.blocked_by_human_gate);
+        assert!(!team.human_gate.blocked);
+        assert_eq!(team.worker_reports.len(), 1);
     }
 
     /// Issue #516: `report_payload` (findings/proposal/risks/next_action/artifacts[]) を渡したとき

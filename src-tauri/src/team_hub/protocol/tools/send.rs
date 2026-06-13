@@ -155,39 +155,16 @@ fn optional_string(args: &Value, snake: &str, camel: &str) -> Option<String> {
         .map(ToOwned::to_owned)
 }
 
-fn is_leader_report(to: &str, message: &str, sender_role: &str) -> bool {
-    if sender_role == "leader" || to.trim() != "leader" {
-        return false;
-    }
-    let lower = message.to_ascii_lowercase();
-    message.contains("完了報告")
-        || lower.contains("completion report")
-        || lower.contains("done:")
-        || lower.contains("blocked")
-        || message.contains("ブロック")
-}
-
-fn report_kind(message: &str) -> &'static str {
-    let lower = message.to_ascii_lowercase();
-    if lower.contains("blocked") || message.contains("ブロック") {
-        "blocked"
-    } else {
-        "message"
-    }
-}
-
 fn is_leader_role(role: &str) -> bool {
     role.trim().eq_ignore_ascii_case("leader")
 }
 
 fn should_record_leader_summary_feed(
-    raw_to: &str,
-    message: &str,
     from_role: &str,
     targets: &[(String, String)],
     message_kind: MessageKind,
 ) -> bool {
-    if is_leader_report(raw_to, message, from_role) || message_kind == MessageKind::Report {
+    if message_kind == MessageKind::Report {
         return true;
     }
 
@@ -198,14 +175,8 @@ fn should_record_leader_summary_feed(
         && !targets.iter().any(|(_, role)| is_leader_role(role))
 }
 
-fn leader_summary_kind(message_kind: MessageKind, message: &str) -> String {
-    if message_kind == MessageKind::Advisory {
-        "advisory".to_string()
-    } else if message_kind == MessageKind::Report {
-        "report".to_string()
-    } else {
-        report_kind(message).to_string()
-    }
+fn leader_summary_kind(message_kind: MessageKind) -> String {
+    message_kind.as_str().to_string()
 }
 
 fn resolve_targets_with_request_cc(
@@ -503,8 +474,6 @@ async fn insert_team_message(
     // メッセージ履歴に追加
     let timestamp = Utc::now().to_rfc3339();
     let should_record_summary_feed = should_record_leader_summary_feed(
-        to,
-        message,
         &ctx.role,
         &targets.targets,
         message_kind,
@@ -557,7 +526,7 @@ async fn insert_team_message(
                 task_id: None,
                 from_role: ctx.role.clone(),
                 from_agent_id: ctx.agent_id.clone(),
-                kind: leader_summary_kind(message_kind, message),
+                kind: leader_summary_kind(message_kind),
                 summary,
                 blocked_reason: None,
                 next_action: None,
@@ -1085,16 +1054,11 @@ mod tests {
         let targets = vec![("reviewer-1".to_string(), "reviewer".to_string())];
 
         assert!(should_record_leader_summary_feed(
-            "reviewer",
-            "この設計でよいか相談です",
             "programmer",
             &targets,
             MessageKind::Advisory
         ));
-        assert_eq!(
-            leader_summary_kind(MessageKind::Advisory, "相談"),
-            "advisory"
-        );
+        assert_eq!(leader_summary_kind(MessageKind::Advisory), "advisory");
     }
 
     #[test]
@@ -1103,19 +1067,32 @@ mod tests {
         let worker_target = vec![("worker-1".to_string(), "worker".to_string())];
 
         assert!(!should_record_leader_summary_feed(
-            "leader",
-            "相談です",
             "programmer",
             &leader_target,
             MessageKind::Advisory
         ));
         assert!(!should_record_leader_summary_feed(
-            "programmer",
-            "作業してください",
             "leader",
             &worker_target,
             MessageKind::Advisory
         ));
+    }
+
+    #[test]
+    fn leader_summary_feed_does_not_infer_report_from_text() {
+        let leader_target = vec![("leader-1".to_string(), "leader".to_string())];
+
+        assert!(!should_record_leader_summary_feed(
+            "programmer",
+            &leader_target,
+            MessageKind::Advisory
+        ));
+        assert!(should_record_leader_summary_feed(
+            "programmer",
+            &leader_target,
+            MessageKind::Report
+        ));
+        assert_eq!(leader_summary_kind(MessageKind::Report), "report");
     }
 
     #[test]
