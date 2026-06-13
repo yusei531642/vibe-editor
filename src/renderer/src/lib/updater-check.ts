@@ -311,7 +311,7 @@ export async function runUpdateInstall(deps: UpdaterDeps): Promise<void> {
     warning +
     (body ? `\n\n${body}` : '');
 
-  let proceed = false;
+  let proceed: boolean;
   try {
     const { ask } = await import('@tauri-apps/plugin-dialog');
     proceed = await ask(message, { title: 'vibe-editor', kind: 'info' });

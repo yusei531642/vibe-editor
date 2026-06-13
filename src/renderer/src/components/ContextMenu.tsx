@@ -99,7 +99,7 @@ export function ContextMenu({ x, y, items, onClose }: ContextMenuProps): JSX.Ele
           .map((it, i) => (it.disabled ? -1 : i))
           .filter((i) => i >= 0);
         if (enabledIdx.length === 0) return;
-        let next = focusedIndex;
+        let next: number;
         if (e.key === 'Home') next = enabledIdx[0];
         else if (e.key === 'End') next = enabledIdx[enabledIdx.length - 1];
         else {
