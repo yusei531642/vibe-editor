@@ -30,25 +30,159 @@ export interface DialogFileFilter {
  * を ASCII '-' に正規化する migration を追加し v10。
  * Issue #618 で `terminalForceUtf8` (default true) を追加し v11。Windows + cmd.exe / PowerShell
  * で起動時に `chcp 65001` を inject して CP932 シェルでの U+FFFD 化を防ぐ。
+ * Issue #994 で API 駆動エージェントを追加し、customAgents を `runtime: cli|api` に拡張して v12。
  */
-export const APP_SETTINGS_SCHEMA_VERSION = 11;
+export const APP_SETTINGS_SCHEMA_VERSION = 12;
 
 /**
- * ユーザーが自由に追加できるエージェントの設定。
- * built-in の claude / codex 以外を登録するためのレコード。
- *  - id: 起動時の識別子。'claude' / 'codex' は予約語 (バリデーションで弾く)
- *  - name: UI 表示名 (Canvas / Team ビルダーに出る)
- *  - command / args / cwd: pty spawn 用の起動パラメータ
- *  - color: Canvas カードの accent カラー (省略時は --accent)
+ * API agent provider preset。`openai-compatible` 系は base URL と request shape を共有し、
+ * `anthropic` / `gemini` だけ native adapter で扱う。
  */
-export interface AgentConfig {
+export type ApiAgentProviderId =
+  | 'openai'
+  | 'openrouter'
+  | 'nvidia-nim'
+  | 'groq'
+  | 'mistral'
+  | 'together'
+  | 'cerebras'
+  | 'anthropic'
+  | 'gemini'
+  | 'custom-openai-compatible';
+
+export type AgentRuntime = 'cli' | 'api';
+
+export interface AgentConfigBase {
   id: string;
   name: string;
+  /** Canvas カードの accent カラー (省略時は --accent) */
+  color?: string;
+}
+
+/**
+ * 既存の CLI / PTY ベース custom agent。旧 customAgents は v12 migration でこの形へ
+ * 前進する (`runtime: 'cli'`)。
+ */
+export interface CliAgentConfig extends AgentConfigBase {
+  runtime: 'cli';
   command: string;
   args: string;
   cwd?: string;
-  color?: string;
 }
+
+/**
+ * API 駆動の Canvas Chat agent。API key は settings に含めず OS keyring に保管する。
+ */
+export interface ApiAgentConfig extends AgentConfigBase {
+  runtime: 'api';
+  providerId: ApiAgentProviderId;
+  model: string;
+  /** custom-openai-compatible のときだけ使う base URL。 */
+  customBaseUrl?: string;
+  temperature?: number;
+  maxOutputTokens?: number;
+  systemPrompt?: string;
+  skillIds?: string[];
+  /**
+   * provider/model が tool calling 不完全な場合は readOnly に degrade し、
+   * TeamHub tool を使わせない。
+   */
+  toolMode?: 'auto' | 'readOnly';
+}
+
+/** ユーザーが自由に追加できるエージェント設定。 */
+export type AgentConfig = CliAgentConfig | ApiAgentConfig;
+
+export interface ApiAgentProviderPreset {
+  id: ApiAgentProviderId;
+  label: string;
+  adapter: 'openai-compatible' | 'anthropic' | 'gemini';
+  baseUrl?: string;
+  defaultModel: string;
+  supportsTools: boolean;
+}
+
+export const API_AGENT_PROVIDER_PRESETS: ApiAgentProviderPreset[] = [
+  {
+    id: 'openai',
+    label: 'OpenAI',
+    adapter: 'openai-compatible',
+    baseUrl: 'https://api.openai.com/v1',
+    defaultModel: 'gpt-4.1',
+    supportsTools: true
+  },
+  {
+    id: 'openrouter',
+    label: 'OpenRouter',
+    adapter: 'openai-compatible',
+    baseUrl: 'https://openrouter.ai/api/v1',
+    defaultModel: 'openai/gpt-4.1',
+    supportsTools: true
+  },
+  {
+    id: 'nvidia-nim',
+    label: 'NVIDIA NIM',
+    adapter: 'openai-compatible',
+    baseUrl: 'https://integrate.api.nvidia.com/v1',
+    defaultModel: 'nvidia/llama-3.3-nemotron-super-49b-v1',
+    supportsTools: false
+  },
+  {
+    id: 'groq',
+    label: 'Groq',
+    adapter: 'openai-compatible',
+    baseUrl: 'https://api.groq.com/openai/v1',
+    defaultModel: 'llama-3.3-70b-versatile',
+    supportsTools: false
+  },
+  {
+    id: 'mistral',
+    label: 'Mistral',
+    adapter: 'openai-compatible',
+    baseUrl: 'https://api.mistral.ai/v1',
+    defaultModel: 'mistral-large-latest',
+    supportsTools: true
+  },
+  {
+    id: 'together',
+    label: 'Together',
+    adapter: 'openai-compatible',
+    baseUrl: 'https://api.together.xyz/v1',
+    defaultModel: 'meta-llama/Llama-3.3-70B-Instruct-Turbo',
+    supportsTools: false
+  },
+  {
+    id: 'cerebras',
+    label: 'Cerebras',
+    adapter: 'openai-compatible',
+    baseUrl: 'https://api.cerebras.ai/v1',
+    defaultModel: 'llama3.1-70b',
+    supportsTools: false
+  },
+  {
+    id: 'anthropic',
+    label: 'Anthropic',
+    adapter: 'anthropic',
+    baseUrl: 'https://api.anthropic.com/v1',
+    defaultModel: 'claude-sonnet-4-5',
+    supportsTools: true
+  },
+  {
+    id: 'gemini',
+    label: 'Gemini',
+    adapter: 'gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    defaultModel: 'gemini-2.5-pro',
+    supportsTools: true
+  },
+  {
+    id: 'custom-openai-compatible',
+    label: 'Custom OpenAI-compatible',
+    adapter: 'openai-compatible',
+    defaultModel: '',
+    supportsTools: false
+  }
+];
 
 export interface AppSettings {
   /** Issue #75: スキーマ番号。未設定 (旧データ) は 0 扱い */
@@ -264,6 +398,110 @@ export interface VoiceSendResult {
   reasonCode?: string;
   /** 人間可読のエラーメッセージ。 */
   error?: string;
+}
+
+// ---------- API Agents (Issue #994) ----------
+
+export type ApiAgentRole = 'system' | 'user' | 'assistant' | 'tool';
+
+export interface ApiAgentMessage {
+  id: string;
+  role: ApiAgentRole;
+  content: string;
+  createdAt: string;
+  toolName?: string;
+}
+
+export interface ApiAgentUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+}
+
+export interface ApiAgentTurnLog {
+  generationId: string;
+  chainId?: string;
+  depth: number;
+  turnNumber: number;
+  stopReason: string;
+  usage?: ApiAgentUsage;
+  createdAt: string;
+}
+
+export interface ApiAgentSession {
+  schemaVersion: number;
+  sessionId: string;
+  agentId: string;
+  providerId: ApiAgentProviderId;
+  model: string;
+  title?: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: ApiAgentMessage[];
+  turnLogs: ApiAgentTurnLog[];
+  toolMode: 'auto' | 'readOnly';
+}
+
+export interface ApiAgentSessionCreateRequest {
+  sessionId?: string;
+  agentId: string;
+  providerId: ApiAgentProviderId;
+  model: string;
+  title?: string;
+  toolMode?: 'auto' | 'readOnly';
+}
+
+export interface ApiAgentSendRequest {
+  sessionId: string;
+  cardInstanceId: string;
+  generationId: string;
+  agent: ApiAgentConfig;
+  message: string;
+  systemPrompt?: string;
+  skills?: { id: string; name: string; body: string }[];
+  chainId?: string;
+  depth?: number;
+  turnBudget?: number;
+}
+
+export interface ApiAgentSendResult {
+  ok: boolean;
+  generationId: string;
+  degradedToReadOnly?: boolean;
+  error?: string;
+}
+
+export interface ApiAgentStreamEvent {
+  sessionId: string;
+  cardInstanceId: string;
+  generationId: string;
+  delta: string;
+}
+
+export interface ApiAgentToolEvent {
+  sessionId: string;
+  cardInstanceId: string;
+  generationId: string;
+  name: string;
+  status: 'started' | 'completed' | 'skipped' | 'failed';
+  detail?: string;
+}
+
+export interface ApiAgentDoneEvent {
+  sessionId: string;
+  cardInstanceId: string;
+  generationId: string;
+  message: ApiAgentMessage;
+  usage?: ApiAgentUsage;
+  stopReason: string;
+  turnCount: number;
+}
+
+export interface ApiAgentErrorEvent {
+  sessionId: string;
+  cardInstanceId: string;
+  generationId: string;
+  message: string;
 }
 
 export interface ClaudeCheckResult {

@@ -229,4 +229,50 @@ describe('migrateSettings', () => {
       expect(migrated.terminalForceUtf8).toBe(true);
     });
   });
+
+  describe('v11 → v12 custom agent runtime migration (Issue #994)', () => {
+    it('marks legacy customAgents as CLI runtime', () => {
+      const migrated = migrateSettings({
+        schemaVersion: 11,
+        language: 'ja',
+        theme: 'claude-dark',
+        customAgents: [
+          { id: 'aider', name: 'Aider', command: 'aider', args: '--yes' }
+        ]
+      });
+
+      expect(migrated.customAgents?.[0]).toMatchObject({
+        id: 'aider',
+        runtime: 'cli',
+        command: 'aider',
+        args: '--yes'
+      });
+      expect(migrated.schemaVersion).toBe(APP_SETTINGS_SCHEMA_VERSION);
+    });
+
+    it('keeps API agents and sanitizes skillIds', () => {
+      const migrated = migrateSettings({
+        schemaVersion: 12,
+        language: 'ja',
+        theme: 'claude-dark',
+        customAgents: [
+          {
+            id: 'openrouter-worker',
+            name: 'OpenRouter Worker',
+            runtime: 'api',
+            providerId: 'openrouter',
+            model: 'openai/gpt-4.1',
+            skillIds: ['vibe-team', 1]
+          }
+        ]
+      });
+
+      expect(migrated.customAgents?.[0]).toMatchObject({
+        runtime: 'api',
+        providerId: 'openrouter',
+        model: 'openai/gpt-4.1',
+        skillIds: ['vibe-team']
+      });
+    });
+  });
 });

@@ -4,7 +4,7 @@
  * 'claude' / 'codex' は built-in として settings.claudeCommand / codexCommand を参照、
  * それ以外は settings.customAgents から lookup する。
  */
-import type { AppSettings } from '../../../types/shared';
+import type { AppSettings, CliAgentConfig } from '../../../types/shared';
 
 export interface ResolvedAgent {
   id: string;
@@ -33,7 +33,9 @@ export function resolveAgentConfig(
     };
   }
   if (agentId !== 'claude') {
-    const custom = (settings.customAgents ?? []).find((a) => a.id === agentId);
+    const custom = (settings.customAgents ?? []).find(
+      (a): a is CliAgentConfig => a.id === agentId && a.runtime === 'cli'
+    );
     if (custom) {
       return {
         id: custom.id,

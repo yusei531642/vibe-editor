@@ -14,7 +14,6 @@
 import {
   APP_SETTINGS_SCHEMA_VERSION,
   DEFAULT_SETTINGS,
-  type AgentConfig,
   type AppSettings,
   type Language,
   type StatusMascotVariant,
@@ -56,6 +55,32 @@ function sanitizeCustomAgentIds(value: unknown): unknown {
     used.add(id);
     if (id === entry.id) return entry;
     return { ...entry, id };
+  });
+}
+
+function migrateCustomAgentsRuntime(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((entry) => {
+    if (!isObject(entry)) return entry;
+    if (entry.runtime === 'api') {
+      return {
+        ...entry,
+        runtime: 'api',
+        providerId:
+          typeof entry.providerId === 'string' ? entry.providerId : 'openai',
+        model: typeof entry.model === 'string' ? entry.model : 'gpt-4.1',
+        skillIds: Array.isArray(entry.skillIds)
+          ? entry.skillIds.filter((x): x is string => typeof x === 'string')
+          : []
+      };
+    }
+    return {
+      ...entry,
+      runtime: 'cli',
+      command: typeof entry.command === 'string' ? entry.command : '',
+      args: typeof entry.args === 'string' ? entry.args : '',
+      cwd: typeof entry.cwd === 'string' ? entry.cwd : ''
+    };
   });
 }
 
@@ -244,7 +269,7 @@ export function migrateSettings(raw: unknown): AppSettings {
     if (Array.isArray(data.customAgents)) {
       data.customAgents = (data.customAgents as unknown[]).map((entry) => {
         if (!isObject(entry)) return entry;
-        const agent = entry as unknown as AgentConfig;
+        const agent = entry as Record<string, unknown>;
         if (typeof agent.args === 'string') {
           return { ...agent, args: normalizeArgsString(agent.args) };
         }
@@ -266,6 +291,14 @@ export function migrateSettings(raw: unknown): AppSettings {
       data.terminalForceUtf8 = true;
     }
   }
+
+  // --- Version 11 → 12: API agent runtime の導入 (Issue #994) ---
+  // 旧 customAgents はすべて CLI/PTY agent なので `runtime: 'cli'` を明示する。
+  if (version < 12) {
+    data.customAgents = migrateCustomAgentsRuntime(data.customAgents);
+  }
+  // 改竄や future build 由来で runtime が欠けた entry も毎ロードで安全側へ寄せる。
+  data.customAgents = migrateCustomAgentsRuntime(data.customAgents);
 
   data.schemaVersion = APP_SETTINGS_SCHEMA_VERSION;
   // 最終マージで欠損フィールドを DEFAULT_SETTINGS で埋める

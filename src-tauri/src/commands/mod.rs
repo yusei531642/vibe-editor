@@ -3,6 +3,7 @@
 // 既存 src/main/ipc/*.ts と 1:1 対応。
 // camelCase JSON 互換のため、各 command struct/enum には #[serde(rename_all = "camelCase")] を付与する。
 
+pub mod api_agents;
 pub mod app;
 // Issue #724 (Security): `asset://` protocol scope の動的許可ヘルパー。
 pub mod asset_scope;

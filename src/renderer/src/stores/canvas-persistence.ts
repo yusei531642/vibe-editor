@@ -6,7 +6,7 @@ import {
 } from './canvas-card-identity';
 
 export const CANVAS_PERSIST_NAME = 'vibe-editor:canvas';
-export const CANVAS_PERSIST_VERSION = 5;
+export const CANVAS_PERSIST_VERSION = 6;
 
 type CanvasPersistState = Pick<
   CanvasState,

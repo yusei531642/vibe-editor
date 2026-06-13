@@ -34,10 +34,10 @@ function payloadAgentId(payload: CardPayload | undefined): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
-/** agentId を持ちうるカード (agent / terminal) からそれを取り出す。 */
+/** agentId を持ちうるカード (agent / apiAgent / terminal) からそれを取り出す。 */
 function nodeAgentId(data: CardData | undefined): string | undefined {
   if (!data) return undefined;
-  if (data.cardType === 'agent' || data.cardType === 'terminal') {
+  if (data.cardType === 'agent' || data.cardType === 'apiAgent' || data.cardType === 'terminal') {
     return data.payload?.agentId;
   }
   return undefined;
@@ -58,7 +58,7 @@ export function findReconcileTarget(
   type: CardType,
   payload: CardPayload | undefined
 ): Node<CardData> | undefined {
-  if (type !== 'agent' && type !== 'terminal') return undefined;
+  if (type !== 'agent' && type !== 'apiAgent' && type !== 'terminal') return undefined;
   const agentId = payloadAgentId(payload);
   if (!agentId) return undefined;
   return nodes.find((n) => n.type === type && nodeAgentId(n.data) === agentId);

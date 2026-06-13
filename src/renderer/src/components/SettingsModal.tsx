@@ -183,6 +183,7 @@ export function SettingsModal({
     const agent: AgentConfig = {
       id,
       name: t('settings.customAgents.newName'),
+      runtime: 'cli',
       command: '',
       args: '',
       cwd: ''

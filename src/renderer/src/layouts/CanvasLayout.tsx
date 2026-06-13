@@ -354,7 +354,30 @@ export function CanvasLayout(): JSX.Element {
     setAddCardOpen(false);
   };
 
-  const addByType = (type: Exclude<CardType, 'terminal' | 'agent'>): void => {
+  const addApiAgent = (): void => {
+    const apiAgent = (settings.customAgents ?? []).find((a) => a.runtime === 'api');
+    if (!apiAgent || apiAgent.runtime !== 'api') {
+      setSettingsOpen(true);
+      return;
+    }
+    addCards([
+      {
+        type: 'apiAgent',
+        title: apiAgent.name,
+        position: stagger('apiAgent'),
+        payload: {
+          agentId: apiAgent.id,
+          providerId: apiAgent.providerId,
+          model: apiAgent.model,
+          toolMode: apiAgent.toolMode ?? 'auto',
+          configured: true
+        }
+      }
+    ]);
+    setAddCardOpen(false);
+  };
+
+  const addByType = (type: Exclude<CardType, 'terminal' | 'agent' | 'apiAgent'>): void => {
     const cwd = projectRoot;
     if (type === 'editor') {
       addCards([{
@@ -537,6 +560,7 @@ export function CanvasLayout(): JSX.Element {
     () => ({
       addClaude: () => addAgent('claude'),
       addCodex: () => addAgent('codex'),
+      addApiAgent,
       addFileTree: () => addByType('fileTree'),
       addChanges: () => addByType('changes'),
       addEditor: () => addByType('editor'),
