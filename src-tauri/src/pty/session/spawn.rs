@@ -184,7 +184,11 @@ pub(crate) fn resolve_terminal_command_path_for_check_with_env(
     #[cfg(not(windows))]
     {
         let _ = env;
-        which::which(command).map_err(Into::into)
+        // Issue #979: macOS GUI 起動では PATH を継承しないため、補強済み PATH で探索する。
+        // 見つからない場合の which::Error は "cannot find binary path" を表示し、
+        // renderer 側の classify-spawn-phase がこの文言に依存している。
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+        which::which_in(command, Some(super::unix_path::enriched_path()), cwd).map_err(Into::into)
     }
 }
 
@@ -201,7 +205,10 @@ fn resolve_spawn_command(
     args: Vec<String>,
     env: &HashMap<String, String>,
 ) -> Result<PreparedSpawnCommand> {
-    let resolved_command = which::which(command)
+    // Issue #979: macOS / Linux の GUI 起動でログインシェル PATH を継承しない問題に
+    // 対処するため、補強済み PATH (`unix_path::enriched_path`) で `which` を実行する。
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+    let resolved_command = which::which_in(command, Some(super::unix_path::enriched_path()), cwd)
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| command.to_string());
     Ok(PreparedSpawnCommand {
@@ -327,6 +334,12 @@ pub fn spawn_session(
         }
         cmd.env(k, v);
     }
+    // Issue #979: macOS / Linux の GUI (Finder/Dock/.desktop) 起動ではログインシェルの
+    // PATH を継承しないため、子プロセスにも補強済み PATH を渡す。これがないと spawn 先の
+    // `claude` から呼ばれる git / node 等の解決も同じ理由で失敗し得る。opts.env が PATH を
+    // 明示する場合は直後の loop で上書きされる (呼び出し側の指定を優先)。
+    #[cfg(not(windows))]
+    cmd.env("PATH", super::unix_path::enriched_path());
     for (k, v) in &opts.env {
         cmd.env(k, v);
     }

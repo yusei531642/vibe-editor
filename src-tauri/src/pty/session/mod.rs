@@ -14,6 +14,8 @@
 //!   コマンドパス解決 / spawn メトリクスログ。
 //! - [`env_allowlist`] — 親プロセス環境変数の継承 allowlist (`should_inherit_env`)。
 //! - [`windows_resolve`] — Windows 専用のコマンドパス解決 (`#[cfg(windows)]`)。
+//! - [`unix_path`] — macOS / Linux 専用の PATH 補強 (`#[cfg(not(windows))]`,
+//!   Issue #979: GUI 起動時にログインシェル PATH を継承しない問題への対処)。
 //! - [`injecting_guard`] — `injecting` フラグの RAII guard (`InjectingGuard`)。
 //! - [`lock`] — 4 つの `Mutex` lock 取得を 1 つに集約する `lock_poisoned!` macro。
 
@@ -22,6 +24,8 @@ mod handle;
 mod injecting_guard;
 mod lock;
 pub(crate) mod spawn;
+#[cfg(not(windows))]
+pub(crate) mod unix_path;
 #[cfg(windows)]
 pub(crate) mod windows_resolve;
 
