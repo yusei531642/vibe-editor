@@ -138,7 +138,9 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 0 18px 0 16px;
+  /* Issue #981: macOS は左の信号機ボタン分を `--titlebar-traffic-inset` で確保。
+     他プラットフォームでは 0px なので従来どおり 16px。 */
+  padding: 0 18px 0 calc(16px + var(--titlebar-traffic-inset, 0px));
   border-bottom: 1px solid var(--border);
   background: var(--bg-toolbar);
   position: relative;

@@ -6,6 +6,7 @@ import type { StatusMascotState } from '../../lib/status-mascot';
 import type { AvailableUpdateInfo } from '../../lib/updater-check';
 import { StatusMascot } from './StatusMascot';
 import { WindowControls } from './WindowControls';
+import { isMacOS } from '../../lib/platform';
 
 interface TopbarProps {
   projectRoot: string;
@@ -151,8 +152,10 @@ export function Topbar({
         </div>
       ) : null}
 
-      {/* Issue #260 PR-2: カスタムタイトルバーのウィンドウ制御 (decorations: false の代替) */}
-      <WindowControls />
+      {/* Issue #260 PR-2: カスタムタイトルバーのウィンドウ制御 (decorations: false の代替)。
+          Issue #981: macOS は OS ネイティブの信号機ボタン (titleBarStyle: Overlay) を
+          使うため、自前の Windows 風ボタンは描画しない。 */}
+      {!isMacOS && <WindowControls />}
 
       {mascotState ? (
         <span
