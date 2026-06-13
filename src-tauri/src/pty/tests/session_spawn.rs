@@ -8,8 +8,9 @@
 //! こちらの subscriber は `target: "pty"` を自分の crate filter で弾かない
 //! (test ローカルに `with_default` で全 target を拾う) ため。
 
-use crate::pty::session::spawn::{
-    build_cmd_label, engine_label, log_spawn_outcome, platform_label, PreparedSpawnCommand,
+use crate::pty::session::spawn::PreparedSpawnCommand;
+use crate::pty::session::spawn_metrics::{
+    build_cmd_label, engine_label, log_spawn_outcome, platform_label,
 };
 use std::io::Write;
 use std::sync::{Arc, Mutex};
