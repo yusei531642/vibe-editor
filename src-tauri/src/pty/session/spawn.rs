@@ -24,6 +24,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
 use super::handle::{SessionHandle, TerminalExitInfo};
+use super::spawn_metrics::{build_cmd_label, engine_label, log_spawn_outcome, platform_label};
 
 /// Issue #818: ターミナル spawn 時の警告 (cwd フォールバック等) を renderer 側に
 /// 言語非依存で渡すための構造体。`message_key` は `src/renderer/src/lib/i18n.ts`
@@ -228,74 +229,6 @@ fn resolve_spawn_command(
     env: &HashMap<String, String>,
 ) -> Result<PreparedSpawnCommand> {
     super::windows_resolve::resolve_windows_spawn_command(command, args, env)
-}
-
-/// Issue #579: spawn ログ用に「漏洩しない短い command ラベル」を作る。
-///
-/// resolved_command はフルパス (例: `C:\Users\foo\AppData\Roaming\npm\claude.cmd`) を
-/// 持ちうるので、basename だけ取り出してさらに `redact_home` を通す。`Path::file_name`
-/// は Unix 上で Windows 区切り `\` を解釈しないため、cross-platform に動かすには
-/// 両方の区切りで rsplit する。
-pub(crate) fn build_cmd_label(prepared: &PreparedSpawnCommand) -> String {
-    let basename = prepared
-        .resolved_command
-        .rsplit(['/', '\\'])
-        .next()
-        .filter(|s| !s.is_empty())
-        .unwrap_or(prepared.requested_command.as_str())
-        .to_string();
-    redact_home(&basename)
-}
-
-pub(crate) fn engine_label(is_codex: bool) -> &'static str {
-    if is_codex {
-        "codex"
-    } else {
-        "claude"
-    }
-}
-
-pub(crate) fn platform_label() -> &'static str {
-    if cfg!(target_os = "windows") {
-        "windows"
-    } else if cfg!(target_os = "macos") {
-        "macos"
-    } else if cfg!(target_os = "linux") {
-        "linux"
-    } else {
-        "other"
-    }
-}
-
-/// Issue #579: PTY spawn の所要時間 + 結果を tracing で記録する。
-/// 集計は `target=pty` + メッセージ `[pty] spawn ok` / `[pty] spawn failed` で grep する想定。
-/// 詳細は `tasks/issue-579/notes.md` を参照。
-pub(crate) fn log_spawn_outcome(
-    cmd_label: &str,
-    engine: &str,
-    platform: &str,
-    elapsed_ms: u64,
-    error: Option<&str>,
-) {
-    match error {
-        None => tracing::info!(
-            target: "pty",
-            command = %cmd_label,
-            engine = %engine,
-            platform = %platform,
-            elapsed_ms = elapsed_ms,
-            "[pty] spawn ok"
-        ),
-        Some(err) => tracing::warn!(
-            target: "pty",
-            command = %cmd_label,
-            engine = %engine,
-            platform = %platform,
-            elapsed_ms = elapsed_ms,
-            error = %err,
-            "[pty] spawn failed"
-        ),
-    }
 }
 
 pub fn spawn_session(

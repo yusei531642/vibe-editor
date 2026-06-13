@@ -24,6 +24,7 @@ mod handle;
 mod injecting_guard;
 mod lock;
 pub(crate) mod spawn;
+pub(crate) mod spawn_metrics;
 #[cfg(not(windows))]
 pub(crate) mod unix_path;
 #[cfg(windows)]
