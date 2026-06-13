@@ -157,15 +157,23 @@ fn list_dir_tool(project_root: &str, args: &Value) -> ToolOutcome {
         Ok(rd) => rd,
         Err(e) => return ToolOutcome::err(format!("read_dir failed: {e}")),
     };
-    let mut entries: Vec<String> = Vec::new();
+    // bounded top-K: 全件を Vec に貯めてソートするのではなく、アルファベット順で先頭
+    // MAX_LIST_ENTRIES 件だけを max-heap で保持する。大量エントリのディレクトリでも
+    // メモリ/ソートコストを K 件に抑える (O(n log K) / O(K))。
+    use std::collections::BinaryHeap;
+    let mut heap: BinaryHeap<String> = BinaryHeap::new();
+    let mut total = 0usize;
     for e in rd.flatten() {
+        total += 1;
         let name = e.file_name().to_string_lossy().to_string();
         let is_dir = e.file_type().map(|t| t.is_dir()).unwrap_or(false);
-        entries.push(if is_dir { format!("{name}/") } else { name });
+        heap.push(if is_dir { format!("{name}/") } else { name });
+        if heap.len() > MAX_LIST_ENTRIES {
+            heap.pop(); // 最大要素を捨て、先頭 K 件 (アルファベット順) を保持
+        }
     }
+    let mut entries = heap.into_vec();
     entries.sort();
-    let total = entries.len();
-    entries.truncate(MAX_LIST_ENTRIES);
     let mut out = entries.join("\n");
     if total > MAX_LIST_ENTRIES {
         out.push_str(&format!(
@@ -260,6 +268,23 @@ mod tests {
         let out = execute_tool(&root, "list_dir", &json!({}));
         assert!(!out.is_error);
         assert!(out.content.contains("a.txt"));
+    }
+
+    #[test]
+    fn list_dir_caps_entry_count_keeping_alphabetical_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        for i in 0..250 {
+            std::fs::write(dir.path().join(format!("f{i:04}.txt")), "x").unwrap();
+        }
+        let out = execute_tool(&root, "list_dir", &json!({ "path": "." }));
+        assert!(!out.is_error);
+        assert!(out.content.contains("more entries truncated"));
+        let entry_lines = out.content.lines().filter(|l| l.ends_with(".txt")).count();
+        assert_eq!(entry_lines, MAX_LIST_ENTRIES);
+        // アルファベット順で先頭が残り、末尾は truncate される
+        assert!(out.content.contains("f0000.txt"));
+        assert!(!out.content.contains("f0249.txt"));
     }
 
     #[test]
