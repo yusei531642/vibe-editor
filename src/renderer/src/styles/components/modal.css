@@ -396,6 +396,32 @@
   align-items: center;
 }
 
+.custom-agent__skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  padding: 4px 0;
+}
+
+.custom-agent__skill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--color-fg);
+  cursor: pointer;
+}
+
+.custom-agent__skill input {
+  width: auto;
+  margin: 0;
+  cursor: pointer;
+}
+
+.custom-agent__skill-name {
+  white-space: nowrap;
+}
+
 .segmented-control {
   display: inline-grid;
   grid-auto-flow: column;

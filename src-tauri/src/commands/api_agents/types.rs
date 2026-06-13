@@ -95,12 +95,22 @@ pub struct ApiAgentSessionCreateRequest {
     pub tool_mode: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+/// system prompt に注入する skill 1 件 (本文込み)。Issue #998 以降はサーバ側 (`skills.rs`)
+/// が `.claude/skills/<id>/SKILL.md` から構築する内部表現で、IPC では送受信しない。
+#[derive(Clone, Debug)]
 pub struct ApiAgentSkill {
     pub id: String,
     pub name: String,
     pub body: String,
+}
+
+/// skill selector 用のメタ情報。`api_agent_skill_list` が renderer へ返す。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiAgentSkillMeta {
+    pub id: String,
+    pub name: String,
+    pub description: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -113,8 +123,6 @@ pub struct ApiAgentSendRequest {
     pub message: String,
     #[serde(default)]
     pub system_prompt: Option<String>,
-    #[serde(default)]
-    pub skills: Option<Vec<ApiAgentSkill>>,
     #[serde(default)]
     pub chain_id: Option<String>,
     #[serde(default)]

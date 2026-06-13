@@ -4,6 +4,7 @@ import {
   type AgentConfig,
   type ApiAgentConfig,
   type ApiAgentProviderId,
+  type ApiAgentSkillMeta,
   type AppSettings,
   type CliAgentConfig
 } from '../../../../types/shared';
@@ -28,6 +29,7 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
   const confirm = useNativeConfirm();
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
+  const [availableSkills, setAvailableSkills] = useState<ApiAgentSkillMeta[]>([]);
   const cliAgent = agent.runtime === 'cli' ? agent : null;
   const apiAgent = agent.runtime === 'api' ? agent : null;
   const apiProviderId = apiAgent?.providerId;
@@ -80,6 +82,32 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
       disposed = true;
     };
   }, [apiProviderId]);
+
+  // active project の .claude/skills/* を列挙 (API runtime のときだけ)。
+  useEffect(() => {
+    if (agent.runtime !== 'api') return;
+    let disposed = false;
+    void window.api.apiAgents
+      .listSkills()
+      .then((list) => {
+        if (!disposed) setAvailableSkills(list);
+      })
+      .catch(() => {
+        if (!disposed) setAvailableSkills([]);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [agent.runtime]);
+
+  const toggleSkill = (id: string): void => {
+    if (!apiAgent) return;
+    const current = apiAgent.skillIds ?? [];
+    const next = current.includes(id)
+      ? current.filter((s) => s !== id)
+      : [...current, id];
+    patchApiAgent({ skillIds: next });
+  };
 
   const switchRuntime = (runtime: 'cli' | 'api'): void => {
     if (runtime === agent.runtime) return;
@@ -300,6 +328,27 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
               spellCheck={false}
             />
           </label>
+
+          <div className="modal__label modal__label--full">
+            <span>{t('settings.customAgents.skills')}</span>
+            {availableSkills.length === 0 ? (
+              <p className="modal__note">{t('settings.customAgents.skillsEmpty')}</p>
+            ) : (
+              <div className="custom-agent__skills">
+                {availableSkills.map((skill) => (
+                  <label key={skill.id} className="custom-agent__skill" title={skill.description}>
+                    <input
+                      type="checkbox"
+                      checked={(apiAgent.skillIds ?? []).includes(skill.id)}
+                      onChange={() => toggleSkill(skill.id)}
+                    />
+                    <span className="custom-agent__skill-name">{skill.name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+            <p className="modal__note">{t('settings.customAgents.skillsAutoTeam')}</p>
+          </div>
 
           <p className="modal__note">
             {provider.supportsTools

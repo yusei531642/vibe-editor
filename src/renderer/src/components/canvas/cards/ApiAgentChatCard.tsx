@@ -7,7 +7,6 @@ import {
   type ApiAgentConfig,
   type ApiAgentMessage
 } from '../../../../../types/shared';
-import { buildApiAgentSkills } from '../../../lib/api-agent-skills';
 import { useSettings } from '../../../lib/settings-context';
 import { useCanvasStore, NODE_MIN_H, NODE_MIN_W, type CardDataOf } from '../../../stores/canvas';
 import { useT } from '../../../lib/i18n';
@@ -176,7 +175,6 @@ function ApiAgentChatCardImpl({
         agent: apiAgent,
         message: text,
         systemPrompt: apiAgent.systemPrompt,
-        skills: buildApiAgentSkills(apiAgent),
         depth: 0,
         turnBudget: 6
       });

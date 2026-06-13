@@ -67,6 +67,13 @@ fn current_skill_text() -> String {
     out
 }
 
+/// Issue #998: API エージェントが TeamHub 参加時に自動追加する `vibe-team` skill の
+/// バンドル本文。プロジェクトに `.claude/skills/vibe-team/SKILL.md` がまだ書き出されて
+/// いない (= チーム未起動) 場合のフォールバックとして使う。
+pub(crate) fn bundled_vibe_team_skill_text() -> String {
+    current_skill_text()
+}
+
 /// 実際の書き出し処理。境界チェックを通過した後の root を渡すこと。
 /// renderer から直接呼ばせない (state を経由した command 経由でのみ呼ばれる)。
 async fn install_skill_at(root: &Path, force: bool) -> InstallSkillResult {

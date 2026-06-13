@@ -775,6 +775,10 @@ const ja: Dict = {
   'settings.customAgents.readOnlyNote':
     'この provider/model は tool calling を read-only chat に degrade します。',
   'settings.customAgents.applyNote': '変更後、Canvas で該当エージェントのカードを作り直すと反映されます。',
+  'settings.customAgents.skills': 'Skill (SKILL.md)',
+  'settings.customAgents.skillsEmpty':
+    'このプロジェクトの .claude/skills に SKILL.md が見つかりません。',
+  'settings.customAgents.skillsAutoTeam': 'TeamHub 参加時は vibe-team skill が自動で追加されます。',
 
   // ---------- MCP tab ----------
   'settings.mcp.autoTitle': '自動セットアップ',
@@ -1648,6 +1652,10 @@ const en: Dict = {
   'settings.customAgents.readOnlyNote':
     'This provider/model degrades to read-only chat because tool calling is unavailable.',
   'settings.customAgents.applyNote': 'Recreate the agent card in Canvas to apply changes.',
+  'settings.customAgents.skills': 'Skills (SKILL.md)',
+  'settings.customAgents.skillsEmpty': 'No SKILL.md found under this project’s .claude/skills.',
+  'settings.customAgents.skillsAutoTeam':
+    'The vibe-team skill is added automatically when joining TeamHub.',
 
   // ---------- MCP tab ----------
   'settings.mcp.autoTitle': 'Auto setup',
