@@ -546,6 +546,11 @@ pub async fn terminal_create(
         if let Some(aid) = &opts.agent_id {
             env.insert("VIBE_AGENT_ID".into(), aid.clone());
         }
+        if let Some(mode) =
+            crate::team_hub::delivery_mode::DeliveryMode::from_env().env_value_for_child()
+        {
+            env.insert("VIBE_TEAM_DELIVERY_MODE".into(), mode.to_string());
+        }
     }
 
     let spawn_opts = SpawnOptions {

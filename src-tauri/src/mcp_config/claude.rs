@@ -1,7 +1,7 @@
 // Claude Code MCP 設定 (~/.claude.json) の `mcpServers.vibe-team` を更新
 
 use anyhow::{Context, Result};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
@@ -106,6 +106,124 @@ pub(crate) async fn cleanup_at(path: &Path) -> Result<bool> {
     Ok(removed)
 }
 
+fn project_settings_local_path(project_root: &str) -> Option<PathBuf> {
+    let root = project_root.trim();
+    if root.is_empty() {
+        return None;
+    }
+    Some(Path::new(root).join(".claude").join("settings.local.json"))
+}
+
+fn is_vibe_inbox_hook(hook: &Value) -> bool {
+    hook.get("type").and_then(Value::as_str) == Some("command")
+        && hook.get("command").and_then(Value::as_str) == Some("node")
+        && hook
+            .get("args")
+            .and_then(Value::as_array)
+            .is_some_and(|args| {
+                args.iter().any(|v| {
+                    v.as_str()
+                        .is_some_and(|s| s.ends_with(crate::team_hub::inbox_watch::FILE_NAME))
+                }) && args.iter().any(|v| v.as_str() == Some("--session-start"))
+            })
+}
+
+fn remove_vibe_inbox_session_start(config: &mut Value) -> bool {
+    let Some(groups) = config
+        .get_mut("hooks")
+        .and_then(|v| v.get_mut("SessionStart"))
+        .and_then(Value::as_array_mut)
+    else {
+        return false;
+    };
+    let mut removed = false;
+    groups.retain_mut(|group| {
+        let Some(hooks) = group.get_mut("hooks").and_then(Value::as_array_mut) else {
+            return true;
+        };
+        let before = hooks.len();
+        hooks.retain(|hook| !is_vibe_inbox_hook(hook));
+        removed |= hooks.len() != before;
+        !hooks.is_empty()
+    });
+    removed
+}
+
+pub(crate) async fn setup_project_inbox_hook(
+    project_root: &str,
+    watcher_path: &Path,
+) -> Result<bool> {
+    if !crate::team_hub::delivery_mode::DeliveryMode::from_env().should_install_monitor_hook() {
+        return Ok(false);
+    }
+    let Some(path) = project_settings_local_path(project_root) else {
+        return Ok(false);
+    };
+    let mut config: Value = match fs::read(&path).await {
+        Ok(bytes) if bytes.is_empty() => Value::Object(Default::default()),
+        Ok(bytes) => serde_json::from_slice(&bytes).with_context(|| {
+            format!(
+                "{} contains invalid JSON; refusing to overwrite",
+                path.display()
+            )
+        })?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Value::Object(Default::default()),
+        Err(e) => return Err(e).with_context(|| format!("failed to read {}", path.display())),
+    };
+    if !config.is_object() {
+        return Err(anyhow::anyhow!("{} must be a JSON object", path.display()));
+    }
+    let before = config.clone();
+    remove_vibe_inbox_session_start(&mut config);
+    let root = config.as_object_mut().expect("object checked above");
+    let hooks = root
+        .entry("hooks")
+        .or_insert_with(|| Value::Object(Default::default()));
+    let hooks_obj = hooks
+        .as_object_mut()
+        .ok_or_else(|| anyhow::anyhow!("hooks must be an object"))?;
+    let session_start = hooks_obj
+        .entry("SessionStart")
+        .or_insert_with(|| Value::Array(Vec::new()));
+    let groups = session_start
+        .as_array_mut()
+        .ok_or_else(|| anyhow::anyhow!("hooks.SessionStart must be an array"))?;
+    groups.push(json!({
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [{
+            "type": "command",
+            "command": "node",
+            "args": [watcher_path.to_string_lossy(), "--session-start"],
+            "timeout": 5
+        }]
+    }));
+    if config == before {
+        return Ok(false);
+    }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).await?;
+    }
+    let json = serde_json::to_vec_pretty(&config)?;
+    crate::commands::atomic_write::atomic_write_with_mode(&path, &json, Some(0o600)).await?;
+    Ok(true)
+}
+
+pub(crate) async fn cleanup_project_inbox_hook(project_root: &str) -> Result<bool> {
+    let Some(path) = project_settings_local_path(project_root) else {
+        return Ok(false);
+    };
+    let Ok(bytes) = fs::read(&path).await else {
+        return Ok(false);
+    };
+    let mut config: Value = serde_json::from_slice(&bytes).unwrap_or_default();
+    let removed = remove_vibe_inbox_session_start(&mut config);
+    if removed {
+        let json = serde_json::to_vec_pretty(&config)?;
+        crate::commands::atomic_write::atomic_write_with_mode(&path, &json, Some(0o600)).await?;
+    }
+    Ok(removed)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,5 +306,27 @@ mod tests {
         assert!(changed, "empty file should be initialized");
         let initialized = fs::read_to_string(&empty_path).await.unwrap();
         assert!(initialized.contains("vibe-team"));
+    }
+
+    #[test]
+    fn remove_vibe_inbox_session_start_removes_only_managed_hook() {
+        let mut config = json!({
+            "hooks": {
+                "SessionStart": [{
+                    "matcher": "startup",
+                    "hooks": [
+                        { "type": "command", "command": "node", "args": ["/x/team-inbox-watch.js", "--session-start"] },
+                        { "type": "command", "command": "echo", "args": ["keep"] }
+                    ]
+                }]
+            }
+        });
+
+        assert!(remove_vibe_inbox_session_start(&mut config));
+        let hooks = config["hooks"]["SessionStart"][0]["hooks"]
+            .as_array()
+            .expect("hooks array");
+        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks[0]["command"].as_str(), Some("echo"));
     }
 }

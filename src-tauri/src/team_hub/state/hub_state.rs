@@ -530,6 +530,7 @@ impl TeamHub {
         crate::commands::atomic_write::atomic_write(&bridge_path, bridge::SOURCE.as_bytes())
             .await
             .map_err(|e| anyhow::anyhow!("atomic_write bridge.js failed: {e:#}"))?;
+        let _inbox_watch_path = crate::team_hub::inbox_watch::install(&dir).await?;
         // Unix: 自分自身しか読めないように 0o600 を強制 (best-effort)
         #[cfg(unix)]
         {

@@ -9,11 +9,13 @@
 // - team_send 等のツール呼び出しを PTY に直接 write 注入する (64B / 15ms)
 
 pub mod bridge;
+pub mod delivery_mode;
 pub mod error;
 // Issue #930: Tauri イベント payload の名前付き struct 集約 (shared.ts と同期)。
 pub mod events;
 // Issue #526: vibe-team の advisory file locks (worker のファイル編集衝突を warn する)。
 pub mod file_locks;
+pub mod inbox_watch;
 pub mod inject;
 pub mod protocol;
 // Issue #517: 動的ロール同士の責務境界 lint (recruit / assign_task で warning 発火)。
