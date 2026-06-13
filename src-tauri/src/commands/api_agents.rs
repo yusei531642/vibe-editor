@@ -236,17 +236,23 @@ pub async fn api_agent_send(
     .collect::<Vec<_>>()
     .join("\n\n");
 
-    let response = call_provider(
-        &provider,
-        &key,
-        &req.agent,
-        &system_prompt,
-        &session.messages,
-    )
-    .await;
+    // SSE chunk が届くたびに delta を emit する。closure は req/app を借用するため、
+    // 後段で req のフィールドを move する前にブロックで drop させる。
+    let response = {
+        let mut on_delta = |delta: &str| emit_delta(&app, &req, delta);
+        call_provider(
+            &provider,
+            &key,
+            &req.agent,
+            &system_prompt,
+            &session.messages,
+            &mut on_delta,
+        )
+        .await
+    };
     match response {
         Ok((content, usage, stop_reason)) => {
-            emit_delta(&app, &req, &content);
+            // 本文は既にストリーミングで emit 済み。done イベントで全文を確定させる。
             let message = ApiAgentMessage {
                 id: Uuid::new_v4().to_string(),
                 role: "assistant".to_string(),
