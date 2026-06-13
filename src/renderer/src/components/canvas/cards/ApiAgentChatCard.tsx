@@ -83,11 +83,18 @@ function ApiAgentChatCardImpl({
     if (!sessionId) return;
     let disposed = false;
     const unsubs: Array<() => void> = [];
+    const addUnsub = (unsub: () => void): void => {
+      if (disposed) {
+        unsub();
+        return;
+      }
+      unsubs.push(unsub);
+    };
     const accept = (cardInstanceId: string, generationId: string): boolean =>
       cardInstanceId === id && generationRef.current === generationId;
     void (async () => {
       const events = window.api.apiAgents.events(sessionId);
-      unsubs.push(
+      addUnsub(
         await events.onDeltaReady((event) => {
           if (disposed || !accept(event.cardInstanceId, event.generationId)) return;
           setMessages((prev) => {
@@ -110,13 +117,13 @@ function ApiAgentChatCardImpl({
           });
         })
       );
-      unsubs.push(
+      addUnsub(
         await events.onToolReady((event) => {
           if (disposed || !accept(event.cardInstanceId, event.generationId)) return;
           setStatus(`${event.name}: ${event.status}`);
         })
       );
-      unsubs.push(
+      addUnsub(
         await events.onDoneReady((event) => {
           if (disposed || !accept(event.cardInstanceId, event.generationId)) return;
           generationRef.current = null;
@@ -127,7 +134,7 @@ function ApiAgentChatCardImpl({
           });
         })
       );
-      unsubs.push(
+      addUnsub(
         await events.onErrorReady((event) => {
           if (disposed || !accept(event.cardInstanceId, event.generationId)) return;
           generationRef.current = null;
@@ -135,7 +142,9 @@ function ApiAgentChatCardImpl({
           setStatus(event.message);
         })
       );
-    })();
+    })().catch((err) => {
+      if (!disposed) setStatus(String(err));
+    });
     return () => {
       disposed = true;
       for (const unsub of unsubs) unsub();

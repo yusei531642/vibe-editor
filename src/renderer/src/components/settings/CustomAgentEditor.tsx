@@ -30,6 +30,7 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const cliAgent = agent.runtime === 'cli' ? agent : null;
   const apiAgent = agent.runtime === 'api' ? agent : null;
+  const apiProviderId = apiAgent?.providerId;
   const argsParse = parseShellArgsStrict(cliAgent?.args ?? '');
   const provider = useMemo(
     () =>
@@ -61,13 +62,14 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
   };
 
   useEffect(() => {
-    if (agent.runtime !== 'api') {
+    if (!apiProviderId) {
       setHasApiKey(null);
       return;
     }
+    setHasApiKey(null);
     let disposed = false;
     void window.api.apiAgents
-      .hasProviderKey(agent.providerId)
+      .hasProviderKey(apiProviderId)
       .then((v) => {
         if (!disposed) setHasApiKey(v);
       })
@@ -77,7 +79,7 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
     return () => {
       disposed = true;
     };
-  }, [agent]);
+  }, [apiProviderId]);
 
   const switchRuntime = (runtime: 'cli' | 'api'): void => {
     if (runtime === agent.runtime) return;
