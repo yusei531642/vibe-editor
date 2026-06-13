@@ -735,6 +735,13 @@ samp,
   --wf-top: 0px;
   --wf-bottom: 0px;
   --wf-x: 0px;
+  /* Issue #981: macOS のネイティブ信号機ボタン (close/min/zoom) を左上に表示する
+   * (titleBarStyle: Overlay)。topbar 左端のブランドロゴが信号機の下に潜らないよう、
+   * macOS のみ左 inset を確保する。Windows/Linux では 0。 */
+  --titlebar-traffic-inset: 0px;
+}
+:root[data-platform='macos'] {
+  --titlebar-traffic-inset: 78px;
 }
 :root[data-platform='windows'][data-window-maximized='true'] {
   --wf-top: 8px;

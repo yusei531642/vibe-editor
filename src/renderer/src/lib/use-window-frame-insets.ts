@@ -11,8 +11,8 @@
  */
 import { useEffect } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { isWindows, platformId } from './platform';
 
-const isWindows = /Windows/i.test(navigator.userAgent);
 type TauriWindowHandle = ReturnType<typeof getCurrentWindow>;
 
 function getSafeCurrentWindow(): TauriWindowHandle | null {
@@ -26,9 +26,12 @@ function getSafeCurrentWindow(): TauriWindowHandle | null {
 
 export function useWindowFrameInsets(): void {
   useEffect(() => {
-    if (!isWindows) return;
     const root = document.documentElement;
-    root.dataset.platform = 'windows';
+    // Issue #981: macOS のネイティブ信号機ボタン (titleBarStyle: Overlay) 分の
+    // 左 inset を CSS 側で当てるため、全プラットフォームで data-platform を出力する。
+    root.dataset.platform = platformId();
+    // 以降の不可視リサイズ境界補正は Windows のフレームレス最大化時のみ必要。
+    if (!isWindows) return;
     // 初期値を即時セットして flash を最小化
     root.dataset.windowMaximized = 'false';
     const win = getSafeCurrentWindow();
