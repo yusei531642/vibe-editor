@@ -3,8 +3,21 @@ use serde_json::{json, Value};
 
 use super::types::{ApiAgentConfig, ApiAgentMessage, ApiAgentUsage};
 
-static HTTP_CLIENT: once_cell::sync::Lazy<reqwest::Client> =
+mod agentic;
+
+pub(super) static HTTP_CLIENT: once_cell::sync::Lazy<reqwest::Client> =
     once_cell::sync::Lazy::new(reqwest::Client::new);
+
+/// tool-calling を有効にして呼ぶときのコンテキスト。`None` のときは read-only chat
+/// (SSE ストリーミング) 経路になる。
+pub(super) struct ToolRuntime<'a> {
+    /// ツールが参照する active project root (state の信頼値)。
+    pub project_root: &'a str,
+    /// 自動 tool ターンの上限。
+    pub max_turns: u32,
+    /// tool 実行状況の通知 (name, status, detail)。
+    pub on_tool: &'a mut (dyn FnMut(&str, &str, Option<&str>) + Send),
+}
 
 #[derive(Clone)]
 pub(super) struct ProviderPreset {
@@ -52,20 +65,42 @@ pub(super) fn provider_preset(
     })
 }
 
-/// provider を呼び出し、応答を SSE でストリーミングする。`on_delta` は本文 chunk が届く
-/// たびに呼ばれる。戻り値は確定後の (全文, usage, stop_reason)。
+/// provider を呼び出す。
+/// - `tools = Some(..)`: 非ストリーミングの tool-calling ループ (read_file / list_dir を実行)。
+/// - `tools = None`: read-only chat を SSE ストリーミング。
+///
+/// いずれも `on_delta` で本文を emit し、戻り値は確定後の (全文, usage, stop_reason)。
 pub(super) async fn call_provider(
     provider: &ProviderPreset,
     key: &str,
     agent: &ApiAgentConfig,
     system_prompt: &str,
     messages: &[ApiAgentMessage],
+    tools: Option<ToolRuntime<'_>>,
     on_delta: &mut (dyn FnMut(&str) + Send),
 ) -> anyhow::Result<(String, Option<ApiAgentUsage>, String)> {
-    match provider.adapter {
-        "anthropic" => call_anthropic(provider, key, agent, system_prompt, messages, on_delta).await,
-        "gemini" => call_gemini(provider, key, agent, system_prompt, messages, on_delta).await,
-        _ => call_openai_compatible(provider, key, agent, system_prompt, messages, on_delta).await,
+    match (provider.adapter, tools) {
+        ("anthropic", Some(rt)) => {
+            agentic::call_anthropic_tools(provider, key, agent, system_prompt, messages, rt, on_delta)
+                .await
+        }
+        ("gemini", Some(rt)) => {
+            agentic::call_gemini_tools(provider, key, agent, system_prompt, messages, rt, on_delta)
+                .await
+        }
+        (_, Some(rt)) => {
+            agentic::call_openai_tools(provider, key, agent, system_prompt, messages, rt, on_delta)
+                .await
+        }
+        ("anthropic", None) => {
+            call_anthropic(provider, key, agent, system_prompt, messages, on_delta).await
+        }
+        ("gemini", None) => {
+            call_gemini(provider, key, agent, system_prompt, messages, on_delta).await
+        }
+        (_, None) => {
+            call_openai_compatible(provider, key, agent, system_prompt, messages, on_delta).await
+        }
     }
 }
 
@@ -336,7 +371,7 @@ fn emit_data_line<F: FnMut(&str)>(line: &[u8], on_data: &mut F) {
     }
 }
 
-fn usage_from_value(value: &Value) -> Option<ApiAgentUsage> {
+pub(super) fn usage_from_value(value: &Value) -> Option<ApiAgentUsage> {
     if !value.is_object() {
         return None;
     }

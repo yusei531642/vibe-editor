@@ -13,12 +13,13 @@ use uuid::Uuid;
 
 mod providers;
 pub mod skills;
+mod tools;
 pub mod types;
 
 #[cfg(test)]
 mod tests;
 
-use self::providers::{call_provider, provider_preset};
+use self::providers::{call_provider, provider_preset, ToolRuntime};
 use self::types::*;
 use crate::state::{current_project_root, AppState};
 use tauri::State;
@@ -236,9 +237,23 @@ pub async fn api_agent_send(
     .collect::<Vec<_>>()
     .join("\n\n");
 
-    // SSE chunk が届くたびに delta を emit する。closure は req/app を借用するため、
-    // 後段で req のフィールドを move する前にブロックで drop させる。
+    // tools_enabled (= !degraded) のとき read_file / list_dir を実行する tool-loop を回す。
+    // read-only / 非対応 provider は tools=None で SSE chat に degrade。
+    // closure 群は req/app を借用するため、後段で req のフィールドを move する前に
+    // ブロックスコープで drop させる。
     let response = {
+        let mut on_tool = |name: &str, status: &str, detail: Option<&str>| {
+            emit_tool(&app, &req, name, status, detail.map(str::to_string));
+        };
+        let tools = if degraded {
+            None
+        } else {
+            Some(ToolRuntime {
+                project_root: &project_root,
+                max_turns: budget,
+                on_tool: &mut on_tool,
+            })
+        };
         let mut on_delta = |delta: &str| emit_delta(&app, &req, delta);
         call_provider(
             &provider,
@@ -246,6 +261,7 @@ pub async fn api_agent_send(
             &req.agent,
             &system_prompt,
             &session.messages,
+            tools,
             &mut on_delta,
         )
         .await
