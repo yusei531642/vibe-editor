@@ -12,6 +12,7 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 mod providers;
+pub mod skills;
 pub mod types;
 
 #[cfg(test)]
@@ -19,6 +20,8 @@ mod tests;
 
 use self::providers::{call_provider, provider_preset};
 use self::types::*;
+use crate::state::{current_project_root, AppState};
+use tauri::State;
 
 const KEYRING_SERVICE: &str = "vibe-editor";
 
@@ -143,6 +146,7 @@ pub async fn api_agent_cancel(_session_id: String, _generation_id: String) -> Co
 #[tauri::command]
 pub async fn api_agent_send(
     app: AppHandle,
+    state: State<'_, AppState>,
     req: ApiAgentSendRequest,
 ) -> CommandResult<ApiAgentSendResult> {
     validate_id("sessionId", &req.session_id)?;
@@ -217,7 +221,11 @@ pub async fn api_agent_send(
     }
 
     let key = read_key(&req.agent.provider_id).await?;
-    let skills_text = build_skills_context(req.skills.as_deref().unwrap_or(&[]));
+    // Issue #998: 選択 skill + 自動 vibe-team の SKILL.md 本文をサーバ側で読み込む。
+    let project_root = current_project_root(&state.project_root).unwrap_or_default();
+    let loaded_skills =
+        skills::load_skill_bodies(&project_root, req.agent.skill_ids.as_deref().unwrap_or(&[])).await;
+    let skills_text = build_skills_context(&loaded_skills);
     let system_prompt = [
         req.system_prompt.as_deref().unwrap_or("").trim(),
         req.agent.system_prompt.as_deref().unwrap_or("").trim(),

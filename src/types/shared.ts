@@ -458,10 +458,20 @@ export interface ApiAgentSendRequest {
   agent: ApiAgentConfig;
   message: string;
   systemPrompt?: string;
-  skills?: { id: string; name: string; body: string }[];
   chainId?: string;
   depth?: number;
   turnBudget?: number;
+}
+
+/**
+ * skill selector 用のメタ情報。Rust `api_agent_skill_list` が active project の
+ * `.claude/skills/<id>/SKILL.md` を列挙して返す。本文 (body) は送信時に Rust 側で解決し、
+ * IPC では往復させない (Issue #998)。
+ */
+export interface ApiAgentSkillMeta {
+  id: string;
+  name: string;
+  description: string;
 }
 
 export interface ApiAgentSendResult {

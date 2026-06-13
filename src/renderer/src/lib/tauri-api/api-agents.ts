@@ -9,6 +9,7 @@ import type {
   ApiAgentSendResult,
   ApiAgentSession,
   ApiAgentSessionCreateRequest,
+  ApiAgentSkillMeta,
   ApiAgentStreamEvent,
   ApiAgentToolEvent
 } from '../../../../types/shared';
@@ -30,6 +31,7 @@ export const apiAgents = {
     invokeCommand('api_agent_send', { req }),
   cancel: (sessionId: string, generationId: string): Promise<void> =>
     invokeCommand('api_agent_cancel', { sessionId, generationId }),
+  listSkills: (): Promise<ApiAgentSkillMeta[]> => invokeCommand('api_agent_skill_list', {}),
   events: (sessionId: string) => ({
     onDeltaReady: (cb: (event: ApiAgentStreamEvent) => void): Promise<() => void> =>
       subscribeEventReady<ApiAgentStreamEvent>(`api-agent:delta:${sessionId}`, cb),
