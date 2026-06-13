@@ -14,6 +14,9 @@ use uuid::Uuid;
 mod providers;
 pub mod types;
 
+#[cfg(test)]
+mod tests;
+
 use self::providers::{call_provider, provider_preset};
 use self::types::*;
 

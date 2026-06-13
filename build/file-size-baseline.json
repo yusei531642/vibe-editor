@@ -4,7 +4,7 @@
   "src-tauri/src/commands/files.rs": 1274,
   "src-tauri/src/commands/git.rs": 529,
   "src-tauri/src/commands/handoffs.rs": 513,
-  "src-tauri/src/commands/settings.rs": 857,
+  "src-tauri/src/commands/settings.rs": 841,
   "src-tauri/src/commands/team_history.rs": 1239,
   "src-tauri/src/commands/team_state.rs": 593,
   "src-tauri/src/commands/terminal.rs": 1002,
