@@ -26,7 +26,9 @@ import {
 } from '../stores/canvas';
 import type { Node } from '@xyflow/react';
 import type { CardData } from '../stores/canvas';
-import { useRoleProfiles } from './role-profiles-context';
+import { useRoleProfiles, customAgentIdFromRole } from './role-profiles-context';
+import { useSettings } from './settings-context';
+import { parseShellArgsStrict } from './parse-args';
 import { ackRecruit } from './recruit-ack';
 import { findRecruitPosition } from './canvas-recruit-position';
 import type {
@@ -97,6 +99,10 @@ function waitPolicyInstructions(policy: WaitPolicy | undefined): string {
 export function useRecruitListener(): void {
   // 動的ロールを RoleProfilesContext に投入するためのフック関数
   const { registerDynamicRole } = useRoleProfiles();
+  // Issue #1021: recruit が custom agent role の場合に runtime を解決するため最新 settings を ref で保持。
+  const { settings } = useSettings();
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const { showToast } = useToast();
   const t = useT();
 
@@ -228,28 +234,75 @@ export function useRecruitListener(): void {
         );
         const pos = findRecruitPosition(requester, teamNodes);
         const titleHint = p.agentLabelHint?.trim() || p.roleProfileId;
-        const newNodeId = store.addCard({
-          type: 'agent',
-          title: titleHint,
-          position: pos,
-          payload: {
-            agent: p.engine,
-            roleProfileId: p.roleProfileId,
-            // 旧コード互換: role 旧フィールドにも書く (一時的)
-            role: p.roleProfileId,
-            teamId: p.teamId,
-            teamName: requesterTeamName,
-            agentId: p.newAgentId,
-            organization: requesterOrganization,
-            // Issue #117: AgentNodeCard が拾って Claude(--append-system-prompt) /
-            // Codex(model_instructions_file) 両方の経路に注入する正本フィールド。
-            // Issue #930: 旧 p.customInstructions は Rust 側に存在しないファントム
-            // フィールドで常に undefined だったため、waitPolicy 由来の指示のみを使う
-            // (実行時挙動は従来と同一)。
-            customInstructions: waitPolicyInstructions(p.waitPolicy),
-            waitPolicy: p.waitPolicy ?? 'strict'
-          }
-        });
+        // Issue #1021: custom agent role の recruit は runtime に応じて正しいカードを spawn する。
+        // (claude/codex を誤起動しない)。CLI → agent カードを custom command で、
+        // API → apiAgent カードを team context 付きで pull 参加させる。
+        const customAgentId = customAgentIdFromRole(p.roleProfileId);
+        const customAgent = customAgentId
+          ? (settingsRef.current.customAgents ?? []).find((a) => a.id === customAgentId)
+          : undefined;
+        let newNodeId: string;
+        if (customAgent?.runtime === 'api') {
+          newNodeId = store.addCard({
+            type: 'apiAgent',
+            title: titleHint,
+            position: pos,
+            payload: {
+              // agentId は Hub の runtime instance id に揃える (dismiss/cancel のカード検索キー)。
+              // 設定 (provider/model) の解決は agentConfigId 経由 (Issue #1021)。
+              agentId: p.newAgentId,
+              agentConfigId: customAgent.id,
+              teamId: p.teamId,
+              teamName: requesterTeamName,
+              // teamRole が teamId と揃うと team_read / team_send / team_info が有効になる (#1005)。
+              teamRole: p.roleProfileId
+            }
+          });
+        } else if (customAgent?.runtime === 'cli') {
+          newNodeId = store.addCard({
+            type: 'agent',
+            title: titleHint,
+            position: pos,
+            payload: {
+              // command override で custom CLI を起動する (CardFrame は payload.command を優先)。
+              agent: p.engine,
+              command: customAgent.command || undefined,
+              args: customAgent.args ? parseShellArgsStrict(customAgent.args).args : undefined,
+              cwd: customAgent.cwd || undefined,
+              roleProfileId: p.roleProfileId,
+              role: p.roleProfileId,
+              teamId: p.teamId,
+              teamName: requesterTeamName,
+              agentId: p.newAgentId,
+              organization: requesterOrganization,
+              customInstructions: waitPolicyInstructions(p.waitPolicy),
+              waitPolicy: p.waitPolicy ?? 'strict'
+            }
+          });
+        } else {
+          newNodeId = store.addCard({
+            type: 'agent',
+            title: titleHint,
+            position: pos,
+            payload: {
+              agent: p.engine,
+              roleProfileId: p.roleProfileId,
+              // 旧コード互換: role 旧フィールドにも書く (一時的)
+              role: p.roleProfileId,
+              teamId: p.teamId,
+              teamName: requesterTeamName,
+              agentId: p.newAgentId,
+              organization: requesterOrganization,
+              // Issue #117: AgentNodeCard が拾って Claude(--append-system-prompt) /
+              // Codex(model_instructions_file) 両方の経路に注入する正本フィールド。
+              // Issue #930: 旧 p.customInstructions は Rust 側に存在しないファントム
+              // フィールドで常に undefined だったため、waitPolicy 由来の指示のみを使う
+              // (実行時挙動は従来と同一)。
+              customInstructions: waitPolicyInstructions(p.waitPolicy),
+              waitPolicy: p.waitPolicy ?? 'strict'
+            }
+          });
+        }
         // Issue #253 / #372: 新メンバー配置後、Canvas 側で「新しい worker」を中心に
         // viewport を寄せる。HR が worker を増やすケースでも Leader ではなく
         // 追加されたばかりの worker が viewport の中央に来る。

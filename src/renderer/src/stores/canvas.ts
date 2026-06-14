@@ -83,7 +83,14 @@ export type AgentCardPayload = AgentPayload & CardPayloadBase;
 
 /** apiAgent カード: API 駆動 Chat session への参照だけを payload に持つ。 */
 export interface ApiAgentCardPayload extends CardPayloadBase {
+  /**
+   * canvas / TeamHub 上のインスタンス ID (dismiss/cancel のカード検索キー)。通常カードは
+   * 設定の agent config id と同じだが、team recruit で生成されたカードは Hub の runtime
+   * instance id (newAgentId) が入る。その場合の設定解決は `agentConfigId` を使う (Issue #1021)。
+   */
   agentId: string;
+  /** 設定の custom agent config id。`agentId` が instance id のときの provider/model 解決用。 */
+  agentConfigId?: string;
   sessionId?: string;
   providerId?: string;
   model?: string;
