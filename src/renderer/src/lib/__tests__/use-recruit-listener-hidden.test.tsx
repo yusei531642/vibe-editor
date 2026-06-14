@@ -73,7 +73,19 @@ vi.mock('../../stores/canvas', () => ({
 }));
 
 vi.mock('../role-profiles-context', () => ({
-  useRoleProfiles: () => ({ registerDynamicRole: vi.fn() })
+  useRoleProfiles: () => ({ registerDynamicRole: vi.fn() }),
+  // Issue #1021: listener が custom agent role を判定するのに使う。
+  customAgentIdFromRole: (roleProfileId: string): string | null =>
+    roleProfileId.startsWith('custom:') ? roleProfileId.slice('custom:'.length) : null
+}));
+
+// Issue #1021: listener は settings.customAgents を ref で参照する (custom agent recruit 用)。
+vi.mock('../settings-context', () => ({
+  useSettings: () => ({ settings: { customAgents: [] } })
+}));
+
+vi.mock('../parse-args', () => ({
+  parseShellArgsStrict: (s: string) => ({ args: s ? s.split(/\s+/) : [] })
 }));
 
 // 最小 i18n: 表示用にキー + パラメータ値を結合して返し、テストで count を文字列照合できるようにする。

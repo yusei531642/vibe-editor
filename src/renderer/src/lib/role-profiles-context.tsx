@@ -18,6 +18,7 @@ import {
 } from 'react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type {
+  AgentConfig,
   DynamicRoleEntry,
   Language,
   RoleCreatedPayload,
@@ -30,6 +31,14 @@ import {
   composeWorkerProfile,
   toolsPlaceholder
 } from './role-profiles-builtin';
+import { useSettings } from './settings-context';
+// Issue #1021: custom agent (CLI/API) → role profile の合成は pure helper に分離。
+import { customAgentToProfile } from './role-profiles-custom-agents';
+export {
+  customAgentToProfile,
+  customAgentIdFromRole,
+  CUSTOM_AGENT_ROLE_PREFIX
+} from './role-profiles-custom-agents';
 
 /**
  * Issue #513: 旧 local 定義 `DynamicRoleEntry` を shared.ts に集約。
@@ -71,7 +80,8 @@ const EMPTY_FILE: RoleProfilesFile = { schemaVersion: 1, overrides: {}, custom: 
 
 function compose(
   file: RoleProfilesFile,
-  dynamic: Record<string, DynamicRoleEntry>
+  dynamic: Record<string, DynamicRoleEntry>,
+  customAgents: AgentConfig[]
 ): {
   byId: Record<string, RoleProfile>;
   ordered: RoleProfile[];
@@ -119,7 +129,17 @@ function compose(
       instructionsJa: entry.instructionsJa
     });
   }
-  // 順序: leader 先頭 → builtin の元順 → user 追加分 → 動的ロール
+  // 5. custom agent (設定の CLI/API agent) を role profile として合成 (Issue #1021)。
+  //    既存 id と衝突する場合は既存を優先 (custom:<id> prefix で実質衝突しない)。
+  const customAgentIds: string[] = [];
+  for (const agent of customAgents) {
+    const profile = customAgentToProfile(agent);
+    if (byId[profile.id]) continue;
+    byId[profile.id] = profile;
+    customAgentIds.push(profile.id);
+  }
+
+  // 順序: leader 先頭 → builtin の元順 → user 追加分 → 動的ロール → custom agent
   const ordered: RoleProfile[] = [];
   const leader = byId['leader'];
   if (leader) ordered.push(leader);
@@ -134,6 +154,9 @@ function compose(
       const p = byId[id];
       if (p) ordered.push(p);
     }
+  }
+  for (const id of customAgentIds) {
+    ordered.push(byId[id]);
   }
   return { byId, ordered };
 }
@@ -245,7 +268,12 @@ export function RoleProfilesProvider({ children }: { children: ReactNode }): JSX
     };
   }, []);
 
-  const { byId, ordered } = useMemo(() => compose(file, dynamic), [file, dynamic]);
+  // Issue #1021: 設定の custom agent (CLI/API) を role profile に合成する。
+  const { settings } = useSettings();
+  const { byId, ordered } = useMemo(
+    () => compose(file, dynamic, settings.customAgents ?? []),
+    [file, dynamic, settings.customAgents]
+  );
 
   // Tauri TeamHub に role profile summary を同期 (team_list_role_profiles / permissions 検証用)。
   // 動的ロールは Hub 側で別管理 (team_id スコープ) なので、ここでは builtin / custom だけを送る。

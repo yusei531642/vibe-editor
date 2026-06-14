@@ -28,7 +28,18 @@ vi.mock('../tauri-api', () => ({
 }));
 
 vi.mock('../role-profiles-context', () => ({
-  useRoleProfiles: () => ({ registerDynamicRole: vi.fn() })
+  useRoleProfiles: () => ({ registerDynamicRole: vi.fn() }),
+  customAgentIdFromRole: (roleProfileId: string): string | null =>
+    roleProfileId.startsWith('custom:') ? roleProfileId.slice('custom:'.length) : null
+}));
+
+// Issue #1021: listener は settings.customAgents / parse-args を参照する。
+vi.mock('../settings-context', () => ({
+  useSettings: () => ({ settings: { customAgents: [] } })
+}));
+
+vi.mock('../parse-args', () => ({
+  parseShellArgsStrict: (s: string) => ({ args: s ? s.split(/\s+/) : [] })
 }));
 
 vi.mock('../toast-context', () => ({
