@@ -82,6 +82,51 @@ pub(super) fn builtin_read_tools() -> Vec<ToolSpec> {
     ]
 }
 
+/// team 参加時に追加するツール定義 (Issue #1004)。pull 型: team_read で受信、team_send で
+/// 送信、team_info で roster 把握。実行は team_hub の既存関数へ委譲する (別経路)。
+pub(super) fn builtin_team_tools() -> Vec<ToolSpec> {
+    vec![
+        ToolSpec {
+            name: "team_read",
+            description: "Read unread messages addressed to you in your team.",
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "unread_only": {
+                        "type": "boolean",
+                        "description": "Only return unread messages (default true)."
+                    }
+                }
+            }),
+        },
+        ToolSpec {
+            name: "team_send",
+            description: "Send a message to a teammate or role in your team.",
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "to": {
+                        "type": "string",
+                        "description": "Recipient: a role name, an agent id, or 'all'."
+                    },
+                    "message": { "type": "string", "description": "Message body." }
+                },
+                "required": ["to", "message"]
+            }),
+        },
+        ToolSpec {
+            name: "team_info",
+            description: "Get your team's roster, leader, and open tasks. No arguments.",
+            parameters: json!({ "type": "object", "properties": {} }),
+        },
+    ]
+}
+
+/// team 系 tool 名か。`execute_tool` ではなく team_hub 経由で実行する。
+pub(super) fn is_team_tool(name: &str) -> bool {
+    matches!(name, "team_read" | "team_send" | "team_info")
+}
+
 /// 名前でツールをディスパッチして実行する。未知ツールはエラー結果を返す。
 pub(super) fn execute_tool(project_root: &str, name: &str, args: &Value) -> ToolOutcome {
     match name {
@@ -307,5 +352,25 @@ mod tests {
         let out = execute_tool("", "list_dir", &json!({}));
         assert!(out.is_error);
         assert!(out.content.contains("no project"));
+    }
+
+    #[test]
+    fn team_tools_are_recognized_and_listed() {
+        assert!(is_team_tool("team_read"));
+        assert!(is_team_tool("team_send"));
+        assert!(is_team_tool("team_info"));
+        assert!(!is_team_tool("read_file"));
+        assert!(!is_team_tool("list_dir"));
+        let names: Vec<&str> = builtin_team_tools().iter().map(|s| s.name).collect();
+        assert_eq!(names, vec!["team_read", "team_send", "team_info"]);
+    }
+
+    #[test]
+    fn execute_tool_does_not_handle_team_tools() {
+        // team tool は execute_tool ではなく team_hub 経由なので、ここでは未知扱い。
+        let dir = setup();
+        let out = execute_tool(&dir.path().to_string_lossy(), "team_send", &json!({}));
+        assert!(out.is_error);
+        assert!(out.content.contains("unknown tool"));
     }
 }

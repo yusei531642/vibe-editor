@@ -41,3 +41,25 @@ pub use send::team_send;
 pub use status::team_status;
 pub use switch_leader::team_switch_leader;
 pub use update_task::team_update_task;
+
+/// Issue #1004: API エージェント (socket を持たない pull 型 virtual member) が tool として
+/// team 系操作を実行するための単一 dispatch シーム。read / send / info の 3 つだけを公開し、
+/// 各 tool の異なるエラー型 (`ToolError` / `SendError`) を文字列に正規化してツール結果として
+/// 返す。dispatch / inject などの中核ルーティングには一切触れない。
+pub(crate) async fn call_api_agent_tool(
+    hub: &crate::team_hub::TeamHub,
+    ctx: &crate::team_hub::CallContext,
+    name: &str,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    match name {
+        "team_read" => read::team_read(hub, ctx, args)
+            .await
+            .map_err(|e| e.to_string()),
+        "team_send" => send::team_send(hub, ctx, args)
+            .await
+            .map_err(|e| format!("{e:?}")),
+        "team_info" => info::team_info(hub, ctx).await.map_err(|e| e.to_string()),
+        other => Err(format!("unknown team tool: {other}")),
+    }
+}

@@ -17,6 +17,17 @@ pub(super) struct ToolRuntime<'a> {
     pub max_turns: u32,
     /// tool 実行状況の通知 (name, status, detail)。
     pub on_tool: &'a mut (dyn FnMut(&str, &str, Option<&str>) + Send),
+    /// team 参加時のみ Some。team_read / team_send / team_info を tool として有効化する。
+    pub team: Option<TeamToolCtx>,
+}
+
+/// team 参加時の tool 実行コンテキスト (Issue #1004)。pull 型なので hub と CallContext 相当の
+/// 情報だけを持つ。`TeamHub` は Arc ベースで cheap clone。
+pub(super) struct TeamToolCtx {
+    pub hub: crate::team_hub::TeamHub,
+    pub team_id: String,
+    pub agent_id: String,
+    pub role: String,
 }
 
 #[derive(Clone)]

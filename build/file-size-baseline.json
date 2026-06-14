@@ -37,8 +37,8 @@
   "src/renderer/src/layouts/CanvasLayout.tsx": 758,
   "src/renderer/src/lib/hooks/use-file-tabs.ts": 517,
   "src/renderer/src/lib/hooks/use-xterm-bind.ts": 889,
-  "src/renderer/src/lib/i18n.ts": 1811,
+  "src/renderer/src/lib/i18n.ts": 1815,
   "src/renderer/src/lib/role-profiles-builtin.ts": 633,
-  "src/renderer/src/stores/canvas.ts": 575,
-  "src/types/shared.ts": 1842
+  "src/renderer/src/stores/canvas.ts": 577,
+  "src/types/shared.ts": 1848
 }

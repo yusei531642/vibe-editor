@@ -168,6 +168,12 @@ function ApiAgentChatCardImpl({
       }
     ]);
     try {
+      // team 参加 (Issue #1004): teamId + teamRole が揃うと team tool が有効になる。
+      // agentId はカードごとに安定な TeamHub 識別子としてノード id を使う。
+      const teamId = payload?.teamId;
+      const teamRole = payload?.teamRole?.trim();
+      const team =
+        teamId && teamRole ? { teamId, agentId: id, role: teamRole } : undefined;
       const result = await window.api.apiAgents.send({
         sessionId,
         cardInstanceId: id,
@@ -175,6 +181,7 @@ function ApiAgentChatCardImpl({
         agent: apiAgent,
         message: text,
         systemPrompt: apiAgent.systemPrompt,
+        team,
         depth: 0,
         turnBudget: 6
       });
@@ -188,7 +195,7 @@ function ApiAgentChatCardImpl({
       setStreaming(false);
       setStatus(err instanceof Error ? err.message : String(err));
     }
-  }, [apiAgent, draft, id, sessionId, streaming]);
+  }, [apiAgent, draft, id, payload?.teamId, payload?.teamRole, sessionId, streaming]);
 
   const cancel = useCallback(() => {
     const generationId = generationRef.current;
@@ -213,6 +220,18 @@ function ApiAgentChatCardImpl({
               <span>read-only</span>
             ) : null}
           </div>
+          {payload?.teamId && (
+            <label className="api-agent-card__team-role">
+              <span>{t('canvas.apiAgent.teamRole')}</span>
+              <input
+                type="text"
+                value={payload.teamRole ?? ''}
+                onChange={(e) => setCardPayload(id, { teamRole: e.target.value })}
+                placeholder={t('canvas.apiAgent.teamRolePlaceholder')}
+                spellCheck={false}
+              />
+            </label>
+          )}
           <div className="api-agent-card__messages" ref={bodyRef}>
             {!configured && (
               <div className="api-agent-card__empty">

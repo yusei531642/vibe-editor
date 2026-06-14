@@ -113,6 +113,15 @@ pub struct ApiAgentSkillMeta {
     pub description: String,
 }
 
+/// team 参加コンテキスト。renderer (apiAgent カード) が所属チーム情報を渡す (Issue #1004)。
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiAgentTeamCtx {
+    pub team_id: String,
+    pub agent_id: String,
+    pub role: String,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApiAgentSendRequest {
@@ -123,6 +132,9 @@ pub struct ApiAgentSendRequest {
     pub message: String,
     #[serde(default)]
     pub system_prompt: Option<String>,
+    /// team 参加時のみ。team_read / team_send / team_info を tool として有効化する (Issue #1004)。
+    #[serde(default)]
+    pub team: Option<ApiAgentTeamCtx>,
     #[serde(default)]
     pub chain_id: Option<String>,
     #[serde(default)]

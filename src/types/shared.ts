@@ -458,6 +458,12 @@ export interface ApiAgentSendRequest {
   agent: ApiAgentConfig;
   message: string;
   systemPrompt?: string;
+  /**
+   * team 参加コンテキスト (Issue #1004)。指定すると team_read / team_send / team_info が
+   * tool として有効になり、TeamHub に pull 型で参加できる。`agentId` はカードごとに安定な
+   * TeamHub 上の識別子、`role` は宛先解決に使うロール名。
+   */
+  team?: { teamId: string; agentId: string; role: string };
   chainId?: string;
   depth?: number;
   turnBudget?: number;
