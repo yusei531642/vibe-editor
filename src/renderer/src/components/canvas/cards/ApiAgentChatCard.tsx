@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
-import { Send, Square } from 'lucide-react';
+import { AtSign, Paperclip, SendHorizontal, Square } from 'lucide-react';
 import { CardFrame } from '../CardFrame';
 import {
   API_AGENT_PROVIDER_PRESETS,
@@ -14,6 +14,38 @@ import { useT } from '../../../lib/i18n';
 function isApiAgentConfig(value: unknown): value is ApiAgentConfig {
   return !!value && typeof value === 'object' && (value as { runtime?: string }).runtime === 'api';
 }
+
+/** ISO 文字列 → `HH:MM:SS` (ターミナル風タイムスタンプ)。不正値は空文字。 */
+function formatClock(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n: number): string => String(n).padStart(2, '0');
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/** 行配列を `+---+ / | ... |` の monospace ボックスに整形する (起動バナー用)。 */
+function boxify(lines: string[]): string {
+  const width = lines.reduce((max, l) => Math.max(max, l.length), 0);
+  const bar = `+${'-'.repeat(width + 2)}+`;
+  const body = lines.map((l) => `| ${l.padEnd(width)} |`).join('\n');
+  return `${bar}\n${body}\n${bar}`;
+}
+
+/** 絶対パスの HOME 部分を `~` に畳む (banner の Workspace 表示用)。 */
+function tildify(path: string): string {
+  return path
+    .replace(/^\/Users\/[^/]+/, '~')
+    .replace(/^\/home\/[^/]+/, '~')
+    .replace(/^[A-Za-z]:\\Users\\[^\\]+/, '~');
+}
+
+/** コンポーザ下部のスラッシュコマンド chip。command は literal、説明は i18n。 */
+const SLASH_CHIPS: Array<{ cmd: string; descKey: string }> = [
+  { cmd: '/plan', descKey: 'canvas.apiChat.cmd.planDesc' },
+  { cmd: '/status', descKey: 'canvas.apiChat.cmd.statusDesc' },
+  { cmd: '/context', descKey: 'canvas.apiChat.cmd.contextDesc' },
+  { cmd: '/clear', descKey: 'canvas.apiChat.cmd.clearDesc' }
+];
 
 function ApiAgentChatCardImpl({
   id,
@@ -29,6 +61,7 @@ function ApiAgentChatCardImpl({
   const [status, setStatus] = useState('');
   const generationRef = useRef<string | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   // team recruit 生成カードは agentId に Hub の instance id が入るため、設定解決は
   // agentConfigId を優先する (通常カードは agentConfigId 未設定で従来どおり agentId, Issue #1021)。
@@ -40,6 +73,25 @@ function ApiAgentChatCardImpl({
   const apiAgent = isApiAgentConfig(agent) ? agent : null;
   const provider = API_AGENT_PROVIDER_PRESETS.find((p) => p.id === apiAgent?.providerId);
   const sessionId = payload?.sessionId;
+  const agentName = data.title || apiAgent?.name || t('settings.customAgents.untitled');
+  const configured = !!apiAgent && !!sessionId;
+
+  // 起動バナー (実データから生成)。Agent / Model / Provider / Workspace / Mode / Tools。
+  const workspace = settings.lastOpenedRoot || settings.claudeCwd || '';
+  const bannerText = useMemo(() => {
+    if (!apiAgent) return '';
+    const toolMode = apiAgent.toolMode ?? (provider?.supportsTools ? 'auto' : 'readOnly');
+    const lines = [
+      'vibe-editor API Agent',
+      `Agent: ${agentName}`,
+      `Model: ${apiAgent.model}`,
+      `Provider: ${provider?.label ?? apiAgent.providerId}`,
+      `Workspace: ${tildify(workspace) || '—'}`,
+      `Mode: ${toolMode === 'auto' ? 'autonomous' : 'read-only'}`
+    ];
+    if (payload?.teamId) lines.push('Team tools: team_read, team_send, team_info');
+    return boxify(lines);
+  }, [apiAgent, provider, agentName, workspace, payload?.teamId]);
 
   useEffect(() => {
     bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
@@ -208,23 +260,36 @@ function ApiAgentChatCardImpl({
     void window.api.apiAgents.cancel(sessionId, generationId);
   }, [sessionId]);
 
-  const title = data.title || apiAgent?.name || t('settings.customAgents.untitled');
-  const configured = !!apiAgent && !!sessionId;
+  // chip / @ ボタンは破壊的でない: 入力欄にテキストを差し込んでフォーカスするだけ。
+  // 例外: /clear はローカル表示履歴をクリアする (server session は消さない)。
+  const insertCommand = useCallback((cmd: string) => {
+    if (cmd === '/clear') {
+      setMessages([]);
+      setStatus('');
+      return;
+    }
+    setDraft((d) => (d.trim() ? `${d.trimEnd()} ${cmd} ` : `${cmd} `));
+    inputRef.current?.focus();
+  }, []);
+
+  const insertMention = useCallback(() => {
+    setDraft((d) => `${d}@`);
+    inputRef.current?.focus();
+  }, []);
 
   return (
     <>
       <Handle type="target" position={Position.Left} style={{ background: '#d97757' }} />
-      <CardFrame id={id} title={title} accent={apiAgent?.color ?? '#d97757'} minWidth={NODE_MIN_W} minHeight={NODE_MIN_H}>
-        <div className="api-agent-card">
-          <div className="api-agent-card__meta">
-            <span>{provider?.label ?? apiAgent?.providerId ?? 'API'}</span>
-            <span>{apiAgent?.model ?? 'unconfigured'}</span>
-            {apiAgent?.toolMode === 'readOnly' || provider?.supportsTools === false ? (
-              <span>read-only</span>
-            ) : null}
-          </div>
+      <CardFrame
+        id={id}
+        title={agentName}
+        accent={apiAgent?.color ?? '#d97757'}
+        minWidth={NODE_MIN_W}
+        minHeight={NODE_MIN_H}
+      >
+        <div className="api-chat">
           {payload?.teamId && (
-            <label className="api-agent-card__team-role">
+            <label className="api-chat__team-role">
               <span>{t('canvas.apiAgent.teamRole')}</span>
               <input
                 type="text"
@@ -235,43 +300,127 @@ function ApiAgentChatCardImpl({
               />
             </label>
           )}
-          <div className="api-agent-card__messages" ref={bodyRef}>
-            {!configured && (
-              <div className="api-agent-card__empty">
-                Configure this API agent in Settings.
+
+          <div className="api-chat__body" ref={bodyRef}>
+            {!configured ? (
+              <div className="api-chat__empty">{t('canvas.apiChat.configure')}</div>
+            ) : (
+              <div className="api-chat__intro">
+                <pre className="api-chat__banner">{bannerText}</pre>
+                <div className="api-chat__sys">
+                  {sessionId ? t('canvas.apiChat.ready') : t('canvas.apiChat.loadingPrompt')}
+                </div>
               </div>
             )}
+
             {messages.map((m) => (
-              <div key={m.id} className={`api-agent-card__msg api-agent-card__msg--${m.role}`}>
-                <span className="api-agent-card__role">{m.role}</span>
-                <div>{m.content}</div>
+              <div key={m.id} className="api-chat__msg" data-role={m.role}>
+                <div className="api-chat__msg-head">
+                  <span className="api-chat__time">{formatClock(m.createdAt)}</span>
+                  <span className="api-chat__who">
+                    {m.role === 'user' ? 'user' : agentName}
+                  </span>
+                </div>
+                <div className="api-chat__msg-body">
+                  <span className="api-chat__marker" aria-hidden="true">
+                    &gt;
+                  </span>
+                  <span className="api-chat__content">{m.content}</span>
+                </div>
               </div>
             ))}
+
+            {streaming && (
+              <div className="api-chat__typing">
+                <span className="api-chat__dots" aria-hidden="true">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+                {t('canvas.apiChat.typing', { name: agentName })}
+              </div>
+            )}
           </div>
-          {status && <div className="api-agent-card__status">{status}</div>}
+
+          {status && <div className="api-chat__status">{status}</div>}
+
           <form
-            className="api-agent-card__composer"
+            className="api-chat__composer"
             onSubmit={(e) => {
               e.preventDefault();
               void send();
             }}
           >
+            <span className="api-chat__prompt" aria-hidden="true">
+              ›
+            </span>
             <textarea
+              ref={inputRef}
+              className="api-chat__input"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               disabled={!configured}
-              rows={2}
+              rows={1}
+              placeholder={t('canvas.apiChat.placeholder')}
               onKeyDown={(e) => {
-                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                // Enter 送信 / Shift+Enter 改行。IME 変換確定中の Enter は送信しない。
+                if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
                   void send();
                 }
               }}
             />
-            <button type="button" className="canvas-btn" onClick={streaming ? cancel : send} disabled={!configured}>
-              {streaming ? <Square size={14} /> : <Send size={14} />}
-            </button>
+            <div className="api-chat__actions">
+              <button
+                type="button"
+                className="api-chat__icon"
+                onClick={insertMention}
+                disabled={!configured}
+                title={t('canvas.apiChat.mention')}
+                aria-label={t('canvas.apiChat.mention')}
+              >
+                <AtSign size={15} strokeWidth={1.75} />
+              </button>
+              <button
+                type="button"
+                className="api-chat__icon"
+                disabled
+                title={t('canvas.apiChat.attach')}
+                aria-label={t('canvas.apiChat.attach')}
+              >
+                <Paperclip size={15} strokeWidth={1.75} />
+              </button>
+              <button
+                type="button"
+                className="api-chat__send"
+                onClick={streaming ? cancel : () => void send()}
+                disabled={!configured}
+                title={streaming ? t('canvas.apiChat.stop') : t('canvas.apiChat.send')}
+                aria-label={streaming ? t('canvas.apiChat.stop') : t('canvas.apiChat.send')}
+              >
+                {streaming ? (
+                  <Square size={14} strokeWidth={2} />
+                ) : (
+                  <SendHorizontal size={16} strokeWidth={1.9} />
+                )}
+              </button>
+            </div>
           </form>
+
+          <div className="api-chat__chips">
+            {SLASH_CHIPS.map((c) => (
+              <button
+                key={c.cmd}
+                type="button"
+                className="api-chat__chip"
+                onClick={() => insertCommand(c.cmd)}
+                disabled={!configured && c.cmd !== '/clear'}
+              >
+                <b>{c.cmd}</b>
+                <span>{t(c.descKey)}</span>
+              </button>
+            ))}
+          </div>
         </div>
       </CardFrame>
       <Handle type="source" position={Position.Right} style={{ background: '#d97757' }} />
