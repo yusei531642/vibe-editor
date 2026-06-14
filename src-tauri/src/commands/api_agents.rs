@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 mod providers;
 pub mod skills;
+mod project_docs;
 mod tools;
 mod tools_exec;
 mod tools_search;
@@ -231,9 +232,12 @@ pub async fn api_agent_send(
     let loaded_skills =
         skills::load_skill_bodies(req.agent.skill_ids.as_deref().unwrap_or(&[])).await;
     let skills_text = build_skills_context(&loaded_skills);
+    // Issue #1038: AGENTS.md / CLAUDE.md を project instructions として system prompt へ注入。
+    let project_docs = project_docs::load_project_docs(&project_root, &project_root).await;
     let system_prompt = [
         req.system_prompt.as_deref().unwrap_or("").trim(),
         req.agent.system_prompt.as_deref().unwrap_or("").trim(),
+        project_docs.as_deref().unwrap_or("").trim(),
         skills_text.trim(),
     ]
     .into_iter()
