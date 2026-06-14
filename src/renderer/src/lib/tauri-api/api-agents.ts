@@ -5,11 +5,13 @@ import { invokeCommand } from './command-error';
 import type {
   ApiAgentDoneEvent,
   ApiAgentErrorEvent,
+  ApiAgentImportableSkill,
   ApiAgentSendRequest,
   ApiAgentSendResult,
   ApiAgentSession,
   ApiAgentSessionCreateRequest,
   ApiAgentSkillMeta,
+  ApiAgentSkillSource,
   ApiAgentStreamEvent,
   ApiAgentToolEvent
 } from '../../../../types/shared';
@@ -32,6 +34,11 @@ export const apiAgents = {
   cancel: (sessionId: string, generationId: string): Promise<void> =>
     invokeCommand('api_agent_cancel', { sessionId, generationId }),
   listSkills: (): Promise<ApiAgentSkillMeta[]> => invokeCommand('api_agent_skill_list', {}),
+  listSkillSources: (): Promise<ApiAgentImportableSkill[]> =>
+    invokeCommand('api_agent_skill_sources_list', {}),
+  importSkill: (source: ApiAgentSkillSource, id: string): Promise<ApiAgentSkillMeta> =>
+    invokeCommand('api_agent_skill_import', { req: { source, id } }),
+  removeSkill: (id: string): Promise<void> => invokeCommand('api_agent_skill_remove', { id }),
   events: (sessionId: string) => ({
     onDeltaReady: (cb: (event: ApiAgentStreamEvent) => void): Promise<() => void> =>
       subscribeEventReady<ApiAgentStreamEvent>(`api-agent:delta:${sessionId}`, cb),

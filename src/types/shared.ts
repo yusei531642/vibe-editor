@@ -470,14 +470,32 @@ export interface ApiAgentSendRequest {
 }
 
 /**
- * skill selector 用のメタ情報。Rust `api_agent_skill_list` が active project の
- * `.claude/skills/<id>/SKILL.md` を列挙して返す。本文 (body) は送信時に Rust 側で解決し、
- * IPC では往復させない (Issue #998)。
+ * skill selector 用のメタ情報。Rust `api_agent_skill_list` が vibe-editor 専用フォルダ
+ * (`~/.vibe-editor/skills/<id>/SKILL.md`) を列挙して返す。本文 (body) は送信時に Rust 側で
+ * 解決し、IPC では往復させない (Issue #998 / #1017)。
  */
 export interface ApiAgentSkillMeta {
   id: string;
   name: string;
   description: string;
+}
+
+/** import 元の種別 (Issue #1017)。 */
+export type ApiAgentSkillSource = 'claude' | 'codex';
+
+/**
+ * Claude / Codex から import 可能な skill のメタ。`api_agent_skill_sources_list` が返す。
+ * `~/.claude/skills` `<project>/.claude/skills` `~/.agents/skills` `<project>/.agents/skills`
+ * を走査する。
+ */
+export interface ApiAgentImportableSkill {
+  id: string;
+  name: string;
+  description: string;
+  source: ApiAgentSkillSource;
+  scope: 'user' | 'project';
+  /** vibe-editor 専用フォルダへ import 済みか。 */
+  imported: boolean;
 }
 
 export interface ApiAgentSendResult {

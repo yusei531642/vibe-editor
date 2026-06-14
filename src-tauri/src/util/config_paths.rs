@@ -53,6 +53,21 @@ pub fn api_agent_sessions_dir() -> PathBuf {
     vibe_root().join("api-agent-sessions")
 }
 
+/// Issue #1017: API agent 専用 skill フォルダ `~/.vibe-editor/skills`。
+/// Claude (`~/.claude/skills`, `<project>/.claude/skills`) / Codex (`~/.agents/skills`,
+/// `<project>/.agents/skills`) から import (コピー) した SKILL.md をここに保存し、API agent は
+/// このフォルダを skill ソースとして読む。
+pub fn vibe_skills_dir() -> PathBuf {
+    vibe_root().join("skills")
+}
+
+/// ユーザー home。HOME 不在時は OS temp にフォールバックして必ず絶対パスを返す
+/// (`vibe_root` と同じ堅牢化, Issue #631)。import 元の `~/.claude/skills` / `~/.agents/skills`
+/// 解決に使う。
+pub fn home_dir() -> PathBuf {
+    dirs::home_dir().unwrap_or_else(std::env::temp_dir)
+}
+
 /// Issue #609 (Security): updater の minisign 署名検証失敗を「24h に 1 度だけ」ユーザーに
 /// 通知するための最終警告タイムスタンプ永続化先 `~/.vibe-editor/updater-warned.json` のパス。
 ///

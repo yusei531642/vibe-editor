@@ -222,10 +222,11 @@ pub async fn api_agent_send(
     }
 
     let key = read_key(&req.agent.provider_id).await?;
-    // Issue #998: 選択 skill + 自動 vibe-team の SKILL.md 本文をサーバ側で読み込む。
+    // project_root は team の read_file / list_dir tool が参照する (Issue #1004)。
     let project_root = current_project_root(&state.project_root).unwrap_or_default();
+    // Issue #998/#1017: 選択 skill + 自動 vibe-team の本文を vibe-editor 専用フォルダから読む。
     let loaded_skills =
-        skills::load_skill_bodies(&project_root, req.agent.skill_ids.as_deref().unwrap_or(&[])).await;
+        skills::load_skill_bodies(req.agent.skill_ids.as_deref().unwrap_or(&[])).await;
     let skills_text = build_skills_context(&loaded_skills);
     let system_prompt = [
         req.system_prompt.as_deref().unwrap_or("").trim(),

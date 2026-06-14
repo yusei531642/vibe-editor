@@ -281,6 +281,9 @@ pub fn run() {
             commands::api_agents::api_agent_send,
             commands::api_agents::api_agent_cancel,
             commands::api_agents::skills::api_agent_skill_list,
+            commands::api_agents::skills::api_agent_skill_sources_list,
+            commands::api_agents::skills::api_agent_skill_import,
+            commands::api_agents::skills::api_agent_skill_remove,
         ])
         .setup(|app| {
             info!(
