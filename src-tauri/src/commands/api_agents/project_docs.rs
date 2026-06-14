@@ -16,8 +16,19 @@ const MAX_TOTAL_BYTES: usize = 32 * 1024;
 /// 各階層で探すファイル名 (先頭優先。AGENTS.md が無ければ CLAUDE.md)。
 const DOC_NAMES: &[&str] = &["AGENTS.md", "CLAUDE.md"];
 
-/// project root → cwd の各階層の project doc を連結して返す。無ければ None。
-pub(super) fn load_project_docs(project_root: &str, cwd: &str) -> Option<String> {
+/// project root → cwd の各階層の project doc を連結して返す (async)。
+/// 同期 fs を複数回呼ぶため spawn_blocking で実行し、async コマンドをブロックしない (Performance)。
+pub(super) async fn load_project_docs(project_root: &str, cwd: &str) -> Option<String> {
+    let root = project_root.to_string();
+    let cwd = cwd.to_string();
+    tokio::task::spawn_blocking(move || load_project_docs_blocking(&root, &cwd))
+        .await
+        .ok()
+        .flatten()
+}
+
+/// 同期実装。project root → cwd の各階層の project doc を連結して返す。無ければ None。
+fn load_project_docs_blocking(project_root: &str, cwd: &str) -> Option<String> {
     let root = project_root.trim();
     if root.is_empty() {
         return None;
@@ -36,7 +47,16 @@ pub(super) fn load_project_docs(project_root: &str, cwd: &str) -> Option<String>
     let mut total = 0usize;
     for dir in chain {
         for name in DOC_NAMES {
-            let Ok(text) = std::fs::read_to_string(dir.join(name)) else {
+            let p = dir.join(name);
+            // 封じ込め (Security): symlink は follow しない。悪意ある repo が AGENTS.md を
+            // 秘密ファイルへの symlink にして system prompt 経由で LLM に漏洩させるのを防ぐ。
+            if std::fs::symlink_metadata(&p)
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&p) else {
                 continue;
             };
             let rel = dir
@@ -96,7 +116,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("AGENTS.md"), "root rules").unwrap();
         let root = dir.path().to_string_lossy().to_string();
-        let out = load_project_docs(&root, &root).unwrap();
+        let out = load_project_docs_blocking(&root, &root).unwrap();
         assert!(out.contains("# AGENTS.md"));
         assert!(out.contains("root rules"));
     }
@@ -106,7 +126,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("CLAUDE.md"), "claude rules").unwrap();
         let root = dir.path().to_string_lossy().to_string();
-        let out = load_project_docs(&root, &root).unwrap();
+        let out = load_project_docs_blocking(&root, &root).unwrap();
         assert!(out.contains("# CLAUDE.md"));
         assert!(out.contains("claude rules"));
     }
@@ -117,7 +137,7 @@ mod tests {
         std::fs::write(dir.path().join("AGENTS.md"), "AGENTS wins").unwrap();
         std::fs::write(dir.path().join("CLAUDE.md"), "claude loses").unwrap();
         let root = dir.path().to_string_lossy().to_string();
-        let out = load_project_docs(&root, &root).unwrap();
+        let out = load_project_docs_blocking(&root, &root).unwrap();
         assert!(out.contains("AGENTS wins"));
         assert!(!out.contains("claude loses"));
     }
@@ -131,7 +151,7 @@ mod tests {
         std::fs::write(sub.join("AGENTS.md"), "LEAF_DOC").unwrap();
         let root = dir.path().to_string_lossy().to_string();
         let cwd = sub.to_string_lossy().to_string();
-        let out = load_project_docs(&root, &cwd).unwrap();
+        let out = load_project_docs_blocking(&root, &cwd).unwrap();
         let ri = out.find("ROOT_DOC").unwrap();
         let li = out.find("LEAF_DOC").unwrap();
         assert!(ri < li, "root doc must come before leaf doc");
@@ -142,12 +162,12 @@ mod tests {
     fn returns_none_when_absent() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_string_lossy().to_string();
-        assert!(load_project_docs(&root, &root).is_none());
+        assert!(load_project_docs_blocking(&root, &root).is_none());
     }
 
     #[test]
     fn empty_root_is_none() {
-        assert!(load_project_docs("", "").is_none());
+        assert!(load_project_docs_blocking("", "").is_none());
     }
 
     #[test]
@@ -158,7 +178,7 @@ mod tests {
         std::fs::create_dir(&root).unwrap();
         std::fs::write(root.join("AGENTS.md"), "INNER_ROOT").unwrap();
         // cwd を root の外 (project 直下) にする → root(inner) のみが対象
-        let out = load_project_docs(
+        let out = load_project_docs_blocking(
             &root.to_string_lossy(),
             &dir.path().to_string_lossy(),
         )
@@ -167,13 +187,29 @@ mod tests {
         assert!(!out.contains("ROOT_ONLY"));
     }
 
+    // Security fix: AGENTS.md が root 外への symlink でも追跡しない。
+    #[cfg(unix)]
+    #[test]
+    fn does_not_follow_symlinked_doc() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let secret = dir.path().join("secret.txt");
+        std::fs::write(&secret, "SECRET_LEAK").unwrap();
+        let root = dir.path().join("proj");
+        std::fs::create_dir(&root).unwrap();
+        symlink(&secret, root.join("AGENTS.md")).unwrap();
+        let out = load_project_docs_blocking(&root.to_string_lossy(), &root.to_string_lossy());
+        // symlink を follow しないので doc 無し扱い (None)。
+        assert!(out.is_none());
+    }
+
     #[test]
     fn truncates_at_size_limit() {
         let dir = tempfile::tempdir().unwrap();
         let big = "x".repeat(MAX_TOTAL_BYTES * 2);
         std::fs::write(dir.path().join("AGENTS.md"), &big).unwrap();
         let root = dir.path().to_string_lossy().to_string();
-        let out = load_project_docs(&root, &root).unwrap();
+        let out = load_project_docs_blocking(&root, &root).unwrap();
         assert!(out.contains("truncated"));
         assert!(out.len() <= MAX_TOTAL_BYTES + 100);
     }
