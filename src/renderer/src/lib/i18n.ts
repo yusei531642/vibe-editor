@@ -783,9 +783,9 @@ const ja: Dict = {
   'settings.customAgents.skillsAutoTeam': 'TeamHub 参加時は vibe-team skill が自動で追加されます。',
   'settings.customAgents.skillImport.title': 'Claude / Codex から skill を import',
   'settings.customAgents.skillImport.note':
-    '~/.claude/skills と .agents/skills (Codex) を走査し、選んだ skill を vibe-editor 専用フォルダにコピーします。',
+    '~/.claude/skills と ~/.agents/skills (Codex) を走査し、選んだ skill を vibe-editor 専用フォルダにコピーします。',
   'settings.customAgents.skillImport.empty':
-    'import 元 (~/.claude/skills・.agents/skills) に skill が見つかりません。',
+    'import 元 (~/.claude/skills・~/.agents/skills) に skill が見つかりません。',
   'settings.customAgents.skillImport.import': 'Import',
   'settings.customAgents.skillImport.remove': '削除',
 
@@ -1670,9 +1670,9 @@ const en: Dict = {
     'The vibe-team skill is added automatically when joining TeamHub.',
   'settings.customAgents.skillImport.title': 'Import skills from Claude / Codex',
   'settings.customAgents.skillImport.note':
-    'Scans ~/.claude/skills and .agents/skills (Codex), and copies the selected skill into the vibe-editor skills folder.',
+    'Scans ~/.claude/skills and ~/.agents/skills (Codex), and copies the selected skill into the vibe-editor skills folder.',
   'settings.customAgents.skillImport.empty':
-    'No skills found in the import sources (~/.claude/skills, .agents/skills).',
+    'No skills found in the import sources (~/.claude/skills, ~/.agents/skills).',
   'settings.customAgents.skillImport.import': 'Import',
   'settings.customAgents.skillImport.remove': 'Remove',
 
