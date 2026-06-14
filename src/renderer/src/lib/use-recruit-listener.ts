@@ -248,7 +248,10 @@ export function useRecruitListener(): void {
             title: titleHint,
             position: pos,
             payload: {
-              agentId: customAgent.id,
+              // agentId は Hub の runtime instance id に揃える (dismiss/cancel のカード検索キー)。
+              // 設定 (provider/model) の解決は agentConfigId 経由 (Issue #1021)。
+              agentId: p.newAgentId,
+              agentConfigId: customAgent.id,
               teamId: p.teamId,
               teamName: requesterTeamName,
               // teamRole が teamId と揃うと team_read / team_send / team_info が有効になる (#1005)。

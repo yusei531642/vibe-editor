@@ -30,9 +30,12 @@ function ApiAgentChatCardImpl({
   const generationRef = useRef<string | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
+  // team recruit 生成カードは agentId に Hub の instance id が入るため、設定解決は
+  // agentConfigId を優先する (通常カードは agentConfigId 未設定で従来どおり agentId, Issue #1021)。
+  const configAgentId = payload?.agentConfigId ?? payload?.agentId;
   const agent = useMemo(
-    () => (settings.customAgents ?? []).find((a) => a.id === payload?.agentId),
-    [payload?.agentId, settings.customAgents]
+    () => (settings.customAgents ?? []).find((a) => a.id === configAgentId),
+    [configAgentId, settings.customAgents]
   );
   const apiAgent = isApiAgentConfig(agent) ? agent : null;
   const provider = API_AGENT_PROVIDER_PRESETS.find((p) => p.id === apiAgent?.providerId);
