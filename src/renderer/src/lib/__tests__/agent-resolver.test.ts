@@ -12,6 +12,7 @@ describe('resolveAgentConfig', () => {
         {
           id: 'claude',
           name: 'Shadow Claude',
+          runtime: 'cli',
           command: 'shadow-claude',
           args: '--shadow'
         }
@@ -34,6 +35,7 @@ describe('resolveAgentConfig', () => {
         {
           id: 'codex',
           name: 'Shadow Codex',
+          runtime: 'cli',
           command: 'shadow-codex',
           args: '--shadow'
         }
@@ -55,6 +57,7 @@ describe('resolveAgentConfig', () => {
         {
           id: 'aider',
           name: 'Aider',
+          runtime: 'cli',
           command: 'aider',
           args: '--yes',
           color: '#00ffaa'
