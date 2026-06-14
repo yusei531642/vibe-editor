@@ -12,6 +12,7 @@
 use serde_json::{json, Value};
 
 use super::super::tools;
+use super::super::tools_exec;
 use super::super::tools_write;
 use super::super::types::{ApiAgentConfig, ApiAgentMessage, ApiAgentUsage};
 use super::{usage_from_value, ProviderPreset, TeamToolCtx, ToolRuntime, HTTP_CLIENT};
@@ -33,6 +34,8 @@ fn tool_specs(rt: &ToolRuntime<'_>) -> Vec<tools::ToolSpec> {
     // Issue #1031: agentic 経路は auto (= !readOnly && supports_tools) のときだけ到達するため、
     // workspace-write な write_file / edit_file を無条件で公開する。
     specs.extend(tools_write::builtin_write_tools());
+    // Issue #1034: bash (shell) も auto のとき公開する。
+    specs.extend(tools_exec::builtin_exec_tools());
     if rt.team.is_some() {
         specs.extend(tools::builtin_team_tools());
     }
@@ -382,6 +385,9 @@ async fn run_tool_with_flag(rt: &mut ToolRuntime<'_>, call: &ToolCall) -> (Strin
                 is_error: true,
             },
         }
+    } else if tools_exec::is_exec_tool(&call.name) {
+        // bash は子プロセス + timeout のため async で実行する (Issue #1034)。
+        tools_exec::execute_exec_tool(rt.project_root, &call.name, &call.args).await
     } else {
         // read_file / list_dir / write_file / edit_file は同期ブロッキング fs を含むため
         // spawn_blocking へ退避する。write 系 (Issue #1031) は tools_write へ dispatch する。
