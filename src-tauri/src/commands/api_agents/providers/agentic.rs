@@ -13,6 +13,7 @@ use serde_json::{json, Value};
 
 use super::super::tools;
 use super::super::tools_exec;
+use super::super::tools_search;
 use super::super::tools_write;
 use super::super::types::{ApiAgentConfig, ApiAgentMessage, ApiAgentUsage};
 use super::{usage_from_value, ProviderPreset, TeamToolCtx, ToolRuntime, HTTP_CLIENT};
@@ -36,6 +37,8 @@ fn tool_specs(rt: &ToolRuntime<'_>) -> Vec<tools::ToolSpec> {
     specs.extend(tools_write::builtin_write_tools());
     // Issue #1034: bash (shell) も auto のとき公開する。
     specs.extend(tools_exec::builtin_exec_tools());
+    // Issue #1036: grep / glob 検索 tool も auto のとき公開する。
+    specs.extend(tools_search::builtin_search_tools());
     if rt.team.is_some() {
         specs.extend(tools::builtin_team_tools());
     }
@@ -397,6 +400,8 @@ async fn run_tool_with_flag(rt: &mut ToolRuntime<'_>, call: &ToolCall) -> (Strin
         match tokio::task::spawn_blocking(move || {
             if tools_write::is_write_tool(&name) {
                 tools_write::execute_write_tool(&project_root, &name, &args)
+            } else if tools_search::is_search_tool(&name) {
+                tools_search::execute_search_tool(&project_root, &name, &args)
             } else {
                 tools::execute_tool(&project_root, &name, &args)
             }

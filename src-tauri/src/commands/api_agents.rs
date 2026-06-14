@@ -15,6 +15,7 @@ mod providers;
 pub mod skills;
 mod tools;
 mod tools_exec;
+mod tools_search;
 mod tools_write;
 pub mod types;
 
