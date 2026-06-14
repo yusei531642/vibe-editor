@@ -25,13 +25,19 @@ import {
 } from 'lucide-react';
 import type { CardData, CardType } from '../stores/canvas';
 import { NODE_H, NODE_W } from '../stores/canvas';
-import type { TeamHistoryEntry, TeamOrganizationMeta, TeamPreset } from '../../../types/shared';
+import type {
+  AgentConfig,
+  TeamHistoryEntry,
+  TeamOrganizationMeta,
+  TeamPreset
+} from '../../../types/shared';
 import { Canvas, type CanvasActions } from '../components/canvas/Canvas';
 import { CanvasSidebar } from '../components/canvas/CanvasSidebar';
 import {
   AddItem,
   AgentBadge,
   BuiltinPresetItem,
+  CustomAgentLeaderPresetItem,
   RecentItem,
   SavedPresetItem,
   TabBtn
@@ -74,6 +80,7 @@ import {
   type SpawnTeamSpec
 } from '../lib/canvas-team-spawn';
 import { findExistingTeamNode } from '../lib/canvas-existing-team';
+import { parseShellArgsStrict } from '../lib/parse-args';
 
 type Tab = 'preset' | 'recent';
 
@@ -291,6 +298,74 @@ export function CanvasLayout(): JSX.Element {
     void loadRecent();
   };
 
+  // Issue #1025: custom agent を「Leader として起動」する。新規 teamId を発行し、
+  //   custom agent を leader ロール (recruit 可能) の単体メンバーとして起動する。
+  //   起動経路は use-recruit-listener の API/CLI 分岐に倣う:
+  //     - API: apiAgent カードが teamId + teamRole で Hub に self-register (#1004/#1005)。
+  //            setupTeamMcp は CLI 用なので呼ばない。
+  //     - CLI: agent カードを custom command override で起動 + setupTeamMcp 配線
+  //            (組み込み leader と同経路)。CLI は claude 互換を前提に team tool を有効化。
+  const applyCustomAgentLeaderPreset = async (agent: AgentConfig): Promise<void> => {
+    const cwd = projectRoot;
+    const teamId = `team-${crypto.randomUUID()}`;
+    const agentId = `leader-0-${teamId}`;
+    const teamName = agent.name || agent.id;
+    const position = stagger('agent');
+    if (agent.runtime === 'api') {
+      addCards([
+        {
+          type: 'apiAgent',
+          title: teamName,
+          position,
+          payload: {
+            agentId,
+            agentConfigId: agent.id,
+            providerId: agent.providerId,
+            model: agent.model,
+            toolMode: agent.toolMode ?? 'auto',
+            configured: true,
+            teamId,
+            teamName,
+            // teamRole が teamId と揃うと team tool が有効化される (#1004/#1005)。
+            teamRole: 'leader'
+          }
+        }
+      ]);
+    } else {
+      // CLI custom agent: 組み込み leader と同様に MCP team tool を配線する。
+      if (settings.mcpAutoSetup !== false) {
+        try {
+          await window.api.app.setupTeamMcp(cwd, teamId, teamName, [
+            { agentId, role: 'leader', agent: 'claude' }
+          ]);
+        } catch (err) {
+          console.warn('[custom-agent-preset] setupTeamMcp failed:', err);
+        }
+      }
+      addCards([
+        {
+          type: 'agent',
+          title: teamName,
+          position,
+          payload: {
+            // CardFrame は payload.command を優先して custom CLI を起動する。
+            agent: 'claude',
+            command: agent.command || undefined,
+            args: agent.args ? parseShellArgsStrict(agent.args).args : undefined,
+            cwd: agent.cwd || cwd,
+            roleProfileId: 'leader',
+            role: 'leader',
+            teamId,
+            teamName,
+            agentId
+          }
+        }
+      ]);
+    }
+    setSpawnOpen(false);
+    void loadRecent();
+  };
+
   const restoreRecent = async (entry: TeamHistoryEntry): Promise<void> => {
     const existing = findExistingTeamNode(useCanvasStore.getState().nodes, entry.id);
     if (existing) {
@@ -379,6 +454,13 @@ export function CanvasLayout(): JSX.Element {
   const closeRecent = useMemo(
     () => recent.filter((r) => r.canvasState && r.canvasState.nodes.length > 0).slice(0, 6),
     [recent]
+  );
+
+  // Issue #1025: 設定で作成した custom agent を「チーム起動」プリセットに自動追加する。
+  // settings.customAgents を購読しているので、追加/削除でプリセットも即出入りする。
+  const customAgents = useMemo<AgentConfig[]>(
+    () => settings.customAgents ?? [],
+    [settings.customAgents]
   );
 
   const cardCounter = (t: CardType): number => nodes.filter((n) => n.type === t).length + 1;
@@ -778,6 +860,22 @@ export function CanvasLayout(): JSX.Element {
                           settings.language
                         )}
                         onClick={() => void applyPreset(preset)}
+                      />
+                    ))}
+                    {/* Issue #1025: custom agent ごとに「Leader のみで起動 (agent名)」を自動追加 */}
+                    {customAgents.map((agent) => (
+                      <CustomAgentLeaderPresetItem
+                        key={agent.id}
+                        label={t('canvas.preset.leaderCustom', {
+                          name: agent.name || agent.id
+                        })}
+                        agentCountLabel={formatOrganizationAgentCount(
+                          0,
+                          1,
+                          settings.language
+                        )}
+                        color={agent.color ?? '#d97757'}
+                        onClick={() => void applyCustomAgentLeaderPreset(agent)}
                       />
                     ))}
                     {savedPresets.length > 0 && (

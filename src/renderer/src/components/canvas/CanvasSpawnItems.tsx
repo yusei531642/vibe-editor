@@ -100,6 +100,35 @@ export function SavedPresetItem({
   );
 }
 
+/**
+ * Issue #1025: 設定で作成した custom agent を「チーム起動」プリセットに自動追加する item。
+ * 表示は組み込みの「Leader のみで起動 (...)」に倣い、leader バッジ + agent 色で描画する。
+ * 起動の中身 (API/CLI 分岐 + leader ロール) は CanvasLayout 側のハンドラが担当する。
+ */
+export function CustomAgentLeaderPresetItem({
+  label,
+  agentCountLabel,
+  color,
+  onClick
+}: {
+  label: string;
+  agentCountLabel: string;
+  color: string;
+  onClick: () => void;
+}): JSX.Element {
+  return (
+    <button type="button" onClick={onClick} className="canvas-popover__preset">
+      <span className="canvas-popover__preset-title-row">
+        <span className="canvas-popover__preset-title">{label}</span>
+        <span className="canvas-popover__preset-sub">{agentCountLabel}</span>
+      </span>
+      <span className="canvas-popover__preset-roles">
+        <AgentBadge label="L" color={color} />
+      </span>
+    </button>
+  );
+}
+
 export function AgentBadge({ label, color }: { label: string; color: string }): JSX.Element {
   return (
     <span
