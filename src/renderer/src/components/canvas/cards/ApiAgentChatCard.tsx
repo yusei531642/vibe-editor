@@ -81,13 +81,18 @@ function ApiAgentChatCardImpl({
   const bannerText = useMemo(() => {
     if (!apiAgent) return '';
     const toolMode = apiAgent.toolMode ?? (provider?.supportsTools ? 'auto' : 'readOnly');
+    // auto かつ provider が tool calling 対応のときだけ実 tool が公開される (Issue #1031)。
+    const toolsEnabled = toolMode === 'auto' && provider?.supportsTools !== false;
     const lines = [
       'vibe-editor API Agent',
       `Agent: ${agentName}`,
       `Model: ${apiAgent.model}`,
       `Provider: ${provider?.label ?? apiAgent.providerId}`,
       `Workspace: ${tildify(workspace) || '—'}`,
-      `Mode: ${toolMode === 'auto' ? 'autonomous' : 'read-only'}`
+      `Mode: ${toolMode === 'auto' ? 'autonomous' : 'read-only'}`,
+      toolsEnabled
+        ? 'Tools: read_file, list_dir, write_file, edit_file'
+        : 'Tools: (read-only chat)'
     ];
     if (payload?.teamId) lines.push('Team tools: team_read, team_send, team_info');
     return boxify(lines);

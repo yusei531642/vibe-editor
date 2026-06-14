@@ -12,6 +12,7 @@
 use serde_json::{json, Value};
 
 use super::super::tools;
+use super::super::tools_write;
 use super::super::types::{ApiAgentConfig, ApiAgentMessage, ApiAgentUsage};
 use super::{usage_from_value, ProviderPreset, TeamToolCtx, ToolRuntime, HTTP_CLIENT};
 
@@ -29,6 +30,9 @@ const BUDGET_MSG: &str = "Tool turn budget exceeded before a final answer.";
 /// read_file / list_dir に追加する。
 fn tool_specs(rt: &ToolRuntime<'_>) -> Vec<tools::ToolSpec> {
     let mut specs = tools::builtin_read_tools();
+    // Issue #1031: agentic 経路は auto (= !readOnly && supports_tools) のときだけ到達するため、
+    // workspace-write な write_file / edit_file を無条件で公開する。
+    specs.extend(tools_write::builtin_write_tools());
     if rt.team.is_some() {
         specs.extend(tools::builtin_team_tools());
     }
@@ -379,12 +383,19 @@ async fn run_tool_with_flag(rt: &mut ToolRuntime<'_>, call: &ToolCall) -> (Strin
             },
         }
     } else {
-        // read_file / list_dir は同期ブロッキング fs を含むため spawn_blocking へ退避する。
+        // read_file / list_dir / write_file / edit_file は同期ブロッキング fs を含むため
+        // spawn_blocking へ退避する。write 系 (Issue #1031) は tools_write へ dispatch する。
         let project_root = rt.project_root.to_string();
         let name = call.name.clone();
         let args = call.args.clone();
-        match tokio::task::spawn_blocking(move || tools::execute_tool(&project_root, &name, &args))
-            .await
+        match tokio::task::spawn_blocking(move || {
+            if tools_write::is_write_tool(&name) {
+                tools_write::execute_write_tool(&project_root, &name, &args)
+            } else {
+                tools::execute_tool(&project_root, &name, &args)
+            }
+        })
+        .await
         {
             Ok(o) => o,
             Err(e) => tools::ToolOutcome {

@@ -14,6 +14,7 @@ use uuid::Uuid;
 mod providers;
 pub mod skills;
 mod tools;
+mod tools_write;
 pub mod types;
 
 #[cfg(test)]
