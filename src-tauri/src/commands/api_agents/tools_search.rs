@@ -1,13 +1,8 @@
-// api_agents/tools_search — API エージェントの検索ツール grep / glob (Issue #1036, Codex parity Phase 2b)。
+// api_agents/tools_search — 検索ツール grep / glob (Issue #1036, Codex parity Phase 2b)。
 //
-// スコープ: grep (literal substring) / glob (* ? ** の簡易マッチャ)。いずれも read-only。
-// 依存追加なし (std のみ) で実装する。
-//
-// 安全モデル: canonicalize 封じ込めで active project root 配下のみ走査。露出は auto 経路のみ
-// (read_file/list_dir と同様)。実行は同期 fs なので caller が spawn_blocking で呼ぶ。
-//
-// 走査では VCS/ビルド生成物ディレクトリを skip し、バイナリ/大ファイルも除外する。
-// 結果は件数上限で truncate して context 肥大を防ぐ。
+// grep (literal substring) / glob (* ? ** 簡易マッチャ)。read-only・依存追加なし (std のみ)。
+// 安全モデル: canonicalize 封じ込めで project root 配下のみ走査。symlink は非追従。露出は auto
+// 経路のみ。VCS/ビルド生成物 dir と バイナリ/大ファイルを skip し、結果は件数上限で truncate。
 
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -22,8 +17,7 @@ const MAX_MATCHES: usize = 200;
 const MAX_GLOB_RESULTS: usize = 300;
 /// 表示する 1 行の最大文字数。
 const MAX_LINE_CHARS: usize = 240;
-/// 走査するエントリ総数の安全上限 (暴走防止)。
-const MAX_WALK_ENTRIES: usize = 50_000;
+const MAX_WALK_ENTRIES: usize = 50_000; // 走査エントリ総数の安全上限 (暴走防止)
 
 /// 走査時に降りないディレクトリ名 (VCS / 依存 / ビルド生成物)。
 const IGNORED_DIRS: &[&str] = &[
@@ -134,10 +128,18 @@ fn walk(root_canon: &Path, start: &Path, mut visit: impl FnMut(&str, &Path) -> b
             if seen > MAX_WALK_ENTRIES {
                 return;
             }
+            let file_type = match entry.file_type() {
+                Ok(t) => t,
+                Err(_) => continue,
+            };
+            // 封じ込め (Critical): symlink は dir/file いずれも辿らない。`fs::metadata`/`fs::read`
+            // が symlink を follow して root 外 (例 ~/.ssh/id_rsa) を読み出すのを防ぐ。
+            if file_type.is_symlink() {
+                continue;
+            }
             let path = entry.path();
-            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
             let name = entry.file_name().to_string_lossy().to_string();
-            if is_dir {
+            if file_type.is_dir() {
                 if IGNORED_DIRS.contains(&name.as_str()) {
                     continue;
                 }
@@ -179,7 +181,7 @@ fn grep_tool(project_root: &str, args: &Value) -> ToolOutcome {
         .get("glob")
         .and_then(Value::as_str)
         .filter(|s| !s.trim().is_empty())
-        .map(|g| g.split('/').map(str::to_string).collect::<Vec<_>>());
+        .map(|g| normalize_glob_owned(g.split('/').map(str::to_string).collect::<Vec<_>>()));
 
     let mut out: Vec<String> = Vec::new();
     let mut truncated = false;
@@ -237,7 +239,8 @@ fn glob_tool(project_root: &str, args: &Value) -> ToolOutcome {
     if pattern.trim().is_empty() {
         return err("glob 'pattern' must not be empty");
     }
-    let pat_segs: Vec<&str> = pattern.trim_start_matches("./").split('/').collect();
+    let raw_segs: Vec<&str> = pattern.trim_start_matches("./").split('/').collect();
+    let pat_segs = normalize_glob(&raw_segs);
 
     let mut out: Vec<String> = Vec::new();
     let mut truncated = false;
@@ -273,6 +276,31 @@ fn truncate_line(line: &str) -> String {
     } else {
         trimmed.to_string()
     }
+}
+
+/// 連続する `**` を 1 個に畳む (意味は等価)。`**/**/**` 等での glob_match の O(d^k) 再帰爆発を
+/// 緩和する (Performance)。借用版。
+fn normalize_glob<'a>(segs: &[&'a str]) -> Vec<&'a str> {
+    let mut out: Vec<&str> = Vec::with_capacity(segs.len());
+    for &s in segs {
+        if s == "**" && out.last() == Some(&"**") {
+            continue;
+        }
+        out.push(s);
+    }
+    out
+}
+
+/// `normalize_glob` の所有版 (grep の glob filter 用)。
+fn normalize_glob_owned(segs: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(segs.len());
+    for s in segs {
+        if s == "**" && out.last().map(String::as_str) == Some("**") {
+            continue;
+        }
+        out.push(s);
+    }
+    out
 }
 
 /// パスセグメント列をパターンセグメント列にマッチさせる。`**` は 0 個以上のセグメントに一致。
@@ -439,5 +467,33 @@ mod tests {
         let out = execute_search_tool("", "grep", &json!({ "pattern": "x" }));
         assert!(out.is_error);
         assert!(out.content.contains("no project"));
+    }
+
+    #[test]
+    fn normalize_glob_collapses_consecutive_double_star() {
+        assert_eq!(normalize_glob(&["**", "**", "*.rs"]), vec!["**", "*.rs"]);
+        // 非連続の ** は保持し、畳んでも意味は等価。
+        assert_eq!(normalize_glob(&["**", "a", "**", "b"]), vec!["**", "a", "**", "b"]);
+        assert!(glob_match(&normalize_glob(&["**", "**", "*.rs"]), &["x", "y", "z.rs"]));
+    }
+
+    // Critical fix: walk() が symlink を辿って root 外を読み出さないこと (grep/glob 共通の walk)。
+    #[cfg(unix)]
+    #[test]
+    fn grep_does_not_follow_symlink_out_of_root() {
+        use std::os::unix::fs::symlink;
+        let dir = setup();
+        let secret = dir.path().join("secret.txt");
+        std::fs::write(&secret, "TOP_SECRET_TOKEN").unwrap();
+        let root = dir.path().join("src");
+        symlink(&secret, root.join("leak.txt")).unwrap();
+        let out = execute_search_tool(
+            &root.to_string_lossy(),
+            "grep",
+            &json!({ "pattern": "TOP_SECRET_TOKEN" }),
+        );
+        assert!(!out.is_error, "{}", out.content);
+        // 漏洩していればマッチ行 "leak.txt:" が出る。symlink 非追従なので no matches。
+        assert!(!out.content.contains("leak.txt:"), "{}", out.content);
     }
 }
