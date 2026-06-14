@@ -27,21 +27,54 @@ fn parse_meta_falls_back_without_frontmatter() {
     assert_eq!(desc, "First real line describes it.");
 }
 
-/// 取り込み元 root: project 指定時は project+user の Claude/Codex 計 4 root をラベル付きで返す。
+/// 取り込み元 root: 各 scope で `.claude` を codex より先に並べ (= .claude 優先)、project codex は
+/// `.codex/skills` と公式 `.agents/skills` の両方を含む (Issue #1019)。
 #[test]
-fn source_roots_cover_claude_and_codex_user_and_project() {
+fn source_roots_prioritize_claude_and_include_codex_and_agents() {
     let roots = source_roots("/tmp/proj");
-    let labels: Vec<(&str, &str)> = roots.iter().map(|(s, sc, _)| (*s, *sc)).collect();
-    assert!(labels.contains(&("claude", "project")));
-    assert!(labels.contains(&("codex", "project")));
-    assert!(labels.contains(&("claude", "user")));
-    assert!(labels.contains(&("codex", "user")));
-    // Codex は .agents/skills, Claude は .claude/skills
-    let codex_proj = roots.iter().find(|(s, sc, _)| *s == "codex" && *sc == "project");
-    assert!(codex_proj.unwrap().2.ends_with(".agents/skills"));
+    let claude_idx = roots
+        .iter()
+        .position(|(s, sc, _)| *s == "claude" && *sc == "project")
+        .unwrap();
+    let codex_idx = roots
+        .iter()
+        .position(|(s, sc, _)| *s == "codex" && *sc == "project")
+        .unwrap();
+    assert!(claude_idx < codex_idx, ".claude must be scanned before codex");
+    let project_codex: Vec<&std::path::PathBuf> = roots
+        .iter()
+        .filter(|(s, sc, _)| *s == "codex" && *sc == "project")
+        .map(|(_, _, p)| p)
+        .collect();
+    assert!(project_codex.iter().any(|p| p.ends_with(".codex/skills")));
+    assert!(project_codex.iter().any(|p| p.ends_with(".agents/skills")));
     // project 未指定なら user スコープのみ
-    let user_only = source_roots("");
-    assert!(user_only.iter().all(|(_, sc, _)| *sc == "user"));
+    assert!(source_roots("").iter().all(|(_, sc, _)| *sc == "user"));
+}
+
+/// `(scope, id)` dedup: 同 scope の同名 skill は `.claude` を優先し、別 scope は残す。
+#[test]
+fn dedup_prefers_claude_within_scope() {
+    let meta = |id: &str| ApiAgentSkillMeta {
+        id: id.to_string(),
+        name: id.to_string(),
+        description: String::new(),
+    };
+    let raw = vec![
+        ("claude", "project", meta("shared")),
+        ("codex", "project", meta("shared")), // 同 (project, shared) → 捨てる
+        ("codex", "project", meta("codex-only")),
+        ("claude", "user", meta("shared")), // 別 scope なので残る
+    ];
+    let out = dedup_by_scope_id(raw, &std::collections::HashSet::new());
+    let shared_proj: Vec<&ImportableSkill> = out
+        .iter()
+        .filter(|s| s.id == "shared" && s.scope == "project")
+        .collect();
+    assert_eq!(shared_proj.len(), 1);
+    assert_eq!(shared_proj[0].source, "claude");
+    assert!(out.iter().any(|s| s.id == "codex-only" && s.source == "codex"));
+    assert!(out.iter().any(|s| s.id == "shared" && s.scope == "user"));
 }
 
 async fn write_skill(dir: &std::path::Path, id: &str, body: &str) {

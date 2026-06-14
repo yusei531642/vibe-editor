@@ -50,17 +50,24 @@ pub(super) async fn load_skill_bodies(skill_ids: &[String]) -> Vec<ApiAgentSkill
 // import 元 (Claude / Codex) の列挙と import / remove
 // ============================================================
 
-/// import 候補の skills root を (source, scope, path) で返す。project root が空ならユーザー
-/// スコープのみ。project を user より先に並べて「project 優先」の重複排除を可能にする。
+/// import 候補の skills root を (source, scope, path) で返す (Issue #1019)。
+/// 各 scope 内で `.claude` を先頭に並べ、`(scope, id)` の first-wins 重複排除で `.claude` を
+/// 優先させる。Codex は `.codex/skills` (ユーザー指定) と公式の `.agents/skills` の両方を走査。
+/// project root が空ならユーザースコープのみ。
 fn source_roots(project_root: &str) -> Vec<(&'static str, &'static str, PathBuf)> {
     let home = config_paths::home_dir();
     let pr = project_root.trim();
     let mut roots: Vec<(&'static str, &'static str, PathBuf)> = Vec::new();
+    // project = ファイルツリーで今開いている作業フォルダ。.claude 優先 → .codex → .agents。
     if !pr.is_empty() {
-        roots.push(("claude", "project", Path::new(pr).join(".claude").join("skills")));
-        roots.push(("codex", "project", Path::new(pr).join(".agents").join("skills")));
+        let p = Path::new(pr);
+        roots.push(("claude", "project", p.join(".claude").join("skills")));
+        roots.push(("codex", "project", p.join(".codex").join("skills")));
+        roots.push(("codex", "project", p.join(".agents").join("skills")));
     }
+    // user (home) も同じ優先順。
     roots.push(("claude", "user", home.join(".claude").join("skills")));
+    roots.push(("codex", "user", home.join(".codex").join("skills")));
     roots.push(("codex", "user", home.join(".agents").join("skills")));
     roots
 }
@@ -78,26 +85,39 @@ pub async fn api_agent_skill_sources_list(
             .map(|s| s.id)
             .collect();
 
-    let mut out: Vec<ImportableSkill> = Vec::new();
-    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    // priority 順 (claude → codex, project → user) に flat 収集してから (scope, id) で dedup。
+    let mut raw: Vec<(&'static str, &'static str, ApiAgentSkillMeta)> = Vec::new();
     for (source, scope, root) in source_roots(&project_root) {
         for meta in list_skills_in(&root).await {
-            let key = (source.to_string(), meta.id.clone());
-            if !seen.insert(key) {
-                continue; // 同 (source, id) は project を優先済み
-            }
-            out.push(ImportableSkill {
-                imported: imported.contains(&meta.id),
-                id: meta.id,
-                name: meta.name,
-                description: meta.description,
-                source: source.to_string(),
-                scope: scope.to_string(),
-            });
+            raw.push((source, scope, meta));
         }
     }
-    out.sort_by(|a, b| (a.source.clone(), a.id.clone()).cmp(&(b.source.clone(), b.id.clone())));
-    Ok(out)
+    Ok(dedup_by_scope_id(raw, &imported))
+}
+
+/// `(scope, id)` の first-wins 重複排除。`source_roots` が各 scope 内で `.claude` を先頭に
+/// 並べるため、同名 skill では `.claude` が勝つ (Issue #1019)。
+fn dedup_by_scope_id(
+    raw: Vec<(&str, &str, ApiAgentSkillMeta)>,
+    imported: &std::collections::HashSet<String>,
+) -> Vec<ImportableSkill> {
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    let mut out: Vec<ImportableSkill> = Vec::new();
+    for (source, scope, meta) in raw {
+        if !seen.insert((scope.to_string(), meta.id.clone())) {
+            continue; // 同 scope の同 id は先勝ち (= .claude 優先)
+        }
+        out.push(ImportableSkill {
+            imported: imported.contains(&meta.id),
+            id: meta.id,
+            name: meta.name,
+            description: meta.description,
+            source: source.to_string(),
+            scope: scope.to_string(),
+        });
+    }
+    out.sort_by(|a, b| (a.scope.clone(), a.id.clone()).cmp(&(b.scope.clone(), b.id.clone())));
+    out
 }
 
 /// 指定 skill を取り込み元から専用フォルダへコピー (snapshot) する。
