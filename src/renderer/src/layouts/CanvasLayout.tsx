@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 import type { CardData, CardType } from '../stores/canvas';
 import { NODE_H, NODE_W } from '../stores/canvas';
-import type { TeamHistoryEntry, TeamOrganizationMeta } from '../../../types/shared';
+import type { TeamHistoryEntry, TeamOrganizationMeta, TeamPreset } from '../../../types/shared';
 import { Canvas, type CanvasActions } from '../components/canvas/Canvas';
 import { CanvasSidebar } from '../components/canvas/CanvasSidebar';
 import {
@@ -33,6 +33,7 @@ import {
   AgentBadge,
   BuiltinPresetItem,
   RecentItem,
+  SavedPresetItem,
   TabBtn
 } from '../components/canvas/CanvasSpawnItems';
 import { VoiceControlButton } from '../components/canvas/VoiceControlButton';
@@ -122,6 +123,10 @@ export function CanvasLayout(): JSX.Element {
   const [tab, setTab] = useState<'preset' | 'recent'>('preset');
   const [addCardOpen, setAddCardOpen] = useState(false);
   const [recent, setRecent] = useState<TeamHistoryEntry[]>([]);
+  // Issue #1023: 🔖 (TeamPresetsPanel) で保存したカスタムプリセットを spawn ポップオーバーの
+  // [プリセット] タブにも併記する。保存系 (TeamPresetsPanel) とは別ポップオーバーなので、
+  // popover を開くたびに list を取り直して新規保存を即反映する。
+  const [savedPresets, setSavedPresets] = useState<TeamPreset[]>([]);
   const [sidebarView, setSidebarView] = useState<SidebarView>('files');
   const [railChangeCount, setRailChangeCount] = useState(0);
   const [railHasGitRepo, setRailHasGitRepo] = useState(true);
@@ -186,6 +191,24 @@ export function CanvasLayout(): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectRoot]);
 
+  // Issue #1023: spawn ポップオーバーを開くたびに保存済みプリセットを取り直す。
+  // 🔖 側で保存した直後に ▼ を開いても最新が出るよう、open 遷移を依存に入れる。
+  useEffect(() => {
+    if (!spawnOpen) return;
+    let cancelled = false;
+    void window.api.teamPresets
+      .list()
+      .then((list) => {
+        if (!cancelled) setSavedPresets(list);
+      })
+      .catch((err) => {
+        console.warn('[team-presets] list failed:', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [spawnOpen]);
+
   // Phase 4-3: 起動時の Canvas チーム復元 (Issue #159) を hook 化
   useCanvasTeamRestore({
     projectRoot,
@@ -221,6 +244,43 @@ export function CanvasLayout(): JSX.Element {
     const { cards } = await spawnTeams({
       cwd,
       teams,
+      existingNodes: useCanvasStore.getState().nodes,
+      mcpAutoSetup: settings.mcpAutoSetup !== false,
+      setupTeamMcp: window.api.app.setupTeamMcp
+    });
+    const ids = addCards(cards);
+    if (ids[0]) notifyRecruit(ids[0]);
+    setSpawnOpen(false);
+    void loadRecent();
+  };
+
+  // Issue #1023: 保存済みプリセット (TeamPreset) を applyPreset と同じ spawnTeam 経路で展開する。
+  //   TeamPresetsPanel.handleApply と等価: teamId 発行 / setupTeamMcp / cwd payload を共通化し、
+  //   apply 後の agent が standalone 化しないようにする。layout が無い role は cascading 配置。
+  const applySavedPreset = async (preset: TeamPreset): Promise<void> => {
+    const teamId = `team-${crypto.randomUUID()}`;
+    const baseX = 60;
+    const baseY = 60;
+    const stride = NODE_W + 40;
+    const stepY = NODE_H + 40;
+    const members: SpawnTeamMember[] = preset.roles.map((role, idx) => {
+      const layoutEntry = preset.layout?.byRole[role.roleProfileId];
+      const position = layoutEntry
+        ? { x: layoutEntry.x, y: layoutEntry.y }
+        : { x: baseX + (idx % 4) * stride, y: baseY + Math.floor(idx / 4) * stepY };
+      return {
+        role: role.roleProfileId,
+        agent: role.agent === 'codex' ? 'codex' : 'claude',
+        position,
+        title: role.label ?? role.roleProfileId,
+        customInstructions: role.customInstructions ?? undefined
+      };
+    });
+    const { cards } = await spawnTeam({
+      teamId,
+      teamName: preset.name,
+      cwd: projectRoot,
+      members,
       existingNodes: useCanvasStore.getState().nodes,
       mcpAutoSetup: settings.mcpAutoSetup !== false,
       setupTeamMcp: window.api.app.setupTeamMcp
@@ -700,20 +760,47 @@ export function CanvasLayout(): JSX.Element {
                     )}
                   </TabBtn>
                 </div>
-                {tab === 'preset' &&
-                  BUILTIN_PRESETS.map((preset) => (
-                    <BuiltinPresetItem
-                      key={preset.id}
-                      preset={preset}
-                      label={t(preset.i18nKey)}
-                      agentCountLabel={formatOrganizationAgentCount(
-                        presetOrganizationCount(preset),
-                        presetMemberCount(preset),
-                        settings.language
-                      )}
-                      onClick={() => void applyPreset(preset)}
-                    />
-                  ))}
+                {tab === 'preset' && (
+                  <>
+                    {savedPresets.length > 0 && (
+                      <div className="canvas-popover__section">
+                        {t('canvas.preset.builtinHeader')}
+                      </div>
+                    )}
+                    {BUILTIN_PRESETS.map((preset) => (
+                      <BuiltinPresetItem
+                        key={preset.id}
+                        preset={preset}
+                        label={t(preset.i18nKey)}
+                        agentCountLabel={formatOrganizationAgentCount(
+                          presetOrganizationCount(preset),
+                          presetMemberCount(preset),
+                          settings.language
+                        )}
+                        onClick={() => void applyPreset(preset)}
+                      />
+                    ))}
+                    {savedPresets.length > 0 && (
+                      <>
+                        <div className="canvas-popover__section">
+                          {t('canvas.preset.savedHeader')}
+                        </div>
+                        {savedPresets.map((preset) => (
+                          <SavedPresetItem
+                            key={preset.id}
+                            preset={preset}
+                            agentCountLabel={formatOrganizationAgentCount(
+                              0,
+                              preset.roles.length,
+                              settings.language
+                            )}
+                            onClick={() => void applySavedPreset(preset)}
+                          />
+                        ))}
+                      </>
+                    )}
+                  </>
+                )}
                 {tab === 'recent' && (
                   <>
                     {closeRecent.length === 0 && (

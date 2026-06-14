@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from 'react';
 import type {
   TeamHistoryEntry,
+  TeamPreset,
   TeamRole,
   TerminalAgent
 } from '../../../../types/shared';
@@ -61,6 +62,39 @@ export function BuiltinPresetItem({
             </span>
           )
         )}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * Issue #1023: 🔖 (TeamPresetsPanel) で保存したカスタムプリセットを、
+ * 「チーム起動」スプリットボタンの [プリセット] タブにも併記するための item。
+ * 組み込みプリセット (BuiltinPresetItem) と見た目を揃えつつ、TeamPreset の
+ * roles[].roleProfileId / agent から RoleDot を描画する。
+ */
+export function SavedPresetItem({
+  preset,
+  agentCountLabel,
+  onClick
+}: {
+  preset: TeamPreset;
+  agentCountLabel: string;
+  onClick: () => void;
+}): JSX.Element {
+  return (
+    <button type="button" onClick={onClick} className="canvas-popover__preset">
+      <span className="canvas-popover__preset-title-row">
+        <span className="canvas-popover__preset-title">{preset.name}</span>
+        <span className="canvas-popover__preset-sub">{agentCountLabel}</span>
+      </span>
+      {preset.description ? (
+        <span className="canvas-popover__preset-desc">{preset.description}</span>
+      ) : null}
+      <span className="canvas-popover__preset-roles">
+        {preset.roles.map((role, i) => (
+          <RoleDot key={`${role.roleProfileId}-${i}`} role={role.roleProfileId} agent={role.agent} />
+        ))}
       </span>
     </button>
   );
