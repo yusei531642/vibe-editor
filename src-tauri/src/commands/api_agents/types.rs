@@ -113,6 +113,30 @@ pub struct ApiAgentSkillMeta {
     pub description: String,
 }
 
+/// import 元 (Claude / Codex) の skill メタ。`api_agent_skill_sources_list` が返す (Issue #1017)。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportableSkill {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    /// 'claude' | 'codex'
+    pub source: String,
+    /// 'user' | 'project'
+    pub scope: String,
+    /// 既に vibe-editor 専用フォルダへ import 済みか。
+    pub imported: bool,
+}
+
+/// skill import 要求 (Issue #1017)。`source` + `id` で取り込み元を特定する。
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportSkillRequest {
+    /// 'claude' | 'codex'
+    pub source: String,
+    pub id: String,
+}
+
 /// team 参加コンテキスト。renderer (apiAgent カード) が所属チーム情報を渡す (Issue #1004)。
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

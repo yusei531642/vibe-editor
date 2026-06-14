@@ -779,8 +779,15 @@ const ja: Dict = {
   'settings.customAgents.applyNote': '変更後、Canvas で該当エージェントのカードを作り直すと反映されます。',
   'settings.customAgents.skills': 'Skill (SKILL.md)',
   'settings.customAgents.skillsEmpty':
-    'このプロジェクトの .claude/skills に SKILL.md が見つかりません。',
+    'import 済みの skill がありません。下の「Claude / Codex から import」で追加してください。',
   'settings.customAgents.skillsAutoTeam': 'TeamHub 参加時は vibe-team skill が自動で追加されます。',
+  'settings.customAgents.skillImport.title': 'Claude / Codex から skill を import',
+  'settings.customAgents.skillImport.note':
+    '~/.claude/skills と ~/.agents/skills (Codex) を走査し、選んだ skill を vibe-editor 専用フォルダにコピーします。',
+  'settings.customAgents.skillImport.empty':
+    'import 元 (~/.claude/skills・~/.agents/skills) に skill が見つかりません。',
+  'settings.customAgents.skillImport.import': 'Import',
+  'settings.customAgents.skillImport.remove': '削除',
 
   // ---------- MCP tab ----------
   'settings.mcp.autoTitle': '自動セットアップ',
@@ -1657,9 +1664,17 @@ const en: Dict = {
     'This provider/model degrades to read-only chat because tool calling is unavailable.',
   'settings.customAgents.applyNote': 'Recreate the agent card in Canvas to apply changes.',
   'settings.customAgents.skills': 'Skills (SKILL.md)',
-  'settings.customAgents.skillsEmpty': 'No SKILL.md found under this project’s .claude/skills.',
+  'settings.customAgents.skillsEmpty':
+    'No imported skills yet. Add some via “Import from Claude / Codex” below.',
   'settings.customAgents.skillsAutoTeam':
     'The vibe-team skill is added automatically when joining TeamHub.',
+  'settings.customAgents.skillImport.title': 'Import skills from Claude / Codex',
+  'settings.customAgents.skillImport.note':
+    'Scans ~/.claude/skills and ~/.agents/skills (Codex), and copies the selected skill into the vibe-editor skills folder.',
+  'settings.customAgents.skillImport.empty':
+    'No skills found in the import sources (~/.claude/skills, ~/.agents/skills).',
+  'settings.customAgents.skillImport.import': 'Import',
+  'settings.customAgents.skillImport.remove': 'Remove',
 
   // ---------- MCP tab ----------
   'settings.mcp.autoTitle': 'Auto setup',

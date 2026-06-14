@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   API_AGENT_PROVIDER_PRESETS,
   type AgentConfig,
@@ -9,6 +9,7 @@ import {
   type CliAgentConfig
 } from '../../../../types/shared';
 import { useT } from '../../lib/i18n';
+import { SkillImportPanel } from './SkillImportPanel';
 import { useNativeConfirm } from '../../lib/use-native-confirm';
 import { parseShellArgsStrict } from '../../lib/parse-args';
 import type { UpdateSetting } from './types';
@@ -83,22 +84,18 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
     };
   }, [apiProviderId]);
 
-  // active project の .claude/skills/* を列挙 (API runtime のときだけ)。
-  useEffect(() => {
-    if (agent.runtime !== 'api') return;
-    let disposed = false;
+  // vibe-editor 専用フォルダの import 済み skill を列挙 (API runtime のときだけ)。
+  const reloadSkills = useCallback((): void => {
     void window.api.apiAgents
       .listSkills()
-      .then((list) => {
-        if (!disposed) setAvailableSkills(list);
-      })
-      .catch(() => {
-        if (!disposed) setAvailableSkills([]);
-      });
-    return () => {
-      disposed = true;
-    };
-  }, [agent.runtime]);
+      .then(setAvailableSkills)
+      .catch(() => setAvailableSkills([]));
+  }, []);
+
+  useEffect(() => {
+    if (agent.runtime !== 'api') return;
+    reloadSkills();
+  }, [agent.runtime, reloadSkills]);
 
   const toggleSkill = (id: string): void => {
     if (!apiAgent) return;
@@ -348,6 +345,7 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
               </div>
             )}
             <p className="modal__note">{t('settings.customAgents.skillsAutoTeam')}</p>
+            <SkillImportPanel onChanged={reloadSkills} />
           </div>
 
           <p className="modal__note">

@@ -1,64 +1,185 @@
-// api_agents/skills — SKILL.md の列挙と読み込み (Issue #998)。
+// api_agents/skills — vibe-editor 専用 skill フォルダの列挙/読み込みと、Claude/Codex skill の
+// import (Issue #998 / #1017)。
+//
+// 構成:
+//   - API エージェントが読む skill ソースは vibe-editor 専用フォルダ `~/.vibe-editor/skills`。
+//   - import 元は Claude (`~/.claude/skills`, `<project>/.claude/skills`) と
+//     Codex (`~/.agents/skills`, `<project>/.agents/skills`)。設定からコピー (snapshot) する。
 //
 // セキュリティ方針:
-//   - 参照するのは active project root (`state` の信頼値) 配下の `.claude/skills/<id>/SKILL.md`
-//     のみ。renderer からパスを受け取らない。
-//   - skill id は `is_valid_id_segment` で検証し、`..` / `/` を含む traversal を拒否する。
-//   - SKILL.md 読み込みはサイズ上限でキャップする (巨大ファイルでの OOM 回避)。
+//   - skill id は `is_valid_id_segment` で検証し、`..` / `/` を含む traversal を拒否。
+//   - 各 skills root を canonicalize し、SKILL.md の実体が root 配下に収まることを検証して
+//     symlink escape を拒否 (canonicalize 後の実体パスを read するため TOCTOU も回避)。
+//   - SKILL.md 読み込みはサイズ上限でキャップ (巨大ファイルでの OOM 回避)。
 
+use crate::commands::atomic_write::atomic_write;
 use crate::commands::error::{CommandError, CommandResult};
 use crate::commands::validation::is_valid_id_segment;
 use crate::state::{current_project_root, AppState};
+use crate::util::config_paths;
 use std::path::{Path, PathBuf};
 use tauri::State;
 use tokio::fs;
 
-use super::types::{ApiAgentSkill, ApiAgentSkillMeta};
+use super::types::{ApiAgentSkill, ApiAgentSkillMeta, ImportSkillRequest, ImportableSkill};
 
-/// 1 つの SKILL.md から読み込む最大バイト数。context budget (`MAX_SKILL_BYTES`) とは別で、
-/// ここでは「異常に巨大なファイルを丸読みしない」ための I/O 上限。
+/// 1 つの SKILL.md から読み込む最大バイト数。
 const MAX_SKILL_FILE_BYTES: usize = 256 * 1024;
 
 /// TeamHub 参加時に自動追加する skill。
 pub(super) const VIBE_TEAM_SKILL_ID: &str = "vibe-team";
 
-fn skills_root(project_root: &str) -> PathBuf {
-    Path::new(project_root).join(".claude").join("skills")
+// ============================================================
+// 専用フォルダ (API エージェントが読む skill ソース)
+// ============================================================
+
+/// vibe-editor 専用 skill フォルダ (`~/.vibe-editor/skills`) の skill 一覧を返す。
+#[tauri::command]
+pub async fn api_agent_skill_list() -> CommandResult<Vec<ApiAgentSkillMeta>> {
+    Ok(list_skills_in(&config_paths::vibe_skills_dir()).await)
 }
 
-/// active project の `.claude/skills/*/SKILL.md` を列挙し、選択可能な skill 一覧を返す。
-/// プロジェクト未選択 / skills ディレクトリ無しのときは空配列。
-#[tauri::command]
-pub async fn api_agent_skill_list(
-    state: State<'_, AppState>,
-) -> CommandResult<Vec<ApiAgentSkillMeta>> {
-    let root = current_project_root(&state.project_root).unwrap_or_default();
-    let root = root.trim();
-    if root.is_empty() {
-        return Ok(Vec::new());
+/// `api_agent_send` から呼ぶ内部ヘルパ。選択された `skill_ids` + 自動 `vibe-team` の本文を、
+/// 専用フォルダから読み込んで返す。無効 id / 不在ファイルはスキップ。`vibe-team` だけは
+/// ファイルが無ければバンドル本文へフォールバックする。
+pub(super) async fn load_skill_bodies(skill_ids: &[String]) -> Vec<ApiAgentSkill> {
+    load_skill_bodies_from(&config_paths::vibe_skills_dir(), skill_ids).await
+}
+
+// ============================================================
+// import 元 (Claude / Codex) の列挙と import / remove
+// ============================================================
+
+/// import 候補の skills root を (source, scope, path) で返す。project root が空ならユーザー
+/// スコープのみ。project を user より先に並べて「project 優先」の重複排除を可能にする。
+fn source_roots(project_root: &str) -> Vec<(&'static str, &'static str, PathBuf)> {
+    let home = config_paths::home_dir();
+    let pr = project_root.trim();
+    let mut roots: Vec<(&'static str, &'static str, PathBuf)> = Vec::new();
+    if !pr.is_empty() {
+        roots.push(("claude", "project", Path::new(pr).join(".claude").join("skills")));
+        roots.push(("codex", "project", Path::new(pr).join(".agents").join("skills")));
     }
-    let dir = skills_root(root);
-    // symlink escape を防ぐため skills root を canonicalize し、配下封じ込めの基準にする。
-    let dir_canon = match fs::canonicalize(&dir).await {
-        Ok(p) => p,
-        Err(_) => return Ok(Vec::new()), // skills ディレクトリが無い
+    roots.push(("claude", "user", home.join(".claude").join("skills")));
+    roots.push(("codex", "user", home.join(".agents").join("skills")));
+    roots
+}
+
+/// Claude / Codex の取り込み元 skill を列挙する。(source, id) で重複排除 (project 優先)。
+#[tauri::command]
+pub async fn api_agent_skill_sources_list(
+    state: State<'_, AppState>,
+) -> CommandResult<Vec<ImportableSkill>> {
+    let project_root = current_project_root(&state.project_root).unwrap_or_default();
+    let imported: std::collections::HashSet<String> =
+        list_skills_in(&config_paths::vibe_skills_dir())
+            .await
+            .into_iter()
+            .map(|s| s.id)
+            .collect();
+
+    let mut out: Vec<ImportableSkill> = Vec::new();
+    let mut seen: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    for (source, scope, root) in source_roots(&project_root) {
+        for meta in list_skills_in(&root).await {
+            let key = (source.to_string(), meta.id.clone());
+            if !seen.insert(key) {
+                continue; // 同 (source, id) は project を優先済み
+            }
+            out.push(ImportableSkill {
+                imported: imported.contains(&meta.id),
+                id: meta.id,
+                name: meta.name,
+                description: meta.description,
+                source: source.to_string(),
+                scope: scope.to_string(),
+            });
+        }
+    }
+    out.sort_by(|a, b| (a.source.clone(), a.id.clone()).cmp(&(b.source.clone(), b.id.clone())));
+    Ok(out)
+}
+
+/// 指定 skill を取り込み元から専用フォルダへコピー (snapshot) する。
+#[tauri::command]
+pub async fn api_agent_skill_import(
+    state: State<'_, AppState>,
+    req: ImportSkillRequest,
+) -> CommandResult<ApiAgentSkillMeta> {
+    if !is_valid_id_segment(&req.id) {
+        return Err(CommandError::validation("invalid skill id"));
+    }
+    if req.source != "claude" && req.source != "codex" {
+        return Err(CommandError::validation("invalid source"));
+    }
+    let project_root = current_project_root(&state.project_root).unwrap_or_default();
+
+    // source の各 root を project 優先で走査し、最初に見つかった SKILL.md を採用する。
+    let mut body: Option<String> = None;
+    for (source, _scope, root) in source_roots(&project_root) {
+        if source != req.source {
+            continue;
+        }
+        let Ok(root_canon) = fs::canonicalize(&root).await else {
+            continue;
+        };
+        let md = root.join(&req.id).join("SKILL.md");
+        if let Some(b) = read_skill_md_within(&root_canon, &md).await {
+            body = Some(b);
+            break;
+        }
+    }
+    let Some(body) = body else {
+        return Err(CommandError::not_found("source skill not found"));
     };
-    let mut rd = match fs::read_dir(&dir).await {
-        Ok(rd) => rd,
-        Err(_) => return Ok(Vec::new()),
+
+    let dest_dir = config_paths::vibe_skills_dir().join(&req.id);
+    fs::create_dir_all(&dest_dir)
+        .await
+        .map_err(|e| CommandError::Io(e.to_string()))?;
+    atomic_write(&dest_dir.join("SKILL.md"), body.as_bytes())
+        .await
+        .map_err(|e| CommandError::internal(e.to_string()))?;
+
+    let (name, description) = parse_skill_meta(&req.id, &body);
+    Ok(ApiAgentSkillMeta {
+        id: req.id,
+        name,
+        description,
+    })
+}
+
+/// 専用フォルダから import 済み skill を削除する。
+#[tauri::command]
+pub async fn api_agent_skill_remove(id: String) -> CommandResult<()> {
+    if !is_valid_id_segment(&id) {
+        return Err(CommandError::validation("invalid skill id"));
+    }
+    let dir = config_paths::vibe_skills_dir().join(&id);
+    match fs::remove_dir_all(&dir).await {
+        Ok(()) | Err(_) => Ok(()), // 不在は成功扱い (冪等)
+    }
+}
+
+// ============================================================
+// 共有ヘルパ
+// ============================================================
+
+/// `dir/<id>/SKILL.md` を列挙して skill メタを返す。dir 不在時は空配列。symlink escape は除外。
+async fn list_skills_in(dir: &Path) -> Vec<ApiAgentSkillMeta> {
+    let Ok(dir_canon) = fs::canonicalize(dir).await else {
+        return Vec::new();
+    };
+    let Ok(mut rd) = fs::read_dir(dir).await else {
+        return Vec::new();
     };
     let mut out: Vec<ApiAgentSkillMeta> = Vec::new();
-    while let Some(entry) = rd
-        .next_entry()
-        .await
-        .map_err(|e| CommandError::Io(e.to_string()))?
-    {
+    while let Ok(Some(entry)) = rd.next_entry().await {
         let id = entry.file_name().to_string_lossy().to_string();
         if !is_valid_id_segment(&id) {
             continue;
         }
         let md = entry.path().join("SKILL.md");
-        // SKILL.md (や中間ディレクトリ) が skills root 外を指す symlink なら読まない。
         let Some(body) = read_skill_md_within(&dir_canon, &md).await else {
             continue;
         };
@@ -70,15 +191,11 @@ pub async fn api_agent_skill_list(
         });
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
-    Ok(out)
+    out
 }
 
-/// `api_agent_send` から呼ぶ内部ヘルパ。選択された `skill_ids` + 自動 `vibe-team` の
-/// `SKILL.md` 本文を読み込んで返す。無効 id / 不在ファイルはスキップ。`vibe-team` だけは
-/// ディスクに無ければバンドル本文へフォールバックする。
-pub(super) async fn load_skill_bodies(project_root: &str, skill_ids: &[String]) -> Vec<ApiAgentSkill> {
-    let root = project_root.trim();
-    // 重複排除しつつ順序を保つ。
+/// `dir/<id>/SKILL.md` から選択 skill + 自動 vibe-team の本文を読み込む。
+async fn load_skill_bodies_from(dir: &Path, skill_ids: &[String]) -> Vec<ApiAgentSkill> {
     let mut ids: Vec<String> = Vec::new();
     for id in skill_ids {
         if is_valid_id_segment(id) && !ids.iter().any(|x| x == id) {
@@ -89,25 +206,16 @@ pub(super) async fn load_skill_bodies(project_root: &str, skill_ids: &[String]) 
     if !ids.iter().any(|i| i == VIBE_TEAM_SKILL_ID) {
         ids.push(VIBE_TEAM_SKILL_ID.to_string());
     }
-
-    // symlink escape を防ぐため skills root を canonicalize して封じ込め基準にする。
-    let dir_canon = if root.is_empty() {
-        None
-    } else {
-        fs::canonicalize(skills_root(root)).await.ok()
-    };
+    let dir_canon = fs::canonicalize(dir).await.ok();
 
     let mut out: Vec<ApiAgentSkill> = Vec::new();
     for id in ids {
         let disk_body = match &dir_canon {
-            Some(dc) => {
-                read_skill_md_within(dc, &skills_root(root).join(&id).join("SKILL.md")).await
-            }
+            Some(dc) => read_skill_md_within(dc, &dir.join(&id).join("SKILL.md")).await,
             None => None,
         };
         let body = match disk_body {
             Some(b) => b,
-            // vibe-team は disk に無い / 読めない / symlink 拒否のときバンドル本文へフォールバック。
             None if id == VIBE_TEAM_SKILL_ID => {
                 crate::commands::vibe_team_skill::bundled_vibe_team_skill_text()
             }
@@ -119,10 +227,8 @@ pub(super) async fn load_skill_bodies(project_root: &str, skill_ids: &[String]) 
     out
 }
 
-/// `.claude/skills` (canonicalize 済み root) 配下に実体が収まる SKILL.md だけを読む。
-/// SKILL.md 自身や中間ディレクトリが root 外を指す symlink / traversal の場合は `None` を返し、
-/// **読み込まない**。canonicalize 後の実体パスを read するため、検査対象と読み込み対象が
-/// 一致し TOCTOU を避けられる (Issue #998 security review)。
+/// canonicalize 済み skills root 配下に実体が収まる SKILL.md だけを読む。root 外を指す
+/// symlink / traversal は `None` を返し読み込まない。
 async fn read_skill_md_within(skills_root_canon: &Path, md_path: &Path) -> Option<String> {
     let canon = fs::canonicalize(md_path).await.ok()?;
     if !canon.starts_with(skills_root_canon) {
@@ -137,8 +243,7 @@ async fn read_skill_md_within(skills_root_canon: &Path, md_path: &Path) -> Optio
 
 async fn read_capped(path: &Path) -> CommandResult<String> {
     use tokio::io::AsyncReadExt;
-    // サイズキャップを I/O 段階で効かせるため、ファイル全体ではなく先頭
-    // MAX_SKILL_FILE_BYTES だけを読む (巨大ファイルでの無駄な read / alloc を回避)。
+    // サイズキャップを I/O 段階で効かせるため先頭 MAX_SKILL_FILE_BYTES だけ読む。
     let file = fs::File::open(path)
         .await
         .map_err(|e| CommandError::Io(e.to_string()))?;
@@ -147,7 +252,6 @@ async fn read_capped(path: &Path) -> CommandResult<String> {
         .read_to_end(&mut buf)
         .await
         .map_err(|e| CommandError::Io(e.to_string()))?;
-    // 上限でのバイト境界切断は from_utf8_lossy が U+FFFD で吸収する。
     Ok(String::from_utf8_lossy(&buf).to_string())
 }
 
@@ -158,7 +262,6 @@ fn parse_skill_meta(id: &str, body: &str) -> (String, String) {
     let mut description: Option<String> = None;
 
     let trimmed = body.trim_start_matches('\u{feff}');
-    // HTML コメント行 (vibe-team の version マーカー等) は frontmatter 検出前にスキップ。
     let mut lines = trimmed.lines().peekable();
     while let Some(l) = lines.peek() {
         let t = l.trim();
@@ -169,7 +272,7 @@ fn parse_skill_meta(id: &str, body: &str) -> (String, String) {
         }
     }
     if lines.peek().map(|l| l.trim()) == Some("---") {
-        lines.next(); // opening ---
+        lines.next();
         for l in lines.by_ref() {
             let t = l.trim();
             if t == "---" {
@@ -193,7 +296,6 @@ fn parse_skill_meta(id: &str, body: &str) -> (String, String) {
             .unwrap_or("")
             .to_string()
     });
-    // description は selector の subtitle 用途なので適度に短縮。
     let description = truncate_chars(&description, 160);
     (name, description)
 }
@@ -219,124 +321,4 @@ fn truncate_chars(s: &str, max: usize) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_meta_reads_frontmatter() {
-        let body = "---\nname: My Skill\ndescription: \"Does a thing\"\n---\n# Heading\nbody text";
-        let (name, desc) = parse_skill_meta("my-skill", body);
-        assert_eq!(name, "My Skill");
-        assert_eq!(desc, "Does a thing");
-    }
-
-    #[test]
-    fn parse_meta_skips_leading_html_comment() {
-        let body = "<!-- vibe-team-skill-version: 1.6.3 -->\n---\nname: vibe-team\ndescription: team rules\n---\nbody";
-        let (name, desc) = parse_skill_meta("vibe-team", body);
-        assert_eq!(name, "vibe-team");
-        assert_eq!(desc, "team rules");
-    }
-
-    #[test]
-    fn parse_meta_falls_back_without_frontmatter() {
-        let body = "# Title\n\nFirst real line describes it.";
-        let (name, desc) = parse_skill_meta("plain", body);
-        assert_eq!(name, "plain");
-        assert_eq!(desc, "First real line describes it.");
-    }
-
-    #[tokio::test]
-    async fn load_skill_bodies_always_includes_vibe_team_via_bundle() {
-        // 存在しない root なのでディスク読み込みは全て失敗するが、vibe-team は
-        // バンドル本文でフォールバックされて必ず 1 件返る。
-        let skills = load_skill_bodies("/nonexistent-root-xyz", &["unknown".to_string()]).await;
-        assert!(skills.iter().any(|s| s.id == VIBE_TEAM_SKILL_ID));
-        assert!(!skills.iter().any(|s| s.id == "unknown"));
-        let vt = skills.iter().find(|s| s.id == VIBE_TEAM_SKILL_ID).unwrap();
-        assert!(vt.body.contains("vibe-team"));
-    }
-
-    #[tokio::test]
-    async fn load_skill_bodies_reads_disk_skill_and_rejects_traversal() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_string_lossy().to_string();
-        let skill_dir = skills_root(&root).join("my-skill");
-        tokio::fs::create_dir_all(&skill_dir).await.unwrap();
-        tokio::fs::write(
-            skill_dir.join("SKILL.md"),
-            "---\nname: Mine\ndescription: d\n---\nhello body",
-        )
-        .await
-        .unwrap();
-
-        let skills = load_skill_bodies(
-            &root,
-            &["my-skill".to_string(), "../escape".to_string()],
-        )
-        .await;
-        let mine = skills.iter().find(|s| s.id == "my-skill").unwrap();
-        assert_eq!(mine.name, "Mine");
-        assert!(mine.body.contains("hello body"));
-        // traversal id は弾かれる
-        assert!(!skills.iter().any(|s| s.id.contains("..")));
-        // vibe-team は自動追加
-        assert!(skills.iter().any(|s| s.id == VIBE_TEAM_SKILL_ID));
-    }
-
-    /// security: SKILL.md が skills root 外を指す symlink の場合、本文を読み込まない。
-    /// 攻撃 repo を clone → API エージェント利用だけで任意ファイルが流出する経路を塞ぐ。
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn load_skill_bodies_rejects_symlink_escape() {
-        use std::os::unix::fs::symlink;
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_string_lossy().to_string();
-        // プロジェクト内だが .claude/skills の外にある「秘密」ファイル
-        let secret = dir.path().join("secret.txt");
-        tokio::fs::write(&secret, "TOP SECRET KEY").await.unwrap();
-        // SKILL.md を秘密ファイルへの symlink にした悪意ある skill
-        let skill_dir = skills_root(&root).join("evil");
-        tokio::fs::create_dir_all(&skill_dir).await.unwrap();
-        symlink(&secret, skill_dir.join("SKILL.md")).unwrap();
-
-        let skills = load_skill_bodies(&root, &["evil".to_string()]).await;
-        // evil は拒否され、どの skill 本文にも秘密が混入しない
-        assert!(!skills.iter().any(|s| s.id == "evil"));
-        assert!(!skills.iter().any(|s| s.body.contains("TOP SECRET")));
-        // vibe-team の自動追加は維持される (バンドル本文)
-        assert!(skills.iter().any(|s| s.id == VIBE_TEAM_SKILL_ID));
-    }
-
-    /// security: skills root 内に収まる正当な symlink は許可される (dotfiles 運用等)。
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn load_skill_bodies_allows_symlink_within_root() {
-        use std::os::unix::fs::symlink;
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_string_lossy().to_string();
-        let real_dir = skills_root(&root).join("real");
-        tokio::fs::create_dir_all(&real_dir).await.unwrap();
-        tokio::fs::write(real_dir.join("SKILL.md"), "inside body")
-            .await
-            .unwrap();
-        // skills root 内で real/SKILL.md を指す symlink ファイル
-        let alias_dir = skills_root(&root).join("alias");
-        tokio::fs::create_dir_all(&alias_dir).await.unwrap();
-        symlink(real_dir.join("SKILL.md"), alias_dir.join("SKILL.md")).unwrap();
-
-        let skills = load_skill_bodies(&root, &["alias".to_string()]).await;
-        let alias = skills.iter().find(|s| s.id == "alias").unwrap();
-        assert!(alias.body.contains("inside body"));
-    }
-
-    #[tokio::test]
-    async fn read_capped_limits_size() {
-        let dir = tempfile::tempdir().unwrap();
-        let p = dir.path().join("big.md");
-        let big = "x".repeat(MAX_SKILL_FILE_BYTES * 2);
-        tokio::fs::write(&p, &big).await.unwrap();
-        let out = read_capped(&p).await.unwrap();
-        assert!(out.len() <= MAX_SKILL_FILE_BYTES);
-    }
-}
+mod tests;
