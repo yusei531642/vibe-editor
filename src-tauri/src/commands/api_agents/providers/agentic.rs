@@ -97,7 +97,7 @@ pub(super) async fn call_openai_tools(
         // assistant の tool_calls メッセージをそのまま会話へ (OpenAI は原文の再送が必要)。
         convo.push(msg.clone());
         for call in &calls {
-            let outcome = run_tool(&mut rt, call);
+            let outcome = run_tool(&mut rt, call).await;
             convo.push(json!({
                 "role": "tool",
                 "tool_call_id": call.id,
@@ -195,7 +195,7 @@ pub(super) async fn call_anthropic_tools(
         convo.push(json!({ "role": "assistant", "content": content }));
         let mut results = Vec::new();
         for call in &calls {
-            let (outcome, is_error) = run_tool_with_flag(&mut rt, call);
+            let (outcome, is_error) = run_tool_with_flag(&mut rt, call).await;
             results.push(json!({
                 "type": "tool_result",
                 "tool_use_id": call.id,
@@ -308,7 +308,7 @@ pub(super) async fn call_gemini_tools(
         contents.push(json!({ "role": "model", "parts": parts }));
         let mut resp_parts = Vec::new();
         for call in &calls {
-            let outcome = run_tool(&mut rt, call);
+            let outcome = run_tool(&mut rt, call).await;
             resp_parts.push(json!({
                 "functionResponse": { "name": call.name, "response": { "result": outcome } }
             }));
@@ -353,13 +353,28 @@ fn gemini_usage(v: &Value) -> Option<ApiAgentUsage> {
 // ---------- shared ----------
 
 /// tool を実行し、status イベントを emit して結果本文を返す。
-fn run_tool(rt: &mut ToolRuntime<'_>, call: &ToolCall) -> String {
-    run_tool_with_flag(rt, call).0
+async fn run_tool(rt: &mut ToolRuntime<'_>, call: &ToolCall) -> String {
+    run_tool_with_flag(rt, call).await.0
 }
 
-fn run_tool_with_flag(rt: &mut ToolRuntime<'_>, call: &ToolCall) -> (String, bool) {
+async fn run_tool_with_flag(rt: &mut ToolRuntime<'_>, call: &ToolCall) -> (String, bool) {
     (rt.on_tool)(&call.name, "started", Some(&summarize_args(&call.args)));
-    let outcome = tools::execute_tool(rt.project_root, &call.name, &call.args);
+    // ツール実行は同期ブロッキング fs (read_dir / read) を含むため、async ランタイムの
+    // worker を塞がないよう spawn_blocking へ退避する。
+    let project_root = rt.project_root.to_string();
+    let name = call.name.clone();
+    let args = call.args.clone();
+    let outcome = match tokio::task::spawn_blocking(move || {
+        tools::execute_tool(&project_root, &name, &args)
+    })
+    .await
+    {
+        Ok(o) => o,
+        Err(e) => tools::ToolOutcome {
+            content: format!("tool execution failed: {e}"),
+            is_error: true,
+        },
+    };
     (rt.on_tool)(
         &call.name,
         if outcome.is_error { "failed" } else { "completed" },
