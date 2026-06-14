@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 
 use super::super::tools;
 use super::super::types::{ApiAgentConfig, ApiAgentMessage, ApiAgentUsage};
-use super::{usage_from_value, ProviderPreset, ToolRuntime, HTTP_CLIENT};
+use super::{usage_from_value, ProviderPreset, TeamToolCtx, ToolRuntime, HTTP_CLIENT};
 
 /// 1 件の tool 呼び出し (provider 非依存に正規化したもの)。
 struct ToolCall {
@@ -24,6 +24,16 @@ struct ToolCall {
 }
 
 const BUDGET_MSG: &str = "Tool turn budget exceeded before a final answer.";
+
+/// このターンでモデルに公開するツール spec。team 参加時は team_read / team_send / team_info を
+/// read_file / list_dir に追加する。
+fn tool_specs(rt: &ToolRuntime<'_>) -> Vec<tools::ToolSpec> {
+    let mut specs = tools::builtin_read_tools();
+    if rt.team.is_some() {
+        specs.extend(tools::builtin_team_tools());
+    }
+    specs
+}
 
 // ---------- OpenAI-compatible ----------
 
@@ -36,7 +46,7 @@ pub(super) async fn call_openai_tools(
     mut rt: ToolRuntime<'_>,
     on_delta: &mut (dyn FnMut(&str) + Send),
 ) -> anyhow::Result<(String, Option<ApiAgentUsage>, String)> {
-    let specs = tools::builtin_read_tools();
+    let specs = tool_specs(&rt);
     let tool_defs: Vec<Value> = specs
         .iter()
         .map(|s| {
@@ -138,7 +148,7 @@ pub(super) async fn call_anthropic_tools(
     mut rt: ToolRuntime<'_>,
     on_delta: &mut (dyn FnMut(&str) + Send),
 ) -> anyhow::Result<(String, Option<ApiAgentUsage>, String)> {
-    let specs = tools::builtin_read_tools();
+    let specs = tool_specs(&rt);
     let tool_defs: Vec<Value> = specs
         .iter()
         .map(|s| json!({ "name": s.name, "description": s.description, "input_schema": s.parameters }))
@@ -244,7 +254,7 @@ pub(super) async fn call_gemini_tools(
     mut rt: ToolRuntime<'_>,
     on_delta: &mut (dyn FnMut(&str) + Send),
 ) -> anyhow::Result<(String, Option<ApiAgentUsage>, String)> {
-    let specs = tools::builtin_read_tools();
+    let specs = tool_specs(&rt);
     let decls: Vec<Value> = specs
         .iter()
         .map(|s| json!({ "name": s.name, "description": s.description, "parameters": s.parameters }))
@@ -359,21 +369,29 @@ async fn run_tool(rt: &mut ToolRuntime<'_>, call: &ToolCall) -> String {
 
 async fn run_tool_with_flag(rt: &mut ToolRuntime<'_>, call: &ToolCall) -> (String, bool) {
     (rt.on_tool)(&call.name, "started", Some(&summarize_args(&call.args)));
-    // ツール実行は同期ブロッキング fs (read_dir / read) を含むため、async ランタイムの
-    // worker を塞がないよう spawn_blocking へ退避する。
-    let project_root = rt.project_root.to_string();
-    let name = call.name.clone();
-    let args = call.args.clone();
-    let outcome = match tokio::task::spawn_blocking(move || {
-        tools::execute_tool(&project_root, &name, &args)
-    })
-    .await
-    {
-        Ok(o) => o,
-        Err(e) => tools::ToolOutcome {
-            content: format!("tool execution failed: {e}"),
-            is_error: true,
-        },
+    let outcome = if tools::is_team_tool(&call.name) {
+        // team 系 tool は team_hub の既存関数へ委譲 (async)。team 未参加なら明示エラー。
+        match rt.team.as_ref() {
+            Some(team) => execute_team_tool(team, &call.name, &call.args).await,
+            None => tools::ToolOutcome {
+                content: format!("team tool '{}' is unavailable: not part of a team", call.name),
+                is_error: true,
+            },
+        }
+    } else {
+        // read_file / list_dir は同期ブロッキング fs を含むため spawn_blocking へ退避する。
+        let project_root = rt.project_root.to_string();
+        let name = call.name.clone();
+        let args = call.args.clone();
+        match tokio::task::spawn_blocking(move || tools::execute_tool(&project_root, &name, &args))
+            .await
+        {
+            Ok(o) => o,
+            Err(e) => tools::ToolOutcome {
+                content: format!("tool execution failed: {e}"),
+                is_error: true,
+            },
+        }
     };
     (rt.on_tool)(
         &call.name,
@@ -381,6 +399,26 @@ async fn run_tool_with_flag(rt: &mut ToolRuntime<'_>, call: &ToolCall) -> (Strin
         None,
     );
     (outcome.content, outcome.is_error)
+}
+
+/// team 系 tool を team_hub の既存関数へ委譲する (Issue #1004)。dispatch/inject の中核には
+/// 触れず、pull 型に必要な team_read / team_send / team_info だけを呼ぶ。
+async fn execute_team_tool(team: &TeamToolCtx, name: &str, args: &Value) -> tools::ToolOutcome {
+    let ctx = crate::team_hub::CallContext {
+        team_id: team.team_id.clone(),
+        role: team.role.clone(),
+        agent_id: team.agent_id.clone(),
+    };
+    match crate::team_hub::protocol::tools::call_api_agent_tool(&team.hub, &ctx, name, args).await {
+        Ok(v) => tools::ToolOutcome {
+            content: v.to_string(),
+            is_error: false,
+        },
+        Err(e) => tools::ToolOutcome {
+            content: e,
+            is_error: true,
+        },
+    }
 }
 
 fn summarize_args(args: &Value) -> String {
@@ -409,92 +447,6 @@ fn sum_opt(a: Option<u32>, b: Option<u32>) -> Option<u32> {
     }
 }
 
+
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn openai_extract_parses_tool_calls() {
-        let msg = json!({
-            "content": null,
-            "tool_calls": [
-                { "id": "call_1", "function": { "name": "read_file", "arguments": "{\"path\":\"a.txt\"}" } }
-            ]
-        });
-        let (text, calls) = openai_extract(&msg);
-        assert_eq!(text, "");
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].id, "call_1");
-        assert_eq!(calls[0].name, "read_file");
-        assert_eq!(calls[0].args["path"], json!("a.txt"));
-    }
-
-    #[test]
-    fn openai_extract_final_text_has_no_calls() {
-        let msg = json!({ "content": "here is the answer" });
-        let (text, calls) = openai_extract(&msg);
-        assert_eq!(text, "here is the answer");
-        assert!(calls.is_empty());
-    }
-
-    #[test]
-    fn anthropic_extract_separates_text_and_tool_use() {
-        let content = vec![
-            json!({ "type": "text", "text": "let me check " }),
-            json!({ "type": "tool_use", "id": "tu_1", "name": "list_dir", "input": { "path": "." } }),
-        ];
-        let (text, calls) = anthropic_extract(&content);
-        assert_eq!(text, "let me check ");
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].name, "list_dir");
-        assert_eq!(calls[0].id, "tu_1");
-        assert_eq!(calls[0].args["path"], json!("."));
-    }
-
-    #[test]
-    fn gemini_extract_reads_function_call() {
-        let parts = vec![
-            json!({ "text": "checking" }),
-            json!({ "functionCall": { "name": "read_file", "args": { "path": "x.rs" } } }),
-        ];
-        let (text, calls) = gemini_extract(&parts);
-        assert_eq!(text, "checking");
-        assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].name, "read_file");
-        assert_eq!(calls[0].args["path"], json!("x.rs"));
-        assert!(calls[0].id.is_empty());
-    }
-
-    #[test]
-    fn accumulate_usage_sums_across_turns() {
-        let mut total = None;
-        accumulate_usage(
-            &mut total,
-            Some(ApiAgentUsage {
-                input_tokens: Some(10),
-                output_tokens: Some(5),
-                total_tokens: None,
-            }),
-        );
-        accumulate_usage(
-            &mut total,
-            Some(ApiAgentUsage {
-                input_tokens: Some(7),
-                output_tokens: Some(3),
-                total_tokens: Some(20),
-            }),
-        );
-        let u = total.unwrap();
-        assert_eq!(u.input_tokens, Some(17));
-        assert_eq!(u.output_tokens, Some(8));
-        assert_eq!(u.total_tokens, Some(20));
-    }
-
-    #[test]
-    fn summarize_args_truncates_long_payloads() {
-        let big = json!({ "path": "a".repeat(300) });
-        let s = summarize_args(&big);
-        assert!(s.chars().count() <= 121);
-        assert!(s.ends_with('…'));
-    }
-}
+mod tests;

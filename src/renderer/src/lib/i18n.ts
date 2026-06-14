@@ -56,6 +56,8 @@ const ja: Dict = {
   'mascot.desc.custom': '自分で用意した画像 (PNG/GIF/SVG/WebP) を相棒として使う',
 
   // ---------- Canvas HUD ----------
+  'canvas.apiAgent.teamRole': 'チームロール',
+  'canvas.apiAgent.teamRolePlaceholder': '例: reviewer',
   'canvas.hud.stage': 'ステージ',
   'canvas.hud.list': 'リスト',
   'canvas.hud.focus': 'フォーカス',
@@ -926,6 +928,8 @@ const en: Dict = {
   'mascot.desc.custom': 'Use your own image (PNG/GIF/SVG/WebP) as the companion',
 
   // ---------- Canvas HUD ----------
+  'canvas.apiAgent.teamRole': 'Team role',
+  'canvas.apiAgent.teamRolePlaceholder': 'e.g. reviewer',
   'canvas.hud.stage': 'Stage',
   'canvas.hud.list': 'List',
   'canvas.hud.focus': 'Focus',

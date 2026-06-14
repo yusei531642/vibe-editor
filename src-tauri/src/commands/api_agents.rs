@@ -19,7 +19,7 @@ pub mod types;
 #[cfg(test)]
 mod tests;
 
-use self::providers::{call_provider, provider_preset, ToolRuntime};
+use self::providers::{call_provider, provider_preset, TeamToolCtx, ToolRuntime};
 use self::types::*;
 use crate::state::{current_project_root, AppState};
 use tauri::State;
@@ -248,10 +248,22 @@ pub async fn api_agent_send(
         let tools = if degraded {
             None
         } else {
+            // team_id / role が揃っているときだけ team tool を有効化する (Issue #1004)。
+            let team = req
+                .team
+                .as_ref()
+                .filter(|t| !t.team_id.trim().is_empty() && !t.role.trim().is_empty())
+                .map(|t| TeamToolCtx {
+                    hub: state.team_hub.clone(),
+                    team_id: t.team_id.clone(),
+                    agent_id: t.agent_id.clone(),
+                    role: t.role.clone(),
+                });
             Some(ToolRuntime {
                 project_root: &project_root,
                 max_turns: budget,
                 on_tool: &mut on_tool,
+                team,
             })
         };
         let mut on_delta = |delta: &str| emit_delta(&app, &req, delta);

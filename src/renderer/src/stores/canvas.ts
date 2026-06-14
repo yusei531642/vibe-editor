@@ -89,6 +89,8 @@ export interface ApiAgentCardPayload extends CardPayloadBase {
   model?: string;
   toolMode?: 'auto' | 'readOnly';
   configured?: boolean;
+  /** Issue #1004: team 参加時のロール名。teamId と揃うと team tool (team_read/send/info) が有効。 */
+  teamRole?: string;
 }
 
 /** terminal カード: 単発の Claude/Codex/シェル端末を起動するための payload。 */
