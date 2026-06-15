@@ -16,6 +16,18 @@ use super::tools::{ToolOutcome, ToolSpec};
 const MAX_FETCH_BYTES: usize = 128 * 1024;
 /// HTTP リクエストのタイムアウト。
 const FETCH_TIMEOUT_SECS: u64 = 20;
+/// 自前で辿るリダイレクトの最大ホップ数。
+const MAX_REDIRECTS: usize = 5;
+
+/// redirect を自動追従しない専用クライアント。リダイレクト先も毎回 SSRF 検証するため、
+/// reqwest の自動 follow (redirect 経由の内部アクセス) を無効化する。
+static NO_REDIRECT_CLIENT: once_cell::sync::Lazy<reqwest::Client> =
+    once_cell::sync::Lazy::new(|| {
+        reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    });
 
 fn ok(content: impl Into<String>) -> ToolOutcome {
     ToolOutcome { content: content.into(), is_error: false }
@@ -82,30 +94,10 @@ async fn web_fetch(args: &Value) -> ToolOutcome {
     let Some(url_str) = args.get("url").and_then(Value::as_str) else {
         return err("web_fetch requires a string 'url' argument");
     };
-    let url = match reqwest::Url::parse(url_str.trim()) {
+    let mut url = match reqwest::Url::parse(url_str.trim()) {
         Ok(u) => u,
         Err(e) => return err(format!("invalid url: {e}")),
     };
-    if !matches!(url.scheme(), "http" | "https") {
-        return err("only http/https URLs are allowed");
-    }
-    let Some(host) = url.host_str().map(str::to_string) else {
-        return err("url has no host");
-    };
-    let port = url.port_or_known_default().unwrap_or(443);
-
-    // SSRF: host を resolve し、内部 IP に解決されるなら拒否。
-    let addrs = match tokio::net::lookup_host((host.as_str(), port)).await {
-        Ok(a) => a.collect::<Vec<_>>(),
-        Err(e) => return err(format!("could not resolve host: {e}")),
-    };
-    if addrs.is_empty() {
-        return err("could not resolve host");
-    }
-    if addrs.iter().any(|a| is_blocked_ip(a.ip())) {
-        return err("blocked: host resolves to a private/loopback/internal address");
-    }
-
     let max = args
         .get("max_bytes")
         .and_then(Value::as_u64)
@@ -113,40 +105,83 @@ async fn web_fetch(args: &Value) -> ToolOutcome {
         .unwrap_or(MAX_FETCH_BYTES)
         .max(1);
 
-    let mut resp = match super::providers::HTTP_CLIENT
-        .get(url)
-        .header("user-agent", "vibe-editor-agent")
-        .timeout(Duration::from_secs(FETCH_TIMEOUT_SECS))
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(e) => return err(format!("request failed: {e}")),
-    };
-    let status = resp.status();
-
-    // 逐次 chunk で読み、上限で打ち切る (巨大レスポンスのメモリ保護)。
-    let mut buf: Vec<u8> = Vec::new();
-    let mut truncated = false;
-    loop {
-        match resp.chunk().await {
-            Ok(Some(chunk)) => {
-                buf.extend_from_slice(&chunk);
-                if buf.len() >= max {
-                    buf.truncate(max);
-                    truncated = true;
-                    break;
-                }
-            }
-            Ok(None) => break,
-            Err(e) => return err(format!("read failed: {e}")),
+    // redirect を自前で辿り、各ホップで SSRF 検証する (redirect 経由の内部アクセスを塞ぐ)。
+    for _hop in 0..=MAX_REDIRECTS {
+        if let Err(e) = validate_url_host(&url).await {
+            return err(e);
         }
+        let mut resp = match NO_REDIRECT_CLIENT
+            .get(url.clone())
+            .header("user-agent", "vibe-editor-agent")
+            .timeout(Duration::from_secs(FETCH_TIMEOUT_SECS))
+            .send()
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => return err(format!("request failed: {e}")),
+        };
+        let status = resp.status();
+        if status.is_redirection() {
+            let Some(loc) = resp
+                .headers()
+                .get(reqwest::header::LOCATION)
+                .and_then(|v| v.to_str().ok())
+            else {
+                return err(format!("HTTP {status}: redirect without a Location header"));
+            };
+            url = match url.join(loc) {
+                Ok(u) => u,
+                Err(e) => return err(format!("invalid redirect target: {e}")),
+            };
+            continue;
+        }
+        // 非リダイレクト: 本文を逐次 chunk で読み上限で打ち切る (メモリ保護)。
+        let mut buf: Vec<u8> = Vec::new();
+        let mut truncated = false;
+        loop {
+            match resp.chunk().await {
+                Ok(Some(chunk)) => {
+                    buf.extend_from_slice(&chunk);
+                    if buf.len() >= max {
+                        buf.truncate(max);
+                        truncated = true;
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => return err(format!("read failed: {e}")),
+            }
+        }
+        let mut text = format!("HTTP {status}\n\n{}", String::from_utf8_lossy(&buf));
+        if truncated {
+            text.push_str("\n…(truncated; exceeds size limit)");
+        }
+        return ok(text);
     }
-    let mut text = format!("HTTP {status}\n\n{}", String::from_utf8_lossy(&buf));
-    if truncated {
-        text.push_str("\n…(truncated; exceeds size limit)");
+    err("too many redirects")
+}
+
+/// scheme + host を検証する。host が内部 (loopback/private/...) に解決されるなら拒否。
+/// redirect の各ホップで呼び、redirect 経由の SSRF を防ぐ。
+async fn validate_url_host(url: &reqwest::Url) -> Result<(), String> {
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("only http/https URLs are allowed".to_string());
     }
-    ok(text)
+    let Some(host) = url.host_str() else {
+        return Err("url has no host".to_string());
+    };
+    let port = url.port_or_known_default().unwrap_or(443);
+    let addrs = tokio::net::lookup_host((host, port))
+        .await
+        .map_err(|e| format!("could not resolve host: {e}"))?
+        .collect::<Vec<_>>();
+    if addrs.is_empty() {
+        return Err("could not resolve host".to_string());
+    }
+    if addrs.iter().any(|a| is_blocked_ip(a.ip())) {
+        return Err("blocked: host resolves to a private/loopback/internal address".to_string());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
