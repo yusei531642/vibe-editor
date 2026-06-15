@@ -248,7 +248,7 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
                   providerId,
                   model: nextProvider?.defaultModel ?? apiAgent.model,
                   customBaseUrl:
-                    providerId === 'custom-openai-compatible'
+                    providerId === 'custom-openai-compatible' || nextProvider?.local
                       ? apiAgent.customBaseUrl
                       : undefined
                 });
@@ -262,14 +262,14 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
             </select>
           </label>
 
-          {apiAgent.providerId === 'custom-openai-compatible' && (
+          {(apiAgent.providerId === 'custom-openai-compatible' || provider.local) && (
             <label className="modal__label modal__label--full">
               <span>{t('settings.customAgents.baseUrl')}</span>
               <input
                 type="text"
                 value={apiAgent.customBaseUrl ?? ''}
                 onChange={(e) => patchApiAgent({ customBaseUrl: e.target.value })}
-                placeholder="https://example.com/v1"
+                placeholder={provider.baseUrl ?? 'https://example.com/v1'}
                 spellCheck={false}
               />
             </label>

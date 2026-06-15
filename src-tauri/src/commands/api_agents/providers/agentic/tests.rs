@@ -103,7 +103,11 @@ use super::*;
             team: None,
         };
         let solo: Vec<&str> = tool_specs(&rt_solo).iter().map(|s| s.name).collect();
-        assert_eq!(solo, vec!["read_file", "list_dir"]);
+        // team 無しでも read/write/exec/search tool は公開される (team tool だけが付かない)。
+        for expected in ["read_file", "list_dir", "write_file", "edit_file", "bash", "grep", "glob"] {
+            assert!(solo.contains(&expected), "missing {expected}");
+        }
+        assert!(!solo.contains(&"team_read"));
 
         // team 有り: team_read / team_send / team_info が追加される
         let mut noop2 = |_: &str, _: &str, _: Option<&str>| {};

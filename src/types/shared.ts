@@ -48,6 +48,8 @@ export type ApiAgentProviderId =
   | 'cerebras'
   | 'anthropic'
   | 'gemini'
+  | 'ollama'
+  | 'lmstudio'
   | 'custom-openai-compatible';
 
 export type AgentRuntime = 'cli' | 'api';
@@ -100,6 +102,10 @@ export interface ApiAgentProviderPreset {
   baseUrl?: string;
   defaultModel: string;
   supportsTools: boolean;
+  /** ローカル実行 (Ollama / LM Studio 等)。base URL 入力を表示し API キーを任意にする。 */
+  local?: boolean;
+  /** API キー必須か (既定 true)。ローカル / custom は false。 */
+  requiresKey?: boolean;
 }
 
 export const API_AGENT_PROVIDER_PRESETS: ApiAgentProviderPreset[] = [
@@ -176,11 +182,32 @@ export const API_AGENT_PROVIDER_PRESETS: ApiAgentProviderPreset[] = [
     supportsTools: true
   },
   {
+    id: 'ollama',
+    label: 'Ollama (local)',
+    adapter: 'openai-compatible',
+    baseUrl: 'http://localhost:11434/v1',
+    defaultModel: 'llama3.1',
+    supportsTools: true,
+    local: true,
+    requiresKey: false
+  },
+  {
+    id: 'lmstudio',
+    label: 'LM Studio (local)',
+    adapter: 'openai-compatible',
+    baseUrl: 'http://localhost:1234/v1',
+    defaultModel: '',
+    supportsTools: true,
+    local: true,
+    requiresKey: false
+  },
+  {
     id: 'custom-openai-compatible',
     label: 'Custom OpenAI-compatible',
     adapter: 'openai-compatible',
     defaultModel: '',
-    supportsTools: false
+    supportsTools: false,
+    requiresKey: false
   }
 ];
 
