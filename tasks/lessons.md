@@ -220,3 +220,9 @@ codex exec --sandbox read-only --color never --ephemeral \
 - `claudeCwd` は CLI 起動時の既定 cwd であり、アプリの active `projectRoot` と同一視しない。
 - 起動復元では `lastOpenedRoot` を優先し、保存済み root が safety gate に拒否されたら、エラーで停止せず明示的なフォルダ選択へ逃がす。
 - home 直下 / system 領域を許可する方向で直さない。Rust 側 safety gate は維持し、renderer 側の復旧フローで吸収する。
+
+## Issue #1042 - Rust Clippy unnecessary_sort_by
+
+- CI が `cargo clippy ... -D warnings` で落ちた場合は、ローカルでも同じコマンドで再現してから直す。
+- `(scope, id)` のような key tuple でソートするだけなら、`sort_by` の比較式より `sort_by_key` を使う。
+- Windows の toolchain に Clippy が無い場合は、検証前に `rustup component add clippy` を実行する。

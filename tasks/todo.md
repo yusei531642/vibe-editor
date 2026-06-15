@@ -1932,3 +1932,32 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1040
 - [x] `npm run build:vite`: PASS
 - [x] `npm run test`: PASS (79 files / 478 tests、既存の React act / Tauri listen cleanup warning は継続)
 - [x] `git diff --check`: PASS
+
+## Issue #1042 - Rust Clippy unnecessary_sort_by in API agent skills (2026-06-15 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1042
+
+### 計画
+
+- [x] PR #1041 merge 後の `cargo-cfg` 失敗ログを確認する。
+- [x] `src-tauri/src/commands/api_agents/skills.rs` の `sort_by` が Clippy `unnecessary_sort_by` に該当することを確認する。
+- [x] `sort_by_key` へ置き換え、動作を変えずに CI エラーを解消する。
+- [x] Rust 検証と差分確認を実行する。
+- [ ] PR を作成し、CI / reviewer bot の結果を確認する。
+
+### Next Steps
+
+- [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
+- [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`
+- [x] `git diff --check`
+
+### 進捗
+
+- [x] `dedup_by_scope_id` の `(scope, id)` ソートを `sort_by_key` に変更した。
+- [x] CI と同じ `-D warnings` 条件で Clippy を通した。
+
+### 検証結果
+
+- [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
+- [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
+- [x] `git diff --check`: PASS
