@@ -53,13 +53,23 @@ pub(super) fn builtin_read_tools() -> Vec<ToolSpec> {
         ToolSpec {
             name: "read_file",
             description: "Read a UTF-8 text file from the current project. \
-                Path is relative to the project root. Read-only.",
+                Path is relative to the project root. Read-only. \
+                Optionally pass 'offset' (1-based start line) and 'limit' (line count) \
+                to read a slice of a large file.",
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
                         "description": "File path relative to the project root."
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "description": "1-based line number to start reading from (optional)."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of lines to read from 'offset' (optional)."
                     }
                 },
                 "required": ["path"]
@@ -169,6 +179,12 @@ fn read_file_tool(project_root: &str, args: &Value) -> ToolOutcome {
     if !meta.is_file() {
         return ToolOutcome::err(format!("not a file: {path}"));
     }
+    // offset / limit が指定されたら行レンジ読み (大ファイルのページング)。
+    let offset = args.get("offset").and_then(Value::as_u64);
+    let limit = args.get("limit").and_then(Value::as_u64);
+    if offset.is_some() || limit.is_some() {
+        return read_file_range(&resolved, offset, limit);
+    }
     use std::io::Read;
     let file = match std::fs::File::open(&resolved) {
         Ok(f) => f,
@@ -183,6 +199,49 @@ fn read_file_tool(project_root: &str, args: &Value) -> ToolOutcome {
         text.push_str("\n…(truncated; file exceeds 64KB read limit)");
     }
     ToolOutcome::ok(text)
+}
+
+/// 行レンジ読み: 1-based `offset` から `limit` 行 (既定 2000) を読む。出力は 64KB で truncate。
+fn read_file_range(
+    resolved: &std::path::Path,
+    offset: Option<u64>,
+    limit: Option<u64>,
+) -> ToolOutcome {
+    use std::io::{BufRead, BufReader};
+    let start = offset.unwrap_or(1).max(1);
+    let count = limit.unwrap_or(2000).max(1);
+    let file = match std::fs::File::open(resolved) {
+        Ok(f) => f,
+        Err(e) => return ToolOutcome::err(format!("open failed: {e}")),
+    };
+    let reader = BufReader::new(file);
+    let mut out = String::new();
+    let mut emitted = 0u64;
+    let mut truncated = false;
+    for (idx, line) in reader.lines().enumerate() {
+        let lineno = idx as u64 + 1;
+        if lineno < start {
+            continue;
+        }
+        if emitted >= count {
+            break;
+        }
+        let line = line.unwrap_or_default();
+        out.push_str(&line);
+        out.push('\n');
+        emitted += 1;
+        if out.len() as u64 > MAX_READ_BYTES {
+            truncated = true;
+            break;
+        }
+    }
+    if emitted == 0 {
+        return ToolOutcome::ok(format!("(no lines at offset {start})"));
+    }
+    if truncated {
+        out.push_str("…(truncated; exceeds 64KB read limit)");
+    }
+    ToolOutcome::ok(out)
 }
 
 fn list_dir_tool(project_root: &str, args: &Value) -> ToolOutcome {
@@ -253,6 +312,40 @@ mod tests {
         assert_eq!(out.content, "hello world");
         let nested = execute_tool(&root, "read_file", &json!({ "path": "sub/b.txt" }));
         assert_eq!(nested.content, "nested");
+    }
+
+    #[test]
+    fn read_file_offset_limit_reads_slice() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        std::fs::write(dir.path().join("n.txt"), "L1\nL2\nL3\nL4\nL5\n").unwrap();
+        let out = execute_tool(
+            &root,
+            "read_file",
+            &json!({ "path": "n.txt", "offset": 2, "limit": 2 }),
+        );
+        assert!(!out.is_error, "{}", out.content);
+        assert_eq!(out.content, "L2\nL3\n");
+    }
+
+    #[test]
+    fn read_file_offset_past_end_is_empty_note() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        std::fs::write(dir.path().join("n.txt"), "L1\nL2\n").unwrap();
+        let out = execute_tool(&root, "read_file", &json!({ "path": "n.txt", "offset": 99 }));
+        assert!(!out.is_error);
+        assert!(out.content.contains("no lines at offset"));
+    }
+
+    #[test]
+    fn read_file_limit_only_reads_head() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        std::fs::write(dir.path().join("n.txt"), "a\nb\nc\nd\n").unwrap();
+        let out = execute_tool(&root, "read_file", &json!({ "path": "n.txt", "limit": 2 }));
+        assert!(!out.is_error);
+        assert_eq!(out.content, "a\nb\n");
     }
 
     #[test]
