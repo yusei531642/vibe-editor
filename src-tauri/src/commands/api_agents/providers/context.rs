@@ -36,6 +36,11 @@ pub(super) fn trim_messages(
         total += len;
         start = prev;
     }
+    // Anthropic / Gemini は messages 先頭が user 必須。トリミングで先頭が assistant に
+    // なった場合は先頭の非 user を落として user 始まりに揃える (最後の 1 件は必ず残す)。
+    while start < messages.len() - 1 && messages[start].role != "user" {
+        start += 1;
+    }
     messages[start..].to_vec()
 }
 
@@ -61,17 +66,32 @@ mod tests {
     }
 
     #[test]
-    fn drops_oldest_when_over_budget() {
-        // 各 10 chars、budget 25 → 末尾から 2 件 (20) は入るが 3 件目 (30) は超過。
+    fn drops_oldest_and_keeps_user_first() {
+        // budget 25: 末尾 2 件 [assistant, user] は収まるが、先頭 assistant を落として
+        // user 始まりに揃えるため最後の user 1 件が残る。
         let ms = vec![
             msg("user", &"x".repeat(10)),
             msg("assistant", &"y".repeat(10)),
             msg("user", &"z".repeat(10)),
         ];
         let out = trim_messages(&ms, 25);
-        assert_eq!(out.len(), 2);
-        assert_eq!(out[0].content, "y".repeat(10));
-        assert_eq!(out[1].content, "z".repeat(10));
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].role, "user");
+        assert_eq!(out[0].content, "z".repeat(10));
+    }
+
+    #[test]
+    fn result_starts_with_user_when_window_starts_at_assistant() {
+        // 全件収まるが先頭が assistant → 先頭の非 user を落として user 始まりにする。
+        let ms = vec![
+            msg("assistant", "a"),
+            msg("user", "b"),
+            msg("assistant", "c"),
+            msg("user", "d"),
+        ];
+        let out = trim_messages(&ms, 1000);
+        assert_eq!(out.first().unwrap().role, "user");
+        assert_eq!(out.len(), 3);
     }
 
     #[test]
