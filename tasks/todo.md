@@ -1961,3 +1961,32 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1042
 - [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
 - [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
 - [x] `git diff --check`: PASS
+
+## Issue #1045 - Agentic tool specs test expects outdated tool list (2026-06-15 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1045
+
+### 計画
+
+- [x] PR #1043 の `verify` 失敗ログを確認する。
+- [x] `tool_specs_adds_team_tools_only_when_in_a_team` が古い tool list を期待していることを確認する。
+- [x] agentic auto mode の現仕様（read / write / bash / search + team tools）へテスト期待値を更新する。
+- [x] `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib commands::api_agents::providers::agentic::tests::tool_specs_adds_team_tools_only_when_in_a_team` を実行する。
+- [x] `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib` を実行する。
+
+### Next Steps
+
+- [ ] Issue #1045 専用 PR を作成し、CI / reviewer bot を確認する。
+
+### 進捗
+
+- [x] `tool_specs` のコメントを現仕様に合わせた。
+- [x] solo 時の base tools と team 時の追加 tools を明示的に検証するようテストを更新した。
+
+### 検証結果
+
+- [x] `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib commands::api_agents::providers::agentic::tests::tool_specs_adds_team_tools_only_when_in_a_team`: PASS
+- [x] `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib`: PASS (793 passed / 0 failed / 2 ignored)
+- [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
+- [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
+- [x] `git diff --check`: PASS
