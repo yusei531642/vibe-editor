@@ -203,7 +203,7 @@ fn read_file_tool(project_root: &str, args: &Value) -> ToolOutcome {
     ToolOutcome::ok(text)
 }
 
-/// 行レンジ読み: 1-based `offset` から `limit` 行 (既定 2000) を読む。出力は 64KB で truncate。
+/// 行レンジ読み (1-based offset / limit 行, 既定 2000, 出力 64KB cap)。skip/read でバッファ再利用。
 fn read_file_range(
     resolved: &std::path::Path,
     offset: Option<u64>,
@@ -216,35 +216,44 @@ fn read_file_range(
         Ok(f) => f,
         Err(e) => return ToolOutcome::err(format!("open failed: {e}")),
     };
-    let reader = BufReader::new(file);
+    let mut reader = BufReader::new(file);
+    let mut buf = String::new();
+
+    let mut lineno = 0u64; // skip: offset 直前まで読み飛ばす (バッファ再利用)
+    while lineno + 1 < start {
+        buf.clear();
+        match reader.read_line(&mut buf) {
+            Ok(0) => return ToolOutcome::ok(format!("(no lines at offset {start})")),
+            Ok(_) => lineno += 1,
+            Err(e) => return ToolOutcome::err(format!("read failed at line {}: {e}", lineno + 1)),
+        }
+    }
+
+    // read: start から count 行 (read_line は改行を保持)。
     let mut out = String::new();
     let mut emitted = 0u64;
     let mut truncated = false;
-    for (idx, line) in reader.lines().enumerate() {
-        let lineno = idx as u64 + 1;
-        if lineno < start {
-            continue;
-        }
-        if emitted >= count {
-            break;
-        }
-        // I/O / 非 UTF-8 エラーは silent に空行へ潰さず、明示して打ち切る。
-        let line = match line {
-            Ok(l) => l,
-            Err(e) => {
-                if emitted == 0 {
-                    return ToolOutcome::err(format!("read failed at line {lineno}: {e}"));
+    while emitted < count {
+        buf.clear();
+        match reader.read_line(&mut buf) {
+            Ok(0) => break,
+            Ok(_) => {
+                out.push_str(&buf);
+                emitted += 1;
+                if out.len() as u64 > MAX_READ_BYTES {
+                    truncated = true;
+                    break;
                 }
-                out.push_str(&format!("…(read stopped at line {lineno}: {e})"));
+            }
+            // I/O / 非 UTF-8 エラーは silent に潰さず明示して打ち切る。
+            Err(e) => {
+                let at = start + emitted;
+                if emitted == 0 {
+                    return ToolOutcome::err(format!("read failed at line {at}: {e}"));
+                }
+                out.push_str(&format!("…(read stopped at line {at}: {e})"));
                 return ToolOutcome::ok(out);
             }
-        };
-        out.push_str(&line);
-        out.push('\n');
-        emitted += 1;
-        if out.len() as u64 > MAX_READ_BYTES {
-            truncated = true;
-            break;
         }
     }
     if emitted == 0 {
@@ -273,9 +282,8 @@ fn list_dir_tool(project_root: &str, args: &Value) -> ToolOutcome {
         Ok(rd) => rd,
         Err(e) => return ToolOutcome::err(format!("read_dir failed: {e}")),
     };
-    // bounded top-K: 全件を Vec に貯めてソートするのではなく、アルファベット順で先頭
-    // MAX_LIST_ENTRIES 件だけを max-heap で保持する。大量エントリのディレクトリでも
-    // メモリ/ソートコストを K 件に抑える (O(n log K) / O(K))。
+    // bounded top-K: アルファベット順で先頭 MAX_LIST_ENTRIES 件だけを max-heap で保持
+    // (大量エントリでもメモリ/ソートコストを K 件に抑える, O(n log K) / O(K))。
     use std::collections::BinaryHeap;
     let mut heap: BinaryHeap<String> = BinaryHeap::new();
     let mut total = 0usize;
