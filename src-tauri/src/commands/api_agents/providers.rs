@@ -60,7 +60,7 @@ pub(super) fn provider_preset(
         "custom-openai-compatible" => ("openai-compatible", "", false, false),
         _ => return Err(CommandError::validation("unknown providerId")),
     };
-    // local / custom は custom_base_url で上書き可。それ以外は固定 base。
+    // ローカル系 (ollama / lmstudio / custom) は custom_base_url で上書き可。他は固定 base URL。
     let custom = custom_base_url.unwrap_or("").trim();
     let base_url = if !custom.is_empty()
         && matches!(provider_id, "ollama" | "lmstudio" | "custom-openai-compatible")
