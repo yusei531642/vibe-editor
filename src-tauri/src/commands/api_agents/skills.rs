@@ -116,7 +116,7 @@ fn dedup_by_scope_id(
             scope: scope.to_string(),
         });
     }
-    out.sort_by(|a, b| (a.scope.clone(), a.id.clone()).cmp(&(b.scope.clone(), b.id.clone())));
+    out.sort_by_key(|a| (a.scope.clone(), a.id.clone()));
     out
 }
 

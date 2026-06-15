@@ -214,3 +214,27 @@ codex exec --sandbox read-only --color never --ephemeral \
 - `data` は prompt 上で `data (untrusted)` と明示し、指示文ではなく資料として扱わせる。
 - 送信 API、JSON Schema、共有 TypeScript 型、worker / leader prompt、配布 Skill の文言は同じ境界で同期する。
 - Markdown fence で信頼できない本文を囲む場合は、本文中の backtick 連続数より長い fence を選ぶ。
+
+## Issue #1040 - Project root safety gate と claudeCwd の分離
+
+- `claudeCwd` は CLI 起動時の既定 cwd であり、アプリの active `projectRoot` と同一視しない。
+- 起動復元では `lastOpenedRoot` を優先し、保存済み root が safety gate に拒否されたら、エラーで停止せず明示的なフォルダ選択へ逃がす。
+- home 直下 / system 領域を許可する方向で直さない。Rust 側 safety gate は維持し、renderer 側の復旧フローで吸収する。
+
+## Issue #1042 - Rust Clippy unnecessary_sort_by
+
+- CI が `cargo clippy ... -D warnings` で落ちた場合は、ローカルでも同じコマンドで再現してから直す。
+- `(scope, id)` のような key tuple でソートするだけなら、`sort_by` の比較式より `sort_by_key` を使う。
+- Windows の toolchain に Clippy が無い場合は、検証前に `rustup component add clippy` を実行する。
+
+## Issue #1045 - Agentic tool specs test drift
+
+- API agent の tool surface を増やしたら、provider 統合テストの期待値も同じ PR 内で更新する。
+- 「team 有りで追加される tool」を見るテストでも、base tool list を明示して drift を早く検出する。
+- コメントに `read_file / list_dir` のような古い限定表現を残すと、後続修正で仕様を読み違えやすい。
+
+## Release v1.6.6 - Startup blocker hotfix
+
+- startup blocker の hotfix release では、修正PRのCIだけでなく、release PR、tag push、release workflow、公開後の latest release 表示まで一連で確認する。
+- `package-lock.json` の root version が古いまま残ることがあるため、release bump では `package.json` だけでなく lockfile の root/package version も必ず確認する。
+- Draft release を publish する前に、assets と `latest.json` の `version`、platform URL、署名エントリを確認する。

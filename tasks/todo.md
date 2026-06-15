@@ -1898,3 +1898,142 @@ Plan: `tasks/issue-568-plan.md`
 - `cargo test --lib`: 295/295 PASS
 - `npx vitest run`: 299/299 PASS (48 files)
 - `npm run typecheck`: 0 error
+
+## Issue #1040 - Invalid saved home root blocks startup after ProjectRoot safety gate (2026-06-15 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1040
+
+### 計画
+
+- [x] v1.6.5 の `ProjectRoot` safety gate と起動復元フローを確認する。
+- [x] ローカル設定で `lastOpenedRoot = C:\Users\zooyo` が起動エラーの直接原因であることを確認する。
+- [x] ローカル `~/.vibe-editor/settings.json` を安全な既存 workspace root に切り替え、当面の起動不能を解除する。
+- [x] `SettingsProvider` が `claudeCwd` を backend project root として同期しないようにする。
+- [x] 初回ロード時、保存済み root が安全チェックで拒否されたら、エラーで停止せずフォルダ選択へフォールバックする。
+- [x] renderer の回帰テスト、型チェック、ビルドを通す。
+
+### Next Steps
+
+- [x] `src/renderer/src/lib/settings-context.tsx` を最小修正する。
+- [x] `src/renderer/src/lib/hooks/use-project-loader.ts` の初回ロードを安全な fallback つきに整理する。
+- [x] 必要な hook / context テストを追加する。
+- [ ] PR を作成し、CodeRabbit / CI / reviewer bot の結果を確認する。
+
+### 進捗
+
+- [x] `settings-context` は `lastOpenedRoot` のみを active project root として同期し、`claudeCwd` を同期元から外した。
+- [x] `use-project-loader` は保存済み root の `setProjectRoot` 失敗時に `lastOpenedRoot` を空にし、フォルダ選択へフォールバックする。
+- [x] `settings-context.test.tsx` と `use-project-loader.test.tsx` に回帰テストを追加した。
+
+### 検証結果
+
+- [x] `npx vitest run src/renderer/src/lib/__tests__/settings-context.test.tsx src/renderer/src/lib/hooks/__tests__/use-project-loader.test.tsx`: PASS (2 files / 8 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run build:vite`: PASS
+- [x] `npm run test`: PASS (79 files / 478 tests、既存の React act / Tauri listen cleanup warning は継続)
+- [x] `git diff --check`: PASS
+
+## Issue #1042 - Rust Clippy unnecessary_sort_by in API agent skills (2026-06-15 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1042
+
+### 計画
+
+- [x] PR #1041 merge 後の `cargo-cfg` 失敗ログを確認する。
+- [x] `src-tauri/src/commands/api_agents/skills.rs` の `sort_by` が Clippy `unnecessary_sort_by` に該当することを確認する。
+- [x] `sort_by_key` へ置き換え、動作を変えずに CI エラーを解消する。
+- [x] Rust 検証と差分確認を実行する。
+- [ ] PR を作成し、CI / reviewer bot の結果を確認する。
+
+### Next Steps
+
+- [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`
+- [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`
+- [x] `git diff --check`
+
+### 進捗
+
+- [x] `dedup_by_scope_id` の `(scope, id)` ソートを `sort_by_key` に変更した。
+- [x] CI と同じ `-D warnings` 条件で Clippy を通した。
+
+### 検証結果
+
+- [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
+- [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
+- [x] `git diff --check`: PASS
+
+## Release v1.6.6 startup hotfix (2026-06-15 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1047
+Plan: `tasks/release-v1.6.6.md`
+
+### 計画
+
+- [x] 最新 release が `v1.6.5` のままであることを確認する。
+- [x] `main` が #1041 / #1043 / #1046 を含むことを確認する。
+- [x] Release workflow が `v*` tag push で draft release を作ることを確認する。
+- [x] npm / Rust / Tauri の version を `1.6.6` に更新する。
+- [x] release PR を作成し、CI / reviewer bot を確認する。
+- [x] PR merge 後に `v1.6.6` tag を push する。
+- [x] release workflow を監視し、draft release の assets と `latest.json` を確認する。
+- [x] draft release を publish する。
+
+### Next Steps
+
+- [x] version files を更新する。
+- [x] `npm run typecheck`、`npm run build:vite`、`cargo check`、`git diff --check` を実行する。
+- [x] PR を作成する。
+- [x] GitHub Release `v1.6.6` を publish する。
+
+### 進捗
+
+- [x] `chore/release-v1.6.6` ブランチを作成した。
+- [x] npm / Rust / Tauri の version を `1.6.6` に同期した。
+- [x] ローカル品質ゲートを通した。
+- [x] PR #1048 を作成し、reviewer bot 承認と CI 全PASSを確認した。
+- [x] PR #1048 が自動マージされ、Issue #1047 が close されたことを確認した。
+- [x] `v1.6.6` tag を merge commit `80f5361` に作成して push した。
+- [x] Release workflow run `27518218007` が成功した。
+- [x] Draft release の assets 13個と `latest.json` の `version: 1.6.6` を確認し、publish した。
+
+### 検証結果
+
+- [x] `npm run typecheck`: PASS
+- [x] `npm run build:vite`: PASS
+- [x] `cargo check --offline --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
+- [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
+- [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
+- [x] `npm run test`: PASS on rerun (79 files / 478 tests)
+- [x] `git diff --check`: PASS
+- [x] PR #1048 CI: `verify` / `cargo-cfg (windows-latest)` / `cargo-cfg (macos-latest)` / `secrets-scan`: PASS
+- [x] Release workflow `27518218007`: Linux / Windows / macOS build jobs: PASS
+- [x] Published release: https://github.com/yusei531642/vibe-editor/releases/tag/v1.6.6
+
+## Issue #1045 - Agentic tool specs test expects outdated tool list (2026-06-15 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1045
+
+### 計画
+
+- [x] PR #1043 の `verify` 失敗ログを確認する。
+- [x] `tool_specs_adds_team_tools_only_when_in_a_team` が古い tool list を期待していることを確認する。
+- [x] agentic auto mode の現仕様（read / write / bash / search + team tools）へテスト期待値を更新する。
+- [x] `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib commands::api_agents::providers::agentic::tests::tool_specs_adds_team_tools_only_when_in_a_team` を実行する。
+- [x] `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib` を実行する。
+
+### Next Steps
+
+- [ ] Issue #1045 専用 PR を作成し、CI / reviewer bot を確認する。
+
+### 進捗
+
+- [x] `tool_specs` のコメントを現仕様に合わせた。
+- [x] solo 時の base tools と team 時の追加 tools を明示的に検証するようテストを更新した。
+
+### 検証結果
+
+- [x] `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib commands::api_agents::providers::agentic::tests::tool_specs_adds_team_tools_only_when_in_a_team`: PASS
+- [x] `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib`: PASS (793 passed / 0 failed / 2 ignored)
+- [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
+- [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
+- [x] `git diff --check`: PASS

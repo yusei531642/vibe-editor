@@ -185,7 +185,7 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
 
   const lastSyncedRootRef = useRef<string>('');
   useEffect(() => {
-    const effectiveRoot = (settingsState.lastOpenedRoot || settingsState.claudeCwd || '').trim();
+    const effectiveRoot = (settingsState.lastOpenedRoot || '').trim();
     if (effectiveRoot === lastSyncedRootRef.current) return;
     lastSyncedRootRef.current = effectiveRoot;
     void window.api.app.setProjectRoot(effectiveRoot).catch((err) => {
@@ -198,7 +198,7 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
         { tone: 'error' }
       );
     });
-  }, [settingsState.lastOpenedRoot, settingsState.claudeCwd]);
+  }, [settingsState.lastOpenedRoot]);
 
   const update = useCallback(
     async (patch: Partial<AppSettings>) => {

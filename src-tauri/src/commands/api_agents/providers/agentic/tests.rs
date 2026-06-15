@@ -95,7 +95,7 @@ use super::*;
         use std::sync::Arc;
 
         let mut noop = |_: &str, _: &str, _: Option<&str>| {};
-        // team 無し: read_file / list_dir のみ
+        // team 無し: auto mode の標準ツールのみ
         let rt_solo = ToolRuntime {
             project_root: "",
             max_turns: 1,
@@ -103,11 +103,16 @@ use super::*;
             team: None,
         };
         let solo: Vec<&str> = tool_specs(&rt_solo).iter().map(|s| s.name).collect();
-        // team 無しでも read/write/exec/search tool は公開される (team tool だけが付かない)。
-        for expected in ["read_file", "list_dir", "write_file", "edit_file", "bash", "grep", "glob"] {
-            assert!(solo.contains(&expected), "missing {expected}");
-        }
-        assert!(!solo.contains(&"team_read"));
+        let base_tools = vec![
+            "read_file",
+            "list_dir",
+            "write_file",
+            "edit_file",
+            "bash",
+            "grep",
+            "glob",
+        ];
+        assert_eq!(solo, base_tools);
 
         // team 有り: team_read / team_send / team_info が追加される
         let mut noop2 = |_: &str, _: &str, _: Option<&str>| {};
@@ -123,8 +128,19 @@ use super::*;
             }),
         };
         let team: Vec<&str> = tool_specs(&rt_team).iter().map(|s| s.name).collect();
-        assert!(team.contains(&"read_file"));
-        assert!(team.contains(&"team_read"));
-        assert!(team.contains(&"team_send"));
-        assert!(team.contains(&"team_info"));
+        assert_eq!(
+            team,
+            vec![
+                "read_file",
+                "list_dir",
+                "write_file",
+                "edit_file",
+                "bash",
+                "grep",
+                "glob",
+                "team_read",
+                "team_send",
+                "team_info",
+            ]
+        );
     }
