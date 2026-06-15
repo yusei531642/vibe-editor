@@ -1898,3 +1898,37 @@ Plan: `tasks/issue-568-plan.md`
 - `cargo test --lib`: 295/295 PASS
 - `npx vitest run`: 299/299 PASS (48 files)
 - `npm run typecheck`: 0 error
+
+## Issue #1040 - Invalid saved home root blocks startup after ProjectRoot safety gate (2026-06-15 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1040
+
+### 計画
+
+- [x] v1.6.5 の `ProjectRoot` safety gate と起動復元フローを確認する。
+- [x] ローカル設定で `lastOpenedRoot = C:\Users\zooyo` が起動エラーの直接原因であることを確認する。
+- [x] ローカル `~/.vibe-editor/settings.json` を安全な既存 workspace root に切り替え、当面の起動不能を解除する。
+- [x] `SettingsProvider` が `claudeCwd` を backend project root として同期しないようにする。
+- [x] 初回ロード時、保存済み root が安全チェックで拒否されたら、エラーで停止せずフォルダ選択へフォールバックする。
+- [x] renderer の回帰テスト、型チェック、ビルドを通す。
+
+### Next Steps
+
+- [x] `src/renderer/src/lib/settings-context.tsx` を最小修正する。
+- [x] `src/renderer/src/lib/hooks/use-project-loader.ts` の初回ロードを安全な fallback つきに整理する。
+- [x] 必要な hook / context テストを追加する。
+- [ ] PR を作成し、CodeRabbit / CI / reviewer bot の結果を確認する。
+
+### 進捗
+
+- [x] `settings-context` は `lastOpenedRoot` のみを active project root として同期し、`claudeCwd` を同期元から外した。
+- [x] `use-project-loader` は保存済み root の `setProjectRoot` 失敗時に `lastOpenedRoot` を空にし、フォルダ選択へフォールバックする。
+- [x] `settings-context.test.tsx` と `use-project-loader.test.tsx` に回帰テストを追加した。
+
+### 検証結果
+
+- [x] `npx vitest run src/renderer/src/lib/__tests__/settings-context.test.tsx src/renderer/src/lib/hooks/__tests__/use-project-loader.test.tsx`: PASS (2 files / 8 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run build:vite`: PASS
+- [x] `npm run test`: PASS (79 files / 478 tests、既存の React act / Tauri listen cleanup warning は継続)
+- [x] `git diff --check`: PASS

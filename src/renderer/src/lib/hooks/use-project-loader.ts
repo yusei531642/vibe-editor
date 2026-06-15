@@ -160,8 +160,24 @@ export function useProjectLoader(
       try {
         // 既存ユーザーの移行: lastOpenedRoot が空で claudeCwd が設定されている場合は
         // かつての挙動 (claudeCwd = 最後に開いたルート) を尊重して再利用する。
-        const remembered = lastOpenedRoot || claudeCwd;
+        // ただし claudeCwd は CLI 既定 cwd でもあり、home 直下など project root として
+        // 不正な値を持ちうる。拒否された remembered root は起動ブロッカーにせず、
+        // 明示的なフォルダ選択へフォールバックする。
+        const remembered = (lastOpenedRoot || claudeCwd || '').trim();
         let root = remembered;
+        let rootIsActive = false;
+        if (root) {
+          try {
+            await window.api.app.setProjectRoot(root);
+            rootIsActive = true;
+          } catch (err) {
+            if (root === lastOpenedRoot) {
+              void updateSettings({ lastOpenedRoot: '' });
+            }
+            useUiStore.getState().setStatus(t('project.initError', { error: String(err) }));
+            root = '';
+          }
+        }
         if (!root) {
           const picked = await window.api.dialog.openFolder(t('appMenu.openFolderDialogTitle'));
           if (cancelled) return;
@@ -179,12 +195,14 @@ export function useProjectLoader(
         // active project_root を await で確定させてから git/sessions の fetch を発火する。
         // ゲート (#932 read 側拡張) は active root 未設定時に reject するため、これが無いと
         // 起動時の git パネルが transient reject で空振りする。
-        try {
-          await window.api.app.setProjectRoot(root);
-        } catch (err) {
-          useUiStore.getState().setStatus(t('project.initError', { error: String(err) }));
-          setGitLoading(false);
-          return;
+        if (!rootIsActive) {
+          try {
+            await window.api.app.setProjectRoot(root);
+          } catch (err) {
+            useUiStore.getState().setStatus(t('project.initError', { error: String(err) }));
+            setGitLoading(false);
+            return;
+          }
         }
         if (cancelled) return;
         setProjectRoot(root);

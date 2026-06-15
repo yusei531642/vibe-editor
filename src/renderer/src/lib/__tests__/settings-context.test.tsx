@@ -90,6 +90,37 @@ describe('settings-context', () => {
     expect(result.current.settings.editorFontSize).toBe(16);
   });
 
+  it('lastOpenedRoot が空なら claudeCwd を project root として同期しない', async () => {
+    const api = installApi({
+      claudeCwd: 'C:\\Users\\zooyo',
+      lastOpenedRoot: ''
+    });
+
+    const { result } = renderHook(() => useSettings(), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    expect(api.app.setProjectRoot).not.toHaveBeenCalled();
+  });
+
+  it('lastOpenedRoot だけを backend project root として同期する', async () => {
+    const api = installApi({
+      claudeCwd: 'C:\\Users\\zooyo',
+      lastOpenedRoot: 'C:\\Users\\zooyo\\Documents\\GitHub\\vibe-editor'
+    });
+
+    const { result } = renderHook(() => useSettings(), { wrapper: Wrapper });
+
+    await waitFor(() =>
+      expect(api.app.setProjectRoot).toHaveBeenCalledWith(
+        'C:\\Users\\zooyo\\Documents\\GitHub\\vibe-editor'
+      )
+    );
+    expect(result.current.loading).toBe(false);
+    expect(api.app.setProjectRoot).toHaveBeenCalledTimes(1);
+  });
+
   it('update() 後 200ms の debounce 経過で window.api.settings.save() が呼ばれる', async () => {
     const api = installApi();
     const { result } = renderHook(() => useSettings(), { wrapper: Wrapper });
