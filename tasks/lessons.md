@@ -214,3 +214,9 @@ codex exec --sandbox read-only --color never --ephemeral \
 - `data` は prompt 上で `data (untrusted)` と明示し、指示文ではなく資料として扱わせる。
 - 送信 API、JSON Schema、共有 TypeScript 型、worker / leader prompt、配布 Skill の文言は同じ境界で同期する。
 - Markdown fence で信頼できない本文を囲む場合は、本文中の backtick 連続数より長い fence を選ぶ。
+
+## Issue #1040 - Project root safety gate と claudeCwd の分離
+
+- `claudeCwd` は CLI 起動時の既定 cwd であり、アプリの active `projectRoot` と同一視しない。
+- 起動復元では `lastOpenedRoot` を優先し、保存済み root が safety gate に拒否されたら、エラーで停止せず明示的なフォルダ選択へ逃がす。
+- home 直下 / system 領域を許可する方向で直さない。Rust 側 safety gate は維持し、renderer 側の復旧フローで吸収する。
