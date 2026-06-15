@@ -228,7 +228,17 @@ fn read_file_range(
         if emitted >= count {
             break;
         }
-        let line = line.unwrap_or_default();
+        // I/O / 非 UTF-8 エラーは silent に空行へ潰さず、明示して打ち切る。
+        let line = match line {
+            Ok(l) => l,
+            Err(e) => {
+                if emitted == 0 {
+                    return ToolOutcome::err(format!("read failed at line {lineno}: {e}"));
+                }
+                out.push_str(&format!("…(read stopped at line {lineno}: {e})"));
+                return ToolOutcome::ok(out);
+            }
+        };
         out.push_str(&line);
         out.push('\n');
         emitted += 1;
@@ -338,6 +348,16 @@ mod tests {
         let out = execute_tool(&root, "read_file", &json!({ "path": "n.txt", "offset": 99 }));
         assert!(!out.is_error);
         assert!(out.content.contains("no lines at offset"));
+    }
+
+    #[test]
+    fn read_file_range_surfaces_non_utf8_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        std::fs::write(dir.path().join("bin.txt"), [0xff, 0xfe, 0x00, 0x01]).unwrap();
+        let out = execute_tool(&root, "read_file", &json!({ "path": "bin.txt", "offset": 1 }));
+        assert!(out.is_error);
+        assert!(out.content.contains("read failed"), "{}", out.content);
     }
 
     #[test]
