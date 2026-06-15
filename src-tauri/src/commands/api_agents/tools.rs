@@ -65,11 +65,13 @@ pub(super) fn builtin_read_tools() -> Vec<ToolSpec> {
                     },
                     "offset": {
                         "type": "integer",
-                        "description": "1-based line number to start reading from (optional)."
+                        "minimum": 1,
+                        "description": "1-based line number to start reading from (optional, >= 1)."
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Maximum number of lines to read from 'offset' (optional)."
+                        "minimum": 1,
+                        "description": "Maximum number of lines to read from 'offset' (optional, >= 1)."
                     }
                 },
                 "required": ["path"]
