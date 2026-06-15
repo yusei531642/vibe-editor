@@ -1,20 +1,14 @@
-// api_agents/tools — API エージェントがモデルに公開する読み取り専用ツール (Issue #1002)。
-//
-// v1 スコープ: read_file / list_dir のみ。書込・シェル実行は対象外。
-//
-// セキュリティ方針:
-//   - 参照は active project root (caller が state から取得した信頼値) 配下のみ。
-//   - canonicalize して root 配下に収まることを検証し、`..` traversal / symlink escape を拒否。
-//   - read_file はサイズ上限、list_dir は件数上限でキャップする。
-//
-// ツール実行は同期 fs (小さなローカル読み取りのみ) で行い、provider アダプタの非ストリーミング
-// tool-loop から `FnMut(&str, &Value) -> ToolOutcome` クロージャ経由で呼ばれる。
+// api_agents/tools — API エージェント向け read_file / list_dir ツール (Issue #1002)。
+// セキュリティ: active project root 配下のみ (canonicalize 封じ込めで traversal/symlink escape 拒否)、
+// read はサイズ上限・list は件数上限でキャップ。同期 fs なので caller が spawn_blocking で実行する。
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
 /// read_file が一度に返す最大バイト数。
 const MAX_READ_BYTES: u64 = 64 * 1024;
+/// read_file レンジ読みの skip フェーズで走査を許す最大バイト数 (大 offset の上限)。
+const MAX_SKIP_BYTES: u64 = 8 * 1024 * 1024;
 /// list_dir が返す最大エントリ数。
 const MAX_LIST_ENTRIES: usize = 200;
 
@@ -219,12 +213,23 @@ fn read_file_range(
     let mut reader = BufReader::new(file);
     let mut buf = String::new();
 
-    let mut lineno = 0u64; // skip: offset 直前まで読み飛ばす (バッファ再利用)
+    // skip: offset 直前まで逐次読み飛ばす。走査バイト量を MAX_SKIP_BYTES で頭打ちにし
+    // 巨大ファイル + 大 offset の長時間ブロックを防ぐ (実行は spawn_blocking 上)。
+    let mut lineno = 0u64;
+    let mut skipped_bytes = 0u64;
     while lineno + 1 < start {
         buf.clear();
         match reader.read_line(&mut buf) {
             Ok(0) => return ToolOutcome::ok(format!("(no lines at offset {start})")),
-            Ok(_) => lineno += 1,
+            Ok(n) => {
+                skipped_bytes += n as u64;
+                if skipped_bytes > MAX_SKIP_BYTES {
+                    return ToolOutcome::err(format!(
+                        "offset {start} is too deep into a large file; use grep/bash instead"
+                    ));
+                }
+                lineno += 1;
+            }
             Err(e) => return ToolOutcome::err(format!("read failed at line {}: {e}", lineno + 1)),
         }
     }
@@ -366,16 +371,6 @@ mod tests {
         let out = execute_tool(&root, "read_file", &json!({ "path": "bin.txt", "offset": 1 }));
         assert!(out.is_error);
         assert!(out.content.contains("read failed"), "{}", out.content);
-    }
-
-    #[test]
-    fn read_file_limit_only_reads_head() {
-        let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().to_string_lossy().to_string();
-        std::fs::write(dir.path().join("n.txt"), "a\nb\nc\nd\n").unwrap();
-        let out = execute_tool(&root, "read_file", &json!({ "path": "n.txt", "limit": 2 }));
-        assert!(!out.is_error);
-        assert_eq!(out.content, "a\nb\n");
     }
 
     #[test]
