@@ -9,6 +9,7 @@ import {
   type CliAgentConfig
 } from '../../../../types/shared';
 import { useT } from '../../lib/i18n';
+import { useToast } from '../../lib/toast-context';
 import { SkillImportPanel } from './SkillImportPanel';
 import { useNativeConfirm } from '../../lib/use-native-confirm';
 import { parseShellArgsStrict } from '../../lib/parse-args';
@@ -28,6 +29,7 @@ interface Props {
 export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element {
   const t = useT();
   const confirm = useNativeConfirm();
+  const { showToast } = useToast();
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [availableSkills, setAvailableSkills] = useState<ApiAgentSkillMeta[]>([]);
@@ -161,16 +163,36 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
 
   const saveApiKey = async (): Promise<void> => {
     if (!apiAgent || !apiKeyDraft.trim()) return;
-    await window.api.apiAgents.setProviderKey(apiAgent.providerId, apiKeyDraft);
-    setApiKeyDraft('');
-    setHasApiKey(true);
+    try {
+      // 失敗を握りつぶさず surface する。未署名 dev ビルドで macOS Keychain アクセスが
+      // 拒否されると set_password が失敗するため、無言だと「保存できた」と誤認する (#1059)。
+      await window.api.apiAgents.setProviderKey(apiAgent.providerId, apiKeyDraft);
+      setApiKeyDraft('');
+      setHasApiKey(true);
+      showToast(t('voice.toast.apiKeySaved'), { tone: 'success' });
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      showToast(t('settings.customAgents.apiKeySaveError', { detail }), {
+        tone: 'error',
+        duration: 8000
+      });
+    }
   };
 
   const clearApiKey = async (): Promise<void> => {
     if (!apiAgent) return;
     if (!(await confirm(t('settings.customAgents.apiKeyClearConfirm')))) return;
-    await window.api.apiAgents.clearProviderKey(apiAgent.providerId);
-    setHasApiKey(false);
+    try {
+      await window.api.apiAgents.clearProviderKey(apiAgent.providerId);
+      setHasApiKey(false);
+      showToast(t('voice.toast.apiKeyCleared'), { tone: 'success' });
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      showToast(t('settings.customAgents.apiKeySaveError', { detail }), {
+        tone: 'error',
+        duration: 8000
+      });
+    }
   };
 
   return (
