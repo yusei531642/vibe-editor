@@ -225,7 +225,7 @@ pub async fn api_agent_send(
         );
     }
 
-    let key = read_key(&req.agent.provider_id).await?;
+    let key = { let k = read_key(&req.agent.provider_id).await; if provider.requires_key { k? } else { k.unwrap_or_default() } };
     // project_root は team の read_file / list_dir tool が参照する (Issue #1004)。
     let project_root = current_project_root(&state.project_root).unwrap_or_default();
     // Issue #998/#1017: 選択 skill + 自動 vibe-team の本文を vibe-editor 専用フォルダから読む。

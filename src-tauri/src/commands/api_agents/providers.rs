@@ -35,44 +35,48 @@ pub(super) struct ProviderPreset {
     pub adapter: &'static str,
     pub base_url: String,
     pub supports_tools: bool,
+    /// false のとき API キー不要 (ローカル / OpenAI 互換ローカル)。
+    pub requires_key: bool,
 }
 
 pub(super) fn provider_preset(
     provider_id: &str,
     custom_base_url: Option<&str>,
 ) -> CommandResult<ProviderPreset> {
-    let preset = match provider_id {
-        "openai" => ("openai-compatible", "https://api.openai.com/v1", true),
-        "openrouter" => ("openai-compatible", "https://openrouter.ai/api/v1", true),
-        "nvidia-nim" => (
-            "openai-compatible",
-            "https://integrate.api.nvidia.com/v1",
-            false,
-        ),
-        "groq" => ("openai-compatible", "https://api.groq.com/openai/v1", false),
-        "mistral" => ("openai-compatible", "https://api.mistral.ai/v1", true),
-        "together" => ("openai-compatible", "https://api.together.xyz/v1", false),
-        "cerebras" => ("openai-compatible", "https://api.cerebras.ai/v1", false),
-        "anthropic" => ("anthropic", "https://api.anthropic.com/v1", true),
-        "gemini" => (
-            "gemini",
-            "https://generativelanguage.googleapis.com/v1beta",
-            true,
-        ),
-        "custom-openai-compatible" => (
-            "openai-compatible",
-            custom_base_url.unwrap_or("").trim(),
-            false,
-        ),
+    // (adapter, default_base_url, supports_tools, requires_key)
+    let (adapter, default_base, supports_tools, requires_key) = match provider_id {
+        "openai" => ("openai-compatible", "https://api.openai.com/v1", true, true),
+        "openrouter" => ("openai-compatible", "https://openrouter.ai/api/v1", true, true),
+        "nvidia-nim" => ("openai-compatible", "https://integrate.api.nvidia.com/v1", false, true),
+        "groq" => ("openai-compatible", "https://api.groq.com/openai/v1", false, true),
+        "mistral" => ("openai-compatible", "https://api.mistral.ai/v1", true, true),
+        "together" => ("openai-compatible", "https://api.together.xyz/v1", false, true),
+        "cerebras" => ("openai-compatible", "https://api.cerebras.ai/v1", false, true),
+        "anthropic" => ("anthropic", "https://api.anthropic.com/v1", true, true),
+        "gemini" => ("gemini", "https://generativelanguage.googleapis.com/v1beta", true, true),
+        // ローカル / OpenAI 互換: API キー不要、base URL は custom_base_url で上書き可。
+        "ollama" => ("openai-compatible", "http://localhost:11434/v1", true, false),
+        "lmstudio" => ("openai-compatible", "http://localhost:1234/v1", true, false),
+        "custom-openai-compatible" => ("openai-compatible", "", false, false),
         _ => return Err(CommandError::validation("unknown providerId")),
     };
-    if preset.1.is_empty() {
+    // ローカル系 (ollama / lmstudio / custom) は custom_base_url で上書き可。他は固定 base URL。
+    let custom = custom_base_url.unwrap_or("").trim();
+    let base_url = if !custom.is_empty()
+        && matches!(provider_id, "ollama" | "lmstudio" | "custom-openai-compatible")
+    {
+        custom
+    } else {
+        default_base
+    };
+    if base_url.is_empty() {
         return Err(CommandError::validation("custom base URL is required"));
     }
     Ok(ProviderPreset {
-        adapter: preset.0,
-        base_url: preset.1.trim_end_matches('/').to_string(),
-        supports_tools: preset.2,
+        adapter,
+        base_url: base_url.trim_end_matches('/').to_string(),
+        supports_tools,
+        requires_key,
     })
 }
 
@@ -428,6 +432,23 @@ mod tests {
     fn custom_provider_requires_base_url() {
         assert!(provider_preset("custom-openai-compatible", None).is_err());
         assert!(provider_preset("custom-openai-compatible", Some("   ")).is_err());
+        // custom はキー任意 (ローカル想定)。
+        assert!(!provider_preset("custom-openai-compatible", Some("http://x/v1")).unwrap().requires_key);
+    }
+
+    #[test]
+    fn local_providers_default_base_and_no_key() {
+        let ollama = provider_preset("ollama", None).unwrap();
+        assert_eq!(ollama.base_url, "http://localhost:11434/v1");
+        assert!(!ollama.requires_key && ollama.supports_tools);
+        let lm = provider_preset("lmstudio", None).unwrap();
+        assert_eq!(lm.base_url, "http://localhost:1234/v1");
+        assert!(!lm.requires_key);
+        // custom_base_url で上書き可 (リモート host)。
+        let ov = provider_preset("ollama", Some("http://192.168.1.2:11434/v1/")).unwrap();
+        assert_eq!(ov.base_url, "http://192.168.1.2:11434/v1");
+        // cloud は requires_key=true。
+        assert!(provider_preset("openai", None).unwrap().requires_key);
     }
 
     #[test]
