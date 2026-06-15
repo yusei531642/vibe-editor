@@ -1,20 +1,14 @@
-// api_agents/tools — API エージェントがモデルに公開する読み取り専用ツール (Issue #1002)。
-//
-// v1 スコープ: read_file / list_dir のみ。書込・シェル実行は対象外。
-//
-// セキュリティ方針:
-//   - 参照は active project root (caller が state から取得した信頼値) 配下のみ。
-//   - canonicalize して root 配下に収まることを検証し、`..` traversal / symlink escape を拒否。
-//   - read_file はサイズ上限、list_dir は件数上限でキャップする。
-//
-// ツール実行は同期 fs (小さなローカル読み取りのみ) で行い、provider アダプタの非ストリーミング
-// tool-loop から `FnMut(&str, &Value) -> ToolOutcome` クロージャ経由で呼ばれる。
+// api_agents/tools — API エージェント向け read_file / list_dir ツール (Issue #1002)。
+// セキュリティ: active project root 配下のみ (canonicalize 封じ込めで traversal/symlink escape を拒否)。
+// read はサイズ上限・list は件数上限でキャップする。同期 fs のため caller が spawn_blocking で実行する。
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
 
 /// read_file が一度に返す最大バイト数。
 const MAX_READ_BYTES: u64 = 64 * 1024;
+/// read_file レンジ読みの skip フェーズで走査を許す最大バイト数 (大 offset の上限)。
+const MAX_SKIP_BYTES: u64 = 8 * 1024 * 1024;
 /// list_dir が返す最大エントリ数。
 const MAX_LIST_ENTRIES: usize = 200;
 
@@ -53,13 +47,25 @@ pub(super) fn builtin_read_tools() -> Vec<ToolSpec> {
         ToolSpec {
             name: "read_file",
             description: "Read a UTF-8 text file from the current project. \
-                Path is relative to the project root. Read-only.",
+                Path is relative to the project root. Read-only. \
+                Optionally pass 'offset' (1-based start line) and 'limit' (line count) \
+                to read a slice of a large file.",
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "path": {
                         "type": "string",
                         "description": "File path relative to the project root."
+                    },
+                    "offset": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "1-based line number to start reading from (optional, >= 1)."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Maximum number of lines to read from 'offset' (optional, >= 1)."
                     }
                 },
                 "required": ["path"]
@@ -169,6 +175,12 @@ fn read_file_tool(project_root: &str, args: &Value) -> ToolOutcome {
     if !meta.is_file() {
         return ToolOutcome::err(format!("not a file: {path}"));
     }
+    // offset / limit が指定されたら行レンジ読み (大ファイルのページング)。
+    let offset = args.get("offset").and_then(Value::as_u64);
+    let limit = args.get("limit").and_then(Value::as_u64);
+    if offset.is_some() || limit.is_some() {
+        return read_file_range(&resolved, offset, limit);
+    }
     use std::io::Read;
     let file = match std::fs::File::open(&resolved) {
         Ok(f) => f,
@@ -183,6 +195,79 @@ fn read_file_tool(project_root: &str, args: &Value) -> ToolOutcome {
         text.push_str("\n…(truncated; file exceeds 64KB read limit)");
     }
     ToolOutcome::ok(text)
+}
+
+/// 行レンジ読み (1-based offset / limit 行, 既定 2000, 出力 64KB cap)。skip/read でバッファ再利用。
+fn read_file_range(
+    resolved: &std::path::Path,
+    offset: Option<u64>,
+    limit: Option<u64>,
+) -> ToolOutcome {
+    use std::io::{BufRead, BufReader};
+    let start = offset.unwrap_or(1).max(1);
+    let count = limit.unwrap_or(2000).max(1);
+    let file = match std::fs::File::open(resolved) {
+        Ok(f) => f,
+        Err(e) => return ToolOutcome::err(format!("open failed: {e}")),
+    };
+    let mut reader = BufReader::new(file);
+    let mut buf = String::new();
+
+    // skip: offset 直前まで逐次読み飛ばす。走査バイト量を MAX_SKIP_BYTES で頭打ちにし
+    // 巨大ファイル + 大 offset の長時間ブロックを防ぐ (実行は spawn_blocking 上)。
+    let mut lineno = 0u64;
+    let mut skipped_bytes = 0u64;
+    while lineno + 1 < start {
+        buf.clear();
+        match reader.read_line(&mut buf) {
+            Ok(0) => return ToolOutcome::ok(format!("(no lines at offset {start})")),
+            Ok(n) => {
+                skipped_bytes += n as u64;
+                if skipped_bytes > MAX_SKIP_BYTES {
+                    return ToolOutcome::err(format!(
+                        "offset {start} is too deep into a large file; use grep/bash instead"
+                    ));
+                }
+                lineno += 1;
+            }
+            Err(e) => return ToolOutcome::err(format!("read failed at line {}: {e}", lineno + 1)),
+        }
+    }
+
+    // read: start から count 行 (read_line は改行を保持)。
+    let mut out = String::new();
+    let mut emitted = 0u64;
+    let mut truncated = false;
+    while emitted < count {
+        buf.clear();
+        match reader.read_line(&mut buf) {
+            Ok(0) => break,
+            Ok(_) => {
+                out.push_str(&buf);
+                emitted += 1;
+                if out.len() as u64 > MAX_READ_BYTES {
+                    truncated = true;
+                    break;
+                }
+            }
+            // I/O / 非 UTF-8 エラーは silent に潰さず明示して打ち切る。
+            Err(e) => {
+                let at = start + emitted;
+                if emitted == 0 {
+                    return ToolOutcome::err(format!("read failed at line {at}: {e}"));
+                }
+                out.push_str(&format!("…(read stopped at line {at}: {e})"));
+                return ToolOutcome::ok(out);
+            }
+        }
+    }
+    if emitted == 0 {
+        return ToolOutcome::ok(format!("(no lines at offset {start})"));
+    }
+    if truncated {
+        out.push_str("…(truncated; exceeds 64KB read limit)");
+    }
+    ToolOutcome::ok(out)
 }
 
 fn list_dir_tool(project_root: &str, args: &Value) -> ToolOutcome {
@@ -202,9 +287,8 @@ fn list_dir_tool(project_root: &str, args: &Value) -> ToolOutcome {
         Ok(rd) => rd,
         Err(e) => return ToolOutcome::err(format!("read_dir failed: {e}")),
     };
-    // bounded top-K: 全件を Vec に貯めてソートするのではなく、アルファベット順で先頭
-    // MAX_LIST_ENTRIES 件だけを max-heap で保持する。大量エントリのディレクトリでも
-    // メモリ/ソートコストを K 件に抑える (O(n log K) / O(K))。
+    // bounded top-K: アルファベット順で先頭 MAX_LIST_ENTRIES 件だけを max-heap で保持
+    // (大量エントリでもメモリ/ソートコストを K 件に抑える, O(n log K) / O(K))。
     use std::collections::BinaryHeap;
     let mut heap: BinaryHeap<String> = BinaryHeap::new();
     let mut total = 0usize;
@@ -253,6 +337,40 @@ mod tests {
         assert_eq!(out.content, "hello world");
         let nested = execute_tool(&root, "read_file", &json!({ "path": "sub/b.txt" }));
         assert_eq!(nested.content, "nested");
+    }
+
+    #[test]
+    fn read_file_offset_limit_reads_slice() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        std::fs::write(dir.path().join("n.txt"), "L1\nL2\nL3\nL4\nL5\n").unwrap();
+        let out = execute_tool(
+            &root,
+            "read_file",
+            &json!({ "path": "n.txt", "offset": 2, "limit": 2 }),
+        );
+        assert!(!out.is_error, "{}", out.content);
+        assert_eq!(out.content, "L2\nL3\n");
+    }
+
+    #[test]
+    fn read_file_offset_past_end_is_empty_note() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        std::fs::write(dir.path().join("n.txt"), "L1\nL2\n").unwrap();
+        let out = execute_tool(&root, "read_file", &json!({ "path": "n.txt", "offset": 99 }));
+        assert!(!out.is_error);
+        assert!(out.content.contains("no lines at offset"));
+    }
+
+    #[test]
+    fn read_file_range_surfaces_non_utf8_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_string_lossy().to_string();
+        std::fs::write(dir.path().join("bin.txt"), [0xff, 0xfe, 0x00, 0x01]).unwrap();
+        let out = execute_tool(&root, "read_file", &json!({ "path": "bin.txt", "offset": 1 }));
+        assert!(out.is_error);
+        assert!(out.content.contains("read failed"), "{}", out.content);
     }
 
     #[test]
