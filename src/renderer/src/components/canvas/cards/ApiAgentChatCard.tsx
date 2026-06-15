@@ -91,7 +91,7 @@ function ApiAgentChatCardImpl({
       `Workspace: ${tildify(workspace) || '—'}`,
       `Mode: ${toolMode === 'auto' ? 'autonomous' : 'read-only'}`,
       toolsEnabled
-        ? 'Tools: read_file, list_dir, write_file, edit_file, bash, grep, glob'
+        ? 'Tools: read_file, list_dir, write_file, edit_file, bash, grep, glob, web_fetch'
         : 'Tools: (read-only chat)'
     ];
     if (payload?.teamId) lines.push('Team tools: team_read, team_send, team_info');

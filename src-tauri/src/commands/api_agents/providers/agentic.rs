@@ -14,6 +14,7 @@ use serde_json::{json, Value};
 use super::super::tools;
 use super::super::tools_exec;
 use super::super::tools_search;
+use super::super::tools_web;
 use super::super::tools_write;
 use super::super::types::{ApiAgentConfig, ApiAgentMessage, ApiAgentUsage};
 use super::{usage_from_value, ProviderPreset, TeamToolCtx, ToolRuntime, HTTP_CLIENT};
@@ -39,6 +40,8 @@ fn tool_specs(rt: &ToolRuntime<'_>) -> Vec<tools::ToolSpec> {
     specs.extend(tools_exec::builtin_exec_tools());
     // Issue #1036: grep / glob 検索 tool も auto のとき公開する。
     specs.extend(tools_search::builtin_search_tools());
+    // Issue #1053: web_fetch (SSRF ガード付き) も auto のとき公開する。
+    specs.extend(tools_web::builtin_web_tools());
     if rt.team.is_some() {
         specs.extend(tools::builtin_team_tools());
     }
@@ -391,6 +394,9 @@ async fn run_tool_with_flag(rt: &mut ToolRuntime<'_>, call: &ToolCall) -> (Strin
     } else if tools_exec::is_exec_tool(&call.name) {
         // bash は子プロセス + timeout のため async で実行する (Issue #1034)。
         tools_exec::execute_exec_tool(rt.project_root, &call.name, &call.args).await
+    } else if tools_web::is_web_tool(&call.name) {
+        // web_fetch は HTTP のため async で実行する (Issue #1053)。
+        tools_web::execute_web_tool(&call.name, &call.args).await
     } else {
         // read_file / list_dir / write_file / edit_file は同期ブロッキング fs を含むため
         // spawn_blocking へ退避する。write 系 (Issue #1031) は tools_write へ dispatch する。

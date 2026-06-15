@@ -111,6 +111,7 @@ use super::*;
             "bash",
             "grep",
             "glob",
+            "web_fetch",
         ];
         assert_eq!(solo, base_tools);
 
@@ -138,6 +139,7 @@ use super::*;
                 "bash",
                 "grep",
                 "glob",
+                "web_fetch",
                 "team_read",
                 "team_send",
                 "team_info",

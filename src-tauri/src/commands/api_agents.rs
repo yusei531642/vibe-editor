@@ -17,6 +17,7 @@ mod project_docs;
 mod tools;
 mod tools_exec;
 mod tools_search;
+mod tools_web;
 mod tools_write;
 pub mod types;
 
@@ -143,8 +144,7 @@ pub async fn api_agent_session_delete(session_id: String) -> CommandResult<()> {
 
 #[tauri::command]
 pub async fn api_agent_cancel(_session_id: String, _generation_id: String) -> CommandResult<()> {
-    // v1 requests are short-lived reqwest calls. Cancellation is represented in the UI by
-    // ignoring stale generationId events; this command is intentionally idempotent.
+    // v1: short-lived reqwest calls; cancel is represented by ignoring stale generationId events.
     Ok(())
 }
 
