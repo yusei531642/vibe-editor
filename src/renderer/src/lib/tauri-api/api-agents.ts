@@ -23,6 +23,8 @@ export const apiAgents = {
     invokeCommand('api_agent_provider_clear_key', { providerId }),
   hasProviderKey: (providerId: string): Promise<boolean> =>
     invokeCommand('api_agent_provider_has_key', { providerId }),
+  listModels: (providerId: string, customBaseUrl?: string): Promise<string[]> =>
+    invokeCommand('api_agent_list_models', { providerId, customBaseUrl }),
   createSession: (req: ApiAgentSessionCreateRequest): Promise<ApiAgentSession> =>
     invokeCommand('api_agent_session_create', { req }),
   loadSession: (sessionId: string): Promise<ApiAgentSession | null> =>

@@ -31,6 +31,7 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
   const [apiKeyDraft, setApiKeyDraft] = useState('');
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [availableSkills, setAvailableSkills] = useState<ApiAgentSkillMeta[]>([]);
+  const [fetchedModels, setFetchedModels] = useState<string[]>([]);
   const cliAgent = agent.runtime === 'cli' ? agent : null;
   const apiAgent = agent.runtime === 'api' ? agent : null;
   const apiProviderId = apiAgent?.providerId;
@@ -83,6 +84,27 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
       disposed = true;
     };
   }, [apiProviderId]);
+
+  // provider / base URL が決まったら利用可能モデルを取得して datalist 候補にする。
+  // 失敗 (鍵未設定 / ローカル未起動 等) は空のままで、従来どおり手入力できる。
+  useEffect(() => {
+    if (!apiProviderId) {
+      setFetchedModels([]);
+      return;
+    }
+    let disposed = false;
+    void window.api.apiAgents
+      .listModels(apiProviderId, apiAgent?.customBaseUrl || undefined)
+      .then((list) => {
+        if (!disposed) setFetchedModels(list);
+      })
+      .catch(() => {
+        if (!disposed) setFetchedModels([]);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [apiProviderId, apiAgent?.customBaseUrl]);
 
   // vibe-editor 専用フォルダの import 済み skill を列挙 (API runtime のときだけ)。
   const reloadSkills = useCallback((): void => {
@@ -283,7 +305,14 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
               onChange={(e) => patchApiAgent({ model: e.target.value })}
               placeholder={provider.defaultModel || 'model-id'}
               spellCheck={false}
+              list={`agent-models-${agent.id}`}
             />
+            {/* provider の /models から取得した候補 (取得失敗時は空 → 従来どおり手入力)。 */}
+            <datalist id={`agent-models-${agent.id}`}>
+              {fetchedModels.map((m) => (
+                <option key={m} value={m} />
+              ))}
+            </datalist>
           </label>
 
           <div className="modal__label modal__label--full">

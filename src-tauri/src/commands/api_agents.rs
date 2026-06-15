@@ -13,6 +13,7 @@ use uuid::Uuid;
 
 mod providers;
 pub mod skills;
+pub mod models;
 mod project_docs;
 mod tools;
 mod tools_exec;
