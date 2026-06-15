@@ -2,7 +2,7 @@
 //
 // tools_enabled (supports_tools && toolMode != readOnly) のとき呼ばれる。tool 解決ターンは
 // SSE の差分蓄積を避けるため非ストリーミング (完全 JSON から tool_calls をパース) で回し、
-// read_file / list_dir を実行して結果を会話へ戻す。最終回答は on_delta で emit する。
+// read/write/shell/search ツールを実行して結果を会話へ戻す。最終回答は on_delta で emit する。
 //
 // 各 provider のツール表現:
 //   - OpenAI:    request.tools[].function / response.message.tool_calls[] / role:"tool"
@@ -29,7 +29,7 @@ struct ToolCall {
 const BUDGET_MSG: &str = "Tool turn budget exceeded before a final answer.";
 
 /// このターンでモデルに公開するツール spec。team 参加時は team_read / team_send / team_info を
-/// read_file / list_dir に追加する。
+/// 標準ツールに追加する。
 fn tool_specs(rt: &ToolRuntime<'_>) -> Vec<tools::ToolSpec> {
     let mut specs = tools::builtin_read_tools();
     // Issue #1031: agentic 経路は auto (= !readOnly && supports_tools) のときだけ到達するため、
