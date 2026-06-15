@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use super::types::{ApiAgentConfig, ApiAgentMessage, ApiAgentUsage};
 
 mod agentic;
+mod context;
 
 pub(super) static HTTP_CLIENT: once_cell::sync::Lazy<reqwest::Client> =
     once_cell::sync::Lazy::new(reqwest::Client::new);
@@ -94,6 +95,9 @@ pub(super) async fn call_provider(
     tools: Option<ToolRuntime<'_>>,
     on_delta: &mut (dyn FnMut(&str) + Send),
 ) -> anyhow::Result<(String, Option<ApiAgentUsage>, String)> {
+    // Issue #1057: 送信前に履歴を末尾優先でバジェット内へトリミングし、context 溢れを防ぐ。
+    let trimmed = context::default_trim(messages);
+    let messages = trimmed.as_slice();
     match (provider.adapter, tools) {
         ("anthropic", Some(rt)) => {
             agentic::call_anthropic_tools(provider, key, agent, system_prompt, messages, rt, on_delta)
