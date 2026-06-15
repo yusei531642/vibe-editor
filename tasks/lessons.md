@@ -226,3 +226,9 @@ codex exec --sandbox read-only --color never --ephemeral \
 - CI が `cargo clippy ... -D warnings` で落ちた場合は、ローカルでも同じコマンドで再現してから直す。
 - `(scope, id)` のような key tuple でソートするだけなら、`sort_by` の比較式より `sort_by_key` を使う。
 - Windows の toolchain に Clippy が無い場合は、検証前に `rustup component add clippy` を実行する。
+
+## Issue #1045 - Agentic tool specs test drift
+
+- API agent の tool surface を増やしたら、provider 統合テストの期待値も同じ PR 内で更新する。
+- 「team 有りで追加される tool」を見るテストでも、base tool list を明示して drift を早く検出する。
+- コメントに `read_file / list_dir` のような古い限定表現を残すと、後続修正で仕様を読み違えやすい。
