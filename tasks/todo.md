@@ -1962,6 +1962,44 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1042
 - [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
 - [x] `git diff --check`: PASS
 
+## Release v1.6.6 startup hotfix (2026-06-15 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1047
+Plan: `tasks/release-v1.6.6.md`
+
+### 計画
+
+- [x] 最新 release が `v1.6.5` のままであることを確認する。
+- [x] `main` が #1041 / #1043 / #1046 を含むことを確認する。
+- [x] Release workflow が `v*` tag push で draft release を作ることを確認する。
+- [x] npm / Rust / Tauri の version を `1.6.6` に更新する。
+- [ ] release PR を作成し、CI / reviewer bot を確認する。
+- [ ] PR merge 後に `v1.6.6` tag を push する。
+- [ ] release workflow を監視し、draft release の assets と `latest.json` を確認する。
+- [ ] draft release を publish する。
+
+### Next Steps
+
+- [x] version files を更新する。
+- [x] `npm run typecheck`、`npm run build:vite`、`cargo check`、`git diff --check` を実行する。
+- [ ] PR を作成する。
+
+### 進捗
+
+- [x] `chore/release-v1.6.6` ブランチを作成した。
+- [x] npm / Rust / Tauri の version を `1.6.6` に同期した。
+- [x] ローカル品質ゲートを通した。
+
+### 検証結果
+
+- [x] `npm run typecheck`: PASS
+- [x] `npm run build:vite`: PASS
+- [x] `cargo check --offline --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
+- [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
+- [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
+- [x] `npm run test`: PASS on rerun (79 files / 478 tests)
+- [x] `git diff --check`: PASS
+
 ## Issue #1045 - Agentic tool specs test expects outdated tool list (2026-06-15 / Codex)
 
 Issue: https://github.com/yusei531642/vibe-editor/issues/1045
