@@ -232,3 +232,9 @@ codex exec --sandbox read-only --color never --ephemeral \
 - API agent の tool surface を増やしたら、provider 統合テストの期待値も同じ PR 内で更新する。
 - 「team 有りで追加される tool」を見るテストでも、base tool list を明示して drift を早く検出する。
 - コメントに `read_file / list_dir` のような古い限定表現を残すと、後続修正で仕様を読み違えやすい。
+
+## Release v1.6.6 - Startup blocker hotfix
+
+- startup blocker の hotfix release では、修正PRのCIだけでなく、release PR、tag push、release workflow、公開後の latest release 表示まで一連で確認する。
+- `package-lock.json` の root version が古いまま残ることがあるため、release bump では `package.json` だけでなく lockfile の root/package version も必ず確認する。
+- Draft release を publish する前に、assets と `latest.json` の `version`、platform URL、署名エントリを確認する。
