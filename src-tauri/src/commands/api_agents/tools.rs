@@ -1,6 +1,6 @@
 // api_agents/tools — API エージェント向け read_file / list_dir ツール (Issue #1002)。
-// セキュリティ: active project root 配下のみ (canonicalize 封じ込めで traversal/symlink escape 拒否)、
-// read はサイズ上限・list は件数上限でキャップ。同期 fs なので caller が spawn_blocking で実行する。
+// セキュリティ: active project root 配下のみ (canonicalize 封じ込めで traversal/symlink escape を拒否)。
+// read はサイズ上限・list は件数上限でキャップする。同期 fs のため caller が spawn_blocking で実行する。
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
