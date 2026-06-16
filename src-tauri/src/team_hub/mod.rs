@@ -9,6 +9,8 @@
 // - team_send 等のツール呼び出しを PTY に直接 write 注入する (64B / 15ms)
 
 // Issue #1062: codex 公式 app-server JSON-RPC (turn/start / turn/steer) 配送クライアント。
+// unix domain socket 上の WebSocket に直結するため unix 専用 (Windows は当面 PTY 注入のまま)。
+#[cfg(unix)]
 pub mod app_server;
 pub mod bridge;
 // Issue #1062: team_send の配送経路ルータ (codex=app-server / それ以外=PTY inject)。
