@@ -49,6 +49,13 @@ pub struct SessionHandle {
     pub role: Option<String>,
     pub cwd: String,
     pub is_codex: bool,
+    /// Issue #1062: codex app-server 配送用。この card が共有 app-server デーモンに紐づく
+    /// 場合の制御 unix socket パス。`None` = 従来の PTY 注入経路。第2段で populate される
+    /// までは常に `None` のため、現状は実行時に必ず PTY 経路を通る (= 機能は休眠)。
+    pub app_server_socket: Option<String>,
+    /// Issue #1062: codex の thread_id (rollout から codex_watcher が検出)。
+    /// app-server `turn/start` の宛先。`None` のうちは PTY 経路。
+    pub thread_id: Option<String>,
     #[cfg_attr(not(windows), allow(dead_code))]
     pub(super) process_id: Option<u32>, // Windows の `taskkill /T` で MCP 等の孤児化を防ぐ。
     /// Issue #153: prompt injection 中はユーザー入力を抑止する。
@@ -389,6 +396,8 @@ pub(crate) mod test_support {
             role: None,
             cwd: String::new(),
             is_codex: false,
+            app_server_socket: None,
+            thread_id: None,
             process_id: None,
             injecting: AtomicBool::new(false),
             write_budget: Mutex::new(WriteBudget {

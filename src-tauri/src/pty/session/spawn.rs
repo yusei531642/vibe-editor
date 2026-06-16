@@ -507,6 +507,9 @@ pub fn spawn_session(
         role: opts.role,
         cwd: opts.cwd,
         is_codex: opts.is_codex,
+        // Issue #1062: app-server 配送経路は第2段で populate される。spawn 時点では未設定。
+        app_server_socket: None,
+        thread_id: None,
         process_id,
         injecting: AtomicBool::new(false),
         write_budget: Mutex::new(WriteBudget {
