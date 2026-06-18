@@ -12,6 +12,7 @@
 
 pub mod batcher;
 pub mod claude_watcher;
+pub mod codex_app_server;
 pub mod codex_broker;
 pub mod codex_watcher;
 pub mod inflight;

@@ -37,6 +37,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tauri::{AppHandle, Emitter};
 
+use crate::pty::SessionRegistry;
+
 /// session が kill された瞬間に `watcher_cancel` を観測して exit できる polling 間隔。
 /// claude_watcher と同値 (100ms)。
 const WATCHER_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -219,7 +221,15 @@ enum CandidateOutcome {
     Retry,
 }
 
-fn emit_session_id(app: &AppHandle, terminal_id: &str, session_id: &str) -> bool {
+fn emit_session_id(
+    app: &AppHandle,
+    registry: &Arc<SessionRegistry>,
+    terminal_id: &str,
+    session_id: &str,
+) -> bool {
+    if let Some(handle) = registry.get(terminal_id) {
+        crate::pty::codex_app_server::set_thread_id(&handle, session_id);
+    }
     let event_name = format!("terminal:sessionId:{terminal_id}");
     if let Err(e) = app.emit(&event_name, session_id.to_string()) {
         tracing::warn!("[codex_watcher] emit failed: {e}");
@@ -237,6 +247,7 @@ fn emit_session_id(app: &AppHandle, terminal_id: &str, session_id: &str) -> bool
 /// 1 つの rollout 候補を評価し、cwd 一致 + 未 claim なら claim → emit する。
 fn process_candidate(
     app: &AppHandle,
+    registry: &Arc<SessionRegistry>,
     terminal_id: &str,
     path: &Path,
     expected_norm: &str,
@@ -262,7 +273,7 @@ fn process_candidate(
         // is_claimed と try_claim の間で他 watcher が先に占有した競合。
         return CandidateOutcome::Consumed;
     }
-    if emit_session_id(app, terminal_id, &id) {
+    if emit_session_id(app, registry, terminal_id, &id) {
         CandidateOutcome::Emitted
     } else {
         // emit 失敗。既に claim 済みなので二重 emit を避けるため Consumed 扱い。
@@ -275,6 +286,7 @@ fn process_candidate(
 /// claude_watcher と同じ cancel / deadline / poll で sessionId を terminal_id 宛に 1 回 emit する。
 pub fn spawn_watcher(
     app: AppHandle,
+    registry: Arc<SessionRegistry>,
     terminal_id: String,
     project_root: String,
     spawned_at: SystemTime,
@@ -284,13 +296,23 @@ pub fn spawn_watcher(
         app.clone(),
         "codex-session-watcher",
         watcher_cancel.clone(),
-        move || run_watcher_loop(app, terminal_id, project_root, spawned_at, watcher_cancel),
+        move || {
+            run_watcher_loop(
+                app,
+                registry,
+                terminal_id,
+                project_root,
+                spawned_at,
+                watcher_cancel,
+            )
+        },
     );
 }
 
 /// watcher 本体ループ。テストからの呼び出し利便のため関数として切り出す。
 fn run_watcher_loop(
     app: AppHandle,
+    registry: Arc<SessionRegistry>,
     terminal_id: String,
     project_root: String,
     spawned_at: SystemTime,
@@ -342,7 +364,7 @@ fn run_watcher_loop(
     // codex が watcher 起動より速く rollout を作った race を救済する。
     // spawn 開始以降に更新された rollout は seen 済みでも 1 度だけ評価する。
     for path in list_recent_rollout_candidates(&dir, spawned_at) {
-        match process_candidate(&app, &terminal_id, &path, &expected_norm) {
+        match process_candidate(&app, &registry, &terminal_id, &path, &expected_norm) {
             CandidateOutcome::Emitted => return,
             CandidateOutcome::Consumed => {} // seen に既に含まれる
             CandidateOutcome::Retry => {
@@ -408,7 +430,7 @@ fn run_watcher_loop(
             if seen.contains(&path) {
                 continue;
             }
-            match process_candidate(&app, &terminal_id, &path, &expected_norm) {
+            match process_candidate(&app, &registry, &terminal_id, &path, &expected_norm) {
                 CandidateOutcome::Emitted => return,
                 CandidateOutcome::Consumed => {
                     seen.insert(path);

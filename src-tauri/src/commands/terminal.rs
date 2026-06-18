@@ -553,6 +553,8 @@ pub async fn terminal_create(
         }
     }
 
+    let app_server_socket = crate::pty::codex_app_server::prepare_for_terminal(&command, is_codex_command, opts.team_id.as_deref(), opts.agent_id.as_deref()).await;
+
     let spawn_opts = SpawnOptions {
         command: command.clone(),
         args: args.clone(),
@@ -562,6 +564,7 @@ pub async fn terminal_create(
         rows: opts.rows.min(u32::from(u16::MAX)) as u16,
         env,
         agent_id: opts.agent_id,
+        app_server_socket,
         // Issue #271: session_key を SpawnOptions / SessionHandle 経由で
         // SessionRegistry::insert に届け、by_session_key index を更新できるようにする。
         session_key: opts.session_key,
@@ -654,6 +657,7 @@ pub async fn terminal_create(
                     if is_codex_command {
                         crate::pty::codex_watcher::spawn_watcher(
                             app.clone(),
+                            state.pty_registry.clone(),
                             watcher_id,
                             actual_root,
                             spawned_at,

@@ -66,6 +66,7 @@ pub struct SpawnOptions {
     pub rows: u16,
     pub env: HashMap<String, String>,
     pub agent_id: Option<String>,
+    pub app_server_socket: Option<String>,
     /// Issue #271: HMR 経路で同じ React mount identity を共有する論理キー。
     /// renderer 側の `TerminalCreateOptions.sessionKey` と一致する。
     pub session_key: Option<String>,
@@ -507,9 +508,8 @@ pub fn spawn_session(
         role: opts.role,
         cwd: opts.cwd,
         is_codex: opts.is_codex,
-        // Issue #1062: app-server 配送経路は第2段で populate される。spawn 時点では未設定。
-        app_server_socket: None,
-        thread_id: None,
+        app_server_socket: Mutex::new(opts.app_server_socket),
+        thread_id: Mutex::new(None),
         process_id,
         injecting: AtomicBool::new(false),
         write_budget: Mutex::new(WriteBudget {
@@ -672,6 +672,7 @@ mod prepare_spawn_command_boundary_tests {
             rows: 24,
             env: HashMap::new(),
             agent_id: None,
+            app_server_socket: None,
             session_key: None,
             team_id: None,
             role: None,

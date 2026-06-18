@@ -4,9 +4,9 @@
 //! 走行中スレッドへ送る公式 API (`turn/start` / `turn/steer`) があり、共有 app-server
 //! デーモンに繋いだ別クライアントから撃つと、TUI(購読者) にライブ反映される。
 //!
-//! 本モジュールはその配送クライアント。PR1 では `super::deliver` から呼ばれるが、
-//! `SessionHandle::app_server_socket` / `thread_id` が populate されるのは後続フェーズの
-//! ため、実行時には既定で PTY 経路のまま (= 休眠基盤)。
+//! 本モジュールはその配送クライアント。Codex team セッションで
+//! `SessionHandle::app_server_socket` / `thread_id` が揃った場合に使われ、失敗時は従来の
+//! PTY 注入へフォールバックする。
 
 pub mod client;
 pub mod error;
