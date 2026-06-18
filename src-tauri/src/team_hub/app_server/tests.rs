@@ -8,11 +8,12 @@ use super::wire::WsStream;
 use serde_json::{json, Value};
 use tokio::net::{UnixListener, UnixStream};
 
-/// mock の挙動。turn/start に対し OK を返すか RPC エラーを返すか。
+/// mock の挙動。turn 系リクエストに対し OK を返すか RPC エラーを返すか。
 #[derive(Clone, Copy)]
 enum TurnBehavior {
     Ok,
     RpcError,
+    ExpectSteer,
 }
 
 /// temp socket に mock app-server を立て、接続を 1 本さばくタスクを spawn する。
@@ -49,25 +50,102 @@ async fn serve_conn(stream: UnixStream, behavior: TurnBehavior) -> Result<(), Ap
             continue;
         };
         let reply = match (method, behavior) {
+            ("initialize", _) => {
+                if !valid_initialize_params(msg.get("params")) {
+                    invalid_params(id, "invalid initialize params")
+                } else {
+                    json!({ "id": id, "result": {} })
+                }
+            }
             ("turn/start", TurnBehavior::RpcError) => json!({
                 "id": id,
                 "error": { "code": -32000, "message": "mock turn rejected" }
             }),
-            ("turn/start", TurnBehavior::Ok) => json!({
-                "id": id,
-                "result": { "turn": { "id": "mock-turn" } }
-            }),
+            ("turn/start", TurnBehavior::Ok) => {
+                if valid_text_input(msg.get("params")) {
+                    json!({
+                        "id": id,
+                        "result": { "turn": { "id": "mock-turn" } }
+                    })
+                } else {
+                    invalid_params(id, "invalid turn/start params")
+                }
+            }
+            ("turn/steer", TurnBehavior::ExpectSteer) => {
+                if valid_text_input(msg.get("params"))
+                    && msg
+                        .get("params")
+                        .and_then(|p| p.get("expectedTurnId"))
+                        .and_then(Value::as_str)
+                        == Some("turn-active")
+                {
+                    json!({
+                        "id": id,
+                        "result": { "turnId": "turn-active" }
+                    })
+                } else {
+                    invalid_params(id, "invalid turn/steer params")
+                }
+            }
             _ => json!({ "id": id, "result": {} }),
         };
-        let text = serde_json::to_string(&reply).expect("serialize reply");
-        ws.write_text(text.as_bytes()).await?;
+        write_reply(&mut ws, reply).await?;
     }
+}
+
+async fn write_reply(ws: &mut WsStream<UnixStream>, reply: Value) -> Result<(), AppServerError> {
+    let text = serde_json::to_string(&reply).expect("serialize reply");
+    ws.write_text(text.as_bytes()).await
+}
+
+fn invalid_params(id: i64, message: &str) -> Value {
+    json!({
+        "id": id,
+        "error": { "code": -32602, "message": message }
+    })
+}
+
+fn valid_initialize_params(params: Option<&Value>) -> bool {
+    let Some(params) = params else {
+        return false;
+    };
+    params
+        .get("clientInfo")
+        .and_then(|v| v.get("title"))
+        .and_then(Value::as_str)
+        == Some("vibe-editor")
+        && params
+            .get("capabilities")
+            .and_then(|v| v.get("experimentalApi"))
+            .and_then(Value::as_bool)
+            == Some(false)
+        && params
+            .get("capabilities")
+            .and_then(|v| v.get("requestAttestation"))
+            .and_then(Value::as_bool)
+            == Some(false)
+}
+
+fn valid_text_input(params: Option<&Value>) -> bool {
+    let Some(input) = params
+        .and_then(|p| p.get("input"))
+        .and_then(Value::as_array)
+        .and_then(|items| items.first())
+    else {
+        return false;
+    };
+    input.get("type").and_then(Value::as_str) == Some("text")
+        && input.get("text").and_then(Value::as_str).is_some()
+        && input
+            .get("text_elements")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
 }
 
 #[tokio::test]
 async fn deliver_happy_path_round_trips() {
     let path = spawn_mock(TurnBehavior::Ok);
-    let result = super::deliver(&path, "thread-123", "hello team", false).await;
+    let result = super::deliver(&path, "thread-123", "hello team").await;
     assert!(result.is_ok(), "expected Ok, got {result:?}");
     let _ = std::fs::remove_file(&path);
 }
@@ -75,7 +153,7 @@ async fn deliver_happy_path_round_trips() {
 #[tokio::test]
 async fn deliver_surfaces_rpc_error() {
     let path = spawn_mock(TurnBehavior::RpcError);
-    let result = super::deliver(&path, "thread-123", "hello team", false).await;
+    let result = super::deliver(&path, "thread-123", "hello team").await;
     match result {
         Err(AppServerError::Rpc { code, .. }) => assert_eq!(code, -32000),
         other => panic!("expected Rpc error, got {other:?}"),
@@ -85,11 +163,9 @@ async fn deliver_surfaces_rpc_error() {
 }
 
 #[tokio::test]
-async fn deliver_steer_uses_in_flight_path() {
-    // in_flight=true でも mock は id+method に応答するので Ok になる。
-    // (turn/steer のメソッド分岐が panic せず往復することの確認。)
-    let path = spawn_mock(TurnBehavior::Ok);
-    let result = super::deliver(&path, "thread-123", "steer text", true).await;
+async fn steer_requires_expected_turn_id_and_round_trips() {
+    let path = spawn_mock(TurnBehavior::ExpectSteer);
+    let result = super::steer(&path, "thread-123", "turn-active", "steer text").await;
     assert!(result.is_ok(), "expected Ok, got {result:?}");
     let _ = std::fs::remove_file(&path);
 }
@@ -97,7 +173,7 @@ async fn deliver_steer_uses_in_flight_path() {
 #[tokio::test]
 async fn deliver_to_missing_socket_is_unreachable() {
     let missing = std::env::temp_dir().join("vibe-as-does-not-exist.sock");
-    let result = super::deliver(&missing.to_string_lossy(), "thread-123", "hello", false).await;
+    let result = super::deliver(&missing.to_string_lossy(), "thread-123", "hello").await;
     assert_eq!(
         result.err().map(|e| e.code()),
         Some("app_server_unreachable")

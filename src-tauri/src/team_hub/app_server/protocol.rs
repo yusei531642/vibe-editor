@@ -16,4 +16,5 @@ pub(crate) const THREAD_RESUME: &str = "thread/resume";
 pub(crate) const TURN_START: &str = "turn/start";
 
 /// 実行中ターンに割り込み入力 (bracketed-paste 割り込みの公式版)。
+#[allow(dead_code)] // 現フェーズでは typed steer entry point のみが保持する将来用メソッド。
 pub(crate) const TURN_STEER: &str = "turn/steer";

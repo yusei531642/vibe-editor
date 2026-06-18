@@ -30,39 +30,56 @@ impl AppServerConn {
     /// `initialize` → `initialized` のハンドシェイク。
     pub async fn initialize(&mut self) -> Result<(), AppServerError> {
         let params = json!({
-            "clientInfo": { "name": "vibe-editor", "version": env!("CARGO_PKG_VERSION") },
-            "capabilities": {}
+            "clientInfo": {
+                "name": "vibe-editor",
+                "title": "vibe-editor",
+                "version": env!("CARGO_PKG_VERSION"),
+            },
+            "capabilities": {
+                "experimentalApi": false,
+                "requestAttestation": false,
+            }
         });
         self.request(protocol::INITIALIZE, params).await?;
         self.notify(protocol::INITIALIZED, json!({})).await?;
         Ok(())
     }
 
-    /// 指定スレッドへメッセージを 1 件配送する。
-    /// `in_flight` が真なら実行中ターンへの `turn/steer`、偽なら新規 `turn/start`。
+    /// 指定スレッドへ新しいメッセージを 1 件配送する。
     /// 戻り値 Ok は「ターンが受理された (= 配送成功)」を意味し、ターン完了までは待たない。
-    pub async fn deliver_turn(
-        &mut self,
-        thread_id: &str,
-        text: &str,
-        in_flight: bool,
-    ) -> Result<(), AppServerError> {
+    pub async fn start_turn(&mut self, thread_id: &str, text: &str) -> Result<(), AppServerError> {
         // best-effort resume: 新規 in-memory スレッドでは "no rollout" エラーになり得るが、
         // threadId さえ有効なら turn/start は成立するため、resume の失敗は無視する。
         let _ = self
             .request(protocol::THREAD_RESUME, json!({ "threadId": thread_id }))
             .await;
 
-        let method = if in_flight {
-            protocol::TURN_STEER
-        } else {
-            protocol::TURN_START
-        };
         let params = json!({
             "threadId": thread_id,
-            "input": [{ "type": "text", "text": text }],
+            "input": [text_input(text)],
         });
-        self.request(method, params).await?;
+        self.request(protocol::TURN_START, params).await?;
+        Ok(())
+    }
+
+    /// 実行中ターンに割り込み入力を配送する。
+    ///
+    /// codex app-server の `turn/steer` は active turn の取り違えを避けるため
+    /// `expectedTurnId` が必須。呼び出し側が active turn id を持てない場合は `start_turn`
+    /// を使うこと。
+    #[allow(dead_code)] // 通知購読で active turn id を保持する後続フェーズから呼び出す。
+    pub async fn steer_turn(
+        &mut self,
+        thread_id: &str,
+        expected_turn_id: &str,
+        text: &str,
+    ) -> Result<(), AppServerError> {
+        let params = json!({
+            "threadId": thread_id,
+            "expectedTurnId": expected_turn_id,
+            "input": [text_input(text)],
+        });
+        self.request(protocol::TURN_STEER, params).await?;
         Ok(())
     }
 
@@ -117,4 +134,12 @@ impl AppServerConn {
             .map_err(|e| AppServerError::Protocol(format!("serialize failed: {e}")))?;
         self.ws.write_text(text.as_bytes()).await
     }
+}
+
+fn text_input(text: &str) -> Value {
+    json!({
+        "type": "text",
+        "text": text,
+        "text_elements": [],
+    })
 }

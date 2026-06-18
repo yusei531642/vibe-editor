@@ -39,8 +39,7 @@ pub async fn deliver_message(
 /// app-server 経路での配送を試みる。成功で `true`、失敗 (= PTY フォールバック) で `false`。
 #[cfg(unix)]
 async fn try_app_server(agent_id: &str, socket: &str, thread_id: &str, text: &str) -> bool {
-    match crate::team_hub::app_server::deliver(socket, thread_id, text, /* in_flight */ false).await
-    {
+    match crate::team_hub::app_server::deliver(socket, thread_id, text).await {
         Ok(()) => true,
         Err(err) => {
             tracing::warn!(
