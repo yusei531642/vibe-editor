@@ -153,6 +153,7 @@ pub async fn ensure_control_socket(codex_command: &str) -> Option<String> {
         return default_existing_socket_after_wait().await;
     }
 
+    // safe-load-exempt: Codex CLI の daemon start stdout (永続化ファイルではない)。
     let parsed_socket = serde_json::from_slice::<DaemonStartResponse>(&output.stdout)
         .ok()
         .and_then(|r| r.socket_path)
