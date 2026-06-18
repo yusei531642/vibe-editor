@@ -7,11 +7,13 @@
 
 #[cfg(unix)]
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::Mutex;
 #[cfg(unix)]
 use std::time::Duration;
 
 use crate::pty::session::SessionHandle;
+use crate::pty::{InFlightTracker, SessionRegistry};
 #[cfg(unix)]
 use crate::util::log_redact::redact_home;
 
@@ -29,17 +31,40 @@ struct DaemonStartResponse {
     socket_path: Option<String>,
 }
 
-pub async fn prepare_for_terminal(
-    codex_command: &str,
+pub fn should_prepare_for_terminal(
     is_codex: bool,
     team_id: Option<&str>,
     agent_id: Option<&str>,
-) -> Option<String> {
-    if is_codex && team_id.is_some() && agent_id.is_some() {
-        ensure_control_socket(codex_command).await
-    } else {
-        None
+) -> bool {
+    is_codex && team_id.is_some() && agent_id.is_some()
+}
+
+pub fn set_socket(session: &SessionHandle, socket: String) {
+    if !session.is_codex || socket.trim().is_empty() {
+        return;
     }
+    match session.app_server_socket.lock() {
+        Ok(mut guard) => *guard = Some(socket),
+        Err(poisoned) => {
+            tracing::warn!("[codex_app_server] app_server_socket mutex poisoned; recovering");
+            *poisoned.into_inner() = Some(socket);
+        }
+    }
+}
+
+pub fn spawn_prepare_task(
+    inflight: &Arc<InFlightTracker>,
+    registry: Arc<SessionRegistry>,
+    term_id: String,
+    codex_command: String,
+) {
+    inflight.spawn(async move {
+        if let Some(socket) = ensure_control_socket(&codex_command).await {
+            if let Some(handle) = registry.get(&term_id) {
+                set_socket(&handle, socket);
+            }
+        }
+    });
 }
 
 pub fn target_for_session(session: &SessionHandle) -> Option<(String, String)> {
@@ -205,23 +230,20 @@ mod tests {
         assert_eq!(parsed.socket_path.as_deref(), Some("/tmp/codex.sock"));
     }
 
-    #[tokio::test]
-    async fn prepare_for_terminal_skips_non_team_codex() {
-        assert!(
-            prepare_for_terminal("missing-codex", true, None, Some("agent"))
-                .await
-                .is_none()
-        );
-        assert!(
-            prepare_for_terminal("missing-codex", true, Some("team"), None)
-                .await
-                .is_none()
-        );
-        assert!(
-            prepare_for_terminal("missing-codex", false, Some("team"), Some("agent"))
-                .await
-                .is_none()
-        );
+    #[test]
+    fn should_prepare_for_terminal_only_allows_team_codex() {
+        assert!(should_prepare_for_terminal(
+            true,
+            Some("team"),
+            Some("agent")
+        ));
+        assert!(!should_prepare_for_terminal(true, None, Some("agent")));
+        assert!(!should_prepare_for_terminal(true, Some("team"), None));
+        assert!(!should_prepare_for_terminal(
+            false,
+            Some("team"),
+            Some("agent")
+        ));
     }
 
     #[test]
@@ -235,7 +257,7 @@ mod tests {
         handle.is_codex = true;
         assert!(target_for_session(&handle).is_none());
 
-        *handle.app_server_socket.lock().unwrap() = Some("/tmp/codex.sock".to_string());
+        set_socket(&handle, "/tmp/codex.sock".to_string());
         assert!(target_for_session(&handle).is_none());
 
         set_thread_id(&handle, "thread-123");

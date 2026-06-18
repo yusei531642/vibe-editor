@@ -139,7 +139,6 @@ mod resolution_tests {
             rows: 24,
             env: HashMap::new(),
             agent_id: None,
-            app_server_socket: None,
             session_key: None,
             team_id: None,
             role: None,

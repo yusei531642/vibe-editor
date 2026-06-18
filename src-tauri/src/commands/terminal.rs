@@ -553,7 +553,11 @@ pub async fn terminal_create(
         }
     }
 
-    let app_server_socket = crate::pty::codex_app_server::prepare_for_terminal(&command, is_codex_command, opts.team_id.as_deref(), opts.agent_id.as_deref()).await;
+    let prepare_codex_app_server = crate::pty::codex_app_server::should_prepare_for_terminal(
+        is_codex_command,
+        opts.team_id.as_deref(),
+        opts.agent_id.as_deref(),
+    );
 
     let spawn_opts = SpawnOptions {
         command: command.clone(),
@@ -564,7 +568,6 @@ pub async fn terminal_create(
         rows: opts.rows.min(u32::from(u16::MAX)) as u16,
         env,
         agent_id: opts.agent_id,
-        app_server_socket,
         // Issue #271: session_key を SpawnOptions / SessionHandle 経由で
         // SessionRegistry::insert に届け、by_session_key index を更新できるようにする。
         session_key: opts.session_key,
@@ -611,6 +614,14 @@ pub async fn terminal_create(
         Ok(id) => {
             // 後続処理: spawn_session の Ok 分岐内で行っていた処理を保持
             // (id は registry に登録済み、retry を経た場合も Ok(()) 後の状態は insert と等価)。
+            if prepare_codex_app_server {
+                crate::pty::codex_app_server::spawn_prepare_task(
+                    &state.pty_inflight,
+                    state.pty_registry.clone(),
+                    id.clone(),
+                    command.clone(),
+                );
+            }
 
             // Issue #413: Fallback 経路として PTY 直接注入する。
             // 通常は CLI args 経路 (--config model_instructions_file=) で system prompt が届くため
