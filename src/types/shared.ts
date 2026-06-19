@@ -292,6 +292,13 @@ export interface AppSettings {
    */
   mcpAutoSetup?: boolean;
   /**
+   * Issue #1068: codex への `team_send` をどの経路で配送するか。
+   * `backend` (既定) は app-server JSON-RPC を優先し、ダメなら PTY 注入へ fallback。
+   * `pty` は常に従来の PTY 注入を使う。undefined は `backend` 扱い。
+   * Windows は app-server 未対応のため、この値に関わらず常に PTY 注入になる。
+   */
+  codexTeamSendDelivery?: CodexTeamSendDelivery;
+  /**
    * Issue #161: webview zoom factor (0.5〜3.0)。Ctrl+=/-/0 や Shift+wheel で変動。
    * 旧実装は永続化していなかったため、再起動後に内部 current=1.0 と実際の zoom が
    * 食い違って Ctrl+= で逆に縮む現象が起きていた。
@@ -333,6 +340,13 @@ export interface AppSettings {
 
 /** Issue #825: 音声指揮モードで「送信時の確認」を 2 段に分けるためのモード。 */
 export type VoiceConfirmationMode = 'always' | 'bypass';
+
+/**
+ * Issue #1068: codex への `team_send` 配送方式。
+ * - `backend`: codex 公式 app-server JSON-RPC で配送し、使えない/失敗時は PTY 注入へ fallback (既定)。
+ * - `pty`: 常に従来の PTY bracketed-paste 注入を使い、app-server 経路を使わない。
+ */
+export type CodexTeamSendDelivery = 'backend' | 'pty';
 
 /**
  * Issue #825: 音声指揮モード (Beta) のユーザー設定。
@@ -635,6 +649,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   hasCompletedOnboarding: false,
   customAgents: [],
   mcpAutoSetup: true,
+  codexTeamSendDelivery: 'backend',
   fileTreeExpanded: {},
   fileTreeCollapsedRoots: [],
   // Issue #618: Windows + cmd.exe / PowerShell で UTF-8 を強制する (CP932 化対策)。
@@ -671,6 +686,7 @@ export const RESETTABLE_SETTING_KEYS = [
   'codexCommand',
   'codexArgs',
   'mcpAutoSetup',
+  'codexTeamSendDelivery',
   'terminalForceUtf8'
 ] as const satisfies readonly (keyof AppSettings)[];
 

@@ -13,6 +13,8 @@
 #[cfg(unix)]
 pub mod app_server;
 pub mod bridge;
+// Issue #1068: codex team_send 配送方式 (PTY 注入 / backend app-server) のユーザー設定ミラー。
+pub mod codex_delivery;
 // Issue #1062: team_send の配送経路ルータ (codex=app-server / それ以外=PTY inject)。
 pub mod deliver;
 pub mod delivery_mode;

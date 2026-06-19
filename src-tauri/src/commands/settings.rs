@@ -94,6 +94,12 @@ pub struct Settings {
     pub codex_command: String,
     #[serde(default)]
     pub codex_args: String,
+    /// Issue #1068: codex への `team_send` 配送方式 (`"backend"` / `"pty"`)。
+    /// `"backend"` (既定) は app-server JSON-RPC を優先し、ダメなら PTY 注入へ fallback。
+    /// `"pty"` は常に PTY 注入。未知値 / None は `"backend"` 扱い。renderer の
+    /// `CodexTeamSendDelivery` literal union と camelCase で対応。
+    #[serde(default = "default_codex_team_send_delivery")]
+    pub codex_team_send_delivery: String,
 
     #[serde(default)]
     pub notepad: String,
@@ -240,6 +246,7 @@ impl Default for Settings {
             sidebar_width: default_sidebar_width(),
             codex_command: default_codex_command(),
             codex_args: String::new(),
+            codex_team_send_delivery: default_codex_team_send_delivery(),
             notepad: String::new(),
             has_completed_onboarding: Some(false),
             custom_agents: Some(Vec::new()),
@@ -318,6 +325,11 @@ fn default_codex_command() -> String {
     "codex".to_string()
 }
 
+/// Issue #1068: codex `team_send` 配送方式の既定。app-server 優先 (現挙動維持)。
+fn default_codex_team_send_delivery() -> String {
+    "backend".to_string()
+}
+
 fn default_claude_code_panel_width() -> f64 {
     460.0
 }
@@ -362,23 +374,35 @@ async fn read_optional_file_with_retry(
 pub async fn settings_load() -> CommandResult<Settings> {
     tracing::info!("[IPC] settings_load called");
     let path = crate::util::config_paths::settings_path();
-    let Some(bytes) =
-        read_optional_file_with_retry(&path, "settings_load", SETTINGS_READ_RETRY_DELAYS).await?
-    else {
+    let settings = match read_optional_file_with_retry(
+        &path,
+        "settings_load",
+        SETTINGS_READ_RETRY_DELAYS,
+    )
+    .await?
+    {
         // Issue #29: 初回起動で settings.json がまだ無いときだけ default を返す。
         // Issue #905: PermissionDenied / sharing violation 等の読み取り不能は default 扱いに
         // しない。renderer 側へ Err を返し、default ベースの auto-save で原本を上書きしない。
-        return Ok(Settings::default());
+        None => Settings::default(),
+        Some(bytes) => {
+            backup_pre_v12_settings_snapshot(&path, &bytes).await;
+            match serde_json::from_slice::<Settings>(&bytes) {
+                Ok(v) => v,
+                // Issue #170 / #493 / #644 / #996: parse 失敗時の原本退避 + v11 スナップショット復旧は
+                // `settings_recovery` に集約 (settings.rs の肥大化を避ける)。
+                Err(e) => {
+                    crate::commands::settings_recovery::recover_after_parse_failure(
+                        &path, &bytes, e,
+                    )
+                    .await
+                }
+            }
+        }
     };
-    backup_pre_v12_settings_snapshot(&path, &bytes).await;
-    match serde_json::from_slice::<Settings>(&bytes) {
-        Ok(v) => Ok(v),
-        // Issue #170 / #493 / #644 / #996: parse 失敗時の原本退避 + v11 スナップショット復旧は
-        // `settings_recovery` に集約 (settings.rs の肥大化を避ける)。
-        Err(e) => Ok(
-            crate::commands::settings_recovery::recover_after_parse_failure(&path, &bytes, e).await,
-        ),
-    }
+    // Issue #1068: team_hub は永続 Settings を直接読まないため、起動時 load でミラーを同期する。
+    crate::team_hub::codex_delivery::set_from_settings(Some(&settings.codex_team_send_delivery));
+    Ok(settings)
 }
 
 async fn backup_pre_v12_settings_snapshot(path: &Path, bytes: &[u8]) {
@@ -500,6 +524,8 @@ pub async fn settings_save(app: tauri::AppHandle, settings: Settings) -> Command
     atomic_write(&path, &json)
         .await
         .map_err(|e| CommandError::Internal(e.to_string()))?;
+    // Issue #1068: 設定変更を team_hub の配送方式ミラーへ即時反映する (settings.json が SSOT)。
+    crate::team_hub::codex_delivery::set_from_settings(Some(&settings.codex_team_send_delivery));
     // Issue #724: mascot custom 画像 (PR #716) をユーザーが設定画面で選び直したとき、
     // assetProtocol.scope は空なので、再起動を待たず同一セッション内でその 1 ファイルを
     // `asset://` で表示できるよう asset scope へ許可する。失敗しても save 自体は成功扱い。
@@ -546,6 +572,8 @@ mod tests {
         assert_eq!(v["terminalFontSize"], json!(13.0));
         assert_eq!(v["claudeCommand"], json!("claude"));
         assert_eq!(v["codexCommand"], json!("codex"));
+        // Issue #1068: codex team_send 配送方式の既定は app-server 優先 (現挙動維持)。
+        assert_eq!(v["codexTeamSendDelivery"], json!("backend"));
         assert_eq!(v["claudeCodePanelWidth"], json!(460.0));
         assert_eq!(v["sidebarWidth"], json!(272.0));
         assert_eq!(v["mcpAutoSetup"], json!(true));

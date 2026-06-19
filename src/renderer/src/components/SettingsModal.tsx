@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Check, Plus, Search, X } from 'lucide-react';
-import type { AgentConfig, AppSettings } from '../../../types/shared';
+import type { AgentConfig, AppSettings, CodexTeamSendDelivery } from '../../../types/shared';
 import { resetPreferencesToDefaults } from '../../../types/shared';
 import { useT } from '../lib/i18n';
 import { useToast } from '../lib/toast-context';
@@ -268,16 +268,34 @@ export function SettingsModal({
         );
       case 'codex':
         return (
-          <CommandOptionsSection
-            title={t('settings.launch.title')}
-            commandKey="codexCommand"
-            commandPlaceholder="codex"
-            argsKey="codexArgs"
-            argsLabel={t('settings.launch.argsLabelSimple')}
-            argsPlaceholder="--model o3"
-            draft={draft}
-            update={update}
-          />
+          <>
+            <CommandOptionsSection
+              title={t('settings.launch.title')}
+              commandKey="codexCommand"
+              commandPlaceholder="codex"
+              argsKey="codexArgs"
+              argsLabel={t('settings.launch.argsLabelSimple')}
+              argsPlaceholder="--model o3"
+              draft={draft}
+              update={update}
+            />
+            <section className="modal__section">
+              <h3>{t('settings.codexDelivery.title')}</h3>
+              <label className="modal__label modal__label--full">
+                <span>{t('settings.codexDelivery.label')}</span>
+                <select
+                  value={draft.codexTeamSendDelivery ?? 'backend'}
+                  onChange={(e) =>
+                    update('codexTeamSendDelivery', e.target.value as CodexTeamSendDelivery)
+                  }
+                >
+                  <option value="backend">{t('settings.codexDelivery.optBackend')}</option>
+                  <option value="pty">{t('settings.codexDelivery.optPty')}</option>
+                </select>
+              </label>
+              <p className="modal__note">{t('settings.codexDelivery.hint')}</p>
+            </section>
+          </>
         );
       case 'roles':
         return <RoleProfilesSection />;
