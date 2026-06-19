@@ -553,6 +553,12 @@ pub async fn terminal_create(
         }
     }
 
+    let prepare_codex_app_server = crate::pty::codex_app_server::should_prepare_for_terminal(
+        is_codex_command,
+        opts.team_id.as_deref(),
+        opts.agent_id.as_deref(),
+    );
+
     let spawn_opts = SpawnOptions {
         command: command.clone(),
         args: args.clone(),
@@ -608,6 +614,14 @@ pub async fn terminal_create(
         Ok(id) => {
             // 後続処理: spawn_session の Ok 分岐内で行っていた処理を保持
             // (id は registry に登録済み、retry を経た場合も Ok(()) 後の状態は insert と等価)。
+            if prepare_codex_app_server {
+                crate::pty::codex_app_server::spawn_prepare_task(
+                    &state.pty_inflight,
+                    state.pty_registry.clone(),
+                    id.clone(),
+                    command.clone(),
+                );
+            }
 
             // Issue #413: Fallback 経路として PTY 直接注入する。
             // 通常は CLI args 経路 (--config model_instructions_file=) で system prompt が届くため
@@ -654,6 +668,7 @@ pub async fn terminal_create(
                     if is_codex_command {
                         crate::pty::codex_watcher::spawn_watcher(
                             app.clone(),
+                            state.pty_registry.clone(),
                             watcher_id,
                             actual_root,
                             spawned_at,

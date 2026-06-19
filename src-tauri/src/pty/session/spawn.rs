@@ -507,6 +507,8 @@ pub fn spawn_session(
         role: opts.role,
         cwd: opts.cwd,
         is_codex: opts.is_codex,
+        app_server_socket: Mutex::new(None),
+        thread_id: Mutex::new(None),
         process_id,
         injecting: AtomicBool::new(false),
         write_budget: Mutex::new(WriteBudget {

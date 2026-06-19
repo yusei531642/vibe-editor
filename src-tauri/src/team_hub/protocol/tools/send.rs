@@ -606,8 +606,11 @@ async fn dispatch_injects(
         let role_clone = target_role.clone();
         let tracker = inflight.clone();
         join_set.spawn(async move {
+            // Issue #1062: codex は app-server JSON-RPC、それ以外は従来 PTY inject へルーティング。
             let result = tracker
-                .track_async(inject::inject(reg, &aid, &from_role, &msg))
+                .track_async(crate::team_hub::deliver::deliver_message(
+                    reg, &aid, &from_role, &msg,
+                ))
                 .await;
             (aid, role_clone, result)
         });
