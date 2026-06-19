@@ -5,7 +5,7 @@
   "src-tauri/src/commands/files.rs": 1274,
   "src-tauri/src/commands/git.rs": 529,
   "src-tauri/src/commands/handoffs.rs": 513,
-  "src-tauri/src/commands/settings.rs": 841,
+  "src-tauri/src/commands/settings.rs": 869,
   "src-tauri/src/commands/team_history.rs": 1239,
   "src-tauri/src/commands/team_state.rs": 593,
   "src-tauri/src/commands/terminal.rs": 1017,
@@ -21,7 +21,7 @@
   "src-tauri/src/pty/session/spawn.rs": 733,
   "src-tauri/src/team_hub/file_locks.rs": 781,
   "src-tauri/src/team_hub/inject.rs": 768,
-  "src-tauri/src/team_hub/mod.rs": 960,
+  "src-tauri/src/team_hub/mod.rs": 962,
   "src-tauri/src/team_hub/protocol/role_template.rs": 632,
   "src-tauri/src/team_hub/protocol/tools/assign_task.rs": 832,
   "src-tauri/src/team_hub/protocol/tools/recruit.rs": 941,
@@ -38,8 +38,8 @@
   "src/renderer/src/layouts/CanvasLayout.tsx": 943,
   "src/renderer/src/lib/hooks/use-file-tabs.ts": 517,
   "src/renderer/src/lib/hooks/use-xterm-bind.ts": 889,
-  "src/renderer/src/lib/i18n.ts": 1864,
+  "src/renderer/src/lib/i18n.ts": 1878,
   "src/renderer/src/lib/role-profiles-builtin.ts": 633,
   "src/renderer/src/stores/canvas.ts": 584,
-  "src/types/shared.ts": 1893
+  "src/types/shared.ts": 1909
 }

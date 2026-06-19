@@ -492,6 +492,13 @@ const ja: Dict = {
   'settings.section.codex.label': 'Codex',
   'settings.section.codex.title': 'Codex',
   'settings.section.codex.desc': '起動コマンドと引数',
+  // Issue #1068: codex team_send の配送方式トグル
+  'settings.codexDelivery.title': 'team_send の配送方式',
+  'settings.codexDelivery.label': '配送方式',
+  'settings.codexDelivery.optBackend': 'バックエンド (app-server) — 使えなければ PTY に自動 fallback',
+  'settings.codexDelivery.optPty': 'PTY 注入 — 常にターミナルへ貼り付け',
+  'settings.codexDelivery.hint':
+    'codex への team_send を、codex 公式 app-server (JSON-RPC) 経由で送るか、従来どおりターミナルへ PTY 注入するか。バックエンドは履歴に残り入力競合も避けられますが、app-server が使えない場合は自動で PTY に fallback します。Windows は app-server 未対応のため常に PTY です。',
   'settings.section.roles.label': 'ロール定義',
   'settings.section.roles.title': 'ロール定義',
   'settings.section.roles.desc': 'チームメンバーの役割テンプレ',
@@ -1390,6 +1397,13 @@ const en: Dict = {
   'settings.section.codex.label': 'Codex',
   'settings.section.codex.title': 'Codex',
   'settings.section.codex.desc': 'Launch command and args',
+  // Issue #1068: codex team_send delivery method toggle
+  'settings.codexDelivery.title': 'team_send delivery',
+  'settings.codexDelivery.label': 'Delivery method',
+  'settings.codexDelivery.optBackend': 'Backend (app-server) — falls back to PTY if unavailable',
+  'settings.codexDelivery.optPty': 'PTY injection — always paste into the terminal',
+  'settings.codexDelivery.hint':
+    'How team_send reaches codex: via the official codex app-server (JSON-RPC) or the legacy PTY paste into the terminal. Backend keeps history and avoids input races, but automatically falls back to PTY when the app-server is unavailable. Windows always uses PTY (app-server is not supported).',
   'settings.section.roles.label': 'Role profiles',
   'settings.section.roles.title': 'Role profiles',
   'settings.section.roles.desc': 'Team member role templates',

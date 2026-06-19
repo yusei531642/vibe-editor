@@ -4,6 +4,9 @@
 //! codex セッションで `app_server_socket` と `thread_id` の両方が分かっている場合のみ、
 //! codex 公式 app-server JSON-RPC (`turn/start`) で配送する。app-server 配送が失敗したら
 //! PTY 注入にフォールバックするため、可用性は従来以上を保つ。
+//!
+//! Issue #1068: ユーザーが設定 (`codexTeamSendDelivery`) で `pty` を選んだ場合は、app-server 経路を
+//! 一切使わず常に PTY 注入する (`codex_delivery::prefers_pty`)。既定の `backend` は上記の挙動。
 
 use std::sync::Arc;
 
@@ -17,13 +20,18 @@ pub async fn deliver_message(
     from_role: &str,
     text: &str,
 ) -> Result<(), InjectError> {
-    if let Some(session) = registry.get_by_agent(agent_id) {
-        if session.is_codex {
-            if let Some((socket, thread_id)) = crate::pty::codex_app_server::target_for_session(&session) {
-                if try_app_server(agent_id, &socket, &thread_id, text).await {
-                    return Ok(());
+    // Issue #1068: 設定で PTY を強制している場合は app-server 経路を完全にスキップする。
+    if !crate::team_hub::codex_delivery::prefers_pty() {
+        if let Some(session) = registry.get_by_agent(agent_id) {
+            if session.is_codex {
+                if let Some((socket, thread_id)) =
+                    crate::pty::codex_app_server::target_for_session(&session)
+                {
+                    if try_app_server(agent_id, &socket, &thread_id, text).await {
+                        return Ok(());
+                    }
+                    // app-server 未対応 / 失敗時は下の PTY 注入へフォールバック。
                 }
-                // app-server 未対応 / 失敗時は下の PTY 注入へフォールバック。
             }
         }
     }
