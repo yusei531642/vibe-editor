@@ -36,6 +36,12 @@ const CODEX_INITIAL_PROMPT_DELAY_MS: u64 = 1800;
 /// terminal 側のチャンク注入用にローカル定数として持つ (旧実装は `15` の直書きだった)。
 const CODEX_PROMPT_CHUNK_DELAY_MS: u64 = 15;
 
+/// Issue #1077: 末尾の確定 `\r` (Enter) だけ失敗すると、paste 本体は届いたのに Codex が初手指示を
+/// 実行しないまま入力欄表示で止まる (team_hub の inject は #378 で `FinalCrFailed` として厳密化済み
+/// だが codex 初手注入経路は未対応だった)。transient な ConPTY back-pressure を吸収するため、最終
+/// `\r` 送出が失敗したときに再送する最大回数。
+const CODEX_FINAL_CR_MAX_RETRY: u32 = 2;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalCreateOptions {
@@ -275,19 +281,40 @@ async fn inject_codex_prompt_to_pty(
             }
         }
     }
-    sleep(Duration::from_millis(CODEX_PROMPT_CHUNK_DELAY_MS)).await;
     // Issue #620: 末尾の確定 `\r` も spawn_blocking 経由で送る。
-    let s = session.clone();
-    match tokio::task::spawn_blocking(move || s.write(b"\r")).await {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => {
-            tracing::warn!("[terminal] codex prompt write(\\r) failed for {term_id}: {e}");
+    // Issue #1077: 最終 `\r` (Enter) の失敗を握り潰すと「起動したのに何も始まらない」状態になる。
+    // transient な ConPTY back-pressure を考慮し、失敗時は backoff を挟んで最大
+    // CODEX_FINAL_CR_MAX_RETRY 回まで再送する。write 成功時のみ break するので、再送が走るのは
+    // 実際に失敗したときだけ (= 二重 Enter は起きない)。
+    let mut cr_sent = false;
+    for attempt in 0..=CODEX_FINAL_CR_MAX_RETRY {
+        sleep(Duration::from_millis(CODEX_PROMPT_CHUNK_DELAY_MS)).await;
+        if registry.get(&term_id).is_none() {
+            return;
         }
-        Err(e) => {
-            tracing::warn!(
-                "[terminal] codex prompt spawn_blocking(\\r) failed for {term_id}: {e}"
-            );
+        let s = session.clone();
+        match tokio::task::spawn_blocking(move || s.write(b"\r")).await {
+            Ok(Ok(())) => {
+                cr_sent = true;
+                break;
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    "[terminal] codex prompt write(\\r) failed for {term_id} (attempt {attempt}/{CODEX_FINAL_CR_MAX_RETRY}): {e}"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[terminal] codex prompt spawn_blocking(\\r) failed for {term_id} (attempt {attempt}/{CODEX_FINAL_CR_MAX_RETRY}): {e}"
+                );
+            }
         }
+    }
+    if !cr_sent {
+        tracing::error!(
+            "[terminal] codex prompt final \\r (Enter) could not be delivered to pty {term_id} after {CODEX_FINAL_CR_MAX_RETRY} retries — prompt may be left unconfirmed in the input box"
+        );
+        return;
     }
     tracing::info!(
         "[terminal] codex prompt injected into pty {term_id} ({} bytes)",
@@ -747,6 +774,22 @@ pub async fn terminal_write(
     Ok(())
 }
 
+/// Issue #1076: PTY resize の下限。spawn 経路 (`openpty`) と同じ floor を resize にも適用する。
+const MIN_PTY_COLS: u32 = 20;
+const MIN_PTY_ROWS: u32 = 5;
+
+/// Issue #1076: resize の cols/rows を `[下限, u16::MAX]` にクランプする。
+///
+/// spawn 経路は `openpty` で cols>=20 / rows>=5 の下限を持つが、`terminal_resize` は上限のみ
+/// クランプしていた。renderer の grid 計算は 20×5 未満を送らないものの、信頼境界外 (renderer の
+/// 任意呼び出し / 将来の別 caller) からの 0×0 resize が ConPTY/portable-pty に渡ると再描画破綻を
+/// 招くため、同じ下限を defense-in-depth でクランプする。
+fn clamp_resize_dims(cols: u32, rows: u32) -> (u16, u16) {
+    let cols = cols.clamp(MIN_PTY_COLS, u32::from(u16::MAX)) as u16;
+    let rows = rows.clamp(MIN_PTY_ROWS, u32::from(u16::MAX)) as u16;
+    (cols, rows)
+}
+
 #[tauri::command]
 pub async fn terminal_resize(
     state: State<'_, AppState>,
@@ -755,8 +798,7 @@ pub async fn terminal_resize(
     rows: u32,
 ) -> crate::commands::error::CommandResult<()> {
     if let Some(s) = state.pty_registry.get(&id) {
-        let cols = cols.min(u32::from(u16::MAX)) as u16;
-        let rows = rows.min(u32::from(u16::MAX)) as u16;
+        let (cols, rows) = clamp_resize_dims(cols, rows);
         // resize 失敗は無害なので握りつぶす (旧実装と同じ)
         match tokio::task::spawn_blocking(move || s.resize(cols, rows)).await {
             Ok(Ok(())) | Ok(Err(_)) => {}
@@ -787,6 +829,41 @@ pub async fn terminal_save_pasted_image(
     mime_type: String,
 ) -> SavePastedImageResult {
     paste_image::save(base64, mime_type).await
+}
+
+#[cfg(test)]
+mod resize_clamp_tests {
+    use super::{clamp_resize_dims, MIN_PTY_COLS, MIN_PTY_ROWS};
+
+    #[test]
+    fn zero_is_clamped_to_spawn_floor() {
+        // Issue #1076: 信頼境界外からの 0×0 resize は ConPTY に届かず下限へ丸められる。
+        assert_eq!(
+            clamp_resize_dims(0, 0),
+            (MIN_PTY_COLS as u16, MIN_PTY_ROWS as u16)
+        );
+    }
+
+    #[test]
+    fn below_floor_is_raised_to_floor() {
+        assert_eq!(
+            clamp_resize_dims(10, 2),
+            (MIN_PTY_COLS as u16, MIN_PTY_ROWS as u16)
+        );
+        // 下限ちょうどは保持される。
+        assert_eq!(clamp_resize_dims(20, 5), (20, 5));
+    }
+
+    #[test]
+    fn normal_values_pass_through() {
+        assert_eq!(clamp_resize_dims(120, 40), (120, 40));
+    }
+
+    #[test]
+    fn above_u16_ceiling_is_clamped() {
+        assert_eq!(clamp_resize_dims(u32::MAX, u32::MAX), (u16::MAX, u16::MAX));
+        assert_eq!(clamp_resize_dims(100_000, 70_000), (u16::MAX, u16::MAX));
+    }
 }
 
 #[cfg(test)]
