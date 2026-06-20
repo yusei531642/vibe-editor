@@ -107,6 +107,8 @@ impl TeamHub {
             }
         }
         drop(s);
+        // Issue #1071: tasks/reports と同じ restore 経路で message 列/既読/next_message_id を復元 (lock 再取得のため drop 後)。
+        self.restore_team_messages(team_id).await;
         // Issue #513: state.lock を drop した後で `replay_persisted_dynamic_roles_for_team` を呼ぶ。
         // この関数は内部で hub.state.lock() を取るので、外側 lock を保持したまま呼ぶと deadlock する。
         // 永続化が空 (entry 0 件) のチームは `replace_dynamic_roles` で空集合を投入することになるが、

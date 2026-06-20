@@ -30,7 +30,7 @@
   "src-tauri/src/team_hub/protocol/tools/update_task.rs": 1249,
   "src-tauri/src/team_hub/role_lint.rs": 629,
   "src-tauri/src/team_hub/state/hub_state.rs": 665,
-  "src-tauri/src/team_hub/state/persistence.rs": 640,
+  "src-tauri/src/team_hub/state/persistence.rs": 642,
   "src-tauri/src/team_hub/state/recruit.rs": 1258,
   "src/renderer/src/components/AppShell.tsx": 977,
   "src/renderer/src/components/FileTreePanel.tsx": 767,

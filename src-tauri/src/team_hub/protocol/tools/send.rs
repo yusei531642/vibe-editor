@@ -544,11 +544,11 @@ async fn insert_team_message(
     sender_diag.last_seen_at = Some(timestamp.clone());
     sender_diag.messages_out_count = sender_diag.messages_out_count.saturating_add(1);
     drop(state);
-    if should_record_summary_feed {
-        if let Err(e) = hub.persist_team_state(&ctx.team_id).await {
-            tracing::warn!("[team_send] persist leader summary feed failed: {e}");
-        }
-    }
+    // Issue #1071: push 後は常に message log (messages/read_by/next_message_id) を persist し、
+    // summary feed (worker_reports) 更新時だけ orchestration state も persist する
+    // (詳細は state::message_log::persist_after_send)。
+    hub.persist_after_send(&ctx.team_id, should_record_summary_feed)
+        .await;
 
     MessageInsertionGuard { msg_id, timestamp }
 }
