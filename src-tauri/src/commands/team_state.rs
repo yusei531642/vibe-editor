@@ -302,7 +302,7 @@ pub fn team_state_path(project_root: &str, team_id: &str) -> PathBuf {
         .join(format!("{}.json", safe_segment(team_id)))
 }
 
-async fn ensure_private_dir(dir: &Path) -> crate::commands::error::CommandResult<()> {
+pub(crate) async fn ensure_private_dir(dir: &Path) -> crate::commands::error::CommandResult<()> {
     fs::create_dir_all(dir).await.map_err(|e| e.to_string())?;
     #[cfg(unix)]
     {

@@ -19,6 +19,10 @@ mod agent_entry;
 mod file_locks_glue;
 mod hub_state;
 mod member_diagnostics;
+// Issue #1071: team メッセージ列 + 既読状態 + next_message_id の永続化 / 復元 (sibling
+// `<team>.messages.json`)。`impl TeamHub` の persist_team_messages / restore_team_messages /
+// persist_after_send を提供する。
+mod message_log;
 mod persistence;
 mod recruit;
 

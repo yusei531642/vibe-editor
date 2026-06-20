@@ -76,6 +76,14 @@ pub async fn team_read(
     let reader_diag = state.diagnostics_mut(&ctx.team_id, &ctx.agent_id);
     reader_diag.last_seen_at = Some(now_iso.clone());
     drop(state);
+    // Issue #1071: read_by を更新したら message log を persist し、Hub 再起動後も既読状態を
+    // 復元できるようにする。再読 (read_by 不変 = newly_read_ids が空) のときは書き込まない
+    // (Monitor mode の 5s poll 等が無駄な write を起こさない自然な debounce)。
+    if !newly_read_ids.is_empty() {
+        if let Err(e) = hub.persist_team_messages(&ctx.team_id).await {
+            tracing::warn!("[team_read] persist team message log failed: {e}");
+        }
+    }
     // Issue #509: 「読了」を Canvas 側 UI に live で通知する。
     // 配送と読了を分離した指標を CardFrame の unread badge に反映する用途。
     // post-subscribe race は構造的に発生しない (read は send 後にしか来ない)。
