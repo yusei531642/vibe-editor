@@ -73,7 +73,7 @@ function buildLeaderHandoffPrompt(markdownPath: string, handoffId: string): stri
     '1. 上記 handoff markdown を Read tool で読み、現在の作業状況・未完了タスク・次アクションを確認する。',
     '2. 必要なら handoff の Notes / Next Actions を補強する追加メモを書き足す。',
     '3. MCP tool `team_create_leader` を呼び、新しい Leader を採用する:',
-    `     team_create_leader({ handoff_id: "${handoffId}" })`,
+    '     team_create_leader({})',
     '   返り値の `agentId` を控えること。',
     '4. 新 Leader が起動したら、`team_send` で agentId 宛にこの handoff のパスと「お前が新 Leader だ」という旨を伝える:',
     `     team_send({ to: "<上で得た agentId>", handoff_id: "${handoffId}", message: "あなたが新 Leader です。handoff を読んで team_ack_handoff({ handoff_id: '${handoffId}' }) を呼び、ACK を返してください: ${markdownPath}" })`,

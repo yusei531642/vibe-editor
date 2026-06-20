@@ -2,8 +2,8 @@
 //!
 //! Issue #373 Phase 2 で `protocol.rs` から切り出し。
 //!
-//! 各 tool 名 / description / inputSchema は逐字保持 (renderer / Claude Code / Codex
-//! 側の MCP クライアントが文字列マッチに依存する可能性があるため、改変禁止)。
+//! 各 tool 名 / description / inputSchema は互換性を意識して変更する (renderer /
+//! Claude Code / Codex 側の MCP クライアントが参照するため)。
 
 use serde_json::{json, Value};
 
@@ -331,10 +331,6 @@ pub(super) fn tool_defs() -> Value {
                         "type": "string",
                         "description": "Optional canvas card title override for the new leader."
                     },
-                    "handoff_id": {
-                        "type": "string",
-                        "description": "Optional handoff id to record replacement leader creation against."
-                    },
                     "engine_policy": {
                         "type": "object",
                         "description": "Optional team-level engine policy. When set, all subsequent team_recruit calls validate `engine` against this policy.",
@@ -450,4 +446,31 @@ pub(super) fn tool_defs() -> Value {
             }
         }
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tool_defs;
+
+    #[test]
+    fn team_create_leader_schema_does_not_advertise_handoff_id() {
+        let tools = tool_defs();
+        let create_leader = tools
+            .as_array()
+            .and_then(|items| {
+                items.iter().find(|tool| {
+                    tool.get("name").and_then(|v| v.as_str()) == Some("team_create_leader")
+                })
+            })
+            .expect("team_create_leader schema exists");
+        let properties = create_leader
+            .pointer("/inputSchema/properties")
+            .and_then(|v| v.as_object())
+            .expect("team_create_leader properties");
+
+        assert!(
+            !properties.contains_key("handoff_id"),
+            "team_create_leader should not ask models to echo long handoff ids"
+        );
+    }
 }
