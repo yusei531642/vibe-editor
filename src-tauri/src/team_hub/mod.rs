@@ -26,6 +26,8 @@ pub mod file_locks;
 pub mod inbox_watch;
 pub mod inject;
 pub mod protocol;
+// Issue #1072 Part2: online (handshake) 時の未読一括再配信 (Pty mode 限定)。
+pub mod redeliver;
 // Issue #517: 動的ロール同士の責務境界 lint (recruit / assign_task で warning 発火)。
 pub mod role_lint;
 // Issue #512: 32 KiB 超の payload を `<project_root>/.vibe-team/tmp/<short_id>.md` に書き出して
@@ -416,6 +418,15 @@ where
     {
         tokio::time::sleep(AUTH_FAIL_DELAY).await;
         return Ok(());
+    }
+
+    // Issue #1072 Part2: online 化 (handshake 成功 = Granted→Active) した瞬間に未読を一括再配信する。
+    // best-effort・fire-and-forget で spawn し、serve_session の開始を遅延させない
+    // (Pty mode 限定で発火。Both/Monitor は Monitor watcher が hwm で catch-up する)。
+    {
+        let hub2 = hub.clone();
+        let ctx2 = ctx.clone();
+        tokio::spawn(async move { hub2.redeliver_unread_on_online(&ctx2).await });
     }
 
     // Issue #638: handshake 後の RPC 処理は inner async block に隔離し、どの early-return path

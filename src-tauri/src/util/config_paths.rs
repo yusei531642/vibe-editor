@@ -36,6 +36,10 @@ pub fn handoffs_path() -> PathBuf {
     vibe_root().join("handoffs")
 }
 
+// Issue #1072: Monitor watcher の per-agent high-water mark は
+// `~/.vibe-editor/team-inbox-watermarks/<team>/<agent>.json` に保存される。唯一の読み書き手は
+// JS watcher (team-inbox-watch.js) なので、パス算出はそちら側に閉じている (Rust ヘルパは設けない)。
+
 /// ロールプロファイル定義ファイル `~/.vibe-editor/role-profiles.json` のパス。
 pub fn role_profiles_path() -> PathBuf {
     vibe_root().join("role-profiles.json")

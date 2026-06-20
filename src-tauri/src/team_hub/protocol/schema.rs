@@ -56,10 +56,15 @@ pub(super) fn tool_defs() -> Value {
         },
         {
             "name": "team_read",
-            "description": "Read past messages addressed to you.",
+            "description": "Read past messages addressed to you. The Monitor inbox watcher uses the additive parameters below for a durable high-water mark (Issue #1072); normal agents only need unread_only.",
             "inputSchema": {
                 "type": "object",
-                "properties": { "unread_only": { "type": "boolean", "default": true } }
+                "properties": {
+                    "unread_only": { "type": "boolean", "default": true, "description": "Return only messages you have not read yet (read_by based)." },
+                    "since_id": { "type": "integer", "minimum": 0, "description": "Return only messages with id greater than this (watermark resume cursor). Omit to disable." },
+                    "mark_read": { "type": "boolean", "default": true, "description": "When false, peek without advancing read_by (used by the watcher before emitting; read_by is advanced after delivery)." },
+                    "exclude_delivered": { "type": "boolean", "default": false, "description": "When true, skip messages already delivered to you via PTY (delivered_to), preventing duplicate delivery in Both mode." }
+                }
             }
         },
         {
