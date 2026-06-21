@@ -236,7 +236,11 @@ impl SessionRegistry {
                             "[registry] replacing session {prev_sid} with {id} — killing old PTY"
                         );
                         let _ = old.kill();
-                        old.cleanup_codex_broker_if_stale();
+                        // Issue #1075: broker 掃除は子プロセス起動 (tasklist/kill/git) + 最大 250ms
+                        // sleep を伴う。`inner` lock を保持したまま同期実行すると全 PTY 操作を
+                        // 直列ブロックするため、`remove()` / `kill_team()` と同じ detached 版を使う
+                        // (直前に kill 済みなので "after kill" 掃除として意味的にも正しい)。
+                        old.cleanup_codex_broker_after_kill();
                     }
                 }
             }
@@ -367,8 +371,8 @@ impl SessionRegistry {
     ///  なったため削除した。)
     ///
     /// Issue #834: 終了経路では broker の stale state 掃除を**スキップ**する (掃除は best-effort で
-    /// 次回起動時の spawn 前 cleanup `cleanup_codex_broker_if_stale` で回収できる)。ここでは
-    /// process-tree kill だけを確実に行う。
+    /// 次回起動時の spawn 前 cleanup (`terminal_create` 内の `codex_broker::cleanup_stale_for_cwd`)
+    /// で回収できる)。ここでは process-tree kill だけを確実に行う。
     pub fn kill_all_blocking(&self, timeout: Duration) {
         let sessions: Vec<Arc<SessionHandle>> = {
             let mut g = recover(self.inner.lock());
