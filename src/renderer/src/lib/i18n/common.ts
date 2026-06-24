@@ -1,3 +1,4 @@
+/* eslint-disable no-restricted-syntax -- i18n辞書本体のため、日本語文字列リテラルをここに集約する */
 import type { Dict } from './index';
 
 // 共通シェル・プロジェクト・エディタ・オンボーディング辞書。公開キーは aggregator で既存 i18n API に統合される。
