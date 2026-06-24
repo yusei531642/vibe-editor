@@ -36,6 +36,20 @@ const CODEX_INITIAL_PROMPT_DELAY_MS: u64 = 1800;
 /// terminal 側のチャンク注入用にローカル定数として持つ (旧実装は `15` の直書きだった)。
 const CODEX_PROMPT_CHUNK_DELAY_MS: u64 = 15;
 
+/// Issue #1077: codex 初手プロンプト注入の末尾確定 `\r` を送る試行回数 (初回 + retry)。
+///
+/// 本文 (bracketed paste) は届いたのに最終 `\r` だけ失敗すると、codex TUI は入力欄に
+/// 貼られた表示のまま confirm されず「起動したのに何も始まらない」状態になる。ConPTY
+/// back-pressure 等で `\r` が一過性に失敗するケースに備え、確定 write を最大この回数まで
+/// 再試行する (team_hub の inject は #378 で最終 `\r` 失敗を `FinalCrFailed` として伝播
+/// 済みだが、本経路は fire-and-forget task のため retry で復旧を図る)。
+const CODEX_FINAL_CR_MAX_ATTEMPTS: u32 = 3;
+
+/// Issue #1077: 末尾確定 `\r` の retry 間に挟むスリープ (ミリ秒)。
+///
+/// back-pressure が解ける猶予を与えてから再送するための短い待ち。
+const CODEX_FINAL_CR_RETRY_DELAY_MS: u64 = 30;
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerminalCreateOptions {
@@ -277,17 +291,43 @@ async fn inject_codex_prompt_to_pty(
     }
     sleep(Duration::from_millis(CODEX_PROMPT_CHUNK_DELAY_MS)).await;
     // Issue #620: 末尾の確定 `\r` も spawn_blocking 経由で送る。
-    let s = session.clone();
-    match tokio::task::spawn_blocking(move || s.write(b"\r")).await {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => {
-            tracing::warn!("[terminal] codex prompt write(\\r) failed for {term_id}: {e}");
+    // Issue #1077: 旧実装は `\r` 失敗を warn のみで握り潰しており、本文 paste は届いたのに
+    // Enter 未確定で codex が起動指示を実行しないまま待機する事故 (「起動したのに何も
+    // 始まらない」) を招いていた。ConPTY back-pressure 等の一過性失敗に備え、確定 `\r` を
+    // 最大 CODEX_FINAL_CR_MAX_ATTEMPTS 回まで再試行する。retry 間は短い sleep を挟み、
+    // session が既に消えていれば retry を打ち切る。
+    let mut final_cr_ok = false;
+    for attempt in 1..=CODEX_FINAL_CR_MAX_ATTEMPTS {
+        let s = session.clone();
+        match tokio::task::spawn_blocking(move || s.write(b"\r")).await {
+            Ok(Ok(())) => {
+                final_cr_ok = true;
+                break;
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(
+                    "[terminal] codex prompt write(\\r) attempt {attempt}/{CODEX_FINAL_CR_MAX_ATTEMPTS} failed for {term_id}: {e}"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "[terminal] codex prompt spawn_blocking(\\r) attempt {attempt}/{CODEX_FINAL_CR_MAX_ATTEMPTS} failed for {term_id}: {e}"
+                );
+            }
         }
-        Err(e) => {
-            tracing::warn!(
-                "[terminal] codex prompt spawn_blocking(\\r) failed for {term_id}: {e}"
-            );
+        if attempt < CODEX_FINAL_CR_MAX_ATTEMPTS {
+            // session がもう無ければ再送しても無駄なので打ち切る。
+            if registry.get(&term_id).is_none() {
+                break;
+            }
+            sleep(Duration::from_millis(CODEX_FINAL_CR_RETRY_DELAY_MS)).await;
         }
+    }
+    if !final_cr_ok {
+        // 全試行が尽きた場合は error ログを残す。codex は確定待ちのまま固まる可能性が高い。
+        tracing::error!(
+            "[terminal] codex prompt final \\r never confirmed for {term_id} after {CODEX_FINAL_CR_MAX_ATTEMPTS} attempts — codex may be waiting unconfirmed"
+        );
     }
     tracing::info!(
         "[terminal] codex prompt injected into pty {term_id} ({} bytes)",
