@@ -66,6 +66,9 @@ pub(crate) struct HubState {
     /// permit 数は `VIBE_TEAM_RECRUIT_CONCURRENCY` 環境変数で `1..=RECRUIT_MAX_CONCURRENCY` の
     /// 範囲に tunable (既定 `RECRUIT_DEFAULT_CONCURRENCY`)。team 単位で lazy 初期化される。
     pub(crate) recruit_semaphores: HashMap<String, Arc<Semaphore>>,
+    /// Issue #1072 Part3: message log の dirty-flag + debounce 状態。send/read は即時 persist せず
+    /// ここに dirty マークし、`run_message_flusher` がまとめて write する (write amplification 解消)。
+    pub(crate) message_flusher: super::message_flush::MessageFlusher,
 }
 
 /// Issue #342 Phase 3 (3.11): tracing-appender が書き出すログファイルの絶対パスを
@@ -484,6 +487,7 @@ impl TeamHub {
                 dynamic_roles: HashMap::new(),
                 file_locks: HashMap::new(),
                 recruit_semaphores: HashMap::new(),
+                message_flusher: super::message_flush::MessageFlusher::default(),
             })),
             app_handle: Arc::new(Mutex::new(None)),
             inflight,
@@ -507,6 +511,11 @@ impl TeamHub {
         rand::thread_rng().fill_bytes(&mut buf);
         // Issue #739: 旧 `team_hub::hex_encode` を `util::log_redact` に集約。
         state.token = crate::util::log_redact::hex_encode(&buf);
+
+        // Issue #1072 Part3: message log の debounce flusher を起動する。state.lock は保持せず
+        // (clone した Notify だけ渡して) spawn し、~750ms 間隔 or 閾値超で dirty team を flush する。
+        let flush_notify = state.message_flusher.notify.clone();
+        tokio::spawn(self.clone().run_message_flusher(flush_notify));
 
         // bridge スクリプトを `~/.vibe-editor/team-bridge.js` に書き出し
         // Issue #143 (Security):

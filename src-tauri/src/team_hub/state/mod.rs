@@ -23,6 +23,9 @@ mod member_diagnostics;
 // `<team>.messages.json`)。`impl TeamHub` の persist_team_messages / restore_team_messages /
 // persist_after_send を提供する。
 mod message_log;
+// Issue #1072 Part3: message log の dirty-flag + debounce flusher。`impl TeamHub` の
+// mark_message_dirty / flush_dirty_message_logs / flush_team_now / run_message_flusher を提供。
+mod message_flush;
 mod persistence;
 mod recruit;
 

@@ -22,7 +22,8 @@ pub(in crate::team_hub) mod consts;
 // `replay_persisted_dynamic_roles_for_team` / `PersistedDynamicRoleEntry` を参照するため、
 // `team_hub` サブツリー全体に公開する。`pub(crate)` まで広げる必要は無い。
 pub(in crate::team_hub) mod dynamic_role;
-mod helpers;
+// Issue #1072: redeliver.rs (team_hub 直下) が message_is_for_me を参照するため team_hub サブツリーへ公開。
+pub(in crate::team_hub) mod helpers;
 // Issue #519: 動的 instructions の禁止句 lint。recruit 段階で逸脱指示を弾く。
 mod instruction_lint;
 // Issue #494: `team_hub/tests/permissions.rs` の matrix integration test から

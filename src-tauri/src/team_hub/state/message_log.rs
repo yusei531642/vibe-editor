@@ -225,17 +225,13 @@ impl TeamHub {
         apply_log(team, log);
     }
 
-    /// Issue #1071: `team_send` の push 直後に呼ぶ共通 persist。message log は常に保存し、
-    /// leader summary feed (worker_reports) を更新したときだけ orchestration state も保存する。
+    /// Issue #1071/#1072: `team_send` の push 直後に呼ぶ共通 persist。
+    /// Issue #1072 Part3 で write amplification を解消するため、message log は即時 atomic_write せず
+    /// dirty マーク (debounce flusher が ~750ms 間隔/閾値超でまとめ書き) に変更した。
+    /// leader summary feed (worker_reports) 更新時のみ orchestration state を即時 persist する。
     /// エラーは warn ログのみ (送信フロー自体は失敗させない、従来挙動を踏襲)。
-    ///
-    // TODO(#1072): nit-1 (reviewer/perf) — 現状は send 毎に直近 N 件を全件再シリアライズして
-    // atomic_write するため write amplification がある。append-only ログ化 or dirty-flag +
-    // debounce (一定間隔/件数でまとめ書き) で軽減する。Phase 2 (#1072) で扱う。
     pub async fn persist_after_send(&self, team_id: &str, also_state: bool) {
-        if let Err(e) = self.persist_team_messages(team_id).await {
-            tracing::warn!("[team_send] persist team message log failed: {e}");
-        }
+        self.mark_message_dirty(team_id).await;
         if also_state {
             if let Err(e) = self.persist_team_state(team_id).await {
                 tracing::warn!("[team_send] persist leader summary feed failed: {e}");

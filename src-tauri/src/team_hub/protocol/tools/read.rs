@@ -19,6 +19,21 @@ pub async fn team_read(
         .get("unread_only")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
+    // Issue #1072 Part1: Monitor watcher の per-agent watermark 用の additive パラメータ。
+    // すべて省略時は従来挙動 (mark_read=true で read_by 前進 / since_id 無 / delivered 除外なし)。
+    // - since_id: これ以下の id を除外 (hwm からの resume cursor、transport 層)。
+    // - mark_read=false: read_by を進めない peek (watcher が emit 後に別途前進させるため)。
+    // - exclude_delivered=true: delivered_to 済み (= Pty 配信済) を除外 (Both mode の定常状態での
+    //   二重配信を抑制。送信中の TOCTOU 窓では稀に重複しうる = at-least-once)。
+    let mark_read = args
+        .get("mark_read")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let since_id = args.get("since_id").and_then(|v| v.as_u64()).map(|v| v as u32);
+    let exclude_delivered = args
+        .get("exclude_delivered")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     let now_iso = Utc::now().to_rfc3339();
     // Issue #509: read_by に **新しく** 追加した message id を集める。
     // (元々 read_by に居る = 既読再 read のケースは inbox_read event で通知しない:
@@ -38,14 +53,27 @@ pub async fn team_read(
         if !(is_for_me && from_someone_else) {
             continue;
         }
+        // Issue #1072: hwm resume — since_id 以下は配信済みとみなして除外 (transport cursor)。
+        if let Some(sid) = since_id {
+            if m.id <= sid {
+                continue;
+            }
+        }
         // Issue #378: unread 判定は `read_by` のみを SSOT とする。`delivered_to` は
         // 「PTY に届いた」事実だけを示し、worker が認識/処理したことの証拠ではないため、
         // unread fallback の対象から外してはならない (= 1 回目の指示を確実に拾えるように)。
         if unread_only && m.read_by.contains(&ctx.agent_id) {
             continue;
         }
+        // Issue #1072: Both mode の二重配信抑制 — Pty が既に配った (delivered_to 済) ものは
+        // watcher の peek から除外する (exclude_delivered=true のときのみ。定常状態の dedup で、
+        // 送信中の TOCTOU 窓では稀に重複しうる = at-least-once)。
+        if exclude_delivered && m.delivered_to.contains(&ctx.agent_id) {
+            continue;
+        }
         let was_unread = !m.read_by.contains(&ctx.agent_id);
-        if was_unread {
+        // Issue #1072: mark_read=false (peek) のときは read_by を進めない (side-effect-free)。
+        if mark_read && was_unread {
             m.read_by.push(ctx.agent_id.clone());
             newly_read_ids.push(m.id);
         }
@@ -54,9 +82,12 @@ pub async fn team_read(
         // だった。Issue #378 で inject 成功は delivered_at に分離したので、read_at は本当に
         // 「team_read 経由で読んだ瞬間」を指す。互換のため or_insert は残す
         // (sender 自身の send 時刻が初期値として入っているケースを潰さないため)。
-        m.read_at
-            .entry(ctx.agent_id.clone())
-            .or_insert_with(|| now_iso.clone());
+        // Issue #1072: peek (mark_read=false) では read_at も更新しない。
+        if mark_read {
+            m.read_at
+                .entry(ctx.agent_id.clone())
+                .or_insert_with(|| now_iso.clone());
+        }
         let received_at = m.read_at.get(&ctx.agent_id).cloned();
         // Issue #378: delivered_at を payload に含めることで、UI / 診断側が
         // 「配達済みだが未読」と「読了」を区別できるようにする。
@@ -76,13 +107,11 @@ pub async fn team_read(
     let reader_diag = state.diagnostics_mut(&ctx.team_id, &ctx.agent_id);
     reader_diag.last_seen_at = Some(now_iso.clone());
     drop(state);
-    // Issue #1071: read_by を更新したら message log を persist し、Hub 再起動後も既読状態を
-    // 復元できるようにする。再読 (read_by 不変 = newly_read_ids が空) のときは書き込まない
-    // (Monitor mode の 5s poll 等が無駄な write を起こさない自然な debounce)。
+    // Issue #1071/#1072: read_by を更新したら message log を dirty マークし、debounce flusher が
+    // まとめて persist する (Hub 再起動後も既読状態を復元可能)。再読 (read_by 不変 = newly_read_ids
+    // が空) や peek (mark_read=false) のときはマークしない (無駄な write を起こさない)。
     if !newly_read_ids.is_empty() {
-        if let Err(e) = hub.persist_team_messages(&ctx.team_id).await {
-            tracing::warn!("[team_read] persist team message log failed: {e}");
-        }
+        hub.mark_message_dirty(&ctx.team_id).await;
     }
     // Issue #509: 「読了」を Canvas 側 UI に live で通知する。
     // 配送と読了を分離した指標を CardFrame の unread badge に反映する用途。
@@ -192,5 +221,111 @@ mod tests {
         let m = team.messages.iter().find(|m| m.id == 1).unwrap();
         assert!(m.read_by.contains(&worker_aid));
         assert!(m.read_at.contains_key(&worker_aid));
+    }
+
+    // ===== Issue #1072 Part1: since_id / mark_read / exclude_delivered =====
+
+    fn watcher_msg(id: u32, to_aid: &str, delivered_to: &[&str]) -> TeamMessage {
+        TeamMessage {
+            id,
+            from: "leader".into(),
+            from_agent_id: "leader-1".into(),
+            to: "worker".into(),
+            kind: "advisory".into(),
+            resolved_recipient_ids: vec![to_aid.into()],
+            message: format!("m{id}"),
+            timestamp: "2026-06-21T00:00:00Z".into(),
+            read_by: vec!["leader-1".into()],
+            read_at: HashMap::new(),
+            delivered_to: delivered_to.iter().map(|s| s.to_string()).collect(),
+            delivered_at: HashMap::new(),
+        }
+    }
+
+    async fn seed_msgs(hub: &TeamHub, team_id: &str, msgs: Vec<TeamMessage>) {
+        let mut state = hub.state.lock().await;
+        let team = state
+            .teams
+            .entry(team_id.to_string())
+            .or_insert_with(TeamInfo::default);
+        team.messages = msgs.into_iter().collect();
+    }
+
+    fn ids_of(res: &serde_json::Value) -> Vec<u64> {
+        res.get("messages")
+            .and_then(|v| v.as_array())
+            .map(|a| a.iter().filter_map(|m| m["id"].as_u64()).collect())
+            .unwrap_or_default()
+    }
+
+    /// since_id はそれ以下の id を除外する (hwm resume cursor)。
+    #[tokio::test]
+    async fn since_id_filters_lower_or_equal_ids() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let aid = "worker-1";
+        seed_msgs(
+            &hub,
+            "t",
+            vec![watcher_msg(1, aid, &[]), watcher_msg(2, aid, &[]), watcher_msg(3, aid, &[])],
+        )
+        .await;
+        let ctx = CallContext { team_id: "t".into(), role: "worker".into(), agent_id: aid.into() };
+        let res = team_read(&hub, &ctx, &json!({ "since_id": 1, "unread_only": false, "mark_read": false }))
+            .await
+            .unwrap();
+        assert_eq!(ids_of(&res), vec![2, 3], "id<=since_id は除外");
+    }
+
+    /// mark_read=false は peek (read_by を進めない)。後続の unread_only でまだ未読として取れる。
+    #[tokio::test]
+    async fn mark_read_false_does_not_advance_read_by() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let aid = "worker-1";
+        seed_msgs(&hub, "t", vec![watcher_msg(1, aid, &[])]).await;
+        let ctx = CallContext { team_id: "t".into(), role: "worker".into(), agent_id: aid.into() };
+
+        let peek = team_read(&hub, &ctx, &json!({ "unread_only": false, "mark_read": false }))
+            .await
+            .unwrap();
+        assert_eq!(ids_of(&peek), vec![1], "peek でも返る");
+        {
+            let s = hub.state.lock().await;
+            let m = s.teams.get("t").unwrap().messages.iter().find(|m| m.id == 1).unwrap();
+            assert!(!m.read_by.contains(&aid.to_string()), "peek は read_by を進めない");
+        }
+        // 通常 read (mark_read 既定 true) で初めて read_by が進む = 後方互換。
+        let read = team_read(&hub, &ctx, &json!({ "unread_only": true })).await.unwrap();
+        assert_eq!(ids_of(&read), vec![1]);
+        let s = hub.state.lock().await;
+        let m = s.teams.get("t").unwrap().messages.iter().find(|m| m.id == 1).unwrap();
+        assert!(m.read_by.contains(&aid.to_string()));
+    }
+
+    /// exclude_delivered=true は delivered_to 済み (Pty 配信済) を除外する (Both mode 二重配信防止)。
+    #[tokio::test]
+    async fn exclude_delivered_skips_pty_delivered() {
+        let hub = TeamHub::new(Arc::new(SessionRegistry::new()));
+        let aid = "worker-1";
+        seed_msgs(
+            &hub,
+            "t",
+            vec![watcher_msg(1, aid, &[aid]), watcher_msg(2, aid, &[])],
+        )
+        .await;
+        let ctx = CallContext { team_id: "t".into(), role: "worker".into(), agent_id: aid.into() };
+        // 除外なし: 両方返る。
+        let all = team_read(&hub, &ctx, &json!({ "unread_only": false, "mark_read": false }))
+            .await
+            .unwrap();
+        assert_eq!(ids_of(&all), vec![1, 2]);
+        // 除外あり: Pty 配信済 (id=1) は出ない。
+        let filtered = team_read(
+            &hub,
+            &ctx,
+            &json!({ "unread_only": false, "mark_read": false, "exclude_delivered": true }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(ids_of(&filtered), vec![2], "delivered_to 済みは除外");
     }
 }

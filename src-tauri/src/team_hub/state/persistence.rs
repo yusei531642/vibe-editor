@@ -143,6 +143,9 @@ impl TeamHub {
 
     /// チームを active list から外す。戻り値が true なら active が 0 → MCP 設定削除可
     pub async fn clear_team(&self, team_id: &str) -> bool {
+        // Issue #1072 Part3: 破棄前に message log を最終 flush (dirty 分を確実に永続化)。
+        // flush_team_now は内部で state.lock を取るので、下の lock を取得する前に呼ぶ (deadlock 回避)。
+        self.flush_team_now(team_id).await;
         let mut s = self.state.lock().await;
         s.teams.remove(team_id);
         s.active_teams.remove(team_id);

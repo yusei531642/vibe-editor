@@ -41,7 +41,9 @@ pub(super) fn resolve_targets(
 ///
 /// resolved_recipient_ids が SSOT。raw `to` は `legacy_message_fallback`
 /// feature が有効な staging hotfix のみ参照する。
-pub(super) fn message_is_for_me(
+// Issue #1072: redeliver.rs (team_hub 直下) からも参照するため pub(crate) へ緩める
+// (従来は protocol 内 team_read 専用の pub(super))。
+pub(crate) fn message_is_for_me(
     resolved_recipient_ids: &[String],
     raw_to: &str,
     reader_role: &str,
