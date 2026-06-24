@@ -209,12 +209,6 @@ impl SessionHandle {
         self.watcher_cancel.clone()
     }
 
-    pub fn cleanup_codex_broker_if_stale(&self) {
-        if self.is_codex {
-            crate::pty::codex_broker::cleanup_stale_for_cwd(&self.cwd);
-        }
-    }
-
     /// Issue #834: codex PTY を kill した後の broker stale state 掃除。
     ///
     /// `cleanup_stale_for_cwd` は `git rev-parse` / `tasklist` (Windows) / `kill` (Unix) の
