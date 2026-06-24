@@ -211,6 +211,55 @@ fn filter_codex_resume_id_in_place(is_codex: bool, args: Vec<String>) -> Vec<Str
     }
 }
 
+/// Issue #1077: codex 初手プロンプトの確定 `\r` 送出 retry の最終結果。
+///
+/// session 消滅由来の打ち切りと「全試行が write 失敗で尽きた」を区別し、ログの文言と
+/// レベルを出し分けるために使う (code review M1)。
+#[derive(Debug, PartialEq, Eq)]
+enum FinalCrOutcome {
+    /// `\r` write が確定した (成功)。
+    Confirmed,
+    /// retry 途中で session が消えた (codex は既に exit 済みの可能性) → 確定待ちではない。
+    SessionGone,
+    /// 全試行が write 失敗で尽きた → codex が確定待ちのまま固まる恐れ。
+    Exhausted,
+}
+
+/// Issue #1077: 確定 `\r` を最大 `max_attempts` 回試行する汎用 retry ループ。
+///
+/// `spawn_blocking` / 実 PTY 依存を `write_cr` / `session_alive` の closure 境界の外に出す
+/// ことで、試行回数・retry 打ち切り条件・session 消滅検知をユニットテスト可能にする。
+///
+/// - `write_cr(attempt)`: 1 回分の `\r` write を行う。`true` で確定成功。失敗時の warn ログは
+///   呼び出し側 closure 内で出す。
+/// - `session_alive()`: retry sleep に入る前に session がまだ生きているか確認する。生きて
+///   いなければ SessionGone で即打ち切る。
+async fn write_final_cr_with_retry<WFut, W, A>(
+    max_attempts: u32,
+    retry_delay: Duration,
+    mut write_cr: W,
+    mut session_alive: A,
+) -> FinalCrOutcome
+where
+    W: FnMut(u32) -> WFut,
+    WFut: std::future::Future<Output = bool>,
+    A: FnMut() -> bool,
+{
+    for attempt in 1..=max_attempts {
+        if write_cr(attempt).await {
+            return FinalCrOutcome::Confirmed;
+        }
+        if attempt < max_attempts {
+            // session がもう無ければ再送しても無駄。codex は確定前に exit 済みと判断して打ち切る。
+            if !session_alive() {
+                return FinalCrOutcome::SessionGone;
+            }
+            tokio::time::sleep(retry_delay).await;
+        }
+    }
+    FinalCrOutcome::Exhausted
+}
+
 /// Codex の system prompt を、PTY (TUI) に直接「最初の入力」として注入する fallback 経路。
 ///
 /// 動作:
@@ -294,40 +343,49 @@ async fn inject_codex_prompt_to_pty(
     // Issue #1077: 旧実装は `\r` 失敗を warn のみで握り潰しており、本文 paste は届いたのに
     // Enter 未確定で codex が起動指示を実行しないまま待機する事故 (「起動したのに何も
     // 始まらない」) を招いていた。ConPTY back-pressure 等の一過性失敗に備え、確定 `\r` を
-    // 最大 CODEX_FINAL_CR_MAX_ATTEMPTS 回まで再試行する。retry 間は短い sleep を挟み、
-    // session が既に消えていれば retry を打ち切る。
-    let mut final_cr_ok = false;
-    for attempt in 1..=CODEX_FINAL_CR_MAX_ATTEMPTS {
-        let s = session.clone();
-        match tokio::task::spawn_blocking(move || s.write(b"\r")).await {
-            Ok(Ok(())) => {
-                final_cr_ok = true;
-                break;
+    // write_final_cr_with_retry で最大 CODEX_FINAL_CR_MAX_ATTEMPTS 回まで再試行する。
+    let outcome = write_final_cr_with_retry(
+        CODEX_FINAL_CR_MAX_ATTEMPTS,
+        Duration::from_millis(CODEX_FINAL_CR_RETRY_DELAY_MS),
+        |attempt| {
+            let s = session.clone();
+            let term_id = term_id.clone();
+            async move {
+                match tokio::task::spawn_blocking(move || s.write(b"\r")).await {
+                    Ok(Ok(())) => true,
+                    Ok(Err(e)) => {
+                        tracing::warn!(
+                            "[terminal] codex prompt write(\\r) attempt {attempt}/{CODEX_FINAL_CR_MAX_ATTEMPTS} failed for {term_id}: {e}"
+                        );
+                        false
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "[terminal] codex prompt spawn_blocking(\\r) attempt {attempt}/{CODEX_FINAL_CR_MAX_ATTEMPTS} failed for {term_id}: {e}"
+                        );
+                        false
+                    }
+                }
             }
-            Ok(Err(e)) => {
-                tracing::warn!(
-                    "[terminal] codex prompt write(\\r) attempt {attempt}/{CODEX_FINAL_CR_MAX_ATTEMPTS} failed for {term_id}: {e}"
-                );
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "[terminal] codex prompt spawn_blocking(\\r) attempt {attempt}/{CODEX_FINAL_CR_MAX_ATTEMPTS} failed for {term_id}: {e}"
-                );
-            }
+        },
+        || registry.get(&term_id).is_some(),
+    )
+    .await;
+    match outcome {
+        FinalCrOutcome::Confirmed => {}
+        FinalCrOutcome::SessionGone => {
+            // session が消えている = codex は確定前に既に exit 済み。確定待ちではないので
+            // warn 止まり (「unconfirmed で固まっている」誤解を生む error を出さない)。
+            tracing::warn!(
+                "[terminal] codex prompt final \\r aborted for {term_id} — session already gone (codex likely exited before confirm)"
+            );
         }
-        if attempt < CODEX_FINAL_CR_MAX_ATTEMPTS {
-            // session がもう無ければ再送しても無駄なので打ち切る。
-            if registry.get(&term_id).is_none() {
-                break;
-            }
-            sleep(Duration::from_millis(CODEX_FINAL_CR_RETRY_DELAY_MS)).await;
+        FinalCrOutcome::Exhausted => {
+            // 全試行が write 失敗で尽きた。codex は確定待ちのまま固まる可能性が高い。
+            tracing::error!(
+                "[terminal] codex prompt final \\r never confirmed for {term_id} after {CODEX_FINAL_CR_MAX_ATTEMPTS} attempts — codex may be waiting unconfirmed"
+            );
         }
-    }
-    if !final_cr_ok {
-        // 全試行が尽きた場合は error ログを残す。codex は確定待ちのまま固まる可能性が高い。
-        tracing::error!(
-            "[terminal] codex prompt final \\r never confirmed for {term_id} after {CODEX_FINAL_CR_MAX_ATTEMPTS} attempts — codex may be waiting unconfirmed"
-        );
     }
     tracing::info!(
         "[terminal] codex prompt injected into pty {term_id} ({} bytes)",
@@ -1052,5 +1110,85 @@ mod codex_resume_filter_tests {
         let input = s(&["-c", "k=v", "resume", "abc;rm -rf /"]);
         let out = filter_codex_resume_id_in_place(true, input.clone());
         assert_eq!(out, input);
+    }
+}
+
+#[cfg(test)]
+mod final_cr_retry_tests {
+    use super::{write_final_cr_with_retry, FinalCrOutcome};
+    use std::cell::Cell;
+    use std::time::Duration;
+
+    // retry delay は 0 にして、テストが実時間 sleep しないようにする。
+    const NO_DELAY: Duration = Duration::from_millis(0);
+
+    #[tokio::test]
+    async fn confirmed_on_first_attempt() {
+        let calls = Cell::new(0u32);
+        let outcome = write_final_cr_with_retry(
+            3,
+            NO_DELAY,
+            |_attempt| {
+                calls.set(calls.get() + 1);
+                async { true }
+            },
+            || true,
+        )
+        .await;
+        assert_eq!(outcome, FinalCrOutcome::Confirmed);
+        assert_eq!(calls.get(), 1, "成功すれば 1 回で打ち切るはず");
+    }
+
+    #[tokio::test]
+    async fn confirmed_after_transient_failures() {
+        // Issue #1077 の本命: 最初の 2 回失敗 → 3 回目で確定。
+        let calls = Cell::new(0u32);
+        let outcome = write_final_cr_with_retry(
+            3,
+            NO_DELAY,
+            |attempt| {
+                calls.set(calls.get() + 1);
+                async move { attempt == 3 }
+            },
+            || true,
+        )
+        .await;
+        assert_eq!(outcome, FinalCrOutcome::Confirmed);
+        assert_eq!(calls.get(), 3, "3 回目で成功するまで retry するはず");
+    }
+
+    #[tokio::test]
+    async fn exhausted_when_all_attempts_fail() {
+        let calls = Cell::new(0u32);
+        let outcome = write_final_cr_with_retry(
+            3,
+            NO_DELAY,
+            |_attempt| {
+                calls.set(calls.get() + 1);
+                async { false }
+            },
+            || true, // session は生存し続ける
+        )
+        .await;
+        assert_eq!(outcome, FinalCrOutcome::Exhausted);
+        assert_eq!(calls.get(), 3, "max_attempts ぶん試行して尽きるはず");
+    }
+
+    #[tokio::test]
+    async fn aborts_when_session_gone() {
+        // session 消滅時は retry せず即 SessionGone (Exhausted の error 文言を出さない / M1)。
+        let calls = Cell::new(0u32);
+        let outcome = write_final_cr_with_retry(
+            3,
+            NO_DELAY,
+            |_attempt| {
+                calls.set(calls.get() + 1);
+                async { false }
+            },
+            || false, // 1 回目失敗後の生存確認で「消滅」を返す
+        )
+        .await;
+        assert_eq!(outcome, FinalCrOutcome::SessionGone);
+        assert_eq!(calls.get(), 1, "session 消滅を検知したら追加 retry しないはず");
     }
 }
