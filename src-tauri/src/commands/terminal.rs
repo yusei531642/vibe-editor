@@ -845,6 +845,26 @@ pub async fn terminal_write(
     Ok(())
 }
 
+/// Issue #1076: `terminal_resize` の下限クランプ値。spawn 経路 (`session/spawn.rs` の
+/// `openpty` で `cols.max(20)` / `rows.max(5)`) と揃える。
+///
+/// 通常は renderer 側の grid 計算が min 20x5 にクランプするため 0x0 resize は顕在化し
+/// にくいが、信頼境界外 (renderer の任意 invoke / 将来の別 caller) から `cols=0` / `rows=0`
+/// が来ると `PtySize { rows: 0, cols: 0 }` がそのまま portable-pty / ConPTY に渡り、
+/// 再描画破綻やクラッシュ気味挙動を招きうる。defense-in-depth で Rust 側にも下限を持つ。
+const TERMINAL_RESIZE_MIN_COLS: u16 = 20;
+const TERMINAL_RESIZE_MIN_ROWS: u16 = 5;
+
+/// renderer から来た任意の `cols` / `rows` を ConPTY に渡せる安全な範囲 (下限 20x5、
+/// 上限 `u16::MAX`) にクランプする。純粋関数として切り出して回帰テスト可能にする (#1076)。
+fn clamp_terminal_resize(cols: u32, rows: u32) -> (u16, u16) {
+    let cols = cols
+        .clamp(u32::from(TERMINAL_RESIZE_MIN_COLS), u32::from(u16::MAX)) as u16;
+    let rows = rows
+        .clamp(u32::from(TERMINAL_RESIZE_MIN_ROWS), u32::from(u16::MAX)) as u16;
+    (cols, rows)
+}
+
 #[tauri::command]
 pub async fn terminal_resize(
     state: State<'_, AppState>,
@@ -853,8 +873,9 @@ pub async fn terminal_resize(
     rows: u32,
 ) -> crate::commands::error::CommandResult<()> {
     if let Some(s) = state.pty_registry.get(&id) {
-        let cols = cols.min(u32::from(u16::MAX)) as u16;
-        let rows = rows.min(u32::from(u16::MAX)) as u16;
+        // Issue #1076: 上限 (u16::MAX) だけでなく下限 (20x5) もクランプし、0x0 等の
+        // 退行サイズが ConPTY に到達しないようにする。spawn 経路の下限と対称。
+        let (cols, rows) = clamp_terminal_resize(cols, rows);
         // resize 失敗は無害なので握りつぶす (旧実装と同じ)
         match tokio::task::spawn_blocking(move || s.resize(cols, rows)).await {
             Ok(Ok(())) | Ok(Err(_)) => {}
@@ -1190,5 +1211,67 @@ mod final_cr_retry_tests {
         .await;
         assert_eq!(outcome, FinalCrOutcome::SessionGone);
         assert_eq!(calls.get(), 1, "session 消滅を検知したら追加 retry しないはず");
+    }
+}
+
+#[cfg(test)]
+mod clamp_terminal_resize_tests {
+    use super::{
+        clamp_terminal_resize, TERMINAL_RESIZE_MIN_COLS, TERMINAL_RESIZE_MIN_ROWS,
+    };
+
+    #[test]
+    fn zero_by_zero_is_clamped_to_lower_bound() {
+        // Issue #1076: 信頼境界外からの 0x0 resize が下限 (20x5) にクランプされること。
+        assert_eq!(
+            clamp_terminal_resize(0, 0),
+            (TERMINAL_RESIZE_MIN_COLS, TERMINAL_RESIZE_MIN_ROWS)
+        );
+    }
+
+    #[test]
+    fn below_minimum_is_clamped_up() {
+        assert_eq!(
+            clamp_terminal_resize(1, 1),
+            (TERMINAL_RESIZE_MIN_COLS, TERMINAL_RESIZE_MIN_ROWS)
+        );
+        assert_eq!(
+            clamp_terminal_resize(19, 4),
+            (TERMINAL_RESIZE_MIN_COLS, TERMINAL_RESIZE_MIN_ROWS)
+        );
+    }
+
+    #[test]
+    fn at_minimum_is_unchanged() {
+        assert_eq!(clamp_terminal_resize(20, 5), (20, 5));
+    }
+
+    #[test]
+    fn normal_size_is_unchanged() {
+        assert_eq!(clamp_terminal_resize(120, 40), (120, 40));
+    }
+
+    #[test]
+    fn above_u16_max_is_clamped_down() {
+        // 上限 u16::MAX クランプの回帰 (旧来の上限防御を維持していること)。
+        assert_eq!(
+            clamp_terminal_resize(100_000, 100_000),
+            (u16::MAX, u16::MAX)
+        );
+    }
+
+    #[test]
+    fn mixed_axis_clamps_independently() {
+        // Issue #1076 (review M1): 片側だけ下限未満でも各軸が独立にクランプされること。
+        assert_eq!(clamp_terminal_resize(0, 40), (TERMINAL_RESIZE_MIN_COLS, 40));
+        assert_eq!(clamp_terminal_resize(120, 0), (120, TERMINAL_RESIZE_MIN_ROWS));
+    }
+
+    #[test]
+    fn u16_max_boundary_is_exact() {
+        // Issue #1076 (review M2): 上限ちょうど (65535) は不変、+1 (65536) は 65535 に丸まる。
+        let max = u32::from(u16::MAX);
+        assert_eq!(clamp_terminal_resize(max, max), (u16::MAX, u16::MAX));
+        assert_eq!(clamp_terminal_resize(max + 1, max + 1), (u16::MAX, u16::MAX));
     }
 }
