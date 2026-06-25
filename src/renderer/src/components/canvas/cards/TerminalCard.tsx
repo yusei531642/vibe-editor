@@ -107,6 +107,8 @@ function TerminalCardImpl({ id, data }: NodeProps<Node<CardDataOf<'terminal'>>>)
             role={payload.role}
             // Issue #63: payload.codexInstructions を TerminalView に伝播
             codexInstructions={payload.codexInstructions}
+            // Issue #1097 (G3): API error リトライループを検知して actionable な案内 toast を出す。
+            detectApiError
             onStatus={setStatus}
             onSessionId={handleSessionId}
             // Canvas zoom で滲まないよう WebGL を切る (DOM renderer 固定)

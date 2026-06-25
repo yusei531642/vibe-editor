@@ -28,7 +28,7 @@ import type { Node } from '@xyflow/react';
 import type { CardData } from '../stores/canvas';
 import { useRoleProfiles, customAgentIdFromRole } from './role-profiles-context';
 import { useSettings } from './settings-context';
-import { parseShellArgsStrict } from './parse-args';
+import { parseCustomAgentArgs } from './parse-args';
 import { ackRecruit } from './recruit-ack';
 import { findRecruitPosition } from './canvas-recruit-position';
 import type {
@@ -259,6 +259,11 @@ export function useRecruitListener(): void {
             }
           });
         } else if (customAgent?.runtime === 'cli') {
+          // Issue #1097: 起動前ガードレール — args の解析警告 (G1) / 明示モデル指定 (G2) を toast 可視化。
+          const cliArgs = parseCustomAgentArgs(customAgent.args);
+          cliArgs.warnings.forEach((w) =>
+            showToastRef.current(tRef.current(w.messageKey, w.params), { tone: 'warning' })
+          );
           newNodeId = store.addCard({
             type: 'agent',
             title: titleHint,
@@ -267,7 +272,7 @@ export function useRecruitListener(): void {
               // command override で custom CLI を起動する (CardFrame は payload.command を優先)。
               agent: p.engine,
               command: customAgent.command || undefined,
-              args: customAgent.args ? parseShellArgsStrict(customAgent.args).args : undefined,
+              args: customAgent.args ? cliArgs.args : undefined,
               cwd: customAgent.cwd || undefined,
               roleProfileId: p.roleProfileId,
               role: p.roleProfileId,

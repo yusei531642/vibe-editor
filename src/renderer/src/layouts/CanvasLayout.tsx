@@ -80,7 +80,7 @@ import {
   type SpawnTeamSpec
 } from '../lib/canvas-team-spawn';
 import { findExistingTeamNode } from '../lib/canvas-existing-team';
-import { parseShellArgsStrict } from '../lib/parse-args';
+import { parseCustomAgentArgs } from '../lib/parse-args';
 
 type Tab = 'preset' | 'recent';
 
@@ -342,6 +342,9 @@ export function CanvasLayout(): JSX.Element {
           console.warn('[custom-agent-preset] setupTeamMcp failed:', err);
         }
       }
+      // Issue #1097: 起動前ガードレール — args の解析警告 (G1) / 明示モデル指定 (G2) を toast 可視化。
+      const customArgs = parseCustomAgentArgs(agent.args);
+      customArgs.warnings.forEach((w) => showToast(t(w.messageKey, w.params), { tone: 'warning' }));
       addCards([
         {
           type: 'agent',
@@ -351,7 +354,7 @@ export function CanvasLayout(): JSX.Element {
             // CardFrame は payload.command を優先して custom CLI を起動する。
             agent: 'claude',
             command: agent.command || undefined,
-            args: agent.args ? parseShellArgsStrict(agent.args).args : undefined,
+            args: agent.args ? customArgs.args : undefined,
             cwd: agent.cwd || cwd,
             roleProfileId: 'leader',
             role: 'leader',

@@ -115,3 +115,47 @@ export function normalizeLeadingDashes(token: string): string {
   if (!token) return token;
   return token.replace(UNICODE_DASH_RE, () => '--');
 }
+
+/**
+ * Issue #1097: parse 済み args 列から明示的なモデル指定 (`--model` / `-m`) を検出して値を返す。
+ * 指定が無ければ `null`。値が次トークンの形式 (`--model opus`) も `=` 形式 (`--model=opus`) も対応。
+ * フラグのみで値が続かない場合は空文字を返す。
+ */
+export function findModelOverride(args: string[]): string | null {
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--model' || a === '-m') return args[i + 1] ?? '';
+    if (a.startsWith('--model=')) return a.slice('--model='.length);
+    if (a.startsWith('-m=')) return a.slice('-m='.length);
+  }
+  return null;
+}
+
+/** Issue #1097: custom-agent 起動前に出す警告 (i18n key + params)。UI 側で `t()` 評価して toast 表示。 */
+export interface CustomAgentArgWarning {
+  messageKey: string;
+  params?: Record<string, string>;
+}
+
+/**
+ * Issue #1097: custom-agent の `args` 文字列を parse しつつ、起動前にユーザーへ出すべき警告を返す。
+ * - G1: 未閉じクォート / Unicode ダッシュ混入 (`customAgent.warn.args`)
+ * - G2: 明示モデル指定 (`customAgent.warn.modelOverride`) — プラン未許可だと API error ループの原因。
+ * UI 依存を持たない純粋関数 (呼び出し側が warnings を toast 表示する)。`args` は正規化済みトークン。
+ */
+export function parseCustomAgentArgs(raw: string | undefined | null): {
+  args: string[];
+  warnings: CustomAgentArgWarning[];
+} {
+  if (!raw) return { args: [], warnings: [] };
+  const parsed = parseShellArgsStrict(raw);
+  const warnings: CustomAgentArgWarning[] = [];
+  if (parsed.unterminatedQuote || parsed.hasUnicodeDash) {
+    warnings.push({ messageKey: 'customAgent.warn.args' });
+  }
+  const model = findModelOverride(parsed.args);
+  if (model !== null) {
+    warnings.push({ messageKey: 'customAgent.warn.modelOverride', params: { model: model || '?' } });
+  }
+  return { args: parsed.args, warnings };
+}

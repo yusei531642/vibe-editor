@@ -15,6 +15,8 @@ import { useCanvasTerminalPointerNormalizer } from '../lib/use-canvas-terminal-p
 import type { CellSize } from '../lib/measure-cell-size';
 import type { TerminalRuntimeStatus } from '../lib/terminal-status';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu';
+import { useToast } from '../lib/toast-context';
+import { createApiErrorDetector, type ApiErrorDetector } from '../lib/pty-api-error-detector';
 
 /**
  * TerminalView を外から操作するためのハンドル。
@@ -119,6 +121,8 @@ interface TerminalViewProps {
   zoomSubscribe?: (cb: () => void) => () => void;
   /** 可観測性ログ用の zoom 取得 */
   getZoom?: () => number;
+  /** Issue #1097 (G3): true で claude の API error リトライループを検知して案内 toast を出す (Canvas 用)。 */
+  detectApiError?: boolean;
 }
 
 /**
@@ -161,12 +165,17 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       unscaledFit,
       getCellSize,
       zoomSubscribe,
-      getZoom
+      getZoom,
+      detectApiError
     },
     ref
   ): JSX.Element {
     const { settings } = useSettings();
     const t = useT();
+    const { showToast } = useToast();
+    // Issue #1097 (G3): claude の API error リトライループを read-only 観測で検知 (Canvas 用)。
+    const apiErrorDetectorRef = useRef<ApiErrorDetector | null>(null);
+    if (detectApiError && !apiErrorDetectorRef.current) apiErrorDetectorRef.current = createApiErrorDetector();
     // Issue #338: useTerminalClipboard が React Context を直接引かないように、言語の current を
     // ref で渡す。settings 変化のたびに同期するので stale にならない。
     const langRef = useRef(settings.language);
@@ -267,12 +276,18 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     };
 
     // --- initialMessage の自動送信 ---
-    const { observeChunk } = useAutoInitialMessage({
+    const { observeChunk: observeInitialMessage } = useAutoInitialMessage({
       spawnKey: `${cwd}\0${command}`,
       initialMessageRef,
       isDisposed: () => disposedRef.current,
       writeToPty
     });
+    // Issue #1097 (G3): 出力を read-only で観測し、API error リトライ初検知で案内 toast (stream は改変しない)。
+    const observeChunk = (data: string): void => {
+      observeInitialMessage(data);
+      if (apiErrorDetectorRef.current?.observe(data))
+        showToast(t('terminal.apiErrorHint'), { tone: 'warning' });
+    };
 
     // --- pty spawn / onData / onExit (不変式 #1: deps は cwd/command のみ) ---
     usePtySession({

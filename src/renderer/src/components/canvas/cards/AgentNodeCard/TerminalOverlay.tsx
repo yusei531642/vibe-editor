@@ -214,6 +214,8 @@ export function TerminalOverlay({
         agentId={payload.agentId}
         role={roleProfileId}
         initialMessage={initialMessage}
+        // Issue #1097 (G3): API error リトライループを検知して actionable な案内 toast を出す。
+        detectApiError
         onStatus={onStatus}
         onActivity={handleActivity}
         onUserInput={handleUserInput}
