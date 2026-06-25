@@ -431,7 +431,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         offExit = window.api.terminal.onExit(resId, (info) => {
           if (!isCurrentGeneration()) return;
           term.writeln(
-            `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m`
+            `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m${info.tail ? `\r\n\x1b[90m── 最終出力 (死因の可能性) ──\x1b[0m\r\n${info.tail.replace(/\n/g, '\r\n')}` : ''}`
           );
           callbacksRef.current.onStatus?.({
             kind: 'exited',
@@ -492,7 +492,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         const newSpawnExitCb = (info: TerminalExitInfo): void => {
           if (!isCurrentGeneration()) return;
           term.writeln(
-            `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m`
+            `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m${info.tail ? `\r\n\x1b[90m── 最終出力 (死因の可能性) ──\x1b[0m\r\n${info.tail.replace(/\n/g, '\r\n')}` : ''}`
           );
           callbacksRef.current.onStatus?.({
             kind: 'exited',
@@ -539,7 +539,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         const attachExitCb = (info: TerminalExitInfo): void => {
           if (!isCurrentGeneration()) return;
           term.writeln(
-            `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m`
+            `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m${info.tail ? `\r\n\x1b[90m── 最終出力 (死因の可能性) ──\x1b[0m\r\n${info.tail.replace(/\n/g, '\r\n')}` : ''}`
           );
           callbacksRef.current.onStatus?.({
             kind: 'exited',

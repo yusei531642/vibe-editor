@@ -1,7 +1,8 @@
 //! Issue #738: 1 セッションぶんの PTY 状態 (`SessionHandle`) と関連型。
 //!
-//! 旧 `session.rs` から `SessionHandle` / `UserWriteOutcome` / `TerminalExitInfo` と
-//! その `impl` / `Drop` を切り出したもの。挙動 (write / user_write / resize / kill /
+//! 旧 `session.rs` から `SessionHandle` / `UserWriteOutcome` と
+//! その `impl` / `Drop` を切り出したもの (`TerminalExitInfo` は Issue #1098 で
+//! `exit_info.rs` へ移設)。挙動 (write / user_write / resize / kill /
 //! Drop 時の child kill / Mutex poison 時の recover) は一切変えていない。
 //!
 //! 4 つの `std::sync::Mutex` (`writer` / `master` / `killer` / `write_budget`) の
@@ -13,7 +14,6 @@ use crate::pty::scrollback::{
 };
 use anyhow::Result;
 use portable_pty::{MasterPty, PtySize};
-use serde::Serialize;
 use std::io::Write;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -25,13 +25,6 @@ use std::time::Instant;
 
 use super::injecting_guard::InjectingGuard;
 use super::lock::{lock_poisoned, LockResult};
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct TerminalExitInfo {
-    pub exit_code: i64,
-    pub signal: Option<i32>,
-}
 
 /// 1 セッションぶんの状態。kill / write / resize 用に master と writer を Mutex 保持。
 pub struct SessionHandle {
