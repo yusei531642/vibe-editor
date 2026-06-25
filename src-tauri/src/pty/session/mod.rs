@@ -20,6 +20,9 @@
 //! - [`lock`] — 4 つの `Mutex` lock 取得を 1 つに集約する `lock_poisoned!` macro。
 
 pub(crate) mod env_allowlist;
+// Issue #1098: exit イベント payload 型 (`TerminalExitInfo`) と exit code 正規化 /
+// 末尾出力サマリ生成。`spawn.rs` の exit watcher が参照する (外部からはパス参照しない)。
+mod exit_info;
 mod handle;
 mod injecting_guard;
 mod lock;

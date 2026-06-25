@@ -17,7 +17,7 @@
   "src-tauri/src/pty/codex_broker.rs": 506,
   "src-tauri/src/pty/codex_watcher.rs": 648,
   "src-tauri/src/pty/registry.rs": 824,
-  "src-tauri/src/pty/session/handle.rs": 551,
+  "src-tauri/src/pty/session/handle.rs": 544,
   "src-tauri/src/pty/session/spawn.rs": 733,
   "src-tauri/src/team_hub/file_locks.rs": 781,
   "src-tauri/src/team_hub/inject.rs": 768,
@@ -41,5 +41,5 @@
   "src/renderer/src/lib/i18n.ts": 1878,
   "src/renderer/src/lib/role-profiles-builtin.ts": 633,
   "src/renderer/src/stores/canvas.ts": 584,
-  "src/types/shared.ts": 1909
+  "src/types/shared.ts": 1910
 }

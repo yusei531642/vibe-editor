@@ -1525,6 +1525,7 @@ export interface TerminalCreateResult {
 export interface TerminalExitInfo {
   exitCode: number;
   signal?: number;
+  tail?: string; // Issue #1098: ANSI 除去済みの exit 直前末尾出力 (死因可視化用)。Rust exit_info.rs と camelCase 対応
 }
 
 // ---------- IDE 端末タブ永続化 (Issue #661) ----------
