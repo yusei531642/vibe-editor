@@ -143,15 +143,21 @@ async fn install_skill_at(root: &Path, force: bool) -> InstallSkillResult {
             (parse_skill_version(&existing), parse_semver(SKILL_VERSION))
         {
             if disk_ver > bundled_ver {
-                tracing::info!(
-                    "[skill] on-disk vibe-team SKILL.md is newer ({}.{}.{}) than bundled ({}.{}.{}); skip to avoid downgrade (force={force})",
-                    disk_ver.0,
-                    disk_ver.1,
-                    disk_ver.2,
-                    bundled_ver.0,
-                    bundled_ver.1,
-                    bundled_ver.2,
-                );
+                // Issue #1108 / PR #1111: 縮退 skip を可観測化する。force=true は明示的な
+                // reinstall (self-heal) が newer on-disk により抑止されたケース = 潜在的な
+                // tamper / downgrade-skip なので WARN で監査可能にする。force=false は
+                // best-effort の通常スキップなので INFO に留める。skip 判定の挙動は不変。
+                let disk = format!("{}.{}.{}", disk_ver.0, disk_ver.1, disk_ver.2);
+                let bundled = format!("{}.{}.{}", bundled_ver.0, bundled_ver.1, bundled_ver.2);
+                if force {
+                    tracing::warn!(
+                        "[skill] vibe-team SKILL.md force install skipped: on-disk version {disk} is newer than bundled {bundled}; preserving to avoid downgrade (verify on-disk file if unexpected)"
+                    );
+                } else {
+                    tracing::info!(
+                        "[skill] vibe-team SKILL.md install skipped: on-disk version {disk} is newer than bundled {bundled}; preserving to avoid downgrade"
+                    );
+                }
                 return InstallSkillResult {
                     ok: true,
                     path: Some(path.to_string_lossy().into_owned()),
