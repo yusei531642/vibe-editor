@@ -378,4 +378,38 @@ mod tests {
         let after = fs::read_to_string(skill_path(root)).await.unwrap();
         assert_eq!(after, user_edited, "user-edited content must be preserved");
     }
+
+    /// (4) 同一バージョン境界: disk_ver == bundled SKILL_VERSION のとき、#1108 ガードは
+    /// strict `>` のため不発。現行版ヘッダを持つファイルは従来の refresh 経路に入り、
+    /// 縮退は起きず bundled 本文へ揃う (版は同一のまま = ダウングレードしない)。
+    #[tokio::test]
+    async fn same_version_on_disk_is_refreshed_not_downgraded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // 現行版ヘッダ付きだが body が bundled と異なる on-disk (本文だけ微編集された状態)。
+        let same_version = versioned(SKILL_VERSION, "SAME VERSION header, slightly edited body");
+        write_skill(root, &same_version).await;
+
+        let result = install_skill_at(root, false).await;
+
+        assert!(result.ok, "install should report ok");
+        // strict `>` 比較なので #1108 ガードは発火せず、skip 経路には入らない。
+        assert!(
+            !result.skipped,
+            "same-version must not hit the downgrade-skip path"
+        );
+        // 現行版ヘッダ持ち → 従来通り bundled で refresh される。
+        assert!(
+            result.overwritten,
+            "same-version is refreshed to bundled (not a downgrade)"
+        );
+        let after = fs::read_to_string(skill_path(root)).await.unwrap();
+        assert_eq!(
+            after,
+            current_skill_text(),
+            "content must match bundled (same version → refresh, no downgrade)"
+        );
+        // 書き込まれた版が bundled と同一であること (= 縮退していない) を明示的に確認。
+        assert_eq!(parse_skill_version(&after), parse_semver(SKILL_VERSION));
+    }
 }
