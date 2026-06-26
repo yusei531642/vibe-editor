@@ -784,6 +784,12 @@ mod tests {
                 system_prompt: None,
                 skill_ids: None,
                 tool_mode: None,
+                engine: None,
+                env: None,
+                icon: None,
+                tags: None,
+                default_skill_ids: None,
+                skill_injection: None,
             }]),
             ..Settings::default()
         };
@@ -811,6 +817,12 @@ mod tests {
                 system_prompt: None,
                 skill_ids: None,
                 tool_mode: None,
+                engine: None,
+                env: None,
+                icon: None,
+                tags: None,
+                default_skill_ids: None,
+                skill_injection: None,
             }]),
             ..Settings::default()
         };
