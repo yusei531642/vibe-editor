@@ -5,6 +5,7 @@
  * index.tsx に分割した際、両側が読む型をここに集約する。挙動は不変、構造のみ。
  */
 import type {
+  AgentEngine,
   HandoffReference,
   InjectFailureReason,
   TeamOrganizationMeta,
@@ -12,7 +13,10 @@ import type {
 } from '../../../../../../types/shared';
 
 export interface AgentPayload {
-  agent?: 'claude' | 'codex';
+  /** 挙動系統 (engine)。識別子ではない。custom CLI も claude/codex いずれかの engine 上で動く。 */
+  agent?: AgentEngine;
+  /** Issue #1113: custom agent の settings.customAgents id。名前/アイコン/色/skill 解決に使う。 */
+  agentConfigId?: string;
   /** 新スキーマ: ロール識別子。未設定時は legacy `role` をフォールバックとして読む。 */
   roleProfileId?: string;
   /** @deprecated 旧フィールド。canvas store v2 マイグレーションで roleProfileId に移行済み */

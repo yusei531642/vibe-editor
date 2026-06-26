@@ -57,6 +57,7 @@ import {
 import { resolveAgentVisual } from '../../../../lib/agent-visual';
 import { parseShellArgs } from '../../../../lib/parse-args';
 import { resolveAgentConfig } from '../../../../lib/agent-resolver';
+import type { AgentEngine } from '../../../../../../types/shared';
 import { useToast } from '../../../../lib/toast-context';
 import {
   deriveCardSummary,
@@ -142,13 +143,13 @@ function AgentNodeCardImpl({
   const teamMembers = useMemo(() => {
     if (!payload.teamId) return null;
     if (teamMembersSig === '')
-      return [] as { agentId: string; roleProfileId: string; agent: 'claude' | 'codex' }[];
+      return [] as { agentId: string; roleProfileId: string; agent: AgentEngine }[];
     return teamMembersSig.split(';').map((s) => {
       const [agentId, roleProfileId, agent] = s.split(':');
       return {
         agentId,
         roleProfileId,
-        agent: agent as 'claude' | 'codex'
+        agent: agent as AgentEngine
       };
     });
   }, [teamMembersSig, payload.teamId]);

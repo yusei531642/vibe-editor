@@ -22,6 +22,7 @@ import {
   normalizeCanvasState
 } from '../lib/canvas-migrations';
 import type { AgentPayload } from '../components/canvas/cards/AgentNodeCard/types';
+import type { AgentEngine } from '../../../types/shared';
 import {
   findReconcileTarget,
   makeCardNode,
@@ -102,7 +103,10 @@ export interface ApiAgentCardPayload extends CardPayloadBase {
 
 /** terminal カード: 単発の Claude/Codex/シェル端末を起動するための payload。 */
 export interface TerminalCardPayload extends CardPayloadBase {
-  agent?: 'claude' | 'codex';
+  /** 挙動系統 (engine)。識別子ではない。custom CLI も claude/codex いずれかの engine 上で動く。 */
+  agent?: AgentEngine;
+  /** Issue #1113: custom agent の settings.customAgents id。名前/アイコン/色/skill 解決に使う。 */
+  agentConfigId?: string;
   role?: string;
   agentId?: string;
   command?: string;

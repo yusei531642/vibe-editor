@@ -5,7 +5,7 @@
   "src-tauri/src/commands/files.rs": 1274,
   "src-tauri/src/commands/git.rs": 529,
   "src-tauri/src/commands/handoffs.rs": 513,
-  "src-tauri/src/commands/settings.rs": 869,
+  "src-tauri/src/commands/settings.rs": 900,
   "src-tauri/src/commands/team_history.rs": 1239,
   "src-tauri/src/commands/team_state.rs": 593,
   "src-tauri/src/commands/terminal.rs": 1278,
@@ -35,11 +35,11 @@
   "src/renderer/src/components/AppShell.tsx": 977,
   "src/renderer/src/components/FileTreePanel.tsx": 767,
   "src/renderer/src/components/canvas/Canvas.tsx": 593,
-  "src/renderer/src/layouts/CanvasLayout.tsx": 946,
+  "src/renderer/src/layouts/CanvasLayout.tsx": 951,
   "src/renderer/src/lib/hooks/use-file-tabs.ts": 517,
   "src/renderer/src/lib/hooks/use-xterm-bind.ts": 889,
   "src/renderer/src/lib/i18n.ts": 1884,
   "src/renderer/src/lib/role-profiles-builtin.ts": 633,
-  "src/renderer/src/stores/canvas.ts": 584,
-  "src/types/shared.ts": 1910
+  "src/renderer/src/stores/canvas.ts": 588,
+  "src/types/shared.ts": 1944
 }

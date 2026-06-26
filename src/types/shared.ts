@@ -31,8 +31,11 @@ export interface DialogFileFilter {
  * Issue #618 で `terminalForceUtf8` (default true) を追加し v11。Windows + cmd.exe / PowerShell
  * で起動時に `chcp 65001` を inject して CP932 シェルでの U+FFFD 化を防ぐ。
  * Issue #994 で API 駆動エージェントを追加し、customAgents を `runtime: cli|api` に拡張して v12。
+ * Issue #1113 で custom agent に descriptor フィールド (engine/env/icon/tags/defaultSkillIds/
+ * skillInjection) を追加し v13。すべて additive-optional なので migration block は不要だが、
+ * 旧 build (#641 save-guard) が新フィールドを silent drop しないよう版数を上げる。
  */
-export const APP_SETTINGS_SCHEMA_VERSION = 12;
+export const APP_SETTINGS_SCHEMA_VERSION = 13;
 
 /**
  * API agent provider preset。`openai-compatible` 系は base URL と request shape を共有し、
@@ -54,11 +57,31 @@ export type ApiAgentProviderId =
 
 export type AgentRuntime = 'cli' | 'api';
 
+/**
+ * エージェントの挙動系統 (engine)。識別子 (TerminalAgent) とは別概念で、
+ * args/resume/inject の組み立てや team tool 配線がこの値で分岐する。
+ * custom CLI agent は claude / codex のどちらかの engine 上で動く。
+ */
+export type AgentEngine = 'claude' | 'codex';
+
+/**
+ * CLI agent に skill (.claude/skills/<id>/SKILL.md) をどう効かせるか (Issue #1113 Phase4)。
+ *  - 'claude-dir'  : 起動前にプロジェクトの .claude/skills へ materialize し CLI の自動探索に任せる
+ *  - 'append-flag' : 起動引数 (--append-system-prompt 相当) に skill 本文を連結注入
+ *  - 'prompt-file' : 一時ファイル化して system-prompt-file 系フラグへ渡す
+ *  - 'none'        : skill 注入を行わない (default)
+ */
+export type AgentSkillInjection = 'claude-dir' | 'append-flag' | 'prompt-file' | 'none';
+
 export interface AgentConfigBase {
   id: string;
   name: string;
   /** Canvas カードの accent カラー (省略時は --accent) */
   color?: string;
+  /** Issue #1113: カード表示用アイコン (lucide アイコン名)。省略時は engine/runtime 既定。 */
+  icon?: string;
+  /** Issue #1113: 分類・フィルタ用タグ。 */
+  tags?: string[];
 }
 
 /**
@@ -70,6 +93,17 @@ export interface CliAgentConfig extends AgentConfigBase {
   command: string;
   args: string;
   cwd?: string;
+  /**
+   * Issue #1113: この custom CLI が動作する engine (default 'claude')。
+   * args/resume/inject の組み立てと team tool 配線がこの値で claude 互換 / codex 互換に分岐する。
+   */
+  engine?: AgentEngine;
+  /** Issue #1113: 起動時に注入する環境変数。 */
+  env?: Record<string, string>;
+  /** Issue #1113: 定義レベルの既定 skill 群 (ノードインスタンスで上書き可能, Phase4)。 */
+  defaultSkillIds?: string[];
+  /** Issue #1113: skill の注入方式 (Phase4)。省略時は engine から既定を決める。 */
+  skillInjection?: AgentSkillInjection;
 }
 
 /**
