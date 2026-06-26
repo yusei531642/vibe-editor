@@ -213,6 +213,25 @@ pub struct AgentConfig {
     pub skill_ids: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_mode: Option<String>,
+    // ---- Issue #1113: custom agent descriptor フィールド (すべて additive-optional) ----
+    /// CLI custom が動作する engine ('claude' | 'codex')。未指定なら renderer 側で 'claude' 既定。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
+    /// 起動時に注入する環境変数。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<HashMap<String, String>>,
+    /// カード表示アイコン (lucide アイコン名)。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// 分類・フィルタ用タグ。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    /// 定義レベルの既定 skill 群 (Phase4)。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_skill_ids: Option<Vec<String>>,
+    /// skill 注入方式 ('claude-dir' | 'append-flag' | 'prompt-file' | 'none', Phase4)。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_injection: Option<String>,
 }
 
 fn default_agent_runtime() -> String {

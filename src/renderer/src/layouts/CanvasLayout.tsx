@@ -31,6 +31,7 @@ import type {
   TeamOrganizationMeta,
   TeamPreset
 } from '../../../types/shared';
+import { engineForAgentConfig } from '../lib/agent-registry';
 import { Canvas, type CanvasActions } from '../components/canvas/Canvas';
 import { CanvasSidebar } from '../components/canvas/CanvasSidebar';
 import {
@@ -333,10 +334,12 @@ export function CanvasLayout(): JSX.Element {
       ]);
     } else {
       // CLI custom agent: 組み込み leader と同様に MCP team tool を配線する。
+      // Issue #1113: engine は custom 定義の engine (default 'claude') を尊重する (registry に集約)。
+      const engine = engineForAgentConfig(agent);
       if (settings.mcpAutoSetup !== false) {
         try {
           await window.api.app.setupTeamMcp(cwd, teamId, teamName, [
-            { agentId, role: 'leader', agent: 'claude' }
+            { agentId, role: 'leader', agent: engine }
           ]);
         } catch (err) {
           console.warn('[custom-agent-preset] setupTeamMcp failed:', err);
@@ -352,7 +355,9 @@ export function CanvasLayout(): JSX.Element {
           position,
           payload: {
             // CardFrame は payload.command を優先して custom CLI を起動する。
-            agent: 'claude',
+            agent: engine,
+            // Issue #1113: custom agent の identity をカードへ伝える (名前/アイコン/色/skill 解決用)。
+            agentConfigId: agent.id,
             command: agent.command || undefined,
             args: agent.args ? customArgs.args : undefined,
             cwd: agent.cwd || cwd,

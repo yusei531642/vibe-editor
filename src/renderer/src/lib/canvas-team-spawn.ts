@@ -23,6 +23,7 @@
 
 import type { Node } from '@xyflow/react';
 import type {
+  AgentEngine,
   HandoffReference,
   TeamOrganizationMeta
 } from '../../../types/shared';
@@ -33,7 +34,8 @@ import type { AgentPayload } from '../components/canvas/cards/AgentNodeCard/type
 export interface SpawnTeamMember {
   /** roleProfileId / role 兼用 (新スキーマ + 旧コード互換)。 */
   role: string;
-  agent: 'claude' | 'codex';
+  /** 挙動系統 (engine)。custom CLI も claude/codex いずれかの engine 上で動く。 */
+  agent: AgentEngine;
   position: { x: number; y: number };
   /** カードヘッダーに表示する label。caller 側で ROLE_META 等から解決して渡す。 */
   title: string;
@@ -64,7 +66,7 @@ export type SetupTeamMcpFn = (
   cwd: string,
   teamId: string,
   teamName: string,
-  members: { agentId: string; role: string; agent: 'claude' | 'codex' }[]
+  members: { agentId: string; role: string; agent: AgentEngine }[]
 ) => Promise<unknown>;
 
 export interface SpawnTeamsInput {
