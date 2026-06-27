@@ -34,6 +34,7 @@ import './styles/components/palette.css';
 import './styles/components/modal.css';
 import './styles/components/welcome.css';
 import './styles/components/onboarding.css';
+import './styles/components/agent-wizard.css';
 import './styles/components/menu.css';
 import './styles/components/toast.css';
 import './styles/components/claude-not-found.css';
