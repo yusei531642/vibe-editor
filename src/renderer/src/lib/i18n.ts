@@ -785,6 +785,9 @@ const ja: Dict = {
   'settings.agentWizard.typeCli': 'CLI コマンド',
   'settings.agentWizard.typeCliDesc': 'ターミナルで動く CLI エージェント (claude/codex 互換)',
   'settings.agentWizard.apiKeyOptional': 'API キー (任意・後で設定可)',
+  'settings.agentWizard.skills': 'Skill',
+  'settings.agentWizard.skillsHint':
+    '起動時に効かせる skill を選択します (任意)。未 import の場合は設定の Skill セクションから取り込めます。',
   'settings.agentWizard.reviewSummary': '以下の内容で作成します',
   'settings.agentWizard.next': '次へ',
   'settings.agentWizard.back': '戻る',
@@ -828,6 +831,7 @@ const ja: Dict = {
   'settings.customAgents.skillsAutoTeam': 'TeamHub 参加時は vibe-team skill が自動で追加されます。',
   'settings.customAgents.skillSearch': 'skill を検索',
   'settings.customAgents.applySkills': 'プロジェクトに適用',
+  'settings.customAgents.applySkillsBusy': '適用中…',
   'settings.customAgents.applySkillsEmpty': '適用する skill が選択されていません。',
   'settings.customAgents.applySkillsDone':
     '{count}/{total} 件の skill を .claude/skills に適用しました。',
@@ -1724,6 +1728,9 @@ const en: Dict = {
   'settings.agentWizard.typeCli': 'CLI command',
   'settings.agentWizard.typeCliDesc': 'A CLI agent that runs in a terminal (claude/codex compatible)',
   'settings.agentWizard.apiKeyOptional': 'API key (optional — can set later)',
+  'settings.agentWizard.skills': 'Skills',
+  'settings.agentWizard.skillsHint':
+    'Select skills to apply at launch (optional). Import more from the Skill section in settings.',
   'settings.agentWizard.reviewSummary': 'Will create with:',
   'settings.agentWizard.next': 'Next',
   'settings.agentWizard.back': 'Back',
@@ -1768,6 +1775,7 @@ const en: Dict = {
     'The vibe-team skill is added automatically when joining TeamHub.',
   'settings.customAgents.skillSearch': 'Search skills',
   'settings.customAgents.applySkills': 'Apply to project',
+  'settings.customAgents.applySkillsBusy': 'Applying…',
   'settings.customAgents.applySkillsEmpty': 'No skills selected to apply.',
   'settings.customAgents.applySkillsDone': 'Applied {count}/{total} skills to .claude/skills.',
   'settings.customAgents.applySkillsError': 'Failed to apply skills: {detail}',
