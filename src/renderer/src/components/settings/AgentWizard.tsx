@@ -10,12 +10,13 @@
  * 完成した AgentConfig は `onCreate` で親 (SettingsModal) に渡し、customAgents へ append する。
  * 表示は自己完結した `agent-wizard.css` を使い、入力欄は共通の `modal__*` クラスを流用する。
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   API_AGENT_PROVIDER_PRESETS,
   type AgentConfig,
   type AgentEngine,
-  type ApiAgentProviderId
+  type ApiAgentProviderId,
+  type ApiAgentSkillMeta
 } from '../../../../types/shared';
 import { useT } from '../../lib/i18n';
 import { useToast } from '../../lib/toast-context';
@@ -27,8 +28,8 @@ interface Props {
 }
 
 type Runtime = 'api' | 'cli';
-type StepId = 'type' | 'configure' | 'appearance' | 'review';
-const STEPS: StepId[] = ['type', 'configure', 'appearance', 'review'];
+type StepId = 'type' | 'configure' | 'appearance' | 'skills' | 'review';
+const STEPS: StepId[] = ['type', 'configure', 'appearance', 'skills', 'review'];
 
 const ICON_SUGGESTIONS = ['Sparkles', 'Terminal', 'Bot', 'Boxes', 'Cloud', 'Cpu', 'Rocket', 'Wrench'];
 
@@ -56,6 +57,27 @@ export function AgentWizard({ onCreate, onCancel }: Props): JSX.Element {
   const [icon, setIcon] = useState('');
   const [color, setColor] = useState('');
   const [tagsRaw, setTagsRaw] = useState('');
+  // skills (Issue #1127): import 済み skill を列挙して複数選択する。
+  const [availableSkills, setAvailableSkills] = useState<ApiAgentSkillMeta[]>([]);
+  const [selectedSkillIds, setSelectedSkillIds] = useState<string[]>([]);
+  useEffect(() => {
+    let cancelled = false;
+    void window.api.apiAgents
+      .listSkills()
+      .then((s) => {
+        if (!cancelled) setAvailableSkills(s);
+      })
+      .catch(() => {
+        if (!cancelled) setAvailableSkills([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const toggleSkill = (id: string): void =>
+    setSelectedSkillIds((cur) =>
+      cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]
+    );
 
   const step = STEPS[stepIdx];
   const provider = useMemo(
@@ -95,16 +117,28 @@ export function AgentWizard({ onCreate, onCancel }: Props): JSX.Element {
       icon: icon.trim() || undefined,
       tags: tags.length ? tags : undefined
     };
+    const skillIds = selectedSkillIds.length ? selectedSkillIds : undefined;
     if (runtime === 'api') {
       return {
         ...base,
         runtime: 'api',
         providerId,
         model: model.trim(),
-        toolMode: provider.supportsTools ? 'auto' : 'readOnly'
+        toolMode: provider.supportsTools ? 'auto' : 'readOnly',
+        // API agent は skillIds を system prompt に注入する。
+        skillIds
       };
     }
-    return { ...base, runtime: 'cli', command: command.trim(), args: args.trim(), cwd: '', engine };
+    // CLI agent は defaultSkillIds を起動時に注入 (engine 既定の skillInjection 経由)。
+    return {
+      ...base,
+      runtime: 'cli',
+      command: command.trim(),
+      args: args.trim(),
+      cwd: '',
+      engine,
+      defaultSkillIds: skillIds
+    };
   };
 
   const handleCreate = async (): Promise<void> => {
@@ -281,6 +315,29 @@ export function AgentWizard({ onCreate, onCancel }: Props): JSX.Element {
             </>
           )}
 
+          {step === 'skills' && (
+            <>
+              <p className="modal__note">{t('settings.agentWizard.skillsHint')}</p>
+              {availableSkills.length === 0 ? (
+                <p className="modal__note">{t('settings.customAgents.skillsEmpty')}</p>
+              ) : (
+                <div className="custom-agent__skills">
+                  {availableSkills.map((s) => (
+                    <label key={s.id} className="custom-agent__skill" title={s.description}>
+                      <input
+                        type="checkbox"
+                        checked={selectedSkillIds.includes(s.id)}
+                        onChange={() => toggleSkill(s.id)}
+                        aria-label={s.name}
+                      />
+                      <span className="custom-agent__skill-name">{s.name}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
           {step === 'review' && (
             <div className="agent-wizard__review">
               <p className="modal__note">{t('settings.agentWizard.reviewSummary')}</p>
@@ -315,6 +372,10 @@ export function AgentWizard({ onCreate, onCancel }: Props): JSX.Element {
                     </li>
                   </>
                 )}
+                <li>
+                  {t('settings.agentWizard.skills')}:{' '}
+                  <strong>{selectedSkillIds.length}</strong>
+                </li>
               </ul>
             </div>
           )}

@@ -29,6 +29,7 @@ export function CliAgentSkillsField({
   const t = useT();
   const { showToast } = useToast();
   const [filter, setFilter] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const matches = (s: ApiAgentSkillMeta): boolean => {
     const needle = filter.trim().toLowerCase();
@@ -42,6 +43,8 @@ export function CliAgentSkillsField({
       showToast(t('settings.customAgents.applySkillsEmpty'), { tone: 'info' });
       return;
     }
+    // Issue #1127: 適用中は二重起動を防ぐ。
+    setBusy(true);
     try {
       const res = await window.api.apiAgents.applySkillsToProject(ids);
       const applied = res.filter((r) => r.status === 'created' || r.status === 'updated').length;
@@ -55,6 +58,8 @@ export function CliAgentSkillsField({
         tone: 'error',
         duration: 8000
       });
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -79,13 +84,16 @@ export function CliAgentSkillsField({
                   type="checkbox"
                   checked={(agent.defaultSkillIds ?? []).includes(skill.id)}
                   onChange={() => onToggle(skill.id)}
+                  aria-label={skill.name}
                 />
                 <span className="custom-agent__skill-name">{skill.name}</span>
               </label>
             ))}
           </div>
-          <button type="button" className="toolbar__btn" onClick={apply}>
-            {t('settings.customAgents.applySkills')}
+          <button type="button" className="toolbar__btn" onClick={apply} disabled={busy}>
+            {busy
+              ? t('settings.customAgents.applySkillsBusy')
+              : t('settings.customAgents.applySkills')}
           </button>
         </>
       )}
