@@ -2,7 +2,17 @@
 
 > 対象: Canvas モードで Claude Code / Codex に加え **任意の追加エージェント** を一級ノードとして登録・配置できるようにし、**カードの GUI を刷新**、**Skill 機能を作り込む**。
 > 調査: 5本の Explore subagent による並列コードベース調査 + grok-4.3 (`x-ai/grok-4.3`) の設計知見。
-> 作成日: 2026-06-26 / ステータス: ドラフト（実装着手前のレビュー用）
+> 作成日: 2026-06-26 / 更新: 2026-06-27 / ステータス: Phase 1-4 マージ済み・Phase 5 実装中
+
+## 実装状況 (2026-06-27)
+
+| Phase | 内容 | Issue / PR | 状態 |
+|---|---|---|---|
+| 1 | エージェント識別の正規化 (AgentDescriptor / engine・identity 分離 / registry) | #1113 / PR #1114 | ✅ merged |
+| 2 | カード GUI 刷新 (種別アイコン / 状態色+形 / 高密度ヘッダー) | #1115 / PR #1116 | ✅ merged |
+| 3 | 追加導線 (任意 custom agent ピッカー / engine・icon・tags 編集 / i18n) | #1117 / PR #1118 | ✅ merged |
+| 4 | CLI Skill アタッチ + プロジェクト materialize (idempotent / 安全ガード) | #1119 / PR #1120 | ✅ merged |
+| 5 | Skill 自動 materialize + ドキュメント整備 | #1121 | 🚧 本 PR |
 
 ---
 

@@ -126,6 +126,19 @@ function AgentNodeCardImpl({
     return () => clearActivity(id);
   }, [id, clearActivity]);
 
+  // Issue #1121 (Phase5): skillInjection==='claude-dir' の CLI エージェントは mount 時に
+  // 既定 skill (defaultSkillIds) をプロジェクトの .claude/skills へ best-effort で materialize
+  // する。claude/codex は起動時に .claude/skills を自動探索するため、手動「適用」なしに skill が
+  // 効く。書き込みは idempotent (内容一致なら no-op)、失敗は warn のみで起動は継続する。
+  useEffect(() => {
+    if (agentDescriptor.skillInjection !== 'claude-dir') return;
+    const ids = agentDescriptor.defaultSkillIds;
+    if (!ids || ids.length === 0) return;
+    void window.api.apiAgents
+      .applySkillsToProject(ids)
+      .catch((e) => console.warn('[agent-card] skill materialize failed:', e));
+  }, [agentDescriptor.skillInjection, agentDescriptor.defaultSkillIds]);
+
   // Issue #23 + カスタムエージェント対応:
   // agent-resolver 経由で built-in (claude/codex) + customAgents のコマンド/引数/cwd を解決する。
   // lastOpenedRoot を最優先とし、エージェント固有 cwd があればそれを fallback として使う。
