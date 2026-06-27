@@ -18,6 +18,7 @@ import { RoleProfilesSection } from './settings/RoleProfilesSection';
 import { DensitySection } from './settings/DensitySection';
 import { CommandOptionsSection } from './settings/CommandOptionsSection';
 import { CustomAgentEditor } from './settings/CustomAgentEditor';
+import { AgentWizard } from './settings/AgentWizard';
 import { McpSection } from './settings/McpSection';
 import { LogsSection } from './settings/LogsSection';
 import { VoiceSection } from './settings/VoiceSection';
@@ -56,6 +57,8 @@ export function SettingsModal({
   const saveTimerRef = useRef<number | null>(null);
   // サイドバー検索 (空文字なら全表示)
   const [navQuery, setNavQuery] = useState('');
+  // Issue #1123: 新規エージェント追加ウィザードの表示状態。
+  const [wizardOpen, setWizardOpen] = useState(false);
   // Issue #195: focus trap + Escape + autofocus 用のルート ref
   const dialogRef = useRef<HTMLDivElement | null>(null);
 
@@ -177,20 +180,11 @@ export function SettingsModal({
   // Phase 4-2: focus trap + Escape を hook 化
   const handleDialogKeyDown = useSettingsKeydown({ dialogRef, onClose });
 
-  /** 新規カスタムエージェントを追加して編集画面へ遷移 */
-  const addCustomAgent = (): void => {
-    const id = `ca_${Math.random().toString(36).slice(2, 10)}`;
-    const agent: AgentConfig = {
-      id,
-      name: t('settings.customAgents.newName'),
-      runtime: 'cli',
-      command: '',
-      args: '',
-      cwd: ''
-    };
-    const next = [...customAgents, agent];
-    update('customAgents', next);
-    setActiveSection(`custom:${id}`);
+  /** Issue #1123: ウィザードで作成した agent を customAgents へ追加し編集画面へ遷移する。 */
+  const handleWizardCreate = (agent: AgentConfig): void => {
+    update('customAgents', [...customAgents, agent]);
+    setActiveSection(`custom:${agent.id}`);
+    setWizardOpen(false);
   };
 
   // すべての hook 呼び出しが終わった後でだけ早期 return する (Rules of Hooks)。
@@ -318,6 +312,7 @@ export function SettingsModal({
   const current = labelOf(activeSection, t, customAgents);
 
   return (
+    <>
     <div
       className="modal-backdrop"
       data-state={dataState}
@@ -396,7 +391,7 @@ export function SettingsModal({
                             key={id}
                             type="button"
                             className="settings-shell__nav-item settings-shell__nav-item--add"
-                            onClick={addCustomAgent}
+                            onClick={() => setWizardOpen(true)}
                           >
                             <Plus size={13} strokeWidth={2} />
                             <span className="settings-shell__nav-label">
@@ -469,5 +464,12 @@ export function SettingsModal({
         </footer>
       </div>
     </div>
+    {wizardOpen && (
+      <AgentWizard
+        onCreate={handleWizardCreate}
+        onCancel={() => setWizardOpen(false)}
+      />
+    )}
+    </>
   );
 }
