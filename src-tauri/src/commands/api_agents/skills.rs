@@ -21,7 +21,10 @@ use std::path::{Path, PathBuf};
 use tauri::State;
 use tokio::fs;
 
-use super::types::{ApiAgentSkill, ApiAgentSkillMeta, ImportSkillRequest, ImportableSkill};
+use super::types::{
+    ApiAgentSkill, ApiAgentSkillMeta, ImportSkillRequest, ImportableSkill, SkillApplyResult,
+    SkillApplyStatus,
+};
 
 /// 1 つの SKILL.md から読み込む最大バイト数。
 const MAX_SKILL_FILE_BYTES: usize = 256 * 1024;
@@ -179,6 +182,95 @@ pub async fn api_agent_skill_remove(id: String) -> CommandResult<()> {
     match fs::remove_dir_all(&dir).await {
         Ok(()) | Err(_) => Ok(()), // 不在は成功扱い (冪等)
     }
+}
+
+/// dest の現在内容 (None=不在) と新 body から materialize 後のステータスを決める純関数。
+/// 内容一致なら Unchanged (idempotent)、不在なら Created、差分ありは Updated。
+fn apply_status(existing: Option<&str>, body: &str) -> SkillApplyStatus {
+    match existing {
+        None => SkillApplyStatus::Created,
+        Some(cur) if cur == body => SkillApplyStatus::Unchanged,
+        Some(_) => SkillApplyStatus::Updated,
+    }
+}
+
+/// Issue #1119: 選択 skill を現在のプロジェクトの `.claude/skills/<id>/SKILL.md` へ materialize する。
+/// claude/codex は起動時に `.claude/skills` を自動探索するため、これで CLI エージェントでも
+/// skill が効く。idempotent (内容一致は Unchanged で書かない)。
+///
+/// セキュリティ (PR #1120 review): 読み込み側 `read_skill_md_within` と対称に、**書き込み先**も
+/// project root を canonicalize して「materialize 先が project 配下に収まる」ことを検証する。
+/// `.claude` / `.claude/skills` / `.claude/skills/<id>` に symlink が仕込まれて project 外を
+/// 指す場合は Unsafe で拒否し、SKILL.md 本文を外部へ書き出さない。
+#[tauri::command]
+pub async fn api_agent_skill_apply_to_project(
+    state: State<'_, AppState>,
+    skill_ids: Vec<String>,
+) -> CommandResult<Vec<SkillApplyResult>> {
+    let project_root = current_project_root(&state.project_root).unwrap_or_default();
+    let pr = project_root.trim();
+    if pr.is_empty() {
+        return Err(CommandError::validation("no project open"));
+    }
+    // 書き込み先 escape を防ぐため project root を canonicalize しておく。
+    let proj_canon = fs::canonicalize(pr)
+        .await
+        .map_err(|_| CommandError::validation("project root not found"))?;
+    let src_dir = config_paths::vibe_skills_dir();
+    let src_canon = fs::canonicalize(&src_dir).await.ok();
+    let claude_skills = proj_canon.join(".claude").join("skills");
+
+    let mut out: Vec<SkillApplyResult> = Vec::new();
+    for id in skill_ids {
+        if !is_valid_id_segment(&id) {
+            out.push(SkillApplyResult {
+                id,
+                status: SkillApplyStatus::Invalid,
+            });
+            continue;
+        }
+        let body = match &src_canon {
+            Some(dc) => read_skill_md_within(dc, &src_dir.join(&id).join("SKILL.md")).await,
+            None => None,
+        };
+        let Some(body) = body else {
+            out.push(SkillApplyResult {
+                id,
+                status: SkillApplyStatus::Missing,
+            });
+            continue;
+        };
+        let dest_dir = claude_skills.join(&id);
+        fs::create_dir_all(&dest_dir)
+            .await
+            .map_err(|e| CommandError::Io(e.to_string()))?;
+        // create 後に canonicalize し、symlink を辿って project root 外へ出ていないか検証する。
+        // escape していれば本文を書かずに Unsafe で記録 (読み込み側と対称な防御)。
+        let dest_canon = match fs::canonicalize(&dest_dir).await {
+            Ok(c) if c.starts_with(&proj_canon) => c,
+            _ => {
+                tracing::warn!(
+                    "[api-agent] rejected skill materialize escaping project root: {}",
+                    dest_dir.display()
+                );
+                out.push(SkillApplyResult {
+                    id,
+                    status: SkillApplyStatus::Unsafe,
+                });
+                continue;
+            }
+        };
+        let dest_md = dest_canon.join("SKILL.md");
+        let existing = fs::read_to_string(&dest_md).await.ok();
+        let status = apply_status(existing.as_deref(), &body);
+        if status != SkillApplyStatus::Unchanged {
+            atomic_write(&dest_md, body.as_bytes())
+                .await
+                .map_err(|e| CommandError::internal(e.to_string()))?;
+        }
+        out.push(SkillApplyResult { id, status });
+    }
+    Ok(out)
 }
 
 // ============================================================

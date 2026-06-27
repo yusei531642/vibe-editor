@@ -2,6 +2,15 @@
 // 親 skills.rs の private fn / 型に `use super::*` でアクセスする。
 
 use super::*;
+use crate::commands::api_agents::types::SkillApplyStatus;
+
+#[test]
+fn apply_status_is_idempotent_and_detects_changes() {
+    // 不在 → Created、内容一致 → Unchanged (再適用は no-op)、差分 → Updated。
+    assert_eq!(apply_status(None, "x"), SkillApplyStatus::Created);
+    assert_eq!(apply_status(Some("x"), "x"), SkillApplyStatus::Unchanged);
+    assert_eq!(apply_status(Some("old"), "new"), SkillApplyStatus::Updated);
+}
 
 #[test]
 fn parse_meta_reads_frontmatter() {

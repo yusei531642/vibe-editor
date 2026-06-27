@@ -815,6 +815,14 @@ const ja: Dict = {
   'settings.customAgents.skillsEmpty':
     'import 済みの skill がありません。下の「Claude / Codex から import」で追加してください。',
   'settings.customAgents.skillsAutoTeam': 'TeamHub 参加時は vibe-team skill が自動で追加されます。',
+  'settings.customAgents.skillSearch': 'skill を検索',
+  'settings.customAgents.applySkills': 'プロジェクトに適用',
+  'settings.customAgents.applySkillsEmpty': '適用する skill が選択されていません。',
+  'settings.customAgents.applySkillsDone':
+    '{count}/{total} 件の skill を .claude/skills に適用しました。',
+  'settings.customAgents.applySkillsError': 'skill の適用に失敗しました: {detail}',
+  'settings.customAgents.cliSkillsNote':
+    'CLI エージェントは .claude/skills を自動探索します。チェックして「適用」でプロジェクトに配置してください。',
   'settings.customAgents.skillImport.title': 'Claude / Codex から skill を import',
   'settings.customAgents.skillImport.note':
     '~/.claude/skills と ~/.agents/skills (Codex) を走査し、選んだ skill を vibe-editor 専用フォルダにコピーします。',
@@ -1736,6 +1744,13 @@ const en: Dict = {
     'No imported skills yet. Add some via “Import from Claude / Codex” below.',
   'settings.customAgents.skillsAutoTeam':
     'The vibe-team skill is added automatically when joining TeamHub.',
+  'settings.customAgents.skillSearch': 'Search skills',
+  'settings.customAgents.applySkills': 'Apply to project',
+  'settings.customAgents.applySkillsEmpty': 'No skills selected to apply.',
+  'settings.customAgents.applySkillsDone': 'Applied {count}/{total} skills to .claude/skills.',
+  'settings.customAgents.applySkillsError': 'Failed to apply skills: {detail}',
+  'settings.customAgents.cliSkillsNote':
+    'CLI agents auto-discover .claude/skills. Check skills and Apply to place them in the project.',
   'settings.customAgents.skillImport.title': 'Import skills from Claude / Codex',
   'settings.customAgents.skillImport.note':
     'Scans ~/.claude/skills and ~/.agents/skills (Codex), and copies the selected skill into the vibe-editor skills folder.',

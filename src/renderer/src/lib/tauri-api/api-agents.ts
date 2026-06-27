@@ -13,7 +13,8 @@ import type {
   ApiAgentSkillMeta,
   ApiAgentSkillSource,
   ApiAgentStreamEvent,
-  ApiAgentToolEvent
+  ApiAgentToolEvent,
+  SkillApplyResult
 } from '../../../../types/shared';
 
 export const apiAgents = {
@@ -41,6 +42,9 @@ export const apiAgents = {
   importSkill: (source: ApiAgentSkillSource, id: string): Promise<ApiAgentSkillMeta> =>
     invokeCommand('api_agent_skill_import', { req: { source, id } }),
   removeSkill: (id: string): Promise<void> => invokeCommand('api_agent_skill_remove', { id }),
+  /** Issue #1119: 選択 skill を現在のプロジェクトの .claude/skills へ materialize する。 */
+  applySkillsToProject: (skillIds: string[]): Promise<SkillApplyResult[]> =>
+    invokeCommand('api_agent_skill_apply_to_project', { skillIds }),
   events: (sessionId: string) => ({
     onDeltaReady: (cb: (event: ApiAgentStreamEvent) => void): Promise<() => void> =>
       subscribeEventReady<ApiAgentStreamEvent>(`api-agent:delta:${sessionId}`, cb),
