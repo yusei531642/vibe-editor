@@ -1,0 +1,38 @@
+/**
+ * canvas-agent-card.css — Issue #1115 (Phase2) エージェントカード GUI 刷新の追加スタイル。
+ *
+ * 既存の `.canvas-agent-card` 系ベーススタイルは canvas.css (file-size baseline 済) に残し、
+ * Phase2 で増える新要素 (種別アイコン / ロール inline 化) のみここで定義して canvas.css の
+ * 肥大化を避ける。claude-design 準拠: hairline border / shadow なし / terra cotta は小面積 /
+ * warm gray。main.tsx では canvas.css の直後・glass.css より前に import する。
+ */
+
+/* エージェント種別アイコン (claude / codex / custom)。色は親から継承し、
+   custom は CardPresentation 側の inline style で accent を上書きする。 */
+.canvas-agent-card__type-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  color: var(--agent-accent, var(--accent));
+}
+
+.canvas-agent-card__type-icon svg {
+  display: block;
+}
+
+/* ロールは avatar glyph を廃し、種別アイコンに主役を譲って muted な inline ラベルへ降格。
+   既存 `.canvas-agent-card__role` (uppercase / letter-spacing) を上書きする。 */
+.canvas-agent-card__role--inline {
+  color: var(--fg-muted, var(--fg-subtle));
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -38,6 +38,7 @@ import './styles/components/menu.css';
 import './styles/components/toast.css';
 import './styles/components/claude-not-found.css';
 import './styles/components/canvas.css';
+import './styles/components/canvas-agent-card.css';
 import './styles/components/team-dashboard.css';
 import './styles/components/claude-patterns.css';
 import './styles/components/shell.css';

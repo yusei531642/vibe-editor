@@ -57,6 +57,7 @@ import {
 import { resolveAgentVisual } from '../../../../lib/agent-visual';
 import { parseShellArgs } from '../../../../lib/parse-args';
 import { resolveAgentConfig } from '../../../../lib/agent-resolver';
+import { resolveAgentDescriptor } from '../../../../lib/agent-registry';
 import type { AgentEngine } from '../../../../../../types/shared';
 import { useToast } from '../../../../lib/toast-context';
 import {
@@ -95,6 +96,12 @@ function AgentNodeCardImpl({
   const profile = visual.profile;
   const accent = visual.agentAccent;
   const organizationAccent = visual.organizationAccent;
+  // Issue #1115: エージェント種別 (claude/codex/custom) の正規化記述子。ヘッダーのアイコン/
+  // 表示名/accent はこれを使い、custom が Claude に偽装されず一目で区別できるようにする。
+  const agentDescriptor = useMemo(
+    () => resolveAgentDescriptor({ agentConfigId: payload.agentConfigId, engine: payload.agent }, settings),
+    [payload.agentConfigId, payload.agent, settings]
+  );
   const title = data?.title ?? visual.label;
   const [status, setStatus] = useState<TerminalRuntimeStatus | null>(null);
   const [activity, setActivityState] = useState<AgentStatus>('idle');
@@ -379,7 +386,9 @@ function AgentNodeCardImpl({
           cardId={id}
           title={title}
           roleLabel={visual.label}
-          glyph={profile.visual.glyph}
+          typeIcon={agentDescriptor.icon}
+          typeName={agentDescriptor.displayName}
+          typeAccent={agentDescriptor.accentColor}
           organizationName={payload.organization?.name}
           activity={activity}
           status={terminalStatus}
