@@ -504,6 +504,55 @@ export function CanvasLayout(): JSX.Element {
     setAddCardOpen(false);
   };
 
+  // Issue #1117: 登録済みの任意 custom agent (CLI/API) を id 指定で Canvas に単体追加する。
+  //   CLI は engine + agentConfigId + command/args を伝搬し (custom が Claude に偽装されない)、
+  //   API は apiAgent カードを生成する。未登録 id は設定モーダルへ誘導する。
+  const addCustomAgent = (agentId: string): void => {
+    const cfg = (settings.customAgents ?? []).find((a) => a.id === agentId);
+    if (!cfg) {
+      setSettingsOpen(true);
+      return;
+    }
+    const cwd = projectRoot;
+    if (cfg.runtime === 'api') {
+      addCards([
+        {
+          type: 'apiAgent',
+          title: cfg.name,
+          position: stagger('apiAgent'),
+          payload: {
+            agentId: cfg.id,
+            agentConfigId: cfg.id,
+            providerId: cfg.providerId,
+            model: cfg.model,
+            toolMode: cfg.toolMode ?? 'auto',
+            configured: true
+          }
+        }
+      ]);
+    } else {
+      const engine = engineForAgentConfig(cfg);
+      const customArgs = parseCustomAgentArgs(cfg.args);
+      customArgs.warnings.forEach((w) => showToast(t(w.messageKey, w.params), { tone: 'warning' }));
+      addCards([
+        {
+          type: 'agent',
+          title: cfg.name,
+          position: stagger('agent'),
+          payload: {
+            agent: engine,
+            agentConfigId: cfg.id,
+            command: cfg.command || undefined,
+            args: cfg.args ? customArgs.args : undefined,
+            cwd: cfg.cwd || cwd,
+            role: 'leader'
+          }
+        }
+      ]);
+    }
+    setAddCardOpen(false);
+  };
+
   const addApiAgent = (): void => {
     const apiAgent = (settings.customAgents ?? []).find((a) => a.runtime === 'api');
     if (!apiAgent || apiAgent.runtime !== 'api') {
@@ -711,6 +760,7 @@ export function CanvasLayout(): JSX.Element {
       addClaude: () => addAgent('claude'),
       addCodex: () => addAgent('codex'),
       addApiAgent,
+      addCustomAgent,
       addFileTree: () => addByType('fileTree'),
       addChanges: () => addByType('changes'),
       addEditor: () => addByType('editor'),
@@ -718,9 +768,18 @@ export function CanvasLayout(): JSX.Element {
     }),
     // addAgent / addByType / applyPreset are recreated with the current project/settings values.
     // Keeping this object memoized prevents Canvas context-menu handlers from rebinding on
-    // unrelated CanvasLayout state changes.
+    // unrelated CanvasLayout state changes. customAgents を deps に含め、追加導線が最新の
+    // 登録エージェントを参照するようにする (Issue #1117)。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [projectRoot, nodes.length, settings.language, settings.mcpAutoSetup, addCards, notifyRecruit]
+    [
+      projectRoot,
+      nodes.length,
+      settings.language,
+      settings.mcpAutoSetup,
+      settings.customAgents,
+      addCards,
+      notifyRecruit
+    ]
   );
 
   return (
