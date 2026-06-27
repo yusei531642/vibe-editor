@@ -137,6 +137,15 @@ pub struct ImportSkillRequest {
     pub id: String,
 }
 
+/// Issue #1119: skill を project の `.claude/skills` へ materialize した結果。
+/// status は 'created' | 'updated' | 'unchanged' | 'missing' | 'invalid'。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillApplyResult {
+    pub id: String,
+    pub status: String,
+}
+
 /// team 参加コンテキスト。renderer (apiAgent カード) が所属チーム情報を渡す (Issue #1004)。
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]

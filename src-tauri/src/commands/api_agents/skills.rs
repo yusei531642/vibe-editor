@@ -21,7 +21,9 @@ use std::path::{Path, PathBuf};
 use tauri::State;
 use tokio::fs;
 
-use super::types::{ApiAgentSkill, ApiAgentSkillMeta, ImportSkillRequest, ImportableSkill};
+use super::types::{
+    ApiAgentSkill, ApiAgentSkillMeta, ImportSkillRequest, ImportableSkill, SkillApplyResult,
+};
 
 /// 1 つの SKILL.md から読み込む最大バイト数。
 const MAX_SKILL_FILE_BYTES: usize = 256 * 1024;
@@ -179,6 +181,74 @@ pub async fn api_agent_skill_remove(id: String) -> CommandResult<()> {
     match fs::remove_dir_all(&dir).await {
         Ok(()) | Err(_) => Ok(()), // 不在は成功扱い (冪等)
     }
+}
+
+/// dest の現在内容 (None=不在) と新 body から materialize 後のステータスを決める純関数。
+/// 内容一致なら unchanged (idempotent)、不在なら created、差分ありは updated。
+fn apply_status(existing: Option<&str>, body: &str) -> &'static str {
+    match existing {
+        None => "created",
+        Some(cur) if cur == body => "unchanged",
+        Some(_) => "updated",
+    }
+}
+
+/// Issue #1119: 選択 skill を現在のプロジェクトの `.claude/skills/<id>/SKILL.md` へ materialize する。
+/// claude/codex は起動時に `.claude/skills` を自動探索するため、これで CLI エージェントでも
+/// skill が効く。idempotent (内容一致は unchanged で書かない)。読み込みは `read_skill_md_within`
+/// で traversal / symlink escape をガードし、書き込みは atomic_write。
+#[tauri::command]
+pub async fn api_agent_skill_apply_to_project(
+    state: State<'_, AppState>,
+    skill_ids: Vec<String>,
+) -> CommandResult<Vec<SkillApplyResult>> {
+    let project_root = current_project_root(&state.project_root).unwrap_or_default();
+    let pr = project_root.trim();
+    if pr.is_empty() {
+        return Err(CommandError::validation("no project open"));
+    }
+    let src_dir = config_paths::vibe_skills_dir();
+    let src_canon = fs::canonicalize(&src_dir).await.ok();
+    let claude_skills = Path::new(pr).join(".claude").join("skills");
+
+    let mut out: Vec<SkillApplyResult> = Vec::new();
+    for id in skill_ids {
+        if !is_valid_id_segment(&id) {
+            out.push(SkillApplyResult {
+                id,
+                status: "invalid".into(),
+            });
+            continue;
+        }
+        let body = match &src_canon {
+            Some(dc) => read_skill_md_within(dc, &src_dir.join(&id).join("SKILL.md")).await,
+            None => None,
+        };
+        let Some(body) = body else {
+            out.push(SkillApplyResult {
+                id,
+                status: "missing".into(),
+            });
+            continue;
+        };
+        let dest_dir = claude_skills.join(&id);
+        let dest_md = dest_dir.join("SKILL.md");
+        let existing = fs::read_to_string(&dest_md).await.ok();
+        let status = apply_status(existing.as_deref(), &body);
+        if status != "unchanged" {
+            fs::create_dir_all(&dest_dir)
+                .await
+                .map_err(|e| CommandError::Io(e.to_string()))?;
+            atomic_write(&dest_md, body.as_bytes())
+                .await
+                .map_err(|e| CommandError::internal(e.to_string()))?;
+        }
+        out.push(SkillApplyResult {
+            id,
+            status: status.into(),
+        });
+    }
+    Ok(out)
 }
 
 // ============================================================

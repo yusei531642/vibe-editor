@@ -4,6 +4,14 @@
 use super::*;
 
 #[test]
+fn apply_status_is_idempotent_and_detects_changes() {
+    // 不在 → created、内容一致 → unchanged (再適用は no-op)、差分 → updated。
+    assert_eq!(apply_status(None, "x"), "created");
+    assert_eq!(apply_status(Some("x"), "x"), "unchanged");
+    assert_eq!(apply_status(Some("old"), "new"), "updated");
+}
+
+#[test]
 fn parse_meta_reads_frontmatter() {
     let body = "---\nname: My Skill\ndescription: \"Does a thing\"\n---\n# Heading\nbody text";
     let (name, desc) = parse_skill_meta("my-skill", body);

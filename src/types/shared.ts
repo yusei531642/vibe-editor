@@ -573,6 +573,20 @@ export interface ApiAgentImportableSkill {
   imported: boolean;
 }
 
+/**
+ * Issue #1119: skill を現在のプロジェクトの `.claude/skills/<id>/SKILL.md` へ materialize した
+ * 結果。claude/codex はこのフォルダを自動探索するため、CLI エージェントでも skill が効く。
+ *  - 'created'   : 新規配置
+ *  - 'updated'   : 既存と差分があり上書き
+ *  - 'unchanged' : 既存と同一 (no-op, idempotent)
+ *  - 'missing'   : import 済みフォルダに該当 skill が無い
+ *  - 'invalid'   : 不正な skill id
+ */
+export interface SkillApplyResult {
+  id: string;
+  status: 'created' | 'updated' | 'unchanged' | 'missing' | 'invalid';
+}
+
 export interface ApiAgentSendResult {
   ok: boolean;
   generationId: string;

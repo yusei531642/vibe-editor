@@ -12,6 +12,7 @@ import {
 import { useT } from '../../lib/i18n';
 import { useToast } from '../../lib/toast-context';
 import { SkillImportPanel } from './SkillImportPanel';
+import { CliAgentSkillsField } from './CliAgentSkillsField';
 import { useNativeConfirm } from '../../lib/use-native-confirm';
 import { parseShellArgsStrict } from '../../lib/parse-args';
 import type { UpdateSetting } from './types';
@@ -117,10 +118,10 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
       .catch(() => setAvailableSkills([]));
   }, []);
 
+  // Issue #1119: CLI でも skill を選べるよう runtime に関わらず一覧をロードする。
   useEffect(() => {
-    if (agent.runtime !== 'api') return;
     reloadSkills();
-  }, [agent.runtime, reloadSkills]);
+  }, [reloadSkills]);
 
   const toggleSkill = (id: string): void => {
     if (!apiAgent) return;
@@ -129,6 +130,16 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
       ? current.filter((s) => s !== id)
       : [...current, id];
     patchApiAgent({ skillIds: next });
+  };
+
+  // Issue #1119: CLI agent の defaultSkillIds をトグルする (UI は CliAgentSkillsField へ分離)。
+  const toggleCliSkill = (id: string): void => {
+    if (!cliAgent) return;
+    const current = cliAgent.defaultSkillIds ?? [];
+    const next = current.includes(id)
+      ? current.filter((s) => s !== id)
+      : [...current, id];
+    patchAgent({ defaultSkillIds: next });
   };
 
   const switchRuntime = (runtime: 'cli' | 'api'): void => {
@@ -288,6 +299,13 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
               <option value="codex">{t('settings.customAgents.engineCodex')}</option>
             </select>
           </label>
+
+          <CliAgentSkillsField
+            agent={cliAgent}
+            availableSkills={availableSkills}
+            onToggle={toggleCliSkill}
+            reloadSkills={reloadSkills}
+          />
         </>
       )}
 

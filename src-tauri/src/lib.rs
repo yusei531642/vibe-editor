@@ -284,6 +284,7 @@ pub fn run() {
             commands::api_agents::skills::api_agent_skill_sources_list,
             commands::api_agents::skills::api_agent_skill_import,
             commands::api_agents::skills::api_agent_skill_remove,
+            commands::api_agents::skills::api_agent_skill_apply_to_project,
             commands::api_agents::models::api_agent_list_models,
         ])
         .setup(|app| {
