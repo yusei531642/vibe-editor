@@ -95,6 +95,8 @@ export interface CanvasActions {
   addClaude: () => void;
   addCodex: () => void;
   addApiAgent: () => void;
+  /** Issue #1117: 登録済み custom agent (CLI/API) を id 指定で Canvas に追加する。 */
+  addCustomAgent: (agentId: string) => void;
   addFileTree: () => void;
   addChanges: () => void;
   addEditor: () => void;
@@ -315,6 +317,12 @@ function FlowApp({ actions }: FlowAppProps): JSX.Element {
       //  即閉じる race を起こしていた (handleNodeContextMenu は両方呼んでいるので
       //  node 上の右クリックは正常)。Pane 経路にも stopPropagation を揃える。
       e.stopPropagation();
+      // Issue #1117: 登録済み custom agent (CLI/API) を 1 件ずつ「ここに追加」できる導線。
+      //   ハードコードの "Add API agent here" (最初の 1 個固定) を撤廃し、任意のエージェントを選べる。
+      const customAgentItems: ContextMenuItem[] = (settings.customAgents ?? []).map((a) => ({
+        label: t('canvasMenu.addCustomAgentHere', { name: a.name || a.id }),
+        action: () => actions.addCustomAgent(a.id)
+      }));
       const items: ContextMenuItem[] = [
         {
           label: t('canvasMenu.addClaudeHere'),
@@ -324,10 +332,7 @@ function FlowApp({ actions }: FlowAppProps): JSX.Element {
           label: t('canvasMenu.addCodexHere'),
           action: actions.addCodex
         },
-        {
-          label: 'Add API agent here',
-          action: actions.addApiAgent
-        },
+        ...customAgentItems,
         {
           label: t('canvasMenu.addFileTreeHere'),
           action: actions.addFileTree
@@ -348,7 +353,7 @@ function FlowApp({ actions }: FlowAppProps): JSX.Element {
       ];
       setContextMenu({ x: e.clientX, y: e.clientY, items });
     },
-    [t, actions]
+    [t, actions, settings.customAgents]
   );
 
   // Issue #158: hand-off event は use-team-handoff の集約 listener 経由で受け取る。

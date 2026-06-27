@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   API_AGENT_PROVIDER_PRESETS,
   type AgentConfig,
+  type AgentEngine,
   type ApiAgentConfig,
   type ApiAgentProviderId,
   type ApiAgentSkillMeta,
@@ -276,6 +277,17 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
               spellCheck={false}
             />
           </label>
+
+          <label className="modal__label modal__label--full">
+            <span>{t('settings.customAgents.engine')}</span>
+            <select
+              value={cliAgent.engine ?? 'claude'}
+              onChange={(e) => patchAgent({ engine: e.target.value as AgentEngine })}
+            >
+              <option value="claude">{t('settings.customAgents.engineClaude')}</option>
+              <option value="codex">{t('settings.customAgents.engineCodex')}</option>
+            </select>
+          </label>
         </>
       )}
 
@@ -414,6 +426,46 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
           value={agent.color ?? ''}
           onChange={(e) => patchAgent({ color: e.target.value || undefined })}
           placeholder="#d97757"
+          spellCheck={false}
+        />
+      </label>
+
+      <label className="modal__label modal__label--full">
+        <span>{t('settings.customAgents.icon')}</span>
+        <input
+          type="text"
+          value={agent.icon ?? ''}
+          onChange={(e) => patchAgent({ icon: e.target.value || undefined })}
+          placeholder="Terminal"
+          spellCheck={false}
+          list="custom-agent-icon-list"
+        />
+        <datalist id="custom-agent-icon-list">
+          <option value="Sparkles" />
+          <option value="Terminal" />
+          <option value="Bot" />
+          <option value="Boxes" />
+          <option value="Cloud" />
+          <option value="Cpu" />
+          <option value="Rocket" />
+          <option value="Wrench" />
+        </datalist>
+      </label>
+
+      <label className="modal__label modal__label--full">
+        <span>{t('settings.customAgents.tags')}</span>
+        <input
+          type="text"
+          value={(agent.tags ?? []).join(', ')}
+          onChange={(e) =>
+            patchAgent({
+              tags: e.target.value
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean)
+            })
+          }
+          placeholder={t('settings.customAgents.tagsPlaceholder')}
           spellCheck={false}
         />
       </label>
