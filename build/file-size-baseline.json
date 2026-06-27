@@ -12,7 +12,7 @@
   "src-tauri/src/commands/terminal/command_validation.rs": 916,
   "src-tauri/src/commands/terminal_tabs.rs": 817,
   "src-tauri/src/commands/voice.rs": 550,
-  "src-tauri/src/lib.rs": 521,
+  "src-tauri/src/lib.rs": 522,
   "src-tauri/src/pty/claude_watcher.rs": 609,
   "src-tauri/src/pty/codex_broker.rs": 506,
   "src-tauri/src/pty/codex_watcher.rs": 648,
@@ -41,5 +41,5 @@
   "src/renderer/src/lib/i18n.ts": 1935,
   "src/renderer/src/lib/role-profiles-builtin.ts": 633,
   "src/renderer/src/stores/canvas.ts": 588,
-  "src/types/shared.ts": 1959
+  "src/types/shared.ts": 1974
 }

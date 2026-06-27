@@ -65,13 +65,17 @@ export type AgentRuntime = 'cli' | 'api';
 export type AgentEngine = 'claude' | 'codex';
 
 /**
- * CLI agent に skill (.claude/skills/<id>/SKILL.md) をどう効かせるか (Issue #1113 Phase4)。
+ * CLI agent に skill (.claude/skills/<id>/SKILL.md) をどう効かせるか (Issue #1113 Phase4 / #1125)。
  *  - 'claude-dir'  : 起動前にプロジェクトの .claude/skills へ materialize し CLI の自動探索に任せる
- *  - 'append-flag' : 起動引数 (--append-system-prompt 相当) に skill 本文を連結注入
- *  - 'prompt-file' : 一時ファイル化して system-prompt-file 系フラグへ渡す
- *  - 'none'        : skill 注入を行わない (default)
+ *                    (claude エンジン既定)
+ *  - 'prompt-file' : skill 本文を system prompt に前置し、一時ファイル経由で起動フラグへ渡す
+ *                    (codex の `--config model_instructions_file=` / claude の
+ *                    `--append-system-prompt-file`)。codex エンジン既定。
+ *  - 'none'        : skill 注入を行わない (注入手段が不明な custom CLI 等)
+ *
+ * Issue #1125: 到達不能だった 'append-flag' を撤去し、全モードが配線済み・有意になるよう整理した。
  */
-export type AgentSkillInjection = 'claude-dir' | 'append-flag' | 'prompt-file' | 'none';
+export type AgentSkillInjection = 'claude-dir' | 'prompt-file' | 'none';
 
 export interface AgentConfigBase {
   id: string;
@@ -553,6 +557,17 @@ export interface ApiAgentSkillMeta {
   id: string;
   name: string;
   description: string;
+}
+
+/**
+ * skill 本文込みの表現。`api_agent_skill_load_bodies` が選択 skill の本文を返す (Issue #1125)。
+ * CLI エージェントの prompt-file 注入で、renderer が本文を system prompt へ前置するために使う。
+ * `load_skill_bodies` (API 経路) と異なり vibe-team は強制同梱しない。
+ */
+export interface ApiAgentSkillBody {
+  id: string;
+  name: string;
+  body: string;
 }
 
 /** import 元の種別 (Issue #1017)。 */

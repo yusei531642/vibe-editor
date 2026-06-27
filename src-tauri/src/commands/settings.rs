@@ -229,7 +229,7 @@ pub struct AgentConfig {
     /// 定義レベルの既定 skill 群 (Phase4)。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_skill_ids: Option<Vec<String>>,
-    /// skill 注入方式 ('claude-dir' | 'append-flag' | 'prompt-file' | 'none', Phase4)。
+    /// skill 注入方式 ('claude-dir' | 'prompt-file' | 'none', Phase4 / Issue #1125)。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skill_injection: Option<String>,
 }

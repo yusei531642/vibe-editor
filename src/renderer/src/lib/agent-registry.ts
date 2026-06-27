@@ -74,9 +74,13 @@ const BUILTIN_AGENT_META: BuiltinAgentMeta[] = [
   { id: 'codex', engine: 'codex', displayName: 'Codex', icon: 'Terminal' }
 ];
 
-/** engine ごとの skill 注入の既定 (Phase4)。claude は .claude/skills 自動探索が効くので materialize。 */
+/**
+ * engine ごとの skill 注入の既定 (Phase4 / Issue #1125)。
+ *  - claude: `.claude/skills` 自動探索が効くので materialize ('claude-dir')。
+ *  - codex : 自動探索しないため、skill 本文を `model_instructions_file` に前置注入 ('prompt-file')。
+ */
 export function defaultSkillInjectionForEngine(engine: AgentEngine): AgentSkillInjection {
-  return engine === 'claude' ? 'claude-dir' : 'none';
+  return engine === 'claude' ? 'claude-dir' : 'prompt-file';
 }
 
 /** runtime ごとのアイコン既定 (custom がアイコン未指定のとき)。 */

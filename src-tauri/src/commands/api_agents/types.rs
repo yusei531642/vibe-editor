@@ -113,6 +113,18 @@ pub struct ApiAgentSkillMeta {
     pub description: String,
 }
 
+/// skill 本文込みの IPC 表現。`api_agent_skill_load_bodies` が renderer へ返す (Issue #1125)。
+/// CLI エージェントの prompt-file 注入 (codex の `model_instructions_file` 等) で、renderer が
+/// 本文を system prompt に前置するために使う。内部表現の `ApiAgentSkill` とは別に持ち、
+/// vibe-team の強制同梱はせず「選択された skill だけ」を返す。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiAgentSkillBody {
+    pub id: String,
+    pub name: String,
+    pub body: String,
+}
+
 /// import 元 (Claude / Codex) の skill メタ。`api_agent_skill_sources_list` が返す (Issue #1017)。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

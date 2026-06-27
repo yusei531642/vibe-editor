@@ -22,8 +22,8 @@ use tauri::State;
 use tokio::fs;
 
 use super::types::{
-    ApiAgentSkill, ApiAgentSkillMeta, ImportSkillRequest, ImportableSkill, SkillApplyResult,
-    SkillApplyStatus,
+    ApiAgentSkill, ApiAgentSkillBody, ApiAgentSkillMeta, ImportSkillRequest, ImportableSkill,
+    SkillApplyResult, SkillApplyStatus,
 };
 
 /// 1 つの SKILL.md から読み込む最大バイト数。
@@ -47,6 +47,25 @@ pub async fn api_agent_skill_list() -> CommandResult<Vec<ApiAgentSkillMeta>> {
 /// ファイルが無ければバンドル本文へフォールバックする。
 pub(super) async fn load_skill_bodies(skill_ids: &[String]) -> Vec<ApiAgentSkill> {
     load_skill_bodies_from(&config_paths::vibe_skills_dir(), skill_ids).await
+}
+
+/// 選択された skill の本文を renderer へ返す (Issue #1125)。CLI エージェントの prompt-file 注入
+/// (codex の `model_instructions_file` 等) で、renderer が本文を system prompt へ前置するために
+/// 使う。`load_skill_bodies` と異なり vibe-team は強制同梱しない (standalone への混入回避)。
+#[tauri::command]
+pub async fn api_agent_skill_load_bodies(
+    skill_ids: Vec<String>,
+) -> CommandResult<Vec<ApiAgentSkillBody>> {
+    let bodies =
+        load_selected_skill_bodies_from(&config_paths::vibe_skills_dir(), &skill_ids).await;
+    Ok(bodies
+        .into_iter()
+        .map(|s| ApiAgentSkillBody {
+            id: s.id,
+            name: s.name,
+            body: s.body,
+        })
+        .collect())
 }
 
 // ============================================================
@@ -307,15 +326,34 @@ async fn list_skills_in(dir: &Path) -> Vec<ApiAgentSkillMeta> {
 }
 
 /// `dir/<id>/SKILL.md` から選択 skill + 自動 vibe-team の本文を読み込む。
+/// API エージェントの system prompt 構築用 (`load_skill_bodies` 経由)。
 async fn load_skill_bodies_from(dir: &Path, skill_ids: &[String]) -> Vec<ApiAgentSkill> {
+    load_skill_bodies_inner(dir, skill_ids, true).await
+}
+
+/// `dir/<id>/SKILL.md` から **選択された skill だけ** の本文を読み込む (vibe-team は同梱しない)。
+/// CLI エージェントの prompt-file 注入で使う。standalone (非チーム) エージェントに TeamHub
+/// プロトコル (vibe-team) が混入しないよう、自動追加を行わない点が `load_skill_bodies_from`
+/// との違い (Issue #1125)。
+async fn load_selected_skill_bodies_from(dir: &Path, skill_ids: &[String]) -> Vec<ApiAgentSkill> {
+    load_skill_bodies_inner(dir, skill_ids, false).await
+}
+
+/// skill 本文ローダの実体。`include_vibe_team` で vibe-team の自動追加を切り替える。
+/// id 検証 / 重複排除 / symlink-safe 読み込み / vibe-team のバンドル fallback は共通。
+async fn load_skill_bodies_inner(
+    dir: &Path,
+    skill_ids: &[String],
+    include_vibe_team: bool,
+) -> Vec<ApiAgentSkill> {
     let mut ids: Vec<String> = Vec::new();
     for id in skill_ids {
         if is_valid_id_segment(id) && !ids.iter().any(|x| x == id) {
             ids.push(id.clone());
         }
     }
-    // 計画 v2: TeamHub 参加時は vibe-team を自動追加。
-    if !ids.iter().any(|i| i == VIBE_TEAM_SKILL_ID) {
+    // 計画 v2: TeamHub 参加時は vibe-team を自動追加 (API エージェント経路のみ)。
+    if include_vibe_team && !ids.iter().any(|i| i == VIBE_TEAM_SKILL_ID) {
         ids.push(VIBE_TEAM_SKILL_ID.to_string());
     }
     let dir_canon = fs::canonicalize(dir).await.ok();

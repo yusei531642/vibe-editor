@@ -10,6 +10,7 @@ import type {
   ApiAgentSendResult,
   ApiAgentSession,
   ApiAgentSessionCreateRequest,
+  ApiAgentSkillBody,
   ApiAgentSkillMeta,
   ApiAgentSkillSource,
   ApiAgentStreamEvent,
@@ -45,6 +46,9 @@ export const apiAgents = {
   /** Issue #1119: 選択 skill を現在のプロジェクトの .claude/skills へ materialize する。 */
   applySkillsToProject: (skillIds: string[]): Promise<SkillApplyResult[]> =>
     invokeCommand('api_agent_skill_apply_to_project', { skillIds }),
+  /** Issue #1125: 選択 skill の本文を読み込む (prompt-file 注入用、vibe-team は同梱しない)。 */
+  loadSkillBodies: (skillIds: string[]): Promise<ApiAgentSkillBody[]> =>
+    invokeCommand('api_agent_skill_load_bodies', { skillIds }),
   events: (sessionId: string) => ({
     onDeltaReady: (cb: (event: ApiAgentStreamEvent) => void): Promise<() => void> =>
       subscribeEventReady<ApiAgentStreamEvent>(`api-agent:delta:${sessionId}`, cb),

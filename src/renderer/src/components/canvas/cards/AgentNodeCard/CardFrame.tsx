@@ -59,6 +59,7 @@ import { parseShellArgs } from '../../../../lib/parse-args';
 import { resolveAgentConfig } from '../../../../lib/agent-resolver';
 import { resolveAgentDescriptor } from '../../../../lib/agent-registry';
 import type { AgentEngine } from '../../../../../../types/shared';
+import { useSkillInjection } from '../../../../lib/use-skill-injection';
 import { useToast } from '../../../../lib/toast-context';
 import {
   deriveCardSummary,
@@ -126,18 +127,10 @@ function AgentNodeCardImpl({
     return () => clearActivity(id);
   }, [id, clearActivity]);
 
-  // Issue #1121 (Phase5): skillInjection==='claude-dir' の CLI エージェントは mount 時に
-  // 既定 skill (defaultSkillIds) をプロジェクトの .claude/skills へ best-effort で materialize
-  // する。claude/codex は起動時に .claude/skills を自動探索するため、手動「適用」なしに skill が
-  // 効く。書き込みは idempotent (内容一致なら no-op)、失敗は warn のみで起動は継続する。
-  useEffect(() => {
-    if (agentDescriptor.skillInjection !== 'claude-dir') return;
-    const ids = agentDescriptor.defaultSkillIds;
-    if (!ids || ids.length === 0) return;
-    void window.api.apiAgents
-      .applySkillsToProject(ids)
-      .catch((e) => console.warn('[agent-card] skill materialize failed:', e));
-  }, [agentDescriptor.skillInjection, agentDescriptor.defaultSkillIds]);
+  // Issue #1121 / #1125: skill 注入 (claude-dir = .claude/skills へ materialize /
+  // prompt-file = 本文を preamble 化) は `useSkillInjection` hook に集約。prompt-file 経路の
+  // preamble を受け取り、下で team ロール prompt と結合して instructions にする。
+  const skillPreamble = useSkillInjection(agentDescriptor);
 
   // Issue #23 + カスタムエージェント対応:
   // agent-resolver 経由で built-in (claude/codex) + customAgents のコマンド/引数/cwd を解決する。
@@ -279,8 +272,16 @@ function AgentNodeCardImpl({
     settings.codexArgs
   ]);
 
-  const claudeInstructions = isClaude ? sysPrompt : undefined;
-  const codexInstructions = isCodex ? sysPrompt : undefined;
+  // Issue #1125: skill 本文 (prompt-file 注入) と team ロール prompt を結合して instructions とする。
+  // claude は通常 claude-dir のため skillPreamble は空 (materialize 経路) で、二重注入は起きない。
+  const instructions = useMemo(() => {
+    const parts = [skillPreamble, sysPrompt]
+      .map((s) => (s ?? '').trim())
+      .filter((s) => s.length > 0);
+    return parts.length > 0 ? parts.join('\n\n') : undefined;
+  }, [skillPreamble, sysPrompt]);
+  const claudeInstructions = isClaude ? instructions : undefined;
+  const codexInstructions = isCodex ? instructions : undefined;
 
   // ---------- Issue #509: 未読 inbox 数の event-driven 集計 ----------
   //

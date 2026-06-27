@@ -58,7 +58,7 @@ describe('agent-registry', () => {
     expect(claude.kind).toBe('builtin');
     expect(claude.skillInjection).toBe('claude-dir');
     expect(codex.engine).toBe('codex');
-    expect(codex.skillInjection).toBe('none');
+    expect(codex.skillInjection).toBe('prompt-file');
   });
 
   it('engineForAgentConfig respects cli engine, defaults to claude, treats api as claude', () => {
@@ -77,8 +77,8 @@ describe('agent-registry', () => {
     expect(d.accentColor).toBe('#abcdef');
     expect(d.tags).toEqual(['exp']);
     expect(d.command).toBe('mycli');
-    // engine codex かつ skillInjection 未指定 → engine 既定 'none'
-    expect(d.skillInjection).toBe('none');
+    // engine codex かつ skillInjection 未指定 → engine 既定 'prompt-file' (Issue #1125)
+    expect(d.skillInjection).toBe('prompt-file');
   });
 
   it('customAgentDescriptor fills defaults for a plain cli agent', () => {
@@ -102,7 +102,7 @@ describe('agent-registry', () => {
 
   it('defaultSkillInjectionForEngine maps engine to injection default', () => {
     expect(defaultSkillInjectionForEngine('claude')).toBe('claude-dir');
-    expect(defaultSkillInjectionForEngine('codex')).toBe('none');
+    expect(defaultSkillInjectionForEngine('codex')).toBe('prompt-file');
   });
 
   it('resolveAgentDescriptor resolves by agentConfigId then engine fallback', () => {
