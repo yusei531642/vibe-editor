@@ -581,10 +581,11 @@ export interface ApiAgentImportableSkill {
  *  - 'unchanged' : 既存と同一 (no-op, idempotent)
  *  - 'missing'   : import 済みフォルダに該当 skill が無い
  *  - 'invalid'   : 不正な skill id
+ *  - 'unsafe'    : 書き込み先が symlink でプロジェクト外へ escape したため拒否
  */
 export interface SkillApplyResult {
   id: string;
-  status: 'created' | 'updated' | 'unchanged' | 'missing' | 'invalid';
+  status: 'created' | 'updated' | 'unchanged' | 'missing' | 'invalid' | 'unsafe';
 }
 
 export interface ApiAgentSendResult {

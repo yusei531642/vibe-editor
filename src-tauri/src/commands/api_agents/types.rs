@@ -137,13 +137,26 @@ pub struct ImportSkillRequest {
     pub id: String,
 }
 
+/// Issue #1119 / PR #1120 review: skill materialize のステータス。TS 側 literal union と
+/// 1:1 対応する型付き enum (kebab-case で 'created' 等にシリアライズ) にして型契約を揃える。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SkillApplyStatus {
+    Created,
+    Updated,
+    Unchanged,
+    Missing,
+    Invalid,
+    /// 書き込み先が symlink でプロジェクト外へ escape したため拒否。
+    Unsafe,
+}
+
 /// Issue #1119: skill を project の `.claude/skills` へ materialize した結果。
-/// status は 'created' | 'updated' | 'unchanged' | 'missing' | 'invalid'。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillApplyResult {
     pub id: String,
-    pub status: String,
+    pub status: SkillApplyStatus,
 }
 
 /// team 参加コンテキスト。renderer (apiAgent カード) が所属チーム情報を渡す (Issue #1004)。
