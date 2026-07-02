@@ -24,7 +24,7 @@ use tokio::fs;
 
 /// Skill ファイル本文の現行バージョン。SKILL.md 先頭に埋め込んでおき、
 /// Rust 側がファイルを見たときに「ユーザーが手で編集したか / 古いバンドル版か」を判別できるようにする。
-const SKILL_VERSION: &str = "1.6.3";
+const SKILL_VERSION: &str = "1.6.5";
 
 /// vibe-team Skill 本文。Claude Code の Skill 形式 (frontmatter + Markdown body) で書く。
 const SKILL_BODY: &str = include_str!("./vibe_team_skill_body.md");
@@ -306,6 +306,26 @@ mod tests {
     /// `<!-- vibe-team-skill-version: VER -->` ヘッダ付きの本文を組み立てる。
     fn versioned(ver: &str, extra_body: &str) -> String {
         format!("<!-- vibe-team-skill-version: {ver} -->\n{extra_body}\n")
+    }
+
+    /// Issue #1109: bundled 本文 (SKILL_VERSION + vibe_team_skill_body.md) と、リポジトリの
+    /// 正本 `.claude/skills/vibe-team/SKILL.md` が再び別文書に乖離しないことを CI で固定する。
+    /// 正本を更新したら `tail -n +2 SKILL.md > vibe_team_skill_body.md` で bundled を再生成し、
+    /// SKILL_VERSION と正本ヘッダを同時に bump すること。
+    #[test]
+    fn bundled_text_matches_repo_canonical_skill_md() {
+        // include_str! なのでファイル移動時はコンパイルエラーで気付ける。
+        // Windows で autocrlf=true な checkout でも比較が壊れないよう CRLF は正規化する
+        // (materialize 時に書かれるのは current_skill_text() 側なので実挙動には影響しない)。
+        let canonical =
+            include_str!("../../../.claude/skills/vibe-team/SKILL.md").replace("\r\n", "\n");
+        let bundled = current_skill_text().replace("\r\n", "\n");
+        assert_eq!(
+            bundled, canonical,
+            "bundled (SKILL_VERSION + vibe_team_skill_body.md) と正本 .claude/skills/vibe-team/SKILL.md が乖離しています。\
+             正本を編集した場合は `tail -n +2 .claude/skills/vibe-team/SKILL.md > src-tauri/src/commands/vibe_team_skill_body.md` \
+             で bundled を再生成し、SKILL_VERSION を bump してください (Issue #1109)"
+        );
     }
 
     #[test]
