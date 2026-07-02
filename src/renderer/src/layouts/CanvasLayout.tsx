@@ -9,40 +9,18 @@
  * Phase 5:
  *   - Preset 起動時に teamHistory に自動保存 (canvasState 込み)
  *   - "Recent Teams" タブで過去チームを再開 (Card 配置完全復元)
+ *
+ * Issue #1032 (god-file 分割): チーム起動は use-canvas-spawn / CanvasSpawnFab、
+ * 単体カード追加は use-canvas-add-card、AppMenuBar 操作は use-canvas-menu-actions が
+ * それぞれ所有する。ここはシェル (Topbar / Rail / Sidebar / Canvas) の組み立てに徹する。
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Node } from '@xyflow/react';
-import {
-  ArrowDownToLine,
-  ChevronDown,
-  FilePlus,
-  FolderTree,
-  GitBranch,
-  Layout,
-  Plus,
-  Sparkles,
-  History
-} from 'lucide-react';
-import type { CardData, CardType } from '../stores/canvas';
-import { NODE_H, NODE_W } from '../stores/canvas';
-import type {
-  AgentConfig,
-  TeamHistoryEntry,
-  TeamOrganizationMeta,
-  TeamPreset
-} from '../../../types/shared';
-import { engineForAgentConfig } from '../lib/agent-registry';
+import { Layout } from 'lucide-react';
+import type { CardData } from '../stores/canvas';
 import { Canvas, type CanvasActions } from '../components/canvas/Canvas';
 import { CanvasSidebar } from '../components/canvas/CanvasSidebar';
-import {
-  AddItem,
-  AgentBadge,
-  BuiltinPresetItem,
-  CustomAgentLeaderPresetItem,
-  RecentItem,
-  SavedPresetItem,
-  TabBtn
-} from '../components/canvas/CanvasSpawnItems';
+import { CanvasSpawnFab } from '../components/canvas/CanvasSpawnFab';
 import { VoiceControlButton } from '../components/canvas/VoiceControlButton';
 import { Rail } from '../components/shell/Rail';
 import { Topbar } from '../components/shell/Topbar';
@@ -50,40 +28,17 @@ import { AppMenuBar } from '../components/shell/AppMenuBar';
 import type { SidebarView } from '../components/Sidebar';
 import { SettingsModal } from '../components/SettingsModal';
 import { useT } from '../lib/i18n';
-import { useNativeConfirm } from '../lib/use-native-confirm';
 import { useUiStore } from '../stores/ui';
 import { useCanvasStore } from '../stores/canvas';
 import { useCanvasViewport } from '../stores/canvas-selectors';
-import {
-  BUILTIN_PRESETS,
-  DEFAULT_SPAWN_PRESET,
-  expandPresetOrganizations,
-  presetMemberCount,
-  presetOrganizationCount,
-  presetPosition,
-  type WorkspacePreset
-} from '../lib/workspace-presets';
-import { ROLE_META } from '../lib/team-roles';
+import { DEFAULT_SPAWN_PRESET } from '../lib/workspace-presets';
 import { useSettings } from '../lib/settings-context';
-import { useToast } from '../lib/toast-context';
-import {
-  localeOf,
-  formatOrganizationAgentCount
-} from '../lib/canvas-layout-helpers';
 import { useCanvasTeamRestore } from '../lib/hooks/use-canvas-team-restore';
 import { useCanvasAutoSave } from '../lib/hooks/use-canvas-auto-save';
+import { useCanvasAddCard } from '../lib/hooks/use-canvas-add-card';
+import { useCanvasMenuActions } from '../lib/hooks/use-canvas-menu-actions';
+import { useCanvasSpawn } from '../lib/hooks/use-canvas-spawn';
 import { useLayoutResize } from '../lib/hooks/use-layout-resize';
-import { getDirtyEditorCardSnapshots } from '../lib/editor-card-dirty-registry';
-import {
-  spawnTeam,
-  spawnTeams,
-  type SpawnTeamMember,
-  type SpawnTeamSpec
-} from '../lib/canvas-team-spawn';
-import { findExistingTeamNode } from '../lib/canvas-existing-team';
-import { parseCustomAgentArgs } from '../lib/parse-args';
-
-type Tab = 'preset' | 'recent';
 
 export function CanvasLayout(): JSX.Element {
   const setViewMode = useUiStore((s) => s.setViewMode);
@@ -110,12 +65,8 @@ export function CanvasLayout(): JSX.Element {
     });
   }, []);
   const viewport = useCanvasViewport();
-  const clear = useCanvasStore((s) => s.clear);
-  const addCards = useCanvasStore((s) => s.addCards);
-  const notifyRecruit = useCanvasStore((s) => s.notifyRecruit);
   const { settings, update: updateSettings, reset: resetSettings } = useSettings();
   const t = useT();
-  const confirm = useNativeConfirm();
   // プロジェクトルート: runtime の lastOpenedRoot を優先。ユーザー設定の
   // claudeCwd (明示指定された作業ディレクトリ) は互換フォールバックとして扱う。
   const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || '';
@@ -126,15 +77,6 @@ export function CanvasLayout(): JSX.Element {
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const availableUpdate = useUiStore((s) => s.availableUpdate);
   const status = useUiStore((s) => s.status);
-  const { showToast, dismissToast } = useToast();
-  const [spawnOpen, setSpawnOpen] = useState(false);
-  const [tab, setTab] = useState<'preset' | 'recent'>('preset');
-  const [addCardOpen, setAddCardOpen] = useState(false);
-  const [recent, setRecent] = useState<TeamHistoryEntry[]>([]);
-  // Issue #1023: 🔖 (TeamPresetsPanel) で保存したカスタムプリセットを spawn ポップオーバーの
-  // [プリセット] タブにも併記する。保存系 (TeamPresetsPanel) とは別ポップオーバーなので、
-  // popover を開くたびに list を取り直して新規保存を即反映する。
-  const [savedPresets, setSavedPresets] = useState<TeamPreset[]>([]);
   const [sidebarView, setSidebarView] = useState<SidebarView>('files');
   const [railChangeCount, setRailChangeCount] = useState(0);
   const [railHasGitRepo, setRailHasGitRepo] = useState(true);
@@ -144,78 +86,23 @@ export function CanvasLayout(): JSX.Element {
       setSidebarView('files');
     }
   }, [railHasGitRepo, sidebarView]);
-  const addPopoverRef = useRef<HTMLDivElement>(null);
-  const spawnPopoverRef = useRef<HTMLDivElement>(null);
-  const locale = localeOf(settings.language);
-  const dateTimeFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat(locale, {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit'
-      }),
-    [locale]
-  );
 
-  useEffect(() => {
-    if (!addCardOpen && !spawnOpen) return;
-    const handlePointerDown = (event: MouseEvent): void => {
-      const target = event.target as globalThis.Node | null;
-      if (addCardOpen && addPopoverRef.current && target && !addPopoverRef.current.contains(target)) {
-        setAddCardOpen(false);
-      }
-      if (spawnOpen && spawnPopoverRef.current && target && !spawnPopoverRef.current.contains(target)) {
-        setSpawnOpen(false);
-      }
-    };
-    const handleKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') {
-        setAddCardOpen(false);
-        setSpawnOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handlePointerDown);
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown);
-      document.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [addCardOpen, spawnOpen]);
-
-  // Recent ロード
-  const loadRecent = async (): Promise<void> => {
-    if (!projectRoot) return;
-    try {
-      const list = await window.api.teamHistory.list(projectRoot);
-      setRecent(list);
-    } catch (err) {
-      console.warn('[recent] load failed:', err);
-    }
-  };
-  useEffect(() => {
-    void loadRecent();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectRoot]);
-
-  // Issue #1023: spawn ポップオーバーを開くたびに保存済みプリセットを取り直す。
-  // 🔖 側で保存した直後に ▼ を開いても最新が出るよう、open 遷移を依存に入れる。
-  useEffect(() => {
-    if (!spawnOpen) return;
-    let cancelled = false;
-    void window.api.teamPresets
-      .list()
-      .then((list) => {
-        if (!cancelled) setSavedPresets(list);
-      })
-      .catch((err) => {
-        console.warn('[team-presets] list failed:', err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [spawnOpen]);
+  // Issue #1032: 単体カード追加 / チーム起動 / メニュー操作は各 hook が所有する。
+  const { stagger, addAgent, addCustomAgent, addApiAgent, addByType } = useCanvasAddCard({
+    nodes,
+    projectRoot
+  });
+  const {
+    recent,
+    setRecent,
+    closeRecent,
+    applyPreset,
+    applySavedPreset,
+    applyCustomAgentLeaderPreset,
+    restoreRecent,
+    spawnTeamPresetById
+  } = useCanvasSpawn({ projectRoot, stagger });
+  const menu = useCanvasMenuActions();
 
   // Phase 4-3: 起動時の Canvas チーム復元 (Issue #159) を hook 化
   useCanvasTeamRestore({
@@ -230,530 +117,6 @@ export function CanvasLayout(): JSX.Element {
   // Canvas でも IDE 側と同じ sidebar 幅ハンドラを使う。
   // `--shell-sidebar-w` を共有しているので、ハンドルだけ Canvas にも生やせばリサイズが効く。
   const { onSidebarResizeStart, onSidebarResizeDouble } = useLayoutResize();
-
-  const applyPreset = async (preset: WorkspacePreset): Promise<void> => {
-    const cwd = projectRoot;
-    const presetName = t(preset.i18nKey);
-    const organizations = expandPresetOrganizations(preset, t, presetName);
-    // Issue #611: builtin / user / history の 3 経路で共通の spawnTeams helper を経由する。
-    //   teamId 発行 / setupTeamMcp / agentId 採番 / 配置整理を helper に集約してドリフトを防ぐ。
-    const teams: SpawnTeamSpec[] = organizations.map((org) => {
-      const teamId = `team-${crypto.randomUUID()}`;
-      const organization: TeamOrganizationMeta = { id: teamId, ...org.meta };
-      const members: SpawnTeamMember[] = org.members.map((m) => ({
-        role: m.role,
-        agent: m.agent === 'codex' ? 'codex' : 'claude',
-        position: presetPosition(m.col, m.row),
-        // Issue #69: 未知 role でもクラッシュしないよう fallback
-        title: ROLE_META[m.role]?.label ?? m.role ?? 'Agent'
-      }));
-      return { teamId, teamName: organization.name, organization, members };
-    });
-    const { cards } = await spawnTeams({
-      cwd,
-      teams,
-      existingNodes: useCanvasStore.getState().nodes,
-      mcpAutoSetup: settings.mcpAutoSetup !== false,
-      setupTeamMcp: window.api.app.setupTeamMcp
-    });
-    const ids = addCards(cards);
-    if (ids[0]) notifyRecruit(ids[0]);
-    setSpawnOpen(false);
-    void loadRecent();
-  };
-
-  // Issue #1023: 保存済みプリセット (TeamPreset) を applyPreset と同じ spawnTeam 経路で展開する。
-  //   TeamPresetsPanel.handleApply と等価: teamId 発行 / setupTeamMcp / cwd payload を共通化し、
-  //   apply 後の agent が standalone 化しないようにする。layout が無い role は cascading 配置。
-  const applySavedPreset = async (preset: TeamPreset): Promise<void> => {
-    const teamId = `team-${crypto.randomUUID()}`;
-    const baseX = 60;
-    const baseY = 60;
-    const stride = NODE_W + 40;
-    const stepY = NODE_H + 40;
-    const members: SpawnTeamMember[] = preset.roles.map((role, idx) => {
-      const layoutEntry = preset.layout?.byRole[role.roleProfileId];
-      const position = layoutEntry
-        ? { x: layoutEntry.x, y: layoutEntry.y }
-        : { x: baseX + (idx % 4) * stride, y: baseY + Math.floor(idx / 4) * stepY };
-      return {
-        role: role.roleProfileId,
-        agent: role.agent === 'codex' ? 'codex' : 'claude',
-        position,
-        title: role.label ?? role.roleProfileId,
-        customInstructions: role.customInstructions ?? undefined
-      };
-    });
-    const { cards } = await spawnTeam({
-      teamId,
-      teamName: preset.name,
-      cwd: projectRoot,
-      members,
-      existingNodes: useCanvasStore.getState().nodes,
-      mcpAutoSetup: settings.mcpAutoSetup !== false,
-      setupTeamMcp: window.api.app.setupTeamMcp
-    });
-    const ids = addCards(cards);
-    if (ids[0]) notifyRecruit(ids[0]);
-    setSpawnOpen(false);
-    void loadRecent();
-  };
-
-  // Issue #1025: custom agent を「Leader として起動」する。新規 teamId を発行し、
-  //   custom agent を leader ロール (recruit 可能) の単体メンバーとして起動する。
-  //   起動経路は use-recruit-listener の API/CLI 分岐に倣う:
-  //     - API: apiAgent カードが teamId + teamRole で Hub に self-register (#1004/#1005)。
-  //            setupTeamMcp は CLI 用なので呼ばない。
-  //     - CLI: agent カードを custom command override で起動 + setupTeamMcp 配線
-  //            (組み込み leader と同経路)。CLI は claude 互換を前提に team tool を有効化。
-  const applyCustomAgentLeaderPreset = async (agent: AgentConfig): Promise<void> => {
-    const cwd = projectRoot;
-    const teamId = `team-${crypto.randomUUID()}`;
-    const agentId = `leader-0-${teamId}`;
-    const teamName = agent.name || agent.id;
-    const position = stagger('agent');
-    if (agent.runtime === 'api') {
-      addCards([
-        {
-          type: 'apiAgent',
-          title: teamName,
-          position,
-          payload: {
-            agentId,
-            agentConfigId: agent.id,
-            providerId: agent.providerId,
-            model: agent.model,
-            toolMode: agent.toolMode ?? 'auto',
-            configured: true,
-            teamId,
-            teamName,
-            // teamRole が teamId と揃うと team tool が有効化される (#1004/#1005)。
-            teamRole: 'leader'
-          }
-        }
-      ]);
-    } else {
-      // CLI custom agent: 組み込み leader と同様に MCP team tool を配線する。
-      // Issue #1113: engine は custom 定義の engine (default 'claude') を尊重する (registry に集約)。
-      const engine = engineForAgentConfig(agent);
-      if (settings.mcpAutoSetup !== false) {
-        try {
-          await window.api.app.setupTeamMcp(cwd, teamId, teamName, [
-            { agentId, role: 'leader', agent: engine }
-          ]);
-        } catch (err) {
-          console.warn('[custom-agent-preset] setupTeamMcp failed:', err);
-        }
-      }
-      // Issue #1097: 起動前ガードレール — args の解析警告 (G1) / 明示モデル指定 (G2) を toast 可視化。
-      const customArgs = parseCustomAgentArgs(agent.args);
-      customArgs.warnings.forEach((w) => showToast(t(w.messageKey, w.params), { tone: 'warning' }));
-      addCards([
-        {
-          type: 'agent',
-          title: teamName,
-          position,
-          payload: {
-            // CardFrame は payload.command を優先して custom CLI を起動する。
-            agent: engine,
-            // Issue #1113: custom agent の identity をカードへ伝える (名前/アイコン/色/skill 解決用)。
-            agentConfigId: agent.id,
-            command: agent.command || undefined,
-            args: agent.args ? customArgs.args : undefined,
-            cwd: agent.cwd || cwd,
-            roleProfileId: 'leader',
-            role: 'leader',
-            teamId,
-            teamName,
-            agentId
-          }
-        }
-      ]);
-    }
-    setSpawnOpen(false);
-    void loadRecent();
-  };
-
-  const restoreRecent = async (entry: TeamHistoryEntry): Promise<void> => {
-    const existing = findExistingTeamNode(useCanvasStore.getState().nodes, entry.id);
-    if (existing) {
-      notifyRecruit(existing.id);
-      showToast(t('teamHistory.alreadyOpen', { name: entry.name || entry.id }), {
-        tone: 'info'
-      });
-      setSpawnOpen(false);
-      return;
-    }
-
-    const cwd = projectRoot || entry.projectRoot;
-    // Issue #611 / #612: history-based 復元も spawnTeam 経由に統一。
-    //   entry.latestHandoff / entry.organization の payload 同梱と placeBatchAwayFromNodes
-    //   による衝突回避を applyPreset と同じ 1 関数で扱うことでドリフトを防ぐ。
-    const members: SpawnTeamMember[] = entry.members.map((m, i) => {
-      const fallbackAgentId = m.agentId ?? `${m.role}-${i}-${entry.id}`;
-      const saved = entry.canvasState?.nodes.find((s) => s.agentId === fallbackAgentId);
-      // Issue #385: 旧 team-history.json に NaN / Infinity / undefined な座標が残っていると、
-      // 復元直後に React Flow が render 例外を出して Canvas 全体が黒画面になる。
-      // 数値として有効でない場合は preset 配置にフォールバックする。
-      const savedX = typeof saved?.x === 'number' && Number.isFinite(saved.x) ? saved.x : null;
-      const savedY = typeof saved?.y === 'number' && Number.isFinite(saved.y) ? saved.y : null;
-      const position =
-        savedX !== null && savedY !== null
-          ? { x: savedX, y: savedY }
-          : presetPosition(i % 3, Math.floor(i / 3));
-      return {
-        role: m.role,
-        agent: m.agent === 'codex' ? 'codex' : 'claude',
-        position,
-        // Issue #69: 未知 role でも落ちないよう optional chain
-        title: ROLE_META[m.role]?.label ?? m.role ?? 'Agent',
-        resumeSessionId: m.sessionId ?? null,
-        // legacy team-history が保持していた特殊 agentId を尊重 (helper 側に明示渡し)
-        agentId: m.agentId ?? undefined
-      };
-    });
-    const { cards } = await spawnTeam({
-      teamId: entry.id,
-      teamName: entry.name,
-      cwd,
-      members,
-      organization: entry.organization,
-      latestHandoff: entry.latestHandoff,
-      existingNodes: useCanvasStore.getState().nodes,
-      mcpAutoSetup: settings.mcpAutoSetup !== false,
-      setupTeamMcp: window.api.app.setupTeamMcp
-    });
-    const ids = addCards(cards);
-    if (ids[0]) notifyRecruit(ids[0]);
-    const updatedEntry: TeamHistoryEntry = {
-      ...entry,
-      lastUsedAt: new Date().toISOString()
-    };
-    setRecent((prev) =>
-      [updatedEntry, ...prev.filter((item) => item.id !== updatedEntry.id)].sort((a, b) =>
-        b.lastUsedAt.localeCompare(a.lastUsedAt)
-      )
-    );
-    // Issue #642: save が外部変更を検知して merge した場合は team-history list を再取得して
-    // setRecent を最新 disk 状態に同期する (= setRecent で push した updatedEntry は保持しつつ、
-    // 他 entry の手編集を UI 上にも反映)。renderer の他の auto-save 経路 (saveBatch 等) を
-    // 持つ caller も同様に `externalChangeMerged === true` を観測したら list 再取得すべき。
-    void window.api.teamHistory
-      .save(updatedEntry)
-      .then((res) => {
-        if (res?.externalChangeMerged === true) {
-          console.info(
-            '[team-history] external change merged on save; refreshing recent list'
-          );
-          window.api.teamHistory
-            .list(projectRoot)
-            .then(setRecent)
-            .catch((err) => {
-              console.warn('[team-history] refresh after external merge failed:', err);
-            });
-        }
-      })
-      .catch((err) => {
-        console.warn('[restore] team_history_save failed:', err);
-      });
-    setSpawnOpen(false);
-  };
-
-  const closeRecent = useMemo(
-    () => recent.filter((r) => r.canvasState && r.canvasState.nodes.length > 0).slice(0, 6),
-    [recent]
-  );
-
-  // Issue #1025: 設定で作成した custom agent を「チーム起動」プリセットに自動追加する。
-  // settings.customAgents を購読しているので、追加/削除でプリセットも即出入りする。
-  const customAgents = useMemo<AgentConfig[]>(
-    () => settings.customAgents ?? [],
-    [settings.customAgents]
-  );
-
-  const cardCounter = (t: CardType): number => nodes.filter((n) => n.type === t).length + 1;
-
-  // Issue #166: Date.now() % 600 だと連続クリックで数 ms 差しか出ず、全カードが
-  // ほぼ同じ x に積み重なって UI 上「追加されていない」ように見えていた。
-  // 既存ノード数 (現在 viewport 内に限らずグローバル) を 6 列グリッドに展開して
-  // staggered レイアウトを返す。
-  // Issue #442: 旧実装は agent/terminal を 480+32 / 320+32、その他を 360+32 / 240+32 で
-  // 並べていたが、addCard / addCards は全 type に NODE_W/NODE_H (= 640x400, Issue #253)
-  // を style として付与するため、type 別ピッチは根拠が無くカードが重なっていた。
-  // ピッチを実カードサイズ NODE_W/NODE_H に統一する。
-  const stagger = (_kind: CardType): { x: number; y: number } => {
-    const idx = nodes.length; // 全 type 共通の連番でも視覚的に十分散る
-    const cols = 6;
-    return {
-      x: (idx % cols) * (NODE_W + 32),
-      y: Math.floor(idx / cols) * (NODE_H + 32)
-    };
-  };
-
-  const addAgent = (agent: 'claude' | 'codex'): void => {
-    const cwd = projectRoot;
-    const n = cardCounter('agent');
-    addCards([
-      {
-        type: 'agent',
-        title: agent === 'codex' ? `Codex #${n}` : `Claude #${n}`,
-        position: stagger('agent'),
-        payload: { agent, role: 'leader', cwd }
-      }
-    ]);
-    setAddCardOpen(false);
-  };
-
-  // Issue #1117: 登録済みの任意 custom agent (CLI/API) を id 指定で Canvas に単体追加する。
-  //   CLI は engine + agentConfigId + command/args を伝搬し (custom が Claude に偽装されない)、
-  //   API は apiAgent カードを生成する。未登録 id は設定モーダルへ誘導する。
-  const addCustomAgent = (agentId: string): void => {
-    const cfg = (settings.customAgents ?? []).find((a) => a.id === agentId);
-    if (!cfg) {
-      setSettingsOpen(true);
-      return;
-    }
-    const cwd = projectRoot;
-    if (cfg.runtime === 'api') {
-      addCards([
-        {
-          type: 'apiAgent',
-          title: cfg.name,
-          position: stagger('apiAgent'),
-          payload: {
-            agentId: cfg.id,
-            agentConfigId: cfg.id,
-            providerId: cfg.providerId,
-            model: cfg.model,
-            toolMode: cfg.toolMode ?? 'auto',
-            configured: true
-          }
-        }
-      ]);
-    } else {
-      const engine = engineForAgentConfig(cfg);
-      const customArgs = parseCustomAgentArgs(cfg.args);
-      customArgs.warnings.forEach((w) => showToast(t(w.messageKey, w.params), { tone: 'warning' }));
-      addCards([
-        {
-          type: 'agent',
-          title: cfg.name,
-          position: stagger('agent'),
-          payload: {
-            agent: engine,
-            agentConfigId: cfg.id,
-            command: cfg.command || undefined,
-            args: cfg.args ? customArgs.args : undefined,
-            cwd: cfg.cwd || cwd,
-            role: 'leader'
-          }
-        }
-      ]);
-    }
-    setAddCardOpen(false);
-  };
-
-  const addApiAgent = (): void => {
-    const apiAgent = (settings.customAgents ?? []).find((a) => a.runtime === 'api');
-    if (!apiAgent || apiAgent.runtime !== 'api') {
-      setSettingsOpen(true);
-      return;
-    }
-    addCards([
-      {
-        type: 'apiAgent',
-        title: apiAgent.name,
-        position: stagger('apiAgent'),
-        payload: {
-          agentId: apiAgent.id,
-          providerId: apiAgent.providerId,
-          model: apiAgent.model,
-          toolMode: apiAgent.toolMode ?? 'auto',
-          configured: true
-        }
-      }
-    ]);
-    setAddCardOpen(false);
-  };
-
-  const addByType = (type: Exclude<CardType, 'terminal' | 'agent' | 'apiAgent'>): void => {
-    const cwd = projectRoot;
-    if (type === 'editor') {
-      addCards([{
-        type,
-        title: t('canvas.card.editor'),
-        position: stagger(type),
-        payload: { projectRoot: cwd, relPath: '' }
-      }]);
-    } else if (type === 'diff') {
-      addCards([{
-        type,
-        title: 'Diff',
-        position: stagger(type),
-        payload: { projectRoot: cwd, relPath: '' }
-      }]);
-    } else if (type === 'fileTree') {
-      addCards([{
-        type,
-        title: t('sidebar.files'),
-        position: stagger(type),
-        payload: { projectRoot: cwd }
-      }]);
-    } else {
-      addCards([{
-        type,
-        title: t('sidebar.changes'),
-        position: stagger(type),
-        payload: { projectRoot: cwd }
-      }]);
-    }
-    setAddCardOpen(false);
-  };
-
-  const handleRestart = async (): Promise<void> => {
-    const dirty = getDirtyEditorCardSnapshots();
-    if (dirty.length > 0) {
-      const paths = dirty.map((d) => `• ${d.relPath}`).join('\n');
-      const message = t('canvas.clearConfirmWithDirtyEditors', {
-        count: dirty.length,
-        paths
-      });
-      if (!(await confirm(message))) return;
-    }
-    await window.api.app.restart();
-  };
-
-  const handleClickUpdate = (): void => {
-    void import('../lib/updater-check').then((m) =>
-      m.runUpdateInstall({
-        language: settings.language,
-        showToast,
-        dismissToast,
-        manual: true
-      })
-    );
-  };
-
-  // ---- AppMenuBar 用ハンドラ群。IDE / Canvas で同一メニューを出すため Canvas 側も実装する。
-  //      workspace 系は settings.update で完結 (recentProjects / workspaceFolders / lastOpenedRoot)。
-  //      handleOpenFile だけ Canvas 固有: Editor カードを addCard で配置する。
-  const pushRecent = useCallback(
-    async (path: string): Promise<void> => {
-      const next = [path, ...(settings.recentProjects ?? []).filter((p) => p !== path)].slice(0, 12);
-      await updateSettings({ recentProjects: next, lastOpenedRoot: path });
-    },
-    [settings.recentProjects, updateSettings]
-  );
-
-  const handleNewProject = useCallback(async () => {
-    const picked = await window.api.dialog.openFolder(t('appMenu.newDialogTitle'));
-    if (picked) await pushRecent(picked);
-  }, [pushRecent, t]);
-
-  const handleOpenFolder = useCallback(async () => {
-    const picked = await window.api.dialog.openFolder(t('appMenu.openFolderDialogTitle'));
-    if (picked) await pushRecent(picked);
-  }, [pushRecent, t]);
-
-  const handleOpenFile = useCallback(async () => {
-    const picked = await window.api.dialog.openFile(t('appMenu.openFileDialogTitle'));
-    if (!picked) return;
-    const dir = picked.replace(/[\\/][^\\/]+$/, '');
-    const name = picked.slice(dir.length + 1);
-    useCanvasStore.getState().addCard({
-      type: 'editor',
-      title: name,
-      payload: { projectRoot: dir, relPath: name }
-    });
-  }, [t]);
-
-  const handleAddWorkspaceFolder = useCallback(async () => {
-    const picked = await window.api.dialog.openFolder(t('appMenu.addWorkspaceDialogTitle'));
-    if (!picked) return;
-    const current = settings.workspaceFolders ?? [];
-    if (current.includes(picked)) return;
-    await updateSettings({ workspaceFolders: [...current, picked] });
-  }, [settings.workspaceFolders, updateSettings, t]);
-
-  const handleOpenRecent = useCallback(
-    (path: string): void => {
-      void pushRecent(path);
-    },
-    [pushRecent]
-  );
-
-  const handleCheckUpdate = useCallback((): void => {
-    void import('../lib/updater-check').then((m) =>
-      m.checkForUpdates({
-        language: settings.language,
-        showToast,
-        dismissToast,
-        manual: true,
-        // Canvas モードでは IDE の terminalTabs を持たない (タブは Canvas カード側で管理)。
-        // updater 側は "0" でも問題なく動く (running task 警告が出ないだけ)。
-        runningTaskCount: 0
-      })
-    );
-  }, [settings.language, showToast, dismissToast]);
-
-  const handleOpenGithub = useCallback((): void => {
-    void window.api.app.openExternal('https://github.com/yusei531642/vibe-editor');
-  }, []);
-
-  const clearCanvas = async (): Promise<void> => {
-    const dirty = getDirtyEditorCardSnapshots();
-    if (dirty.length === 0) {
-      if (await confirm(t('canvas.clearConfirm'))) clear();
-      return;
-    }
-    const paths = dirty.map((d) => `• ${d.relPath}`).join('\n');
-    const message = t('canvas.clearConfirmWithDirtyEditors', {
-      count: dirty.length,
-      paths
-    });
-    if (await confirm(message)) clear();
-  };
-
-  /**
-   * Issue #825: 音声指揮の `spawn_team_preset` から呼ばれる薄ラッパ。
-   * BUILTIN_PRESETS を id で lookup して applyPreset へ転送する。
-   * AI から渡される id を信頼せず、見つからなければ `ok: false` を返して AI に feedback する。
-   *
-   * applyPreset は closure で projectRoot / settings を参照しているため、
-   * 直接 deps に入れると毎 render で identity が変わる。一方で
-   * useVoiceRealtime 側は ioRef.current 経由で callback を読むため identity 安定は
-   * 不要 (use-voice-realtime.ts の `ioRef.current = io` 参照)。
-   * stale closure を避けつつ session の lifecycle を乱さないため、
-   * ref で最新の applyPreset をブリッジする。
-   */
-  const applyPresetRef = useRef(applyPreset);
-  useEffect(() => {
-    applyPresetRef.current = applyPreset;
-  });
-  const spawnTeamPresetById = useCallback(
-    async (presetId: string): Promise<{ ok: boolean; message?: string }> => {
-      const preset = BUILTIN_PRESETS.find((p) => p.id === presetId);
-      if (!preset) {
-        return {
-          ok: false,
-          message: `Unknown preset id: ${presetId}`
-        };
-      }
-      try {
-        await applyPresetRef.current(preset);
-        return {
-          ok: true,
-          message: `Team preset '${presetId}' spawned on the Canvas.`
-        };
-      } catch (err) {
-        return {
-          ok: false,
-          message: err instanceof Error ? err.message : String(err)
-        };
-      }
-    },
-    []
-  );
 
   const canvasActions = useMemo<CanvasActions>(
     () => ({
@@ -776,9 +139,7 @@ export function CanvasLayout(): JSX.Element {
       nodes.length,
       settings.language,
       settings.mcpAutoSetup,
-      settings.customAgents,
-      addCards,
-      notifyRecruit
+      settings.customAgents
     ]
   );
 
@@ -793,18 +154,18 @@ export function CanvasLayout(): JSX.Element {
         projectRoot={projectRoot}
         status={status}
         availableUpdate={availableUpdate}
-        onClickUpdate={handleClickUpdate}
+        onClickUpdate={menu.handleClickUpdate}
         menuBar={
           <AppMenuBar
             recentProjects={settings.recentProjects ?? []}
-            onNewProject={() => void handleNewProject()}
-            onOpenFolder={() => void handleOpenFolder()}
-            onOpenFile={() => void handleOpenFile()}
-            onAddWorkspaceFolder={() => void handleAddWorkspaceFolder()}
-            onOpenRecent={handleOpenRecent}
-            onRestart={() => void handleRestart()}
-            onCheckUpdate={handleCheckUpdate}
-            onOpenGithub={handleOpenGithub}
+            onNewProject={() => void menu.handleNewProject()}
+            onOpenFolder={() => void menu.handleOpenFolder()}
+            onOpenFile={() => void menu.handleOpenFile()}
+            onAddWorkspaceFolder={() => void menu.handleAddWorkspaceFolder()}
+            onOpenRecent={menu.handleOpenRecent}
+            onRestart={() => void menu.handleRestart()}
+            onCheckUpdate={menu.handleCheckUpdate}
+            onOpenGithub={menu.handleOpenGithub}
             onOpenSettings={() => setSettingsOpen(true)}
             onOpenPalette={() => setPaletteOpen(true)}
             onToggleSidebar={() => toggleSidebar()}
@@ -817,7 +178,7 @@ export function CanvasLayout(): JSX.Element {
               <button
                 type="button"
                 className="canvas-btn canvas-btn--ghost"
-                onClick={() => void clearCanvas()}
+                onClick={() => void menu.clearCanvas()}
                 title={t('canvas.clear.tooltip')}
                 aria-label={t('canvas.clear.tooltip')}
               >
@@ -868,128 +229,15 @@ export function CanvasLayout(): JSX.Element {
           {/* Issue #825: 音声指揮モード (Beta) のトグルボタン。
               内部で voice.enabled / hasApiKey の 2 条件を確認し、満たさない場合は null を返す。
               Settings で enable した直後にも反映できるよう常時マウントしておく。
-              spawn_team_preset の実体は CanvasLayout の applyPreset を id 経由で呼ぶ薄ラッパ。 */}
+              spawn_team_preset の実体は use-canvas-spawn の applyPreset を id 経由で呼ぶ薄ラッパ。 */}
           <VoiceControlButton onSpawnTeamPreset={spawnTeamPresetById} />
-          {/* Canvas 右上に固定で配置するチーム起動 FAB。split button: 本体クリックで
-              既定プリセットを 1-click 起動、caret でプリセット/最近使ったチームの
-              popover を開く。canvas-header 撤廃 (#709) で消えていたのを復活。 */}
-          <div className="canvas-spawn-fab" ref={spawnPopoverRef}>
-            <div className="canvas-btn-split">
-              <button
-                type="button"
-                className="canvas-btn canvas-btn--primary canvas-btn-split__main"
-                onClick={() => void applyPreset(DEFAULT_SPAWN_PRESET)}
-                aria-label={t('canvas.spawnTeam.tooltip')}
-                title={t('canvas.spawnTeam.tooltip')}
-              >
-                <Sparkles size={13} strokeWidth={1.8} />
-                {t('canvas.spawnTeam')}
-              </button>
-              <button
-                type="button"
-                className="canvas-btn canvas-btn--primary canvas-btn-split__caret"
-                onClick={() => setSpawnOpen((v) => !v)}
-                aria-label={t('canvas.spawnTeamMore.tooltip')}
-                title={t('canvas.spawnTeamMore.tooltip')}
-                aria-expanded={spawnOpen}
-              >
-                <ChevronDown size={12} strokeWidth={2} />
-              </button>
-            </div>
-            {spawnOpen && (
-              <div className="canvas-popover canvas-popover--wide">
-                <div className="canvas-popover__tabs">
-                  <TabBtn active={tab === 'preset'} onClick={() => setTab('preset')}>
-                    <Sparkles size={11} /> {t('canvas.preset')}
-                  </TabBtn>
-                  <TabBtn active={tab === 'recent'} onClick={() => setTab('recent')}>
-                    <History size={11} /> {t('canvas.recent')}
-                    {closeRecent.length > 0 && (
-                      <span className="canvas-popover__tab-badge">{closeRecent.length}</span>
-                    )}
-                  </TabBtn>
-                </div>
-                {tab === 'preset' && (
-                  <>
-                    {savedPresets.length > 0 && (
-                      <div className="canvas-popover__section">
-                        {t('canvas.preset.builtinHeader')}
-                      </div>
-                    )}
-                    {BUILTIN_PRESETS.map((preset) => (
-                      <BuiltinPresetItem
-                        key={preset.id}
-                        preset={preset}
-                        label={t(preset.i18nKey)}
-                        agentCountLabel={formatOrganizationAgentCount(
-                          presetOrganizationCount(preset),
-                          presetMemberCount(preset),
-                          settings.language
-                        )}
-                        onClick={() => void applyPreset(preset)}
-                      />
-                    ))}
-                    {/* Issue #1025: custom agent ごとに「Leader のみで起動 (agent名)」を自動追加 */}
-                    {customAgents.map((agent) => (
-                      <CustomAgentLeaderPresetItem
-                        key={agent.id}
-                        label={t('canvas.preset.leaderCustom', {
-                          name: agent.name || agent.id
-                        })}
-                        agentCountLabel={formatOrganizationAgentCount(
-                          0,
-                          1,
-                          settings.language
-                        )}
-                        color={agent.color ?? '#d97757'}
-                        onClick={() => void applyCustomAgentLeaderPreset(agent)}
-                      />
-                    ))}
-                    {savedPresets.length > 0 && (
-                      <>
-                        <div className="canvas-popover__section">
-                          {t('canvas.preset.savedHeader')}
-                        </div>
-                        {savedPresets.map((preset) => (
-                          <SavedPresetItem
-                            key={preset.id}
-                            preset={preset}
-                            agentCountLabel={formatOrganizationAgentCount(
-                              0,
-                              preset.roles.length,
-                              settings.language
-                            )}
-                            onClick={() => void applySavedPreset(preset)}
-                          />
-                        ))}
-                      </>
-                    )}
-                  </>
-                )}
-                {tab === 'recent' && (
-                  <>
-                    {closeRecent.length === 0 && (
-                      <div className="canvas-popover__empty">{t('canvas.noRecentTeams')}</div>
-                    )}
-                    {closeRecent.map((entry) => (
-                      <RecentItem
-                        key={entry.id}
-                        entry={entry}
-                        fallbackName={entry.name || entry.id.slice(0, 8)}
-                        agentCountLabel={formatOrganizationAgentCount(
-                          entry.organization ? 1 : 0,
-                          entry.members.length,
-                          settings.language
-                        )}
-                        lastUsedLabel={dateTimeFormatter.format(new Date(entry.lastUsedAt))}
-                        onClick={() => void restoreRecent(entry)}
-                      />
-                    ))}
-                  </>
-                )}
-              </div>
-            )}
-          </div>
+          <CanvasSpawnFab
+            closeRecent={closeRecent}
+            applyPreset={applyPreset}
+            applySavedPreset={applySavedPreset}
+            applyCustomAgentLeaderPreset={applyCustomAgentLeaderPreset}
+            restoreRecent={restoreRecent}
+          />
         </div>
       </div>
 
