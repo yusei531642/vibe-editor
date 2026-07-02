@@ -1,5 +1,10 @@
 [advisories]
 ignore = [
+  # quick-xml (plist -> tauri の transitive)。fix は >=0.41 だが plist は最新 1.9.0 でも
+  # ^0.39.2 要求で追従不能 (Issue #1134)。DoS 系 2 件で、外部 XML を食わせる経路は無い。
+  # plist / tauri が quick-xml >=0.41 に移行したら ignore を外して版上げすること。
+  "RUSTSEC-2026-0194", # quick-xml: duplicate attribute check の quadratic run time
+  "RUSTSEC-2026-0195", # quick-xml: NsReader の unbounded namespace allocation (DoS)
   "RUSTSEC-2024-0413", # atk: gtk-rs GTK3 (wry/tauri 側の移行待ち)
   "RUSTSEC-2024-0416", # atk-sys: gtk-rs GTK3
   "RUSTSEC-2025-0057", # fxhash: selectors -> kuchikiki -> tauri-utils
