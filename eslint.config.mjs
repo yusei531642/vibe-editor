@@ -143,8 +143,8 @@ export default tseslint.config(
   {
     files: ['src/renderer/**/*.{ts,tsx}'],
     ignores: [
-      // i18n 辞書本体 (ja 文言の定義場所)
-      'src/renderer/src/lib/i18n.ts',
+      // i18n 辞書本体 (ja 文言の定義場所)。Issue #1032 で lib/i18n/ 配下の領域別サブ辞書に分割。
+      'src/renderer/src/lib/i18n/**',
       // Claude / Codex へ渡す日本語プロンプト定義 (UI 表示文字列ではない)
       'src/renderer/src/lib/role-profiles-builtin.ts',
       'src/renderer/src/lib/team-prompts.ts',
