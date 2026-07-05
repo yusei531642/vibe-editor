@@ -88,7 +88,7 @@ jobs:
         run: npm ci
 
       - name: Build & release
-        uses: tauri-apps/tauri-action@564aea5a8075c7a54c167bb0cf5b3255314a7f9d # v0.5.22
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # tauri 自動アップデート用の署名鍵 (GitHub Secrets から)
