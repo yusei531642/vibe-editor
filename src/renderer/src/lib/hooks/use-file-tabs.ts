@@ -253,13 +253,14 @@ export function useFileTabs(opts: UseFileTabsOptions): UseFileTabsResult {
       // Issue #4: 同じ相対パスが別ルートに存在しうるので id に root も混ぜる
       const id = `edit:${effectiveRoot}\u0001${relPath}`;
       setActiveTabId(id);
-      // Issue #480: 最近開いたファイル履歴を更新 (先頭へ移動、上限制限)
+      // Issue #480/#1136: active/recent は更新するが、既存タブの内容は再読込しない
       setRecentFiles((prev) => {
         const filtered = prev.filter(
           (entry) => !(entry.rootPath === effectiveRoot && entry.relPath === relPath)
         );
         return [{ rootPath: effectiveRoot, relPath }, ...filtered].slice(0, RECENT_FILES_LIMIT);
       });
+      if (editorTabs.some((tab) => tab.id === id)) return;
       setEditorTabs((prev) => {
         if (prev.some((t) => t.id === id)) return prev;
         return [
@@ -316,9 +317,8 @@ export function useFileTabs(opts: UseFileTabsOptions): UseFileTabsResult {
         );
       }
     },
-    [t]
+    [editorTabs, t]
   );
-
   const updateEditorContent = useCallback((id: string, content: string) => {
     setEditorTabs((prev) =>
       prev.map((t) => (t.id === id ? { ...t, content } : t))
