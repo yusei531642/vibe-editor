@@ -152,6 +152,8 @@ fn ensure_return_path_identity(
     installed_dir: &File,
     installed_file: &File,
 ) -> io::Result<()> {
+    // A safe handle-bound write is not enough: the lexical path returned to the
+    // renderer must still identify both the same directory and the same final file.
     let returned_dir = reopen_skill_dir(root)?;
     let returned_file = open_final_regular(&returned_dir)?;
     if same_file(installed_dir, &returned_dir)? && same_file(installed_file, &returned_file)? {
