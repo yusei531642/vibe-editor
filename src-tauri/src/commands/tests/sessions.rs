@@ -394,7 +394,7 @@ async fn sessions_list_canonical_alias_reads_only_active_raw_directory() {
         })],
     )
     .await;
-    // cwd欠落は既存filterがfail-openするため、requested alias側を読めば漏れるcanary。
+    // cwd欠落のforeign JSONLも、requested alias側directoryを選ばないため到達しない。
     write_jsonl(
         &alias_dir.join("secret.jsonl"),
         &[json!({
@@ -538,6 +538,68 @@ async fn sessions_list_retargeted_foreign_cwd_symlink_is_not_disclosed() {
         std::fs::remove_file(&foreign_cwd_link).unwrap();
         symlink(&active, &foreign_cwd_link).unwrap();
         sessions_list_from_home(authorized, home_path).await
+    })
+    .await
+    .unwrap();
+
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].id, "active");
+    assert_eq!(result[0].title, "active title");
+}
+
+/// Claude directory encodingが衝突しても、cwd欠落/空のforeign JSONLはproject所属を証明
+/// できないためfail-closedでtitleを返さない。
+#[tokio::test]
+async fn sessions_list_missing_or_blank_cwd_collision_is_not_disclosed() {
+    let sandbox = tempdir().unwrap();
+    let active = sandbox.path().join("a-b");
+    let foreign = sandbox.path().join("a").join("b");
+    tokio::fs::create_dir_all(&active).await.unwrap();
+    tokio::fs::create_dir_all(&foreign).await.unwrap();
+    let active_raw = active.to_string_lossy().into_owned();
+    let foreign_raw = foreign.to_string_lossy().into_owned();
+    assert_eq!(
+        encode_project_path(&active_raw),
+        encode_project_path(&foreign_raw),
+        "fixture must exercise an encoded Claude directory collision"
+    );
+
+    let home = tempdir().unwrap();
+    let project_dir = home
+        .path()
+        .join(".claude/projects")
+        .join(encode_project_path(&active_raw));
+    tokio::fs::create_dir_all(&project_dir).await.unwrap();
+    write_jsonl(
+        &project_dir.join("active.jsonl"),
+        &[json!({
+            "type": "user",
+            "cwd": active_raw,
+            "message": { "content": "active title" }
+        })],
+    )
+    .await;
+    write_jsonl(
+        &project_dir.join("foreign-missing-cwd.jsonl"),
+        &[json!({
+            "type": "user",
+            "message": { "content": "foreign missing-cwd secret" }
+        })],
+    )
+    .await;
+    write_jsonl(
+        &project_dir.join("foreign-blank-cwd.jsonl"),
+        &[json!({
+            "type": "user",
+            "cwd": "  ",
+            "message": { "content": "foreign blank-cwd secret" }
+        })],
+    )
+    .await;
+
+    let slot = active_slot(Some(&active));
+    let result = sessions_list_via(&slot, active_raw, |authorized| {
+        sessions_list_from_home(authorized, home.path().to_path_buf())
     })
     .await
     .unwrap();

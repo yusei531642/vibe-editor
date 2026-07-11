@@ -171,18 +171,24 @@ pub(crate) async fn sessions_list_from_home(
             if let Some(next) = iter.next() {
                 spawn_one(&mut in_flight, next);
             }
-            // cwd が jsonl から取れたときだけ厳密チェック (取れないものは fail-open)
-            if let Some(ref c) = summary.cwd {
-                let cwd_key = lexical_project_root_key(c);
-                if !c.trim().is_empty() && cwd_key != canonical_key && cwd_key != active_raw_key {
-                    tracing::debug!(
-                        "[sessions] skipping colliding session {}: cwd={} != requested={}",
-                        cand.id,
-                        c,
-                        project_root
-                    );
-                    continue;
-                }
+            // Claude directory名は衝突可能なので、cwdが無い/空の旧形式・破損JSONLも
+            // fail-closedで除外する。titleだけではactive projectを証明できない。
+            let Some(cwd) = summary.cwd.as_deref().filter(|cwd| !cwd.trim().is_empty()) else {
+                tracing::debug!(
+                    "[sessions] skipping session {} without a usable cwd",
+                    cand.id
+                );
+                continue;
+            };
+            let cwd_key = lexical_project_root_key(cwd);
+            if cwd_key != canonical_key && cwd_key != active_raw_key {
+                tracing::debug!(
+                    "[sessions] skipping colliding session {}: cwd={} != requested={}",
+                    cand.id,
+                    cwd,
+                    project_root
+                );
+                continue;
             }
             sessions.push(SessionInfo {
                 id: cand.id,
