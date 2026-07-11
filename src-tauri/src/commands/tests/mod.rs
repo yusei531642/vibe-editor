@@ -12,3 +12,4 @@
 mod git;
 mod sessions;
 mod settings;
+mod team_history_authz;

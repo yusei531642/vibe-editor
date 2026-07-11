@@ -23,6 +23,10 @@ use crate::commands::error::{CommandError, CommandResult};
 use crate::state::current_project_root;
 use crate::team_hub::TeamHub;
 
+mod active_project;
+pub use active_project::assert_active_project_root;
+pub(crate) use active_project::{assert_active_project_root_with_raw, AuthorizedActiveProjectRoot};
+
 /// canonicalize 済み、かつ AppState の active project_root あるいは許可済み workspace folder と
 /// 照合済みの project root。FS helper はこの型を要求することで、renderer 由来の生文字列が
 /// authz gate を通らずにファイル操作へ届く経路を型で塞ぐ。
@@ -30,23 +34,6 @@ use crate::team_hub::TeamHub;
 pub struct ProjectRoot {
     canonical: PathBuf,
     display: String,
-}
-
-/// active projectとの照合に成功した同一snapshotを表すcapability。
-///
-/// `ProjectRoot` は後続FS操作用のcanonical path、`active_raw` はClaude CLIが
-/// `~/.claude/projects/<encoded>` を決める既存のraw表記を保持する。requested rawを
-/// 保持しないため、canonical aliasから別encoded directoryを選ぶことはできない。
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct AuthorizedActiveProjectRoot {
-    canonical: ProjectRoot,
-    active_raw: String,
-}
-
-impl AuthorizedActiveProjectRoot {
-    pub(crate) fn into_parts(self) -> (ProjectRoot, String) {
-        (self.canonical, self.active_raw)
-    }
 }
 
 impl ProjectRoot {
@@ -103,105 +90,6 @@ fn clamp_team_id_for_log(raw: &str) -> String {
         .take(96)
         .map(|c| if c.is_control() { '?' } else { c })
         .collect()
-}
-
-/// renderer 由来の `given` project_root が `AppState` の active project_root と
-/// canonicalize 比較で一致するかを検証する。
-///
-/// - `given` が空 → `Authz("project_root is empty")`
-/// - active が `None` / 空 → `Authz("no active project_root configured")`
-///   (起動直後で project が選ばれていないケース)
-/// - canonicalize に失敗した側 (= 存在しない / シンボリックリンク辿れず 等) →
-///   `Authz` で reject (それぞれ `requested project_root` / `active project_root`
-///   どちらが失敗したかを message に含める)
-/// - 両者が一致しない → `Authz("project_root does not match active project")`
-///
-/// reject 時は `tracing::warn!` で active / 試行 path (clamp 済み) を audit log に残す。
-/// 戻り値は **canonicalize 後の active path** (caller が後続処理で使えるよう返す)。
-pub async fn assert_active_project_root(
-    project_root_slot: &ArcSwapOption<String>,
-    given: &str,
-) -> CommandResult<ProjectRoot> {
-    assert_active_project_root_with_raw(project_root_slot, given)
-        .await
-        .map(|authorized| authorized.canonical)
-}
-
-/// `assert_active_project_root` と同じstrict gateを実行し、canonical capabilityに加えて
-/// 同一認可snapshotのactive raw表記も返す。Claude project directory keyや既存のraw storage
-/// keyとの互換が必要なcrate内commandだけが使用する。
-pub(crate) async fn assert_active_project_root_with_raw(
-    project_root_slot: &ArcSwapOption<String>,
-    given: &str,
-) -> CommandResult<AuthorizedActiveProjectRoot> {
-    let trimmed = given.trim();
-    if trimmed.is_empty() {
-        tracing::warn!(
-            given = %clamp_for_log(given),
-            "[authz] assert_active_project_root rejected: empty project_root"
-        );
-        return Err(CommandError::authz("project_root is empty"));
-    }
-
-    let active = current_project_root(project_root_slot).unwrap_or_default();
-    if active.trim().is_empty() {
-        tracing::warn!(
-            given = %clamp_for_log(given),
-            "[authz] assert_active_project_root rejected: no active project_root configured"
-        );
-        return Err(CommandError::authz("no active project_root configured"));
-    }
-
-    // Issue #831: canonicalize は同期 blocking I/O。本 helper は handoffs_* / team_state_read
-    // から高頻度に呼ばれ、network mount / 低速 FS では `std::fs::canonicalize` が Tokio worker
-    // スレッドを完了まで塞ぐ (#620 と同種のアンチパターン)。`tokio::fs::canonicalize` に置換し、
-    // req と active は独立なので `tokio::join!` で並列実行する (team_mcp.rs と同形)。
-    let (req_res, active_res) = tokio::join!(
-        tokio::fs::canonicalize(trimmed),
-        tokio::fs::canonicalize(active.trim())
-    );
-    let req_canon = match req_res {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!(
-                given = %clamp_for_log(given),
-                error = %e,
-                "[authz] assert_active_project_root rejected: canonicalize requested project_root failed"
-            );
-            return Err(CommandError::authz(format!(
-                "canonicalize requested project_root failed: {e}"
-            )));
-        }
-    };
-    let active_canon = match active_res {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!(
-                active = %clamp_for_log(&active),
-                error = %e,
-                "[authz] assert_active_project_root rejected: canonicalize active project_root failed"
-            );
-            return Err(CommandError::authz(format!(
-                "canonicalize active project_root failed: {e}"
-            )));
-        }
-    };
-
-    if req_canon != active_canon {
-        tracing::warn!(
-            requested = %clamp_for_log(&req_canon.to_string_lossy()),
-            active = %clamp_for_log(&active_canon.to_string_lossy()),
-            "[authz] assert_active_project_root rejected: project_root mismatch"
-        );
-        return Err(CommandError::authz(
-            "project_root does not match active project",
-        ));
-    }
-
-    Ok(AuthorizedActiveProjectRoot {
-        canonical: ProjectRoot::from_canonical(active_canon),
-        active_raw: active,
-    })
 }
 
 /// Issue #954 / #963: ファイル系 IPC (`files_*`) 用のゲート。
