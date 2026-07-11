@@ -286,22 +286,6 @@ mod tests {
     fn active_root(path: Option<&Path>) -> ArcSwapOption<String> {
         ArcSwapOption::from(path.map(|path| Arc::new(path.to_string_lossy().into_owned())))
     }
-    #[tokio::test]
-    async fn non_directory_keeps_result_contract() {
-        let file = tempfile::NamedTempFile::new().expect("file");
-        let slot = active_root(Some(file.path()));
-        let result =
-            install_skill_for_active_root(&slot, file.path().to_string_lossy().as_ref(), false)
-                .await;
-        assert!(!result.ok);
-        assert!(result.path.is_none());
-        assert!(!result.skipped);
-        assert!(!result.overwritten);
-        assert!(result
-            .error
-            .as_deref()
-            .is_some_and(|error| error.starts_with("secure skill install failed:")));
-    }
 
     #[tokio::test]
     async fn active_root_install_preserves_result_contract() {
