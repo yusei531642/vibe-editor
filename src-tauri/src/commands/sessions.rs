@@ -5,7 +5,7 @@
 
 use crate::commands::authz::AuthorizedActiveProjectRoot;
 use crate::commands::error::CommandResult;
-use crate::pty::path_norm::{encode_project_path, normalize_project_root};
+use crate::pty::path_norm::encode_project_path;
 use crate::state::AppState;
 use arc_swap::ArcSwapOption;
 use serde::Serialize;
@@ -34,6 +34,21 @@ fn projects_dir(home: &Path, root: &str) -> PathBuf {
     home.join(".claude")
         .join("projects")
         .join(encode_project_path(root))
+}
+
+/// JSONLに保存されたcwdを、gate後のI/Oなしで比較するためのkeyにする。
+///
+/// `normalize_project_root` はcanonicalizeを含むため、保存後にsymlinkがretargetされると
+/// foreign cwdをactive identityとして再解決してしまう。storage互換のためraw表記を保った
+/// まま、区切り・末尾slash・Windows caseだけを純粋に正規化する。
+fn lexical_project_root_key(raw: &str) -> String {
+    let normalized = raw.replace('\\', "/");
+    let stripped = normalized.trim_end_matches('/');
+    if cfg!(windows) {
+        stripped.to_lowercase()
+    } else {
+        stripped.to_string()
+    }
 }
 
 #[tauri::command]
@@ -73,6 +88,9 @@ pub(crate) async fn sessions_list_from_home(
     authorized: AuthorizedActiveProjectRoot,
     home: PathBuf,
 ) -> Vec<SessionInfo> {
+    // directoryは既存Claude互換のactive raw、cwd selectorはgate時canonical identityと
+    // 同じsnapshotのactive raw identityのいずれかだけを許可する。どちらも後続I/Oなし。
+    let active_raw_key = authorized.active_raw_key();
     let (canonical, project_root) = authorized.into_parts();
     let dir = projects_dir(&home, &project_root);
     let Ok(mut rd) = tokio::fs::read_dir(&dir).await else {
@@ -81,7 +99,7 @@ pub(crate) async fn sessions_list_from_home(
     // Issue #31: encode_project_path は非英数を '-' に潰すので、別 project が同じ
     // encoded directory に衝突し得る (例: `C:\repo-a` と `C:\repo\a`)。
     // jsonl 内に Claude Code が書き込む cwd を読んで、異なる project のものは除外する。
-    let requested_norm = canonical.comparison_key();
+    let canonical_key = canonical.comparison_key();
 
     // Issue #127: 旧実装は metadata + read_jsonl_summary を 1 ファイルずつ直列に await
     // しており、100+ セッションあるプロジェクトで I/O 直列化により 1〜3 秒かかっていた。
@@ -155,7 +173,8 @@ pub(crate) async fn sessions_list_from_home(
             }
             // cwd が jsonl から取れたときだけ厳密チェック (取れないものは fail-open)
             if let Some(ref c) = summary.cwd {
-                if !c.trim().is_empty() && normalize_project_root(c) != requested_norm {
+                let cwd_key = lexical_project_root_key(c);
+                if !c.trim().is_empty() && cwd_key != canonical_key && cwd_key != active_raw_key {
                     tracing::debug!(
                         "[sessions] skipping colliding session {}: cwd={} != requested={}",
                         cand.id,

@@ -418,8 +418,8 @@ async fn sessions_list_canonical_alias_reads_only_active_raw_directory() {
 }
 
 /// Issue #1147: active raw自体がsymlinkでも、gate後のretargetでcwd selectorを
-/// foreign projectへ差し替えられない。directory keyだけはactive raw互換を維持し、
-/// identity比較はgate時canonical snapshotへ固定する。
+/// foreign projectへ差し替えられない。JSONLの既存cwdはgate時canonicalまたはactive raw
+/// snapshotのpure keyだけを許可し、後続canonicalizeはしない。
 #[cfg(unix)]
 #[tokio::test]
 async fn sessions_list_symlink_retarget_keeps_gate_time_canonical_identity() {
@@ -435,17 +435,31 @@ async fn sessions_list_symlink_retarget_keeps_gate_time_canonical_identity() {
 
     let home = tempdir().unwrap();
     let active_raw = active_link.to_string_lossy().into_owned();
+    let active_canonical = std::fs::canonicalize(&active)
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
     let project_dir = home
         .path()
         .join(".claude/projects")
         .join(encode_project_path(&active_raw));
     tokio::fs::create_dir_all(&project_dir).await.unwrap();
+    // active rawで保存された既存JSONLと、canonical cwdで保存されたJSONLの両方を維持する。
     write_jsonl(
-        &project_dir.join("active.jsonl"),
+        &project_dir.join("active-raw.jsonl"),
         &[json!({
             "type": "user",
-            "cwd": active.to_string_lossy(),
-            "message": { "content": "active title" }
+            "cwd": active_raw,
+            "message": { "content": "active raw title" }
+        })],
+    )
+    .await;
+    write_jsonl(
+        &project_dir.join("active-canonical.jsonl"),
+        &[json!({
+            "type": "user",
+            "cwd": active_canonical,
+            "message": { "content": "active canonical title" }
         })],
     )
     .await;
@@ -469,6 +483,66 @@ async fn sessions_list_symlink_retarget_keeps_gate_time_canonical_identity() {
     .await
     .unwrap();
 
+    let ids: Vec<&str> = result.iter().map(|session| session.id.as_str()).collect();
+    assert_eq!(result.len(), 2, "returned ids: {ids:?}");
+    assert!(ids.contains(&"active-raw"));
+    assert!(ids.contains(&"active-canonical"));
+}
+
+/// encoded project directoryが衝突した場合でも、foreignを指していたcwd symlinkがlist中に
+/// activeへretargetされてforeign titleを返すことはない。
+#[cfg(unix)]
+#[tokio::test]
+async fn sessions_list_retargeted_foreign_cwd_symlink_is_not_disclosed() {
+    use std::os::unix::fs::symlink;
+
+    let sandbox = tempdir().unwrap();
+    let active = sandbox.path().join("active");
+    let foreign = sandbox.path().join("foreign");
+    let foreign_cwd_link = sandbox.path().join("foreign-cwd-link");
+    tokio::fs::create_dir_all(&active).await.unwrap();
+    tokio::fs::create_dir_all(&foreign).await.unwrap();
+    symlink(&foreign, &foreign_cwd_link).unwrap();
+
+    let home = tempdir().unwrap();
+    let active_raw = active.to_string_lossy().into_owned();
+    // Collision済みのClaude directoryにforeign sessionが混在した状況を作る。
+    let project_dir = home
+        .path()
+        .join(".claude/projects")
+        .join(encode_project_path(&active_raw));
+    tokio::fs::create_dir_all(&project_dir).await.unwrap();
+    write_jsonl(
+        &project_dir.join("active.jsonl"),
+        &[json!({
+            "type": "user",
+            "cwd": active_raw,
+            "message": { "content": "active title" }
+        })],
+    )
+    .await;
+    let foreign_cwd_raw = foreign_cwd_link.to_string_lossy().into_owned();
+    write_jsonl(
+        &project_dir.join("foreign-secret.jsonl"),
+        &[json!({
+            "type": "user",
+            "cwd": foreign_cwd_raw,
+            "message": { "content": "foreign secret title" }
+        })],
+    )
+    .await;
+
+    let slot = active_slot(Some(&active));
+    let home_path = home.path().to_path_buf();
+    let result = sessions_list_via(&slot, active_raw, move |authorized| async move {
+        std::fs::remove_file(&foreign_cwd_link).unwrap();
+        symlink(&active, &foreign_cwd_link).unwrap();
+        sessions_list_from_home(authorized, home_path).await
+    })
+    .await
+    .unwrap();
+
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].id, "active");
+    assert_eq!(result[0].title, "active title");
 }
