@@ -35,7 +35,7 @@ notify = "8"
 # --- error / logging ---
 anyhow = "1"
 # Issue #1186: 認可済み project root の directory handle から相対 I/O だけを行い、
-# 子 symlink / junction / reparse と検査後差替えによる越境を防ぐ。高水準の cap-std
+# 子 symlink / junction / reparse と検査後差し替えによる越境を防ぐ。高水準の cap-std
 # wrapper は不要なので、必要な openat 相当 primitive だけを完全固定で直接利用する。
 cap-primitives = "=4.0.2"
 tracing = "0.1"

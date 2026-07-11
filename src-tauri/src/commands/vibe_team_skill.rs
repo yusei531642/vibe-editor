@@ -127,13 +127,13 @@ async fn install_skill_at(root: &Path, force: bool) -> InstallSkillResult {
             }
             // Issue #1108: on-disk が bundled より「新しい」版なら、force=true でも縮退上書き
             // しない。on-disk ヘッダの版を parse して bundled SKILL_VERSION と semver 比較し、
-            // disk が厳密に新しい場合だけ skip する。版が無い / 同等以下の場合は guard を
+            // disk が厳密に新しい場合だけ skip する。版がない / 同等以下の場合は guard を
             // 素通りさせ、従来挙動 (下の force / ユーザー編集判定) を保守的に維持する。
             if let (Some(disk_ver), Some(bundled_ver)) =
                 (parse_skill_version(existing), parse_semver(SKILL_VERSION))
             {
                 if disk_ver > bundled_ver {
-                    // Issue #1108 / PR #1111: 縮退 skip を可観測化する。force=true は明示的な
+                    // Issue #1108 / PR #1111: 縮退 skip を観測可能にする。force=true は明示的な
                     // reinstall (self-heal) が newer on-disk により抑止されたケース = 潜在的な
                     // tamper / downgrade-skip なので WARN で監査可能にする。force=false は
                     // best-effort の通常スキップなので INFO に留める。skip 判定の挙動は不変。
@@ -159,24 +159,30 @@ async fn install_skill_at(root: &Path, force: bool) -> InstallSkillResult {
     })
     .await;
 
+    match outcome {
+        Ok(outcome) => map_install_result(&path, outcome),
+        Err(_) => InstallSkillResult {
+            ok: false,
+            error: Some("secure skill install task failed".into()),
+            ..Default::default()
+        },
+    }
+}
+
+fn map_install_result(
+    path: &Path,
+    outcome: std::io::Result<secure_install::InstallOutcome>,
+) -> InstallSkillResult {
     let outcome = match outcome {
-        Ok(Ok(outcome)) => outcome,
-        Ok(Err(error)) => {
+        Ok(outcome) => outcome,
+        Err(error) => {
             return InstallSkillResult {
                 ok: false,
                 error: Some(format!("secure skill install failed: {error}")),
                 ..Default::default()
             };
         }
-        Err(_) => {
-            return InstallSkillResult {
-                ok: false,
-                error: Some("secure skill install task failed".into()),
-                ..Default::default()
-            };
-        }
     };
-
     if outcome.skipped {
         return InstallSkillResult {
             ok: true,

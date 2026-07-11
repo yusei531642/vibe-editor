@@ -161,12 +161,72 @@ fn parent_swap_after_open_stays_bound_to_original_directory_handles() {
         },
     );
 
-    assert!(result.is_ok());
+    assert!(
+        result.is_err(),
+        "a returned ambient path must not identify a different directory"
+    );
     assert_eq!(
         std::fs::read(moved.join("skills/vibe-team/SKILL.md")).unwrap(),
         b"safe body"
     );
     assert!(!outside.path().join("skills/vibe-team/SKILL.md").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn regular_to_fifo_swap_is_rejected_without_blocking() {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let _worker = std::thread::spawn(move || {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(skill_dir(project.path())).unwrap();
+        std::fs::write(skill_path(project.path()), b"old").unwrap();
+        let skill = skill_path(project.path());
+        let result = secure_install::install_with_test_hook(
+            project.path(),
+            b"new",
+            |_| secure_install::ExistingAction::Replace,
+            |point| {
+                if point == "after-directory-open" {
+                    std::fs::remove_file(&skill).unwrap();
+                    let path = CString::new(skill.as_os_str().as_bytes()).unwrap();
+                    let status = unsafe { libc::mkfifo(path.as_ptr(), 0o600) };
+                    assert_eq!(status, 0, "FIFO fixture creation failed");
+                }
+            },
+        );
+        let _ = sender.send(result.is_err());
+    });
+
+    let rejected = receiver
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .expect("FIFO差し替え時も installer は5秒以内に応答する必要があります");
+    assert!(rejected, "FIFO entry must fail closed");
+}
+
+#[cfg(unix)]
+#[test]
+fn final_file_swap_after_rename_clears_top_level_returned_path() {
+    let project = tempfile::tempdir().unwrap();
+    let result = secure_install::install_with_test_hook(
+        project.path(),
+        b"installed",
+        |_| secure_install::ExistingAction::Replace,
+        |point| {
+            if point == "after-atomic-replace" {
+                std::fs::remove_file(skill_path(project.path())).unwrap();
+                std::fs::write(skill_path(project.path()), b"attacker replacement").unwrap();
+            }
+        },
+    );
+    let public = map_install_result(&skill_path(project.path()), result);
+
+    assert!(!public.ok);
+    assert!(public.path.is_none());
+    assert!(!public.skipped);
+    assert!(!public.overwritten);
 }
 
 #[cfg(unix)]
