@@ -52,7 +52,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # OpenAI API key を OS の credential store に暗号化保管するための薄いラッパ。
 # Windows: Credential Manager / macOS: Keychain / Linux: secret-service。
 # Service: "vibe-editor", Account: "openai-realtime-api-key" で統一する。
-keyring = "3"
+keyring = "4"
 
 # --- misc ---
 once_cell = "1"
