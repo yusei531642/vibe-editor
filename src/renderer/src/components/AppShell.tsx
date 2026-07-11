@@ -225,6 +225,10 @@ export function AppShell({
     try {
       const sess = await window.api.sessions.list(projectRoot);
       setSessions(sess);
+    } catch (err) {
+      // Issue #1147: strict active-root gateのrejectをeffectからunhandledにしない。
+      // list refreshのtoast UXは #1139 の対象であり、ここでは既存のconsole診断に留める。
+      console.warn('[app-shell] sessions.list failed:', err);
     } finally {
       setSessionsLoading(false);
     }
