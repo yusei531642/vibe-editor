@@ -121,39 +121,39 @@ async fn install_skill_at(root: &Path, force: bool) -> InstallSkillResult {
     let root = root.to_path_buf();
     let outcome = tokio::task::spawn_blocking(move || {
         secure_install::install(&root, new_text.as_bytes(), |existing| {
-        let starts_with_current_header = existing.starts_with(&header_prefix);
-        if starts_with_current_header && existing == new_text {
-                    return secure_install::ExistingAction::Skip;
-        }
-        // Issue #1108: on-disk が bundled より「新しい」版なら、force=true でも縮退上書き
-        // しない。on-disk ヘッダの版を parse して bundled SKILL_VERSION と semver 比較し、
-        // disk が厳密に新しい場合だけ skip する。版が無い / 同等以下の場合は guard を
-        // 素通りさせ、従来挙動 (下の force / ユーザー編集判定) を保守的に維持する。
-        if let (Some(disk_ver), Some(bundled_ver)) =
-            (parse_skill_version(existing), parse_semver(SKILL_VERSION))
-        {
-            if disk_ver > bundled_ver {
-                // Issue #1108 / PR #1111: 縮退 skip を可観測化する。force=true は明示的な
-                // reinstall (self-heal) が newer on-disk により抑止されたケース = 潜在的な
-                // tamper / downgrade-skip なので WARN で監査可能にする。force=false は
-                // best-effort の通常スキップなので INFO に留める。skip 判定の挙動は不変。
-                let disk = format!("{}.{}.{}", disk_ver.0, disk_ver.1, disk_ver.2);
-                let bundled = format!("{}.{}.{}", bundled_ver.0, bundled_ver.1, bundled_ver.2);
-                if force {
-                    tracing::warn!(
-                        "[skill] vibe-team SKILL.md force install skipped: on-disk version {disk} is newer than bundled {bundled}; preserving to avoid downgrade (verify on-disk file if unexpected)"
-                    );
-                } else {
-                    tracing::info!(
-                        "[skill] vibe-team SKILL.md install skipped: on-disk version {disk} is newer than bundled {bundled}; preserving to avoid downgrade"
-                    );
-                }
-                    return secure_install::ExistingAction::Skip;
-            }
-        }
-        if !force && !starts_with_current_header {
+            let starts_with_current_header = existing.starts_with(&header_prefix);
+            if starts_with_current_header && existing == new_text {
                 return secure_install::ExistingAction::Skip;
-        }
+            }
+            // Issue #1108: on-disk が bundled より「新しい」版なら、force=true でも縮退上書き
+            // しない。on-disk ヘッダの版を parse して bundled SKILL_VERSION と semver 比較し、
+            // disk が厳密に新しい場合だけ skip する。版が無い / 同等以下の場合は guard を
+            // 素通りさせ、従来挙動 (下の force / ユーザー編集判定) を保守的に維持する。
+            if let (Some(disk_ver), Some(bundled_ver)) =
+                (parse_skill_version(existing), parse_semver(SKILL_VERSION))
+            {
+                if disk_ver > bundled_ver {
+                    // Issue #1108 / PR #1111: 縮退 skip を可観測化する。force=true は明示的な
+                    // reinstall (self-heal) が newer on-disk により抑止されたケース = 潜在的な
+                    // tamper / downgrade-skip なので WARN で監査可能にする。force=false は
+                    // best-effort の通常スキップなので INFO に留める。skip 判定の挙動は不変。
+                    let disk = format!("{}.{}.{}", disk_ver.0, disk_ver.1, disk_ver.2);
+                    let bundled = format!("{}.{}.{}", bundled_ver.0, bundled_ver.1, bundled_ver.2);
+                    if force {
+                        tracing::warn!(
+                            "[skill] vibe-team SKILL.md force install skipped: on-disk version {disk} is newer than bundled {bundled}; preserving to avoid downgrade (verify on-disk file if unexpected)"
+                        );
+                    } else {
+                        tracing::info!(
+                            "[skill] vibe-team SKILL.md install skipped: on-disk version {disk} is newer than bundled {bundled}; preserving to avoid downgrade"
+                        );
+                    }
+                    return secure_install::ExistingAction::Skip;
+                }
+            }
+            if !force && !starts_with_current_header {
+                return secure_install::ExistingAction::Skip;
+            }
             secure_install::ExistingAction::Replace
         })
     })
