@@ -22,6 +22,8 @@ use std::path::{Path, PathBuf};
 use tauri::State;
 use tokio::fs;
 
+mod secure_install;
+
 /// Skill ファイル本文の現行バージョン。SKILL.md 先頭に埋め込んでおき、
 /// Rust 側がファイルを見たときに「ユーザーが手で編集したか / 古いバンドル版か」を判別できるようにする。
 const SKILL_VERSION: &str = "1.6.5";
@@ -114,6 +116,13 @@ async fn install_skill_at(root: &Path, force: bool) -> InstallSkillResult {
                 "project_root is not a directory: {}",
                 root.display()
             )),
+            ..Default::default()
+        };
+    }
+    if let Err(error) = secure_install::open_skill_dir(root) {
+        return InstallSkillResult {
+            ok: false,
+            error: Some(format!("secure skill directory open failed: {error}")),
             ..Default::default()
         };
     }
@@ -344,6 +353,34 @@ mod tests {
         assert_eq!(
             parse_skill_version("<!-- vibe-team-skill-version: 1.6 -->"),
             None
+        );
+    }
+
+    /// Issue #1186: 認可済み root 配下でも `.claude` が外部 directory への link なら、
+    /// ambient path の create/write は project 外へ到達する。installer は fail closed とし、
+    /// outside canary と書込先を一切変更してはならない。
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn rejects_claude_symlink_without_outside_write() {
+        use std::os::unix::fs::symlink;
+
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let canary = outside.path().join("canary");
+        std::fs::write(&canary, b"unchanged").unwrap();
+        symlink(outside.path(), project.path().join(".claude")).unwrap();
+
+        let result = install_skill_at(project.path(), false).await;
+
+        assert!(
+            !result.ok,
+            "linked parent must fail closed: {:?}",
+            result.error
+        );
+        assert_eq!(std::fs::read(&canary).unwrap(), b"unchanged");
+        assert!(
+            !outside.path().join("skills/vibe-team/SKILL.md").exists(),
+            "installer must not create a file outside the authorized project"
         );
     }
 
