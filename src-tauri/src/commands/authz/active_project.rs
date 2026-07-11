@@ -14,6 +14,10 @@ pub(crate) struct AuthorizedActiveProjectRoot {
 }
 
 impl AuthorizedActiveProjectRoot {
+    /// gate時点のcanonical identityとactive raw表記を、そのまま後続readerへ渡す。
+    ///
+    /// readerはこの値を再canonicalizeせず、snapshotの比較keyだけでstorageを選別する。
+    /// これによりgate後のsymlink retargetを新しいproject identityとして採用しない。
     pub(crate) fn into_parts(self) -> (ProjectRoot, String) {
         (self.canonical, self.active_raw)
     }
