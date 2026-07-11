@@ -15,14 +15,20 @@
 // 配置タイミング: setup_team_mcp で「実チーム」を初めて起動するときに 1 回書き出す。
 // _init / 空 team_id ではスキップする。既存ファイルを上書きするかは forceOverwrite で制御。
 
-use crate::commands::atomic_write::atomic_write;
 use crate::state::AppState;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tauri::State;
+
+#[cfg(test)]
+use crate::commands::atomic_write::atomic_write;
+#[cfg(test)]
 use tokio::fs;
 
 mod secure_install;
+#[cfg(test)]
+#[path = "vibe_team_skill/secure_install_tests.rs"]
+mod secure_install_tests;
 
 /// Skill ファイル本文の現行バージョン。SKILL.md 先頭に埋め込んでおき、
 /// Rust 側がファイルを見たときに「ユーザーが手で編集したか / 古いバンドル版か」を判別できるようにする。
@@ -109,47 +115,22 @@ fn parse_semver(s: &str) -> Option<(u64, u64, u64)> {
 /// 実際の書き出し処理。境界チェックを通過した後の root を渡すこと。
 /// renderer から直接呼ばせない (state を経由した command 経由でのみ呼ばれる)。
 async fn install_skill_at(root: &Path, force: bool) -> InstallSkillResult {
-    if !root.is_dir() {
-        return InstallSkillResult {
-            ok: false,
-            error: Some(format!(
-                "project_root is not a directory: {}",
-                root.display()
-            )),
-            ..Default::default()
-        };
-    }
-    if let Err(error) = secure_install::open_skill_dir(root) {
-        return InstallSkillResult {
-            ok: false,
-            error: Some(format!("secure skill directory open failed: {error}")),
-            ..Default::default()
-        };
-    }
-    let dir = skill_dir(root);
     let path = skill_path(root);
-
     let new_text = current_skill_text();
     let header_prefix = header_line();
-    let mut overwritten = false;
-
-    if let Ok(existing) = fs::read_to_string(&path).await {
+    let root = root.to_path_buf();
+    let outcome = tokio::task::spawn_blocking(move || {
+        secure_install::install(&root, new_text.as_bytes(), |existing| {
         let starts_with_current_header = existing.starts_with(&header_prefix);
         if starts_with_current_header && existing == new_text {
-            // 内容まで完全一致 → no-op
-            return InstallSkillResult {
-                ok: true,
-                path: Some(path.to_string_lossy().into_owned()),
-                skipped: true,
-                ..Default::default()
-            };
+                    return secure_install::ExistingAction::Skip;
         }
         // Issue #1108: on-disk が bundled より「新しい」版なら、force=true でも縮退上書き
         // しない。on-disk ヘッダの版を parse して bundled SKILL_VERSION と semver 比較し、
         // disk が厳密に新しい場合だけ skip する。版が無い / 同等以下の場合は guard を
         // 素通りさせ、従来挙動 (下の force / ユーザー編集判定) を保守的に維持する。
         if let (Some(disk_ver), Some(bundled_ver)) =
-            (parse_skill_version(&existing), parse_semver(SKILL_VERSION))
+            (parse_skill_version(existing), parse_semver(SKILL_VERSION))
         {
             if disk_ver > bundled_ver {
                 // Issue #1108 / PR #1111: 縮退 skip を可観測化する。force=true は明示的な
@@ -167,37 +148,40 @@ async fn install_skill_at(root: &Path, force: bool) -> InstallSkillResult {
                         "[skill] vibe-team SKILL.md install skipped: on-disk version {disk} is newer than bundled {bundled}; preserving to avoid downgrade"
                     );
                 }
-                return InstallSkillResult {
-                    ok: true,
-                    path: Some(path.to_string_lossy().into_owned()),
-                    skipped: true,
-                    ..Default::default()
-                };
+                    return secure_install::ExistingAction::Skip;
             }
         }
         if !force && !starts_with_current_header {
-            // ユーザー編集を上書きしない
+                return secure_install::ExistingAction::Skip;
+        }
+            secure_install::ExistingAction::Replace
+        })
+    })
+    .await;
+
+    let outcome = match outcome {
+        Ok(Ok(outcome)) => outcome,
+        Ok(Err(error)) => {
             return InstallSkillResult {
-                ok: true,
-                path: Some(path.to_string_lossy().into_owned()),
-                skipped: true,
+                ok: false,
+                error: Some(format!("secure skill install failed: {error}")),
                 ..Default::default()
             };
         }
-        overwritten = true;
-    }
+        Err(_) => {
+            return InstallSkillResult {
+                ok: false,
+                error: Some("secure skill install task failed".into()),
+                ..Default::default()
+            };
+        }
+    };
 
-    if let Err(e) = fs::create_dir_all(&dir).await {
+    if outcome.skipped {
         return InstallSkillResult {
-            ok: false,
-            error: Some(format!("create_dir_all failed: {e}")),
-            ..Default::default()
-        };
-    }
-    if let Err(e) = atomic_write(&path, new_text.as_bytes()).await {
-        return InstallSkillResult {
-            ok: false,
-            error: Some(format!("atomic_write failed: {e:#}")),
+            ok: true,
+            path: Some(path.to_string_lossy().into_owned()),
+            skipped: true,
             ..Default::default()
         };
     }
@@ -205,7 +189,8 @@ async fn install_skill_at(root: &Path, force: bool) -> InstallSkillResult {
     // INFO はマスク済み path、DEBUG にだけ生 path を残す。
     tracing::info!(
         "[skill] vibe-team SKILL.md installed at {} (overwrite={overwritten})",
-        crate::util::log_redact::redact_home(&path.to_string_lossy())
+        crate::util::log_redact::redact_home(&path.to_string_lossy()),
+        overwritten = outcome.overwritten
     );
     tracing::debug!(
         "[skill] vibe-team SKILL.md installed at (raw) {}",
@@ -214,7 +199,7 @@ async fn install_skill_at(root: &Path, force: bool) -> InstallSkillResult {
     InstallSkillResult {
         ok: true,
         path: Some(path.to_string_lossy().into_owned()),
-        overwritten,
+        overwritten: outcome.overwritten,
         skipped: false,
         error: None,
     }
@@ -353,34 +338,6 @@ mod tests {
         assert_eq!(
             parse_skill_version("<!-- vibe-team-skill-version: 1.6 -->"),
             None
-        );
-    }
-
-    /// Issue #1186: 認可済み root 配下でも `.claude` が外部 directory への link なら、
-    /// ambient path の create/write は project 外へ到達する。installer は fail closed とし、
-    /// outside canary と書込先を一切変更してはならない。
-    #[cfg(unix)]
-    #[tokio::test]
-    async fn rejects_claude_symlink_without_outside_write() {
-        use std::os::unix::fs::symlink;
-
-        let project = tempfile::tempdir().unwrap();
-        let outside = tempfile::tempdir().unwrap();
-        let canary = outside.path().join("canary");
-        std::fs::write(&canary, b"unchanged").unwrap();
-        symlink(outside.path(), project.path().join(".claude")).unwrap();
-
-        let result = install_skill_at(project.path(), false).await;
-
-        assert!(
-            !result.ok,
-            "linked parent must fail closed: {:?}",
-            result.error
-        );
-        assert_eq!(std::fs::read(&canary).unwrap(), b"unchanged");
-        assert!(
-            !outside.path().join("skills/vibe-team/SKILL.md").exists(),
-            "installer must not create a file outside the authorized project"
         );
     }
 
