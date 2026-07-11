@@ -12,6 +12,8 @@ use uuid::Uuid;
 
 use crate::commands::team_history::HandoffReference;
 
+mod list;
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct HandoffContent {
@@ -374,25 +376,7 @@ pub async fn handoffs_list(
         return Ok(Vec::new());
     }
     let dir = handoff_dir(&project_root, team_id.as_deref());
-    let mut out = Vec::new();
-    let Ok(mut rd) = fs::read_dir(&dir).await else {
-        return Ok(out);
-    };
-    while let Ok(Some(entry)) = rd.next_entry().await {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("json") {
-            continue;
-        }
-        let Ok(bytes) = fs::read(&path).await else {
-            continue;
-        };
-        let Ok(handoff) = serde_json::from_slice::<HandoffCheckpoint>(&bytes) else {
-            continue;
-        };
-        out.push(handoff);
-    }
-    out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    Ok(out)
+    Ok(list::load_handoffs_from_dir(&dir).await)
 }
 
 #[tauri::command]
