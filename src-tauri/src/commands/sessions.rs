@@ -3,9 +3,14 @@
 // ~/.claude/projects/<encoded-projectRoot>/*.jsonl を列挙し、
 // 各 jsonl から最初のユーザーメッセージ (=タイトル) と message count を抽出する。
 
+use crate::commands::authz::AuthorizedActiveProjectRoot;
+use crate::commands::error::CommandResult;
 use crate::pty::path_norm::{encode_project_path, normalize_project_root};
+use crate::state::AppState;
+use arc_swap::ArcSwapOption;
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use tauri::State;
 use tokio::io::AsyncBufReadExt;
 
 #[derive(Serialize)]
@@ -25,23 +30,58 @@ pub struct SessionInfo {
     pub last_modified_ms: i64,
 }
 
-fn projects_dir(root: &str) -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_default();
+fn projects_dir(home: &Path, root: &str) -> PathBuf {
     home.join(".claude")
         .join("projects")
         .join(encode_project_path(root))
 }
 
 #[tauri::command]
-pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
-    let dir = projects_dir(&project_root);
+pub async fn sessions_list(
+    state: State<'_, AppState>,
+    project_root: String,
+) -> CommandResult<Vec<SessionInfo>> {
+    let home = dirs::home_dir().unwrap_or_default();
+    sessions_list_via(&state.project_root, project_root, move |authorized| {
+        sessions_list_from_home(authorized, home)
+    })
+    .await
+}
+
+/// command入口のstrict gateと後続readerの順序を1か所に固定する。readerは
+/// `AuthorizedActiveProjectRoot` なしでは呼べないため、拒否requestはdirectory I/Oへ進まない。
+pub(crate) async fn sessions_list_via<R, Reader, Fut>(
+    project_root_slot: &ArcSwapOption<String>,
+    project_root: String,
+    reader: Reader,
+) -> CommandResult<R>
+where
+    Reader: FnOnce(AuthorizedActiveProjectRoot) -> Fut,
+    Fut: std::future::Future<Output = R>,
+{
+    let authorized = crate::commands::authz::assert_active_project_root_with_raw(
+        project_root_slot,
+        &project_root,
+    )
+    .await?;
+    Ok(reader(authorized).await)
+}
+
+/// 認可済みactive rawをClaude CLI互換でencodeし、session metadataを列挙する。
+/// `home`を引数化して、実HOMEを変更せずdirectory selectionを統合テストできるようにする。
+pub(crate) async fn sessions_list_from_home(
+    authorized: AuthorizedActiveProjectRoot,
+    home: PathBuf,
+) -> Vec<SessionInfo> {
+    let (canonical, project_root) = authorized.into_parts();
+    let dir = projects_dir(&home, &project_root);
     let Ok(mut rd) = tokio::fs::read_dir(&dir).await else {
         return vec![];
     };
     // Issue #31: encode_project_path は非英数を '-' に潰すので、別 project が同じ
     // encoded directory に衝突し得る (例: `C:\repo-a` と `C:\repo\a`)。
     // jsonl 内に Claude Code が書き込む cwd を読んで、異なる project のものは除外する。
-    let requested_norm = normalize_project_root(&project_root);
+    let requested_norm = canonical.comparison_key();
 
     // Issue #127: 旧実装は metadata + read_jsonl_summary を 1 ファイルずつ直列に await
     // しており、100+ セッションあるプロジェクトで I/O 直列化により 1〜3 秒かかっていた。

@@ -32,6 +32,23 @@ pub struct ProjectRoot {
     display: String,
 }
 
+/// active projectとの照合に成功した同一snapshotを表すcapability。
+///
+/// `ProjectRoot` は後続FS操作用のcanonical path、`active_raw` はClaude CLIが
+/// `~/.claude/projects/<encoded>` を決める既存のraw表記を保持する。requested rawを
+/// 保持しないため、canonical aliasから別encoded directoryを選ぶことはできない。
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct AuthorizedActiveProjectRoot {
+    canonical: ProjectRoot,
+    active_raw: String,
+}
+
+impl AuthorizedActiveProjectRoot {
+    pub(crate) fn into_parts(self) -> (ProjectRoot, String) {
+        (self.canonical, self.active_raw)
+    }
+}
+
 impl ProjectRoot {
     fn from_canonical(canonical: PathBuf) -> Self {
         let display = canonical.to_string_lossy().into_owned();
@@ -44,6 +61,18 @@ impl ProjectRoot {
 
     pub fn as_str(&self) -> &str {
         &self.display
+    }
+
+    /// gate時に確定したcanonical pathからI/Oなしで比較keyを作る。
+    /// capability発行後にsymlinkがretargetされてもidentityを再解決しない。
+    pub(crate) fn comparison_key(&self) -> String {
+        let normalized = self.display.replace('\\', "/");
+        let stripped = normalized.trim_end_matches('/');
+        if cfg!(windows) {
+            stripped.to_lowercase()
+        } else {
+            stripped.to_string()
+        }
     }
 
     #[cfg(test)]
@@ -93,6 +122,18 @@ pub async fn assert_active_project_root(
     project_root_slot: &ArcSwapOption<String>,
     given: &str,
 ) -> CommandResult<ProjectRoot> {
+    assert_active_project_root_with_raw(project_root_slot, given)
+        .await
+        .map(|authorized| authorized.canonical)
+}
+
+/// `assert_active_project_root` と同じstrict gateを実行し、canonical capabilityに加えて
+/// 同一認可snapshotのactive raw表記も返す。Claude project directory keyや既存のraw storage
+/// keyとの互換が必要なcrate内commandだけが使用する。
+pub(crate) async fn assert_active_project_root_with_raw(
+    project_root_slot: &ArcSwapOption<String>,
+    given: &str,
+) -> CommandResult<AuthorizedActiveProjectRoot> {
     let trimmed = given.trim();
     if trimmed.is_empty() {
         tracing::warn!(
@@ -157,7 +198,10 @@ pub async fn assert_active_project_root(
         ));
     }
 
-    Ok(ProjectRoot::from_canonical(active_canon))
+    Ok(AuthorizedActiveProjectRoot {
+        canonical: ProjectRoot::from_canonical(active_canon),
+        active_raw: active,
+    })
 }
 
 /// Issue #954 / #963: ファイル系 IPC (`files_*`) 用のゲート。
@@ -517,6 +561,16 @@ mod tests {
                 .expect("canon")
                 .as_path()
         );
+    }
+
+    /// Issue #1147: Windowsのcanonical snapshotはverbatim prefixを含み得る。
+    /// symlink retarget後もI/Oで再解決せず、区切りとcaseだけをpureに正規化する。
+    #[cfg(windows)]
+    #[test]
+    fn canonical_comparison_key_normalizes_windows_without_io() {
+        let root =
+            ProjectRoot::assume_canonical_for_test(PathBuf::from(r"\\?\C:\Users\YUSEI\Repo\"));
+        assert_eq!(root.comparison_key(), "//?/c:/users/yusei/repo");
     }
 
     // ===== Issue #601 (Tier A-3): assert_active_team helper =====
