@@ -218,7 +218,6 @@ export function AppShell({
   }, [dirtyEditorTabs.length, t]);
 
   // ---------- データ更新 ----------
-
   const refreshSessions = useCallback(async () => {
     if (!projectRoot) return;
     setSessionsLoading(true);
@@ -226,18 +225,15 @@ export function AppShell({
       const sess = await window.api.sessions.list(projectRoot);
       setSessions(sess);
     } catch (err) {
-      // Issue #1147: strict active-root gateのrejectをeffectからunhandledにしない。
-      // list refreshのtoast UXは #1139 の対象であり、ここでは既存のconsole診断に留める。
+      // #1147: authz rejectをcatch。toast UXは #1139 の対象なのでconsole診断を維持する。
       console.warn('[app-shell] sessions.list failed:', err);
     } finally {
       setSessionsLoading(false);
     }
   }, [projectRoot]);
-
   useEffect(() => {
     if (sidebarView === 'sessions') void refreshSessions();
   }, [sidebarView, refreshSessions]);
-
   // ---------- 差分レビュー依頼 ----------
 
   /** 指定ファイルの変更を Claude Code にレビュー依頼するプロンプトを生成してターミナルに送信 */
