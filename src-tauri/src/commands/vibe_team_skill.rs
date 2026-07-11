@@ -15,6 +15,7 @@
 // 配置タイミング: setup_team_mcp で「実チーム」を初めて起動するときに 1 回書き出す。
 // _init / 空 team_id ではスキップする。既存ファイルを上書きするかは forceOverwrite で制御。
 
+use crate::commands::authz::assert_active_project_root;
 use crate::state::AppState;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -218,54 +219,26 @@ pub async fn app_install_vibe_team_skill(
     force_overwrite: Option<bool>,
 ) -> crate::commands::error::CommandResult<InstallSkillResult> {
     let force = force_overwrite.unwrap_or(false);
-    let trimmed = project_root.trim();
-    if trimmed.is_empty() {
-        return Ok(InstallSkillResult {
-            ok: false,
-            error: Some("project_root is empty".into()),
-            ..Default::default()
-        });
-    }
     // Issue #135 (Security): renderer から来る project_root が AppState の現在値と一致
     // するか canonicalize 比較する。一致しないとユーザー HOME 等の任意ディレクトリ配下に
     // .claude/skills/vibe-team/SKILL.md を作成できてしまい AI hijack 経路になる。
-    // Issue #739: ArcSwapOption の lock-free load で現在値を読む。
-    let active = crate::state::current_project_root(&state.project_root).unwrap_or_default();
-    if active.trim().is_empty() {
-        return Ok(InstallSkillResult {
+    // Issue #1149: 認可をauthz helperへ一本化し、認可失敗は従来どおりresult.errorで返す。
+    Ok(install_skill_for_active_root(&state.project_root, &project_root, force).await)
+}
+
+async fn install_skill_for_active_root(
+    project_root_slot: &arc_swap::ArcSwapOption<String>,
+    project_root: &str,
+    force: bool,
+) -> InstallSkillResult {
+    match assert_active_project_root(project_root_slot, project_root).await {
+        Ok(root) => install_skill_at(root.as_path(), force).await,
+        Err(error) => InstallSkillResult {
             ok: false,
-            error: Some("no active project_root configured".into()),
+            error: Some(error.to_string()),
             ..Default::default()
-        });
+        },
     }
-    let req_canon = match std::fs::canonicalize(trimmed) {
-        Ok(p) => p,
-        Err(e) => {
-            return Ok(InstallSkillResult {
-                ok: false,
-                error: Some(format!("canonicalize requested project_root failed: {e}")),
-                ..Default::default()
-            });
-        }
-    };
-    let active_canon = match std::fs::canonicalize(active.trim()) {
-        Ok(p) => p,
-        Err(e) => {
-            return Ok(InstallSkillResult {
-                ok: false,
-                error: Some(format!("canonicalize active project_root failed: {e}")),
-                ..Default::default()
-            });
-        }
-    };
-    if req_canon != active_canon {
-        return Ok(InstallSkillResult {
-            ok: false,
-            error: Some("project_root does not match active project".into()),
-            ..Default::default()
-        });
-    }
-    Ok(install_skill_at(&req_canon, force).await)
 }
 
 /// 内部呼び出し版 (setup_team_mcp など他コマンドから使う)。force=false。
@@ -275,7 +248,7 @@ pub async fn install_skill_best_effort(project_root: &str) {
     if trimmed.is_empty() {
         return;
     }
-    let root = match std::fs::canonicalize(trimmed) {
+    let root = match tokio::fs::canonicalize(trimmed).await {
         Ok(p) => p,
         Err(e) => {
             tracing::warn!("[skill] canonicalize failed (best-effort): {e}");
@@ -293,6 +266,8 @@ pub async fn install_skill_best_effort(project_root: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use arc_swap::ArcSwapOption;
+    use std::sync::Arc;
 
     /// 指定の本文を temp dir 配下の `.claude/skills/vibe-team/SKILL.md` に書き出す。
     async fn write_skill(root: &Path, body: &str) {
@@ -306,6 +281,92 @@ mod tests {
     /// `<!-- vibe-team-skill-version: VER -->` ヘッダ付きの本文を組み立てる。
     fn versioned(ver: &str, extra_body: &str) -> String {
         format!("<!-- vibe-team-skill-version: {ver} -->\n{extra_body}\n")
+    }
+
+    fn active_root(path: Option<&Path>) -> ArcSwapOption<String> {
+        ArcSwapOption::from(path.map(|path| Arc::new(path.to_string_lossy().into_owned())))
+    }
+    #[tokio::test]
+    async fn non_directory_keeps_result_contract() {
+        let file = tempfile::NamedTempFile::new().expect("file");
+        let slot = active_root(Some(file.path()));
+        let result =
+            install_skill_for_active_root(&slot, file.path().to_string_lossy().as_ref(), false)
+                .await;
+        assert!(!result.ok);
+        assert!(result.path.is_none());
+        assert!(!result.skipped);
+        assert!(!result.overwritten);
+        assert!(result
+            .error
+            .as_deref()
+            .is_some_and(|error| error.starts_with("secure skill install failed:")));
+    }
+
+    #[tokio::test]
+    async fn active_root_install_preserves_result_contract() {
+        let project = tempfile::tempdir().expect("project");
+        let slot = active_root(Some(project.path()));
+
+        let result =
+            install_skill_for_active_root(&slot, project.path().to_string_lossy().as_ref(), false)
+                .await;
+
+        assert!(result.ok);
+        assert!(!result.skipped);
+        assert!(!result.overwritten);
+        assert!(result.error.is_none());
+        let canonical_project = tokio::fs::canonicalize(project.path())
+            .await
+            .expect("canonical project");
+        let expected_path = skill_path(&canonical_project);
+        assert_eq!(
+            result.path.as_deref(),
+            Some(expected_path.to_string_lossy().as_ref())
+        );
+    }
+
+    #[tokio::test]
+    async fn active_root_install_rejects_empty_missing_and_mismatch() {
+        let active = tempfile::tempdir().expect("active");
+        let foreign = tempfile::tempdir().expect("foreign");
+        let slot = active_root(Some(active.path()));
+
+        let empty = install_skill_for_active_root(&slot, "  ", false).await;
+        assert!(!empty.ok);
+        assert_eq!(empty.error.as_deref(), Some("project_root is empty"));
+
+        let unconfigured = install_skill_for_active_root(
+            &active_root(None),
+            active.path().to_string_lossy().as_ref(),
+            false,
+        )
+        .await;
+        assert!(!unconfigured.ok);
+        assert_eq!(
+            unconfigured.error.as_deref(),
+            Some("no active project_root configured")
+        );
+
+        let missing_path = active.path().join("missing");
+        let missing =
+            install_skill_for_active_root(&slot, missing_path.to_string_lossy().as_ref(), false)
+                .await;
+        assert!(!missing.ok);
+        assert!(missing
+            .error
+            .as_deref()
+            .is_some_and(|error| error.starts_with("canonicalize requested project_root failed:")));
+
+        let mismatch =
+            install_skill_for_active_root(&slot, foreign.path().to_string_lossy().as_ref(), false)
+                .await;
+        assert!(!mismatch.ok);
+        assert_eq!(
+            mismatch.error.as_deref(),
+            Some("project_root does not match active project")
+        );
+        assert!(!skill_path(foreign.path()).exists());
     }
 
     /// Issue #1109: bundled 本文 (SKILL_VERSION + vibe_team_skill_body.md) と、リポジトリの
