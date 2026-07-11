@@ -71,4 +71,20 @@ describe('sessions/teamHistory list authz IPC contract', () => {
       message: 'project_root does not match active project'
     });
   });
+
+  it('normalizes a no-active-project rejection for history callers to handle', async () => {
+    mocks.invoke.mockRejectedValueOnce({
+      code: 'authz',
+      message: 'no active project root'
+    });
+
+    await expect(teamHistory.list('/workspace/initializing')).rejects.toMatchObject<
+      Partial<CommandError>
+    >({
+      name: 'CommandError',
+      command: 'team_history_list',
+      code: 'authz',
+      message: 'no active project root'
+    });
+  });
 });
