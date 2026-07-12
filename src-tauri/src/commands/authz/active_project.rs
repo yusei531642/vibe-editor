@@ -59,11 +59,50 @@ pub async fn assert_active_project_root(
         .map(|authorized| authorized.canonical)
 }
 
+/// identity 再照合キャッシュの利用可否。PTY / MCP の起動境界 (Issue #1200) は必ず
+/// `Fresh` を使い、check-to-use 間の directory 置換を TTL 内でも見逃さない。
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum RecheckPolicy {
+    CachedTtl,
+    Fresh,
+}
+
 /// strict gateと同一snapshotのcanonical capability + active rawを返すcrate内helper。
 pub(crate) async fn assert_active_project_root_with_raw(
     project_root_slot: &ArcSwapOption<String>,
     project_root_identity_slot: &ArcSwapOption<ProjectRootIdentity>,
     given: &str,
+) -> CommandResult<AuthorizedActiveProjectRoot> {
+    assert_active_project_root_policy(
+        project_root_slot,
+        project_root_identity_slot,
+        given,
+        RecheckPolicy::CachedTtl,
+    )
+    .await
+}
+
+/// 起動境界用: identity 再照合の TTL キャッシュを使わず必ず platform identity を取り直す。
+pub async fn assert_active_project_root_fresh(
+    project_root_slot: &ArcSwapOption<String>,
+    project_root_identity_slot: &ArcSwapOption<ProjectRootIdentity>,
+    given: &str,
+) -> CommandResult<ProjectRoot> {
+    assert_active_project_root_policy(
+        project_root_slot,
+        project_root_identity_slot,
+        given,
+        RecheckPolicy::Fresh,
+    )
+    .await
+    .map(|authorized| authorized.canonical)
+}
+
+pub(crate) async fn assert_active_project_root_policy(
+    project_root_slot: &ArcSwapOption<String>,
+    project_root_identity_slot: &ArcSwapOption<ProjectRootIdentity>,
+    given: &str,
+    policy: RecheckPolicy,
 ) -> CommandResult<AuthorizedActiveProjectRoot> {
     let trimmed = given.trim();
     if trimmed.is_empty() {
@@ -135,7 +174,7 @@ pub(crate) async fn assert_active_project_root_with_raw(
             "active project root has no native authority identity",
         ));
     };
-    if !identity_recently_verified(&stored_identity) {
+    if policy == RecheckPolicy::Fresh || !identity_recently_verified(&stored_identity) {
         let observed_identity =
             crate::commands::project_authority::capture_identity(&active_canon).await?;
         if observed_identity != stored_identity {
