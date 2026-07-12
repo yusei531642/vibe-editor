@@ -198,14 +198,15 @@ export function CanvasSidebar({
 
   const handleDeleteTeamHistory = useCallback(
     async (id: string): Promise<void> => {
+      if (!projectRoot) return;
       try {
-        await window.api.teamHistory.delete(id);
+        await window.api.teamHistory.delete(projectRoot, id);
         setTeamHistory((prev) => prev.filter((t) => t.id !== id));
       } catch (err) {
         console.warn('[canvas-sidebar] team-history delete failed:', err);
       }
     },
-    []
+    [projectRoot]
   );
 
   return (

@@ -227,9 +227,9 @@ pub fn run() {
             commands::sessions::sessions_list,
             // ---- team_history ----
             commands::team_history::list::team_history_list,
-            commands::team_history::team_history_save,
-            commands::team_history::team_history_save_batch,
-            commands::team_history::team_history_delete,
+            commands::team_history::mutate::team_history_save,
+            commands::team_history::mutate::team_history_save_batch,
+            commands::team_history::mutate::team_history_delete,
             commands::team_state::team_state_read,
             // ---- recruit observability (Issue #578) ----
             commands::team_state::recruit_observed_while_hidden,

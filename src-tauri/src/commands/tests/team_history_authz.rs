@@ -244,3 +244,115 @@ async fn team_history_list_retargeted_foreign_symlink_entry_is_not_disclosed() {
 
     assert!(result.is_empty());
 }
+
+// ---- Issue #1194: mutation (save / save_batch / delete) の gate 順序と fail-closed ----
+
+use crate::commands::team_history::mutate::team_history_mutation_via;
+
+async fn team_history_mutation_via_native_identity<R, Writer, Fut>(
+    slot: &ArcSwapOption<String>,
+    entry_project_roots: &[&str],
+    writer: Writer,
+) -> crate::commands::error::CommandResult<R>
+where
+    Writer: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = R>,
+{
+    let identity = match crate::state::current_project_root(slot) {
+        Some(root) => crate::commands::project_authority::capture_identity(root)
+            .await
+            .ok(),
+        None => None,
+    };
+    let identity_slot = ArcSwapOption::from(identity.map(Arc::new));
+    team_history_mutation_via(slot, &identity_slot, entry_project_roots, writer).await
+}
+
+async fn assert_mutation_rejection_skips_writer(
+    slot: &ArcSwapOption<String>,
+    entry_project_roots: &[&str],
+) {
+    let called = AtomicBool::new(false);
+    let result =
+        team_history_mutation_via_native_identity(slot, entry_project_roots, |_target| async {
+            called.store(true, Ordering::SeqCst);
+            "must-not-run"
+        })
+        .await;
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("unauthorized mutation must reject instead of writing"),
+    };
+    assert_eq!(error.code(), "authz");
+    assert!(
+        !called.load(Ordering::SeqCst),
+        "STORE/hydration writer ran before authz"
+    );
+}
+
+/// active 一致の mutation は gate を通り、gate 時 active raw snapshot key を writer に渡す。
+#[tokio::test]
+async fn team_history_mutation_active_root_passes_snapshot_key_to_writer() {
+    let active = tempdir().unwrap();
+    let active_raw = active.path().to_string_lossy().into_owned();
+    let slot = active_slot(Some(active.path()));
+    let expected = active_raw.clone();
+
+    let target = team_history_mutation_via_native_identity(
+        &slot,
+        &[active_raw.as_str()],
+        |target| async move { target },
+    )
+    .await
+    .unwrap();
+    // gate 時 active raw snapshot key (= slot 値の I/O なし正規化) と一致すること。
+    assert_eq!(
+        target,
+        crate::commands::team_history::list::normalize_stored_project_root(&expected)
+    );
+}
+
+/// empty / active 未設定 / missing / foreign は authz で拒否し、writer (STORE lock /
+/// disk write / hydration を内包) を一切呼ばない。
+#[tokio::test]
+async fn team_history_mutation_rejections_never_call_writer() {
+    let active = tempdir().unwrap();
+    let foreign = tempdir().unwrap();
+    let slot = active_slot(Some(active.path()));
+    let active_raw = active.path().to_string_lossy().into_owned();
+    let foreign_raw = foreign.path().to_string_lossy().into_owned();
+    let missing_raw = active.path().join("missing").to_string_lossy().into_owned();
+
+    assert_mutation_rejection_skips_writer(&slot, &["  "]).await;
+    assert_mutation_rejection_skips_writer(&slot, &[]).await;
+    assert_mutation_rejection_skips_writer(&active_slot(None), &[active_raw.as_str()]).await;
+    assert_mutation_rejection_skips_writer(&slot, &[missing_raw.as_str()]).await;
+    assert_mutation_rejection_skips_writer(&slot, &[foreign_raw.as_str()]).await;
+}
+
+/// batch 内に 1 entry でも別 project が混ざれば、gate (identity 照合) にも進まず全体 reject。
+#[tokio::test]
+async fn team_history_mutation_mixed_project_batch_is_rejected() {
+    let active = tempdir().unwrap();
+    let foreign = tempdir().unwrap();
+    let slot = active_slot(Some(active.path()));
+    let active_raw = active.path().to_string_lossy().into_owned();
+    let foreign_raw = foreign.path().to_string_lossy().into_owned();
+
+    assert_mutation_rejection_skips_writer(
+        &slot,
+        &[active_raw.as_str(), foreign_raw.as_str(), active_raw.as_str()],
+    )
+    .await;
+}
+
+/// canonical には一致する alias 表記 (末尾 "/." 等) でも、raw key が active と異なる entry は
+/// 拒否する。alias で保存すると active raw の list から見えない孤児履歴になるため。
+#[tokio::test]
+async fn team_history_mutation_alias_notation_is_rejected() {
+    let active = tempdir().unwrap();
+    let slot = active_slot(Some(active.path()));
+    let alias_raw = active.path().join(".").to_string_lossy().into_owned();
+
+    assert_mutation_rejection_skips_writer(&slot, &[alias_raw.as_str()]).await;
+}

@@ -220,8 +220,10 @@ export function useTeamHistorySync(
   const handleDeleteTeamHistory = useCallback(async (entryId: string) => {
     setTeamHistoryEntries((prev) => prev.filter((e) => e.id !== entryId));
     if (!window.api.teamHistory) return;
+    const projectRoot = optsRef.current.projectRoot;
+    if (!projectRoot) return;
     try {
-      await window.api.teamHistory.delete(entryId);
+      await window.api.teamHistory.delete(projectRoot, entryId);
     } catch (err) {
       console.warn('[teamHistory] delete failed:', err);
     }
