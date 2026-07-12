@@ -88,7 +88,7 @@ export function CanvasSidebar({
       setSessions(await window.api.sessions.list(projectRoot));
       setTeamHistory(await window.api.teamHistory.list(projectRoot));
     } catch (err) {
-      console.warn('[canvas-sidebar] sessions.list failed:', err);
+      console.warn('[canvas-sidebar] session/history refresh failed:', err);
     } finally {
       setSessionsLoading(false);
     }

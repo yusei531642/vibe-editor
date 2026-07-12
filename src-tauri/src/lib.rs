@@ -218,7 +218,7 @@ pub fn run() {
             // ---- sessions ----
             commands::sessions::sessions_list,
             // ---- team_history ----
-            commands::team_history::team_history_list,
+            commands::team_history::list::team_history_list,
             commands::team_history::team_history_save,
             commands::team_history::team_history_save_batch,
             commands::team_history::team_history_delete,

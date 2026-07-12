@@ -12,6 +12,10 @@ use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::sync::Mutex;
 
+pub(crate) mod list;
+#[cfg(test)]
+pub(crate) use list::{filter_team_history_entries, team_history_list_via};
+
 /// Issue #642 / #739: cache を最後に disk と同期したときの状態を表す sum type。
 ///
 /// 旧実装は `Option<Option<DiskFingerprint>>` という二重 Option で同じ三状態を表していたが、
@@ -449,27 +453,6 @@ where
             external_change_merged,
         },
     }
-}
-
-#[tauri::command]
-pub async fn team_history_list(project_root: String) -> Vec<TeamHistoryEntry> {
-    // Issue #739: 旧 LOCK / CACHE / DISK_FINGERPRINT の 3 段ロックを STORE 1 ロックに統合。
-    let mut store = STORE.lock().await;
-    ensure_loaded(&mut store).await;
-    // Issue #642: list でも fingerprint を見て外部変更があれば disk を再読込。renderer が
-    // ユーザー手編集後に list を再取得したときに古い in-memory cache を返さないようにする。
-    // list には書き込み対象 id が無いため `incoming_ids` は空集合 (= 全 entry を disk 側で
-    // 上書き可能) として扱う。
-    let path = store_path();
-    let TeamHistoryStore { cache, sync_state } = &mut *store;
-    let all = cache.as_mut().expect("ensured");
-    let _ = reconcile_external_changes(&path, all, sync_state, &HashSet::new()).await;
-    // Issue #32: 比較は normalize 後の値で行う
-    let target = normalize_project_root(&project_root);
-    all.iter()
-        .filter(|e| normalize_project_root(&e.project_root) == target)
-        .cloned()
-        .collect()
 }
 
 /// Issue #132 共通ヘルパ: 1 つの新エントリを cache に merge して MAX 件まで圧縮する。
