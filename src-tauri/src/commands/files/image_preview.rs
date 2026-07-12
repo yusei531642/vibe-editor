@@ -33,6 +33,9 @@ fn image_mime_type(path: &std::path::Path) -> Option<&'static str> {
     }
 }
 
+// command-result-exempt: files_* 系の非 Result 契約 (renderer は ok/error 構造体を直接受ける,
+// files.rs 冒頭コメント参照) に揃える。preview 失敗は placeholder 表示に落とすだけで
+// CommandError の構造化 code を必要としない。
 #[tauri::command]
 pub async fn files_read_image(
     app: AppHandle,

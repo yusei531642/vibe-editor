@@ -305,6 +305,8 @@ pub async fn restore_active_project_root(app: &AppHandle) {
 
 /// renderer初期化時の同期点。setup時の非同期restoreと競合しても、git/sessionsを発火する前に
 /// native ledgerの復元完了を待てるようにする。
+// command-result-exempt: restore 失敗は restore_active_project_root 内で warn ログへ落とし
+// 空文字を返す設計。renderer には error を届けず「未選択状態」として扱わせる。
 #[tauri::command]
 pub async fn app_restore_authorized_project_root(app: AppHandle) -> String {
     restore_active_project_root(&app).await;
