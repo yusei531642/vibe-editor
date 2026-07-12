@@ -14,6 +14,25 @@ fn active_slot(path: Option<&std::path::Path>) -> ArcSwapOption<String> {
     ArcSwapOption::from(path.map(|path| Arc::new(path.to_string_lossy().into_owned())))
 }
 
+async fn team_history_list_via_native_identity<R, Reader, Fut>(
+    slot: &ArcSwapOption<String>,
+    requested: String,
+    reader: Reader,
+) -> crate::commands::error::CommandResult<R>
+where
+    Reader: FnOnce(String) -> Fut,
+    Fut: std::future::Future<Output = R>,
+{
+    let identity = match crate::state::current_project_root(slot) {
+        Some(root) => crate::commands::project_authority::capture_identity(root)
+            .await
+            .ok(),
+        None => None,
+    };
+    let identity_slot = ArcSwapOption::from(identity.map(Arc::new));
+    team_history_list_via(slot, &identity_slot, requested, reader).await
+}
+
 fn entry(id: &str, project_root: &str) -> TeamHistoryEntry {
     TeamHistoryEntry {
         id: id.to_string(),
@@ -34,7 +53,7 @@ async fn assert_authz_rejection_skips_store_reader(
     requested: String,
 ) {
     let called = AtomicBool::new(false);
-    let result = team_history_list_via(slot, requested, |_target| async {
+    let result = team_history_list_via_native_identity(slot, requested, |_target| async {
         called.store(true, Ordering::SeqCst);
         vec![entry("must-not-run", "/foreign")]
     })
@@ -55,9 +74,13 @@ async fn team_history_list_active_root_returns_reader_result() {
     let active = tempdir().unwrap();
     let active_raw = active.path().to_string_lossy().into_owned();
     let slot = active_slot(Some(active.path()));
-    let result = team_history_list_via(&slot, active_raw.clone(), move |target| async move {
+    let result = team_history_list_via_native_identity(
+        &slot,
+        active_raw.clone(),
+        move |target| async move {
         filter_team_history_entries(&target, &[entry("active", &active_raw)])
-    })
+        },
+    )
     .await
     .unwrap();
     assert_eq!(result.len(), 1);
@@ -101,7 +124,7 @@ async fn team_history_list_canonical_alias_returns_active_entry() {
     let alias_raw = active.path().join(".").to_string_lossy().into_owned();
     let slot = active_slot(Some(active.path()));
 
-    let result = team_history_list_via(&slot, alias_raw, move |target| async move {
+    let result = team_history_list_via_native_identity(&slot, alias_raw, move |target| async move {
         filter_team_history_entries(
             &target,
             &[
@@ -134,7 +157,7 @@ async fn team_history_list_symlink_retarget_keeps_gate_time_identity() {
     let active_raw = requested.clone();
     let slot = active_slot(Some(&active_link));
 
-    let result = team_history_list_via(&slot, requested, move |target| async move {
+    let result = team_history_list_via_native_identity(&slot, requested, move |target| async move {
         std::fs::remove_file(&active_link).unwrap();
         symlink(&foreign, &active_link).unwrap();
         filter_team_history_entries(
@@ -168,7 +191,10 @@ async fn team_history_list_requested_alias_uses_active_raw_snapshot_key() {
     let alias_raw = requested_alias.to_string_lossy().into_owned();
     let slot = active_slot(Some(&active));
 
-    let result = team_history_list_via(&slot, alias_raw.clone(), move |target| async move {
+    let result = team_history_list_via_native_identity(
+        &slot,
+        alias_raw.clone(),
+        move |target| async move {
         assert_eq!(target, active_raw);
         filter_team_history_entries(
             &target,
@@ -177,7 +203,8 @@ async fn team_history_list_requested_alias_uses_active_raw_snapshot_key() {
                 entry("alias-must-not-select", &alias_raw),
             ],
         )
-    })
+        },
+    )
     .await
     .unwrap();
 
@@ -203,7 +230,7 @@ async fn team_history_list_retargeted_foreign_symlink_entry_is_not_disclosed() {
     let historical_raw = historical_link.to_string_lossy().into_owned();
     let slot = active_slot(Some(&active));
 
-    let result = team_history_list_via(
+    let result = team_history_list_via_native_identity(
         &slot,
         active.to_string_lossy().into_owned(),
         move |target| async move {

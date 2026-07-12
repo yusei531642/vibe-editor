@@ -33,7 +33,10 @@ function installApi(): void {
   (window as TestWindow).api = {
     settings: {
       load: vi.fn(async () => DEFAULT_SETTINGS),
-      save: vi.fn(async () => undefined)
+      save: vi.fn(async () => undefined),
+      pickCustomMascot: vi.fn(async () => null),
+      loadCustomMascot: vi.fn(async () => null),
+      clearCustomMascot: vi.fn(async () => undefined)
     },
     app: {
       setProjectRoot: vi.fn(async () => undefined),

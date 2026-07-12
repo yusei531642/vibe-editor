@@ -8,6 +8,7 @@ import {
   type ApiAgentMessage
 } from '../../../../../types/shared';
 import { useSettings } from '../../../lib/settings-context';
+import { useProject } from '../../../lib/app-state-context';
 import { useCanvasStore, NODE_MIN_H, NODE_MIN_W, type CardDataOf } from '../../../stores/canvas';
 import { useT } from '../../../lib/i18n';
 
@@ -77,7 +78,7 @@ function ApiAgentChatCardImpl({
   const configured = !!apiAgent && !!sessionId;
 
   // 起動バナー (実データから生成)。Agent / Model / Provider / Workspace / Mode / Tools。
-  const workspace = settings.lastOpenedRoot || settings.claudeCwd || '';
+  const { projectRoot: workspace } = useProject();
   const bannerText = useMemo(() => {
     if (!apiAgent) return '';
     const toolMode = apiAgent.toolMode ?? (provider?.supportsTools ? 'auto' : 'readOnly');

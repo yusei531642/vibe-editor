@@ -20,7 +20,12 @@ async fn assert_project_root_via(
     project_root: &str,
 ) -> crate::commands::error::CommandResult<ProjectRoot> {
     let state = app.state::<crate::state::AppState>();
-    crate::commands::authz::assert_active_project_root(&state.project_root, project_root).await
+    crate::commands::authz::assert_active_project_root(
+        &state.project_root,
+        &state.project_root_identity,
+        project_root,
+    )
+    .await
 }
 
 /// Windows で GUI アプリ (Tauri) からコンソールプロセス (git.exe) を起動すると、

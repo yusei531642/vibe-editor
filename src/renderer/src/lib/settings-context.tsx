@@ -183,22 +183,9 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
     applyDensity(settingsState.density);
   }, [settingsState.density]);
 
-  const lastSyncedRootRef = useRef<string>('');
-  useEffect(() => {
-    const effectiveRoot = (settingsState.lastOpenedRoot || '').trim();
-    if (effectiveRoot === lastSyncedRootRef.current) return;
-    lastSyncedRootRef.current = effectiveRoot;
-    void window.api.app.setProjectRoot(effectiveRoot).catch((err) => {
-      // Issue #490: console.warn だと開発者しか気付けないため Toast に昇格。
-      // SettingsProvider は ToastProvider の親なので bridge 経由で通知する。
-      bridgedToast(
-        translate(settingsRef.current.language ?? 'ja', 'toast.settings.projectRootFailed', {
-          error: String(err)
-        }),
-        { tone: 'error' }
-      );
-    });
-  }, [settingsState.lastOpenedRoot]);
+  // Issue #1193: lastOpenedRoot はrendererが保存する表示・recent用の設定であり、backendの
+  // active project rootを切り替えるauthorityには使わない。rootの有効化はnative pickerを
+  // 内包するRust commandだけが実施する。
 
   const update = useCallback(
     async (patch: Partial<AppSettings>) => {

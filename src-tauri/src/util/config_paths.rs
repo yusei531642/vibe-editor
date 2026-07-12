@@ -26,6 +26,21 @@ pub fn settings_path() -> PathBuf {
     vibe_root().join("settings.json")
 }
 
+/// Issue #1193 (Security): renderer が書き換えられる settings.json とは分離した、
+/// ネイティブ選択済みプロジェクト root の認可記録。
+///
+/// このファイルは Rust 側の native picker / 明示的な revoke 経路だけが更新する。
+/// `lastOpenedRoot` や `workspaceFolders` は表示用ヒントであり、本ファイルの代替にはならない。
+pub fn project_authority_path() -> PathBuf {
+    vibe_root().join("project-authority.json")
+}
+
+/// Issue #1193: native picker で選んだ custom mascot のprivate copy。
+/// renderer設定のraw pathをasset scopeへ追加せずに表示するためのSSOT。
+pub fn custom_mascot_path() -> PathBuf {
+    vibe_root().join("custom-mascot.json")
+}
+
 /// ログ出力先ディレクトリ `~/.vibe-editor/logs`。
 pub fn logs_dir() -> PathBuf {
     vibe_root().join("logs")

@@ -33,7 +33,7 @@ export interface TerminalTab {
   freshSessionId: boolean;
   /**
    * Issue #662: 起動時に PTY に渡す cwd (絶対パス)。永続化復元用。
-   * null なら App.tsx 側 fallback (`settings.claudeCwd ?? projectRoot`) を使う。
+   * null なら AppShell 側でnative authority由来のprojectRootを使う。
    */
   cwd: string | null;
   /**
@@ -76,7 +76,7 @@ export interface AddTerminalTabOptions {
   customLabel?: string | null;
   /**
    * Issue #662: 永続化復元時に PTY 起動 cwd として渡す絶対パス。
-   * 未指定なら App.tsx 側 fallback (`settings.claudeCwd ?? projectRoot`) を使う。
+   * 未指定なら AppShell 側でnative authority由来のprojectRootを使う。
    */
   cwd?: string | null;
   /**

@@ -2,7 +2,7 @@
 // イベントで通知する。renderer 側は git status / file tree をリフレッシュできる。
 //
 // 設計:
-//   - app_set_project_root で project_root が変わるたびに watcher を再起動
+//   - native project authority がproject_rootを切り替えるたびに watcher を再起動
 //   - notify crate の RecommendedWatcher で project_root/ 配下を手動で非再帰監視
 //   - イベントは 300ms trailing debounce: 最後のイベント着信から 300ms 経ってから emit
 //     (Issue #105: 旧実装は leading debounce で最初のイベントしか拾えず、保存処理の
@@ -104,8 +104,8 @@ fn watch_created_dirs(watcher: &mut RecommendedWatcher, event: &Event, root: &Pa
 /// ユーザーの「プロジェクト」として自然なディレクトリだけを許可し、
 /// ルートドライブ / ホーム直下 / 明らかなシステム領域は拒否する。
 ///
-/// Issue #639: app_set_project_root も同水準の検証を行うため `pub(crate)` で公開する。
-/// 「fs_watch 用」と「project_root setter 用」で同じ judgement (canonicalize / system
+/// Issue #1193: native project authorityも同水準の検証を行うため `pub(crate)` で公開する。
+/// 「fs_watch 用」と「native project activation 用」で同じ judgement (canonicalize / system
 /// 領域 denylist / home 直下拒否) を共有することで、TOCTOU で project_root が system 領域に
 /// 切り替わって後続 IPC (git_*, fs_watch::start_for_root, file 読み書き) が信頼できない
 /// 場所で発火するのを防ぐ defense-in-depth とする。
@@ -123,6 +123,15 @@ pub(crate) fn is_safe_watch_root(root: &Path) -> bool {
     if let Some(home) = dirs::home_dir() {
         let home_canon = home.canonicalize().unwrap_or(home);
         if canon == home_canon {
+            return false;
+        }
+    }
+
+    // Issue #1193: private authority ledger / settings / TeamHub state を含む
+    // `~/.vibe-editor` 自体（またはその祖先・子孫）をprojectにすると、認可済みfiles IPCから
+    // ledgerを書き換えてnative approvalを偽造できる。通常projectはsiblingなので影響しない。
+    if let Ok(private_root) = crate::util::config_paths::vibe_root().canonicalize() {
+        if canon.starts_with(&private_root) || private_root.starts_with(&canon) {
             return false;
         }
     }
@@ -218,6 +227,16 @@ fn rollback_active_if_current(generation: u64, root: &str) {
     if g.0 == generation && g.1.as_deref() == Some(root) {
         g.1 = None;
     }
+}
+
+/// 現在の watcher を無効化する。root を空文字へ切り替えるだけでは旧 watcher が残るため、
+/// project authority を clear するときは必ず generation を進めて thread を終了させる。
+pub fn stop_active_watcher() {
+    let Ok(mut g) = ACTIVE_WATCHER_GEN.lock() else {
+        return;
+    };
+    g.0 = g.0.wrapping_add(1);
+    g.1 = None;
 }
 
 /// `root` 配下を監視開始する。既に別 root で動いていたら停止する。
@@ -353,7 +372,7 @@ pub fn start_for_root(app: AppHandle, root: String) {
 mod tests {
     use super::{
         claim_active_for_root, current_active, file_name_is_ignored, is_safe_watch_root,
-        path_is_ignored, rollback_active_if_current, ACTIVE_WATCHER_GEN,
+        path_is_ignored, rollback_active_if_current, stop_active_watcher, ACTIVE_WATCHER_GEN,
     };
     use once_cell::sync::Lazy;
     use std::ffi::OsStr;
@@ -459,6 +478,18 @@ mod tests {
             current_active(),
             (new_generation, Some(new_root.to_string()))
         );
+        reset_active_for_test();
+    }
+
+    #[test]
+    fn stopping_active_watcher_invalidates_the_current_generation() {
+        let _guard = ACTIVE_WATCHER_TEST_LOCK.lock().unwrap();
+        reset_active_for_test();
+        let generation = claim_active_for_root("/tmp/vibe-editor-watch-root").unwrap();
+        stop_active_watcher();
+        let (current_generation, root) = current_active();
+        assert!(current_generation > generation);
+        assert!(root.is_none());
         reset_active_for_test();
     }
 }

@@ -101,10 +101,13 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps): JSX.Ele
   }, [step]);
 
   const chooseFolder = useCallback(async () => {
-    if (!window.api?.dialog) return;
+    if (!window.api?.app) return;
     setFolderBusy(true);
     try {
-      const picked = await window.api.dialog.openFolder(t('onboarding.workspace.choose'));
+      // Issue #1193: この選択とactive rootへの昇格を同一native IPCで完結する。
+      const picked = await window.api.app.pickAndActivateProjectRoot(
+        t('onboarding.workspace.choose')
+      );
       if (picked) setDraftFolder(picked);
     } finally {
       setFolderBusy(false);

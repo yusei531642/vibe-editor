@@ -63,7 +63,6 @@ export function useProjectLoader(
 ): UseProjectLoaderResult {
   const settingsLoading = useSettingsLoading();
   const { update: updateSettings } = useSettingsActions();
-  const claudeCwd = useSettingsValue('claudeCwd');
   const lastOpenedRoot = useSettingsValue('lastOpenedRoot');
   const recentProjects = useSettingsValue('recentProjects');
   const hasCompletedOnboarding = useSettingsValue('hasCompletedOnboarding');
@@ -84,21 +83,8 @@ export function useProjectLoader(
       root: string,
       options: { addToRecent?: boolean } = { addToRecent: true }
     ): Promise<boolean> => {
-      if (projectRoot && projectRoot !== root && !(await optsRef.current.confirmDiscardEditorTabs())) {
-        return false;
-      }
-      // Issue #954: backend の active project_root を先に確定させる。git_status / files_list
-      // 等の read 系 IPC は active root とのゲート照合 (#932 の read 側拡張) を通るため、
-      // 確定前に fetch を発火すると transient reject でパネルが空振りする。
-      // setProjectRoot は fs_watch 付け替え / asset scope 許可も担う既存 IPC で冪等
-      // (settings-context 側の同期 effect が後から同じ root で呼んでも無害)。
-      // 失敗 (system 領域 reject 等) 時はロード自体を中止してステータスに表示する。
-      try {
-        await window.api.app.setProjectRoot(root);
-      } catch (err) {
-        useUiStore.getState().setStatus(t('project.loadError', { error: String(err) }));
-        return false;
-      }
+      // Issue #1193: root はこの関数の前にnative picker commandがRust側でactive化済み。
+      // rendererのraw pathはauthorityにならず、以後のgit/files IPCもbackend gateで照合される。
       setProjectRoot(root);
       useUiStore.getState().setStatus(t('project.loading'));
       setGitLoading(true);
@@ -136,6 +122,12 @@ export function useProjectLoader(
         }
         return true;
       } catch (err) {
+        // native pickerはbackend authorityを先に切り替える。後続の初期化に失敗したまま
+        // 旧UIを残すとbackend/UIが別projectを指すため、active rootをfail-closedで解除する。
+        await window.api.app.clearActiveProjectRoot().catch(() => undefined);
+        setProjectRoot('');
+        setGitStatus(null);
+        optsRef.current.onProjectSwitched('');
         useUiStore.getState().setStatus(t('project.loadError', { error: String(err) }));
         return false;
       } finally {
@@ -143,6 +135,21 @@ export function useProjectLoader(
       }
     },
     [projectRoot, mcpAutoSetup, recentProjects, updateSettings, t]
+  );
+
+  const pickAndLoadProject = useCallback(
+    async (
+      title: string,
+      options: { addToRecent?: boolean } = { addToRecent: true }
+    ): Promise<boolean> => {
+      // native pickerのcancel前に未保存タブを守る。picker成功後にbackend authorityが切り替わるため、
+      // 確認は先に済ませる。
+      if (projectRoot && !(await optsRef.current.confirmDiscardEditorTabs())) return false;
+      const root = await window.api.app.pickAndActivateProjectRoot(title);
+      if (!root) return false;
+      return loadProject(root, options);
+    },
+    [loadProject, projectRoot]
   );
 
   // 初回ロード — lastOpenedRoot (前回開いたルート) があれば復元、なければフォルダ選択ダイアログ。
@@ -158,28 +165,13 @@ export function useProjectLoader(
     let cancelled = false;
     (async () => {
       try {
-        // 既存ユーザーの移行: lastOpenedRoot が空で claudeCwd が設定されている場合は
-        // かつての挙動 (claudeCwd = 最後に開いたルート) を尊重して再利用する。
-        // ただし claudeCwd は CLI 既定 cwd でもあり、home 直下など project root として
-        // 不正な値を持ちうる。拒否された remembered root は起動ブロッカーにせず、
-        // 明示的なフォルダ選択へフォールバックする。
-        const remembered = (lastOpenedRoot || claudeCwd || '').trim();
-        let root = remembered;
-        let rootIsActive = false;
-        if (root) {
-          try {
-            await window.api.app.setProjectRoot(root);
-            rootIsActive = true;
-          } catch (err) {
-            if (root === lastOpenedRoot) {
-              void updateSettings({ lastOpenedRoot: '' });
-            }
-            useUiStore.getState().setStatus(t('project.initError', { error: String(err) }));
-            root = '';
-          }
-        }
+        // Issue #1193: settings.lastOpenedRoot / claudeCwd はrendererが更新できるため、
+        // 起動時のauthorityに使わない。Rustのprivate ledgerが復元したactive rootだけを使う。
+        let root = await window.api.app.restoreAuthorizedProjectRoot();
         if (!root) {
-          const picked = await window.api.dialog.openFolder(t('appMenu.openFolderDialogTitle'));
+          const picked = await window.api.app.pickAndActivateProjectRoot(
+            t('appMenu.openFolderDialogTitle')
+          );
           if (cancelled) return;
           if (!picked) {
             // ユーザーがキャンセルした場合は projectRoot 未設定のまま空状態を維持。
@@ -189,20 +181,6 @@ export function useProjectLoader(
             return;
           }
           root = picked;
-        }
-        if (cancelled) return;
-        // Issue #954 (PR #962 auto-review): 起動復元パスも loadProject と同様に backend の
-        // active project_root を await で確定させてから git/sessions の fetch を発火する。
-        // ゲート (#932 read 側拡張) は active root 未設定時に reject するため、これが無いと
-        // 起動時の git パネルが transient reject で空振りする。
-        if (!rootIsActive) {
-          try {
-            await window.api.app.setProjectRoot(root);
-          } catch (err) {
-            useUiStore.getState().setStatus(t('project.initError', { error: String(err) }));
-            setGitLoading(false);
-            return;
-          }
         }
         if (cancelled) return;
         setProjectRoot(root);
@@ -227,6 +205,10 @@ export function useProjectLoader(
         optsRef.current.onLoaded({ gitStatus: gs, sessions: sess });
         useUiStore.getState().setStatus(root.split(/[\\/]/).pop() ?? root);
       } catch (err) {
+        await window.api.app.clearActiveProjectRoot().catch(() => undefined);
+        setProjectRoot('');
+        setGitStatus(null);
+        optsRef.current.onProjectSwitched('');
         useUiStore.getState().setStatus(t('project.initError', { error: String(err) }));
         setGitLoading(false);
       }
@@ -268,11 +250,19 @@ export function useProjectLoader(
   );
 
   const handleNewProject = useCallback(async () => {
-    const folder = await window.api.dialog.openFolder(
+    if (projectRoot && !(await optsRef.current.confirmDiscardEditorTabs())) return;
+    const folder = await window.api.app.pickAndActivateProjectRoot(
       t('project.newDialogTitle')
     );
     if (!folder) return;
-    const empty = await window.api.dialog.isFolderEmpty(folder);
+    let empty: boolean;
+    try {
+      empty = await window.api.dialog.isFolderEmpty(folder);
+    } catch (err) {
+      await window.api.app.clearActiveProjectRoot().catch(() => undefined);
+      useUiStore.getState().setStatus(t('project.loadError', { error: String(err) }));
+      return;
+    }
     const loaded = await loadProject(folder);
     if (!loaded) return;
     if (!empty) {
@@ -282,32 +272,38 @@ export function useProjectLoader(
     } else {
       optsRef.current.showToast(t('project.created'), { tone: 'success' });
     }
-  }, [loadProject, t]);
+  }, [loadProject, projectRoot, t]);
 
   const handleOpenFolder = useCallback(async () => {
-    const folder = await window.api.dialog.openFolder(t('project.openExistingDialogTitle'));
-    if (!folder) return;
-    await loadProject(folder);
-  }, [loadProject, t]);
+    await pickAndLoadProject(t('project.openExistingDialogTitle'));
+  }, [pickAndLoadProject, t]);
 
   const handleOpenFile = useCallback(async () => {
-    const file = await window.api.dialog.openFile(t('appMenu.openFileDialogTitle'));
-    if (!file) return;
-    const parent = file.replace(/[\\/][^\\/]+$/, '');
-    const loaded = await loadProject(parent);
+    if (projectRoot && !(await optsRef.current.confirmDiscardEditorTabs())) return;
+    const picked = await window.api.app.pickFileAndActivateProjectRoot(
+      t('appMenu.openFileDialogTitle')
+    );
+    if (!picked) return;
+    const loaded = await loadProject(picked.projectRoot);
     if (loaded) {
       optsRef.current.showToast(
-        t('project.fileParentLoaded', { file }),
+        t('project.fileParentLoaded', { file: picked.filePath }),
         { tone: 'info' }
       );
     }
-  }, [loadProject, t]);
+  }, [loadProject, projectRoot, t]);
 
   const handleOpenRecent = useCallback(
     async (path: string) => {
-      await loadProject(path);
+      // recentProjects は表示用の履歴であり、raw pathを再有効化する能力ではない。
+      if (projectRoot && !(await optsRef.current.confirmDiscardEditorTabs())) return;
+      const root = await window.api.app.reconfirmProjectRoot(
+        path,
+        t('project.openExistingDialogTitle')
+      );
+      if (root) await loadProject(root);
     },
-    [loadProject]
+    [loadProject, projectRoot, t]
   );
 
   const handleClearRecent = useCallback(() => {
@@ -318,7 +314,7 @@ export function useProjectLoader(
   }, [updateSettings, t]);
 
   const handleAddWorkspaceFolder = useCallback(async () => {
-    const folder = await window.api.dialog.openFolder(
+    const folder = await window.api.app.pickWorkspaceRoot(
       t('appMenu.addWorkspaceDialogTitle')
     );
     if (!folder) return;
@@ -363,10 +359,15 @@ export function useProjectLoader(
         const nextPrimary = current.find((p) => p !== path) ?? '';
         const nextWorkspaceFolders = current.filter((p) => p !== path && p !== nextPrimary);
         if (nextPrimary) {
-          const loaded = await loadProject(nextPrimary);
+          const activated = await window.api.app.activateAuthorizedWorkspaceRoot(nextPrimary);
+          const loaded = await loadProject(activated);
           if (!loaded) return;
-          await updateSettings({ workspaceFolders: nextWorkspaceFolders });
+          await updateSettings({
+            lastOpenedRoot: activated,
+            workspaceFolders: nextWorkspaceFolders
+          });
         } else {
+          await window.api.app.clearActiveProjectRoot();
           setProjectRoot('');
           setGitStatus(null);
           setGitLoading(false);
@@ -378,6 +379,7 @@ export function useProjectLoader(
           });
         }
       } else {
+        await window.api.app.revokeWorkspaceRoot(path);
         await updateSettings({ workspaceFolders: current.filter((p) => p !== path) });
       }
       optsRef.current.showToast(t('workspace.removed', { name }), { tone: 'info' });

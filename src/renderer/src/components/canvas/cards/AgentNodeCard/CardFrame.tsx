@@ -73,6 +73,7 @@ import { CardPresentation } from './CardPresentation';
 import { CardHandoff } from './CardHandoff';
 import { CardInject } from './CardInject';
 import { CardSummary, type CardSummaryHealth } from './CardSummary';
+import { useProject } from '../../../../lib/app-state-context';
 
 // Issue #732: `NodeProps` を `Node<CardDataOf<'agent'>>` で具体化することで
 // `data.payload` が `AgentPayload` として読め、`unknown` からの inline cast が不要になる。
@@ -82,6 +83,7 @@ function AgentNodeCardImpl({
 }: NodeProps<Node<CardDataOf<'agent'>>>): JSX.Element {
   const termRef = useRef<TerminalViewHandle | null>(null);
   const { settings } = useSettings();
+  const { projectRoot } = useProject();
   const t = useT();
   const confirmRemoveCard = useConfirmRemoveCard();
   const setCardPayload = useCanvasStore((s) => s.setCardPayload);
@@ -134,10 +136,10 @@ function AgentNodeCardImpl({
 
   // Issue #23 + カスタムエージェント対応:
   // agent-resolver 経由で built-in (claude/codex) + customAgents のコマンド/引数/cwd を解決する。
-  // lastOpenedRoot を最優先とし、エージェント固有 cwd があればそれを fallback として使う。
-  // payload.command / payload.cwd が先に指定されていればそちらを優先 (legacy 互換)。
+  // native authority と同期した active root だけを cwd に使う。settings / persisted payload の
+  // raw path は侵害 renderer が書き換えられるため authority にしない。
   const resolved = resolveAgentConfig(payload.agent ?? 'claude', settings);
-  const cwd = settings.lastOpenedRoot || resolved.cwd || payload.cwd || '';
+  const cwd = projectRoot;
   const command = payload.command ?? resolved.command;
 
   // ----- チームのシステムプロンプトを構築 -----

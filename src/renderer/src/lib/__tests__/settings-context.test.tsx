@@ -31,7 +31,6 @@ interface MockApi {
     save: ReturnType<typeof vi.fn>;
   };
   app: {
-    setProjectRoot: ReturnType<typeof vi.fn>;
     setZoomLevel: ReturnType<typeof vi.fn>;
   };
 }
@@ -47,7 +46,6 @@ function installApi(
       save: vi.fn(saveImpl ?? (async () => undefined))
     },
     app: {
-      setProjectRoot: vi.fn(async () => undefined),
       setZoomLevel: vi.fn(async () => undefined)
     }
   };
@@ -90,7 +88,7 @@ describe('settings-context', () => {
     expect(result.current.settings.editorFontSize).toBe(16);
   });
 
-  it('lastOpenedRoot が空なら claudeCwd を project root として同期しない', async () => {
+  it('settings の root候補は backend authority を変更しない', async () => {
     const api = installApi({
       claudeCwd: 'C:\\Users\\zooyo',
       lastOpenedRoot: ''
@@ -99,26 +97,8 @@ describe('settings-context', () => {
     const { result } = renderHook(() => useSettings(), { wrapper: Wrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    await new Promise((resolve) => window.setTimeout(resolve, 0));
-
-    expect(api.app.setProjectRoot).not.toHaveBeenCalled();
-  });
-
-  it('lastOpenedRoot だけを backend project root として同期する', async () => {
-    const api = installApi({
-      claudeCwd: 'C:\\Users\\zooyo',
-      lastOpenedRoot: 'C:\\Users\\zooyo\\Documents\\GitHub\\vibe-editor'
-    });
-
-    const { result } = renderHook(() => useSettings(), { wrapper: Wrapper });
-
-    await waitFor(() =>
-      expect(api.app.setProjectRoot).toHaveBeenCalledWith(
-        'C:\\Users\\zooyo\\Documents\\GitHub\\vibe-editor'
-      )
-    );
-    expect(result.current.loading).toBe(false);
-    expect(api.app.setProjectRoot).toHaveBeenCalledTimes(1);
+    expect(result.current.settings.claudeCwd).toBe('C:\\Users\\zooyo');
+    expect(api.app).not.toHaveProperty('setProjectRoot');
   });
 
   it('update() 後 200ms の debounce 経過で window.api.settings.save() が呼ばれる', async () => {

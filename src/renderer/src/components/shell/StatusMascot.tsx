@@ -1,5 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { memo, useEffect, useState } from 'react';
 import type { StatusMascotVariant } from '../../../../types/shared';
 import type { StatusMascotState } from '../../lib/status-mascot';
 import { isTauri } from '../../lib/tauri-api';
@@ -9,8 +8,8 @@ interface StatusMascotProps {
   label: string;
   variant?: StatusMascotVariant;
   /**
-   * variant === 'custom' のとき表示するユーザー画像の絶対パス。
-   * convertFileSrc() で asset URL に変換して <img> で描画する。
+   * variant === 'custom' のときprivate storeを再読込するための表示用変更キー。
+   * path自体は画像読み出しauthorityに使わない。
    */
   customPath?: string;
   /**
@@ -186,25 +185,32 @@ interface CustomMascotImageProps {
 }
 
 /**
- * ユーザー画像 (variant='custom') を `asset://` 経由で <img> 描画する。
+ * ユーザー画像 (variant='custom') をprivate store由来のdata URLで <img> 描画する。
  * 失敗時 / dev:vite 時 / 未指定時は組み込み SVG のプレースホルダにフォールバック。
  */
 function CustomMascotImage({ customPath, label }: CustomMascotImageProps): JSX.Element {
   const tauri = isTauri();
   const [errored, setErrored] = useState(false);
-  const src = useMemo(() => {
-    if (!tauri || !customPath) return '';
-    try {
-      return convertFileSrc(customPath);
-    } catch {
-      return '';
-    }
-  }, [tauri, customPath]);
+  const [src, setSrc] = useState('');
   // 壊れた画像で onError 後に customPath を別画像へ差し替えても、errored=true のままだと
   // <img> がマウントされず placeholder にロックされる。path 切替時にリセットする。
   useEffect(() => {
     setErrored(false);
-  }, [customPath]);
+    setSrc('');
+    if (!tauri || !customPath) return;
+    let cancelled = false;
+    void window.api.settings
+      .loadCustomMascot()
+      .then((dataUrl) => {
+        if (!cancelled) setSrc(dataUrl ?? '');
+      })
+      .catch(() => {
+        if (!cancelled) setErrored(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [customPath, tauri]);
 
   if (!src || errored) {
     return <CustomMascotPlaceholder />;

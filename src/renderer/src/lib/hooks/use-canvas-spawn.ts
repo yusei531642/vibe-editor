@@ -208,7 +208,7 @@ export function useCanvasSpawn({ projectRoot, stagger }: UseCanvasSpawnOptions):
             agentConfigId: agent.id,
             command: agent.command || undefined,
             args: agent.args ? customArgs.args : undefined,
-            cwd: agent.cwd || cwd,
+            cwd,
             roleProfileId: 'leader',
             role: 'leader',
             teamId,

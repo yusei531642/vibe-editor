@@ -445,7 +445,12 @@ pub async fn team_state_read(
     project_root: String,
     team_id: String,
 ) -> crate::commands::error::CommandResult<Option<TeamOrchestrationState>> {
-    crate::commands::authz::assert_active_project_root(&state.project_root, &project_root).await?;
+    crate::commands::authz::assert_active_project_root(
+        &state.project_root,
+        &state.project_root_identity,
+        &project_root,
+    )
+    .await?;
     Ok(load_orchestration_state(&project_root, &team_id).await)
 }
 
@@ -513,11 +518,7 @@ mod tests {
         let mut out = Vec::new();
         let mut rd = fs::read_dir(dir).await.unwrap();
         while let Ok(Some(entry)) = rd.next_entry().await {
-            if entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(&prefix)
-            {
+            if entry.file_name().to_string_lossy().starts_with(&prefix) {
                 out.push(entry.path());
             }
         }
@@ -580,7 +581,9 @@ mod tests {
         // #853: 原本 path は退避処理に一切触られず残置される (並行 save の valid file を
         // 追い出す余地が無い)。
         assert_eq!(
-            fs::read(&path).await.expect("original must remain in place"),
+            fs::read(&path)
+                .await
+                .expect("original must remain in place"),
             corrupt
         );
 

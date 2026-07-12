@@ -1,4 +1,4 @@
-import { cleanup, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSettings } from '../../../../../types/shared';
 
@@ -51,7 +51,13 @@ type TestWindow = Window &
 
 interface MockApi {
   app: {
-    setProjectRoot: ReturnType<typeof vi.fn>;
+    restoreAuthorizedProjectRoot: ReturnType<typeof vi.fn>;
+    pickAndActivateProjectRoot: ReturnType<typeof vi.fn>;
+    reconfirmProjectRoot: ReturnType<typeof vi.fn>;
+    pickFileAndActivateProjectRoot: ReturnType<typeof vi.fn>;
+    clearActiveProjectRoot: ReturnType<typeof vi.fn>;
+    pickWorkspaceRoot: ReturnType<typeof vi.fn>;
+    revokeWorkspaceRoot: ReturnType<typeof vi.fn>;
     setupTeamMcp: ReturnType<typeof vi.fn>;
     setWindowTitle: ReturnType<typeof vi.fn>;
   };
@@ -71,7 +77,13 @@ interface MockApi {
 function installApi(): MockApi {
   const api: MockApi = {
     app: {
-      setProjectRoot: vi.fn(async () => undefined),
+      restoreAuthorizedProjectRoot: vi.fn(async () => ''),
+      pickAndActivateProjectRoot: vi.fn(async () => null),
+      reconfirmProjectRoot: vi.fn(async () => null),
+      pickFileAndActivateProjectRoot: vi.fn(async () => null),
+      clearActiveProjectRoot: vi.fn(async () => undefined),
+      pickWorkspaceRoot: vi.fn(async () => null),
+      revokeWorkspaceRoot: vi.fn(async () => undefined),
       setupTeamMcp: vi.fn(async () => undefined),
       setWindowTitle: vi.fn(async () => undefined)
     },
@@ -129,17 +141,14 @@ describe('useProjectLoader', () => {
     vi.restoreAllMocks();
   });
 
-  it('保存済み root が拒否されたらフォルダ選択へフォールバックする', async () => {
+  it('保存済み root はauthorityに使わず、native pickerの結果だけを起動する', async () => {
     const invalidRoot = 'C:\\Users\\zooyo';
     const pickedRoot =
       'C:\\Users\\zooyo\\Documents\\GitHub\\DX\\digital-management-consulting-app';
     mocks.settingsValues.lastOpenedRoot = invalidRoot;
     mocks.settingsValues.claudeCwd = invalidRoot;
     const api = installApi();
-    api.app.setProjectRoot
-      .mockRejectedValueOnce(new Error('project_root rejected by safety check'))
-      .mockResolvedValueOnce(undefined);
-    api.dialog.openFolder.mockResolvedValueOnce(pickedRoot);
+    api.app.pickAndActivateProjectRoot.mockResolvedValueOnce(pickedRoot);
     const onLoaded = vi.fn();
     const onProjectSwitched = vi.fn();
 
@@ -147,14 +156,11 @@ describe('useProjectLoader', () => {
       useProjectLoader(options({ onLoaded, onProjectSwitched }))
     );
 
-    await waitFor(() => expect(api.dialog.openFolder).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.app.pickAndActivateProjectRoot).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(api.git.status).toHaveBeenCalledWith(pickedRoot));
 
-    expect(api.app.setProjectRoot.mock.calls.map(([root]) => root)).toEqual([
-      invalidRoot,
-      pickedRoot
-    ]);
-    expect(mocks.updateSettings).toHaveBeenCalledWith({ lastOpenedRoot: '' });
+    expect(api.app.restoreAuthorizedProjectRoot).toHaveBeenCalledTimes(1);
+    expect(api.app.pickAndActivateProjectRoot).toHaveBeenCalledWith('appMenu.openFolderDialogTitle');
     expect(mocks.updateSettings).toHaveBeenCalledWith({ lastOpenedRoot: pickedRoot });
     expect(result.current.projectRoot).toBe(pickedRoot);
     expect(onLoaded).toHaveBeenCalledWith({
@@ -162,5 +168,24 @@ describe('useProjectLoader', () => {
       sessions: []
     });
     expect(onProjectSwitched).not.toHaveBeenCalled();
+  });
+
+  it('recent pathはnative pickerの初期位置にだけ渡し、再選択結果をloadする', async () => {
+    const api = installApi();
+    api.app.restoreAuthorizedProjectRoot.mockResolvedValueOnce('/repo');
+    api.app.reconfirmProjectRoot.mockResolvedValueOnce('/repo-next');
+    const { result } = renderHook(() => useProjectLoader(options()));
+    await waitFor(() => expect(result.current.projectRoot).toBe('/repo'));
+
+    await act(async () => {
+      await result.current.handleOpenRecent('/history-only');
+    });
+
+    expect(api.app.reconfirmProjectRoot).toHaveBeenCalledWith(
+      '/history-only',
+      'project.openExistingDialogTitle'
+    );
+    expect(api.git.status).toHaveBeenLastCalledWith('/repo-next');
+    expect(result.current.projectRoot).toBe('/repo-next');
   });
 });

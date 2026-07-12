@@ -2,36 +2,48 @@
  * ImagePreview — Canvas / IDE で画像ファイルをプレビューするコンポーネント。
  *
  * Issue #325: ファイルツリーから png/jpg/gif/webp 等を開いたとき、Monaco の
- * binary プレースホルダではなく実際の画像を表示する。Tauri v2 の asset プロトコル
- * (convertFileSrc) で `asset://` URL を生成して <img> に渡す。
+ * binary プレースホルダではなく実際の画像を表示する。global `asset://` scopeにはproject rootを
+ * 追加せず、backendのfiles認可を通して取得したdata URLだけを <img> に渡す。
  *
- * dev:vite 直接アクセス (Tauri ランタイム不在) では convertFileSrc が機能しないため、
+ * dev:vite 直接アクセス (Tauri ランタイム不在) ではbackend読込が機能しないため、
  * その場合は静的なフォールバックメッセージを出す。
  */
-import { useMemo, useState } from 'react';
-import { convertFileSrc } from '@tauri-apps/api/core';
+import { useEffect, useState } from 'react';
 import { useT } from '../lib/i18n';
 import { isTauri } from '../lib/tauri-api';
 
 interface ImagePreviewProps {
-  /** OS 絶対パス。convertFileSrc に渡される */
-  absolutePath: string;
+  /** backend files authzへ渡すproject root */
+  projectRoot: string;
   /** ヘッダ表示用 (相対パス想定だが実装側で自由に決めて良い) */
   relativePath: string;
 }
 
-export function ImagePreview({ absolutePath, relativePath }: ImagePreviewProps): JSX.Element {
+export function ImagePreview({ projectRoot, relativePath }: ImagePreviewProps): JSX.Element {
   const t = useT();
   const [errored, setErrored] = useState(false);
+  const [url, setUrl] = useState('');
   const tauri = isTauri();
-  const url = useMemo(() => {
-    if (!tauri) return '';
-    try {
-      return convertFileSrc(absolutePath);
-    } catch {
-      return '';
-    }
-  }, [absolutePath, tauri]);
+
+  useEffect(() => {
+    if (!tauri) return;
+    let cancelled = false;
+    setErrored(false);
+    setUrl('');
+    void window.api.files
+      .readImage(projectRoot, relativePath)
+      .then((result) => {
+        if (cancelled) return;
+        if (result.ok && result.dataUrl) setUrl(result.dataUrl);
+        else setErrored(true);
+      })
+      .catch(() => {
+        if (!cancelled) setErrored(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectRoot, relativePath, tauri]);
 
   if (!tauri) {
     return (

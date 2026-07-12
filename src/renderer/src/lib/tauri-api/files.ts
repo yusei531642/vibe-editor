@@ -3,6 +3,7 @@
 import { invokeCommand } from './command-error';
 import type {
   FileListResult,
+  FileImageReadResult,
   FileMutationResult,
   FileReadResult,
   FileWriteResult
@@ -13,6 +14,9 @@ export const files = {
     invokeCommand('files_list', { projectRoot, relPath }),
   read: (projectRoot: string, relPath: string): Promise<FileReadResult> =>
     invokeCommand('files_read', { projectRoot, relPath }),
+  /** Issue #1193: global asset:// scopeを使わずbackend認可済みdata URLを取得する。 */
+  readImage: (projectRoot: string, relPath: string): Promise<FileImageReadResult> =>
+    invokeCommand('files_read_image', { projectRoot, relPath }),
   /**
    * Issue #65 / #104 / #102 / #119: external-change 検出と元 encoding の保持。
    *   - expectedMtimeMs: 開いた時点の mtime

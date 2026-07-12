@@ -134,7 +134,8 @@ export function customAgentDescriptor(agent: AgentConfig): ResolvedAgentDescript
       ...base,
       command: agent.command,
       args: agent.args,
-      cwd: agent.cwd,
+      // Issue #1193: execution cwd はruntime ProjectContextから注入する。設定値はauthorityにしない。
+      cwd: '',
       env: agent.env,
       defaultSkillIds: agent.defaultSkillIds ?? [],
       skillInjection: agent.skillInjection ?? defaultSkillInjectionForEngine(engine)
