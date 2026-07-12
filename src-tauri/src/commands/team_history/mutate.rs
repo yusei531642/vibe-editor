@@ -9,8 +9,8 @@
 use super::list::normalize_stored_project_root;
 use super::{
     apply_with_disk_commit, ensure_loaded, hydrate_orchestration_summary, merge_entry,
-    reconcile_external_changes, store_path, validate_entry_size, MutationResult,
-    TeamHistoryEntry, TeamHistoryStore, STORE,
+    reconcile_external_changes, store_path, validate_entry_size, ActiveHistoryScope,
+    MutationResult, TeamHistoryEntry, TeamHistoryStore, STORE,
 };
 use crate::commands::error::{CommandError, CommandResult};
 use crate::commands::project_authority::ProjectRootIdentity;
@@ -88,7 +88,7 @@ pub(crate) async fn team_history_mutation_via<R, Writer, Fut>(
     writer: Writer,
 ) -> CommandResult<R>
 where
-    Writer: FnOnce(String) -> Fut,
+    Writer: FnOnce(ActiveHistoryScope) -> Fut,
     Fut: std::future::Future<Output = R>,
 {
     let Some((first, rest)) = entry_project_roots.split_first() else {
@@ -121,7 +121,11 @@ where
             "entry project_root must match the active project root notation",
         ));
     }
-    Ok(writer(target).await)
+    let scope = ActiveHistoryScope {
+        raw_key: target,
+        identity: authorized.approved_identity().clone(),
+    };
+    Ok(writer(scope).await)
 }
 
 /// 削除は id と gate 時 active raw key の両方が一致した entry だけを対象にする。
@@ -137,8 +141,14 @@ fn has_scoped_entry(entries: &[TeamHistoryEntry], target: &str, id: &str) -> boo
         .any(|e| e.id == id && normalize_stored_project_root(&e.project_root) == target)
 }
 
-async fn save_authorized(target: String, mut entry: TeamHistoryEntry) -> MutationResult {
-    debug_assert_eq!(normalize_stored_project_root(&entry.project_root), target);
+async fn save_authorized(scope: ActiveHistoryScope, mut entry: TeamHistoryEntry) -> MutationResult {
+    debug_assert_eq!(
+        normalize_stored_project_root(&entry.project_root),
+        scope.raw_key
+    );
+    // Issue #1192: 保存時点の native approval identity を刻印する。renderer が identity を
+    // 自称しても常に gate snapshot で上書きされる。
+    entry.project_identity = Some(scope.identity.clone());
     // Issue #624: DoS 防御 — 1 MiB 超の entry は merge 前に reject する。
     if let Err(e) = validate_entry_size(&entry) {
         return MutationResult {
@@ -179,12 +189,19 @@ async fn save_authorized(target: String, mut entry: TeamHistoryEntry) -> Mutatio
 }
 
 async fn save_batch_authorized(
-    target: String,
-    entries: Vec<TeamHistoryEntry>,
+    scope: ActiveHistoryScope,
+    mut entries: Vec<TeamHistoryEntry>,
 ) -> MutationResult {
+    // Issue #1192: 保存時点の native approval identity を全 entry に刻印する。
+    for entry in &mut entries {
+        entry.project_identity = Some(scope.identity.clone());
+    }
     // Issue #624: 各 entry を merge 前に validate (1 件でも巨大なら全体 reject)。
     for entry in &entries {
-        debug_assert_eq!(normalize_stored_project_root(&entry.project_root), target);
+        debug_assert_eq!(
+            normalize_stored_project_root(&entry.project_root),
+            scope.raw_key
+        );
         if let Err(e) = validate_entry_size(entry) {
             return MutationResult {
                 ok: false,
@@ -230,7 +247,8 @@ async fn save_batch_authorized(
     .await
 }
 
-async fn delete_authorized(target: String, id: String) -> MutationResult {
+async fn delete_authorized(scope: ActiveHistoryScope, id: String) -> MutationResult {
+    let target = scope.raw_key;
     // Issue #739: 旧 LOCK / CACHE / DISK_FINGERPRINT の 3 段ロックを STORE 1 ロックに統合。
     let mut store = STORE.lock().await;
     ensure_loaded(&mut store).await;
@@ -285,6 +303,7 @@ mod tests {
             canvas_state: None,
             latest_handoff: None,
             orchestration: None,
+            project_identity: None,
         }
     }
 

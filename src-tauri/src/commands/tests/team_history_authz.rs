@@ -20,7 +20,7 @@ async fn team_history_list_via_native_identity<R, Reader, Fut>(
     reader: Reader,
 ) -> crate::commands::error::CommandResult<R>
 where
-    Reader: FnOnce(String) -> Fut,
+    Reader: FnOnce(crate::commands::team_history::ActiveHistoryScope) -> Fut,
     Fut: std::future::Future<Output = R>,
 {
     let identity = match crate::state::current_project_root(slot) {
@@ -45,6 +45,7 @@ fn entry(id: &str, project_root: &str) -> TeamHistoryEntry {
         canvas_state: None,
         latest_handoff: None,
         orchestration: None,
+        project_identity: None,
     }
 }
 
@@ -53,7 +54,7 @@ async fn assert_authz_rejection_skips_store_reader(
     requested: String,
 ) {
     let called = AtomicBool::new(false);
-    let result = team_history_list_via_native_identity(slot, requested, |_target| async {
+    let result = team_history_list_via_native_identity(slot, requested, |_scope| async {
         called.store(true, Ordering::SeqCst);
         vec![entry("must-not-run", "/foreign")]
     })
@@ -77,8 +78,8 @@ async fn team_history_list_active_root_returns_reader_result() {
     let result = team_history_list_via_native_identity(
         &slot,
         active_raw.clone(),
-        move |target| async move {
-        filter_team_history_entries(&target, &[entry("active", &active_raw)])
+        move |scope| async move {
+        filter_team_history_entries(&scope, &[entry("active", &active_raw)])
         },
     )
     .await
@@ -124,9 +125,9 @@ async fn team_history_list_canonical_alias_returns_active_entry() {
     let alias_raw = active.path().join(".").to_string_lossy().into_owned();
     let slot = active_slot(Some(active.path()));
 
-    let result = team_history_list_via_native_identity(&slot, alias_raw, move |target| async move {
+    let result = team_history_list_via_native_identity(&slot, alias_raw, move |scope| async move {
         filter_team_history_entries(
-            &target,
+            &scope,
             &[
                 entry("active", &active_raw),
                 entry("foreign", "/definitely-not-the-active-project"),
@@ -157,11 +158,11 @@ async fn team_history_list_symlink_retarget_keeps_gate_time_identity() {
     let active_raw = requested.clone();
     let slot = active_slot(Some(&active_link));
 
-    let result = team_history_list_via_native_identity(&slot, requested, move |target| async move {
+    let result = team_history_list_via_native_identity(&slot, requested, move |scope| async move {
         std::fs::remove_file(&active_link).unwrap();
         symlink(&foreign, &active_link).unwrap();
         filter_team_history_entries(
-            &target,
+            &scope,
             &[
                 entry("active", &active_raw),
                 entry("foreign", foreign.to_string_lossy().as_ref()),
@@ -194,10 +195,10 @@ async fn team_history_list_requested_alias_uses_active_raw_snapshot_key() {
     let result = team_history_list_via_native_identity(
         &slot,
         alias_raw.clone(),
-        move |target| async move {
-        assert_eq!(target, active_raw);
+        move |scope| async move {
+        assert_eq!(scope.raw_key, active_raw);
         filter_team_history_entries(
-            &target,
+            &scope,
             &[
                 entry("active", &active_raw),
                 entry("alias-must-not-select", &alias_raw),
@@ -233,10 +234,10 @@ async fn team_history_list_retargeted_foreign_symlink_entry_is_not_disclosed() {
     let result = team_history_list_via_native_identity(
         &slot,
         active.to_string_lossy().into_owned(),
-        move |target| async move {
+        move |scope| async move {
             std::fs::remove_file(&historical_link).unwrap();
             symlink(&active, &historical_link).unwrap();
-            filter_team_history_entries(&target, &[entry("foreign", &historical_raw)])
+            filter_team_history_entries(&scope, &[entry("foreign", &historical_raw)])
         },
     )
     .await
@@ -255,7 +256,7 @@ async fn team_history_mutation_via_native_identity<R, Writer, Fut>(
     writer: Writer,
 ) -> crate::commands::error::CommandResult<R>
 where
-    Writer: FnOnce(String) -> Fut,
+    Writer: FnOnce(crate::commands::team_history::ActiveHistoryScope) -> Fut,
     Fut: std::future::Future<Output = R>,
 {
     let identity = match crate::state::current_project_root(slot) {
@@ -274,7 +275,7 @@ async fn assert_mutation_rejection_skips_writer(
 ) {
     let called = AtomicBool::new(false);
     let result =
-        team_history_mutation_via_native_identity(slot, entry_project_roots, |_target| async {
+        team_history_mutation_via_native_identity(slot, entry_project_roots, |_scope| async {
             called.store(true, Ordering::SeqCst);
             "must-not-run"
         })
@@ -301,15 +302,17 @@ async fn team_history_mutation_active_root_passes_snapshot_key_to_writer() {
     let target = team_history_mutation_via_native_identity(
         &slot,
         &[active_raw.as_str()],
-        |target| async move { target },
+        |scope| async move { scope },
     )
     .await
     .unwrap();
     // gate 時 active raw snapshot key (= slot 値の I/O なし正規化) と一致すること。
     assert_eq!(
-        target,
+        target.raw_key,
         crate::commands::team_history::list::normalize_stored_project_root(&expected)
     );
+    // Issue #1192: writer には gate と同一 snapshot の approval identity が渡ること。
+    assert!(!target.identity.platform_file_id.is_empty());
 }
 
 /// empty / active 未設定 / missing / foreign は authz で拒否し、writer (STORE lock /
@@ -355,4 +358,44 @@ async fn team_history_mutation_alias_notation_is_rejected() {
     let alias_raw = active.path().join(".").to_string_lossy().into_owned();
 
     assert_mutation_rejection_skips_writer(&slot, &[alias_raw.as_str()]).await;
+}
+
+// ---- Issue #1192: entry 単位の project identity 照合 ----
+
+/// directory 置換 (同一 path・別 filesystem object) 後、旧 identity 時代の entry は
+/// 新 identity の scope では列挙されない。identity 無しの legacy entry は互換で通る。
+#[tokio::test]
+async fn history_from_replaced_directory_is_not_attributed_to_new_identity() {
+    use crate::commands::team_history::list::normalize_stored_project_root;
+    use crate::commands::team_history::ActiveHistoryScope;
+
+    let sandbox = tempdir().unwrap();
+    let root = sandbox.path().join("project");
+    let parked = sandbox.path().join("parked");
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    let old_identity = crate::commands::project_authority::capture_identity(&root)
+        .await
+        .unwrap();
+    // 同一 path のまま directory を置換する (= symlink retarget / restore 相当)。
+    tokio::fs::rename(&root, &parked).await.unwrap();
+    tokio::fs::create_dir_all(&root).await.unwrap();
+    let new_identity = crate::commands::project_authority::capture_identity(&root)
+        .await
+        .unwrap();
+    assert_ne!(old_identity, new_identity, "fixture premise");
+
+    let raw = root.to_string_lossy().into_owned();
+    let scope = ActiveHistoryScope {
+        raw_key: normalize_stored_project_root(&raw),
+        identity: new_identity.clone(),
+    };
+    let mut stale = entry("stale-era", &raw);
+    stale.project_identity = Some(old_identity);
+    let mut current = entry("current-era", &raw);
+    current.project_identity = Some(new_identity);
+    let legacy = entry("legacy-no-identity", &raw);
+
+    let listed = filter_team_history_entries(&scope, &[stale, current, legacy]);
+    let ids: Vec<&str> = listed.iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(ids, vec!["current-era", "legacy-no-identity"]);
 }

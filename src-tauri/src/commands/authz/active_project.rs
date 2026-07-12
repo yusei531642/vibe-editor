@@ -12,6 +12,7 @@ use arc_swap::ArcSwapOption;
 pub(crate) struct AuthorizedActiveProjectRoot {
     canonical: ProjectRoot,
     active_raw: String,
+    approved_identity: ProjectRootIdentity,
 }
 
 impl AuthorizedActiveProjectRoot {
@@ -27,6 +28,15 @@ impl AuthorizedActiveProjectRoot {
     ///
     /// rawを再canonicalizeすると、gate後のsymlink retargetを新しいidentityとして採用して
     /// しまう。既存storageがraw project_rootをkeyに持つ場合だけ、このsnapshot keyを使う。
+    /// gate が照合に用いた native approval identity snapshot を返す。
+    ///
+    /// これは picker 承認時に記録された identity (slot 値) であり、gate 後の filesystem
+    /// 変化を含まない。storage が entry 単位の identity 照合 (Issue #1192) を行うときの
+    /// 比較基準にする。
+    pub(crate) fn approved_identity(&self) -> &ProjectRootIdentity {
+        &self.approved_identity
+    }
+
     pub(crate) fn active_raw_key(&self) -> String {
         let normalized = self.active_raw.replace('\\', "/");
         let stripped = normalized.trim_end_matches('/');
@@ -143,6 +153,7 @@ pub(crate) async fn assert_active_project_root_with_raw(
     Ok(AuthorizedActiveProjectRoot {
         canonical: ProjectRoot::from_canonical(active_canon),
         active_raw: active,
+        approved_identity: stored_identity,
     })
 }
 

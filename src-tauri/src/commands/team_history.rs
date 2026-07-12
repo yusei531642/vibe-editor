@@ -5,7 +5,6 @@
 
 use crate::commands::files::hash::{mtime_ms_of, sha256_hex};
 use crate::commands::team_state::TeamOrchestrationSummary;
-use crate::pty::path_norm::normalize_project_root;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -179,6 +178,20 @@ pub struct TeamHistoryEntry {
     /// Issue #470: TeamHub orchestration state の軽量要約。本体は team-state store に置く。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub orchestration: Option<TeamOrchestrationSummary>,
+    /// Issue #1192: 保存時点の project root filesystem identity snapshot。save gate が
+    /// native approval identity から付与し、renderer 入力値は常に上書きされる。
+    /// symlink retarget / directory 置換の後、path 表記が同じでも別 filesystem object の
+    /// 履歴を現 project へ帰属させないための比較基準。None は #1192 以前の legacy entry。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_identity: Option<crate::commands::project_authority::ProjectRootIdentity>,
+}
+
+/// Issue #1192: gate 時 active snapshot。storage selector の raw key と native approval
+/// identity を一体で運び、reader / writer が gate と別の時点の値を再取得しないようにする。
+#[derive(Clone, Debug)]
+pub(crate) struct ActiveHistoryScope {
+    pub(crate) raw_key: String,
+    pub(crate) identity: crate::commands::project_authority::ProjectRootIdentity,
 }
 
 #[derive(Serialize, Default)]
@@ -468,14 +481,16 @@ fn merge_entry(all: &mut Vec<TeamHistoryEntry>, entry: TeamHistoryEntry) {
         !(e.id == entry.id
             && list::normalize_stored_project_root(&e.project_root) == new_entry_raw_key)
     });
-    let new_entry_key = normalize_project_root(&entry.project_root);
+    // Issue #1192: cap 集計 key も canonicalize せず raw key で数える。現 filesystem での
+    // 再解決は retarget 後の別 project を同一視するし、STORE lock 内の blocking I/O も避ける。
+    let new_entry_key = list::normalize_stored_project_root(&entry.project_root);
     all.sort_by(|a, b| b.last_used_at.cmp(&a.last_used_at));
     let mut kept: Vec<TeamHistoryEntry> = Vec::with_capacity(all.len() + 1);
     kept.push(entry);
     let mut per_project_count: HashMap<String, usize> = HashMap::new();
     per_project_count.insert(new_entry_key, 1);
     for e in std::mem::take(all).into_iter() {
-        let key = normalize_project_root(&e.project_root);
+        let key = list::normalize_stored_project_root(&e.project_root);
         let count = per_project_count.entry(key).or_insert(0);
         if *count < MAX_ENTRIES_PER_PROJECT {
             *count += 1;
@@ -540,6 +555,7 @@ mod tests {
             canvas_state: None,
             latest_handoff: None,
             orchestration: None,
+            project_identity: None,
         }
     }
 
@@ -555,6 +571,7 @@ mod tests {
             canvas_state: None,
             latest_handoff: None,
             orchestration: None,
+            project_identity: None,
         };
         // summary 相当は orchestration.blocked_reason に詰めて差分を作る。
         if !summary.is_empty() {

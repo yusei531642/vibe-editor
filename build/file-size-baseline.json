@@ -6,7 +6,7 @@
   "src-tauri/src/commands/git.rs": 534,
   "src-tauri/src/commands/handoffs.rs": 519,
   "src-tauri/src/commands/settings.rs": 877,
-  "src-tauri/src/commands/team_history.rs": 1222,
+  "src-tauri/src/commands/team_history.rs": 1114,
   "src-tauri/src/commands/team_state.rs": 596,
   "src-tauri/src/commands/terminal.rs": 1278,
   "src-tauri/src/commands/terminal/command_validation.rs": 916,
@@ -37,5 +37,5 @@
   "src/renderer/src/lib/hooks/use-xterm-bind.ts": 889,
   "src/renderer/src/lib/role-profiles-builtin.ts": 633,
   "src/renderer/src/stores/canvas.ts": 588,
-  "src/types/shared.ts": 1981
+  "src/types/shared.ts": 1994
 }

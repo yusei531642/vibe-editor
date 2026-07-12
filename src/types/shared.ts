@@ -1107,6 +1107,19 @@ export interface TeamHistoryEntry {
   latestHandoff?: HandoffReference;
   /** Issue #470: TeamHub orchestration state の軽量要約 */
   orchestration?: TeamOrchestrationSummary;
+  /**
+   * Issue #1192: 保存時点の project root filesystem identity snapshot。
+   * backend の save gate が native approval identity から付与する読み取り専用値で、
+   * renderer が値を渡しても常に上書きされる。undefined は #1192 以前の legacy entry。
+   */
+  projectIdentity?: ProjectRootIdentitySnapshot;
+}
+
+/** Issue #1192: project root を path 表記ではなく filesystem object として識別する snapshot。 */
+export interface ProjectRootIdentitySnapshot {
+  version: number;
+  canonicalRoot: string;
+  platformFileId: string;
 }
 
 export interface TeamCanvasNode {
