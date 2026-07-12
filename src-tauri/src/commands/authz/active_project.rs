@@ -125,20 +125,88 @@ pub(crate) async fn assert_active_project_root_with_raw(
             "active project root has no native authority identity",
         ));
     };
-    let observed_identity =
-        crate::commands::project_authority::capture_identity(&active_canon).await?;
-    if observed_identity != stored_identity {
-        tracing::warn!(
-            active = %clamp_for_log(&active_canon.to_string_lossy()),
-            "[authz] assert_active_project_root rejected: active root identity changed"
-        );
-        return Err(CommandError::authz(
-            "active project root identity no longer matches its native approval",
-        ));
+    if !identity_recently_verified(&stored_identity) {
+        let observed_identity =
+            crate::commands::project_authority::capture_identity(&active_canon).await?;
+        if observed_identity != stored_identity {
+            tracing::warn!(
+                active = %clamp_for_log(&active_canon.to_string_lossy()),
+                "[authz] assert_active_project_root rejected: active root identity changed"
+            );
+            return Err(CommandError::authz(
+                "active project root identity no longer matches its native approval",
+            ));
+        }
+        record_identity_verified(&stored_identity);
     }
 
     Ok(AuthorizedActiveProjectRoot {
         canonical: ProjectRoot::from_canonical(active_canon),
         active_raw: active,
     })
+}
+
+/// identity 再照合 (blocking canonicalize×2 + platform file id×2) の短TTLキャッシュ。
+///
+/// `files_list` / `git_status` 等の高頻度IPCが毎回 blocking I/O を踏むと、低速ストレージで
+/// レイテンシが積み上がる (PR #1202 review)。直近で native identity 一致を確認済みの
+/// active root に限り TTL 内は再照合を省略する。TTL 内の directory 置換検知は次の expiry
+/// 後の照合まで遅延するが、canonical path 一致 (上段) は毎回検証され、grant の追加は
+/// 発生しない。root 切替時は `invalidate_identity_recheck` で即座に破棄する。
+const IDENTITY_RECHECK_TTL: std::time::Duration = std::time::Duration::from_secs(2);
+
+static IDENTITY_RECHECK_CACHE: std::sync::Mutex<
+    Option<(ProjectRootIdentity, std::time::Instant)>,
+> = std::sync::Mutex::new(None);
+
+fn identity_recently_verified(identity: &ProjectRootIdentity) -> bool {
+    let cache = IDENTITY_RECHECK_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    matches!(
+        &*cache,
+        Some((cached, verified_at))
+            if cached == identity && verified_at.elapsed() < IDENTITY_RECHECK_TTL
+    )
+}
+
+fn record_identity_verified(identity: &ProjectRootIdentity) {
+    *IDENTITY_RECHECK_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+        Some((identity.clone(), std::time::Instant::now()));
+}
+
+/// active root の activate / clear 時にキャッシュを即時破棄する (state.rs から呼ぶ)。
+pub fn invalidate_identity_recheck() {
+    *IDENTITY_RECHECK_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+}
+
+#[cfg(test)]
+mod recheck_cache_tests {
+    use super::*;
+
+    fn identity(root: &str, file_id: &str) -> ProjectRootIdentity {
+        ProjectRootIdentity {
+            version: 1,
+            canonical_root: root.to_string(),
+            platform_file_id: file_id.to_string(),
+        }
+    }
+
+    #[test]
+    fn cache_hits_only_for_identical_identity_and_clears_on_invalidate() {
+        let current = identity("/tmp/project", "unix:1:100");
+        let other = identity("/tmp/project", "unix:1:999");
+        invalidate_identity_recheck();
+        assert!(!identity_recently_verified(&current));
+        record_identity_verified(&current);
+        assert!(identity_recently_verified(&current));
+        // 同一pathでも filesystem identity が異なる (= 置換された) 場合は再照合へ回す。
+        assert!(!identity_recently_verified(&other));
+        invalidate_identity_recheck();
+        assert!(!identity_recently_verified(&current));
+    }
 }

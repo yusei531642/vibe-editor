@@ -103,14 +103,27 @@ pub async fn files_read_image(
             };
         }
     };
-    use base64::Engine;
+    // 最大 10 MiB の base64 encode は 10ms 超かかりうる CPU 仕事なので、tokio の async
+    // ワーカーを塞がないよう blocking pool へ逃がす (PR #1202 review)。
+    let encoded = match tokio::task::spawn_blocking(move || {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    })
+    .await
+    {
+        Ok(encoded) => encoded,
+        Err(error) => {
+            return FileImageReadResult {
+                ok: false,
+                error: Some(format!("encode image failed: {error}")),
+                ..Default::default()
+            };
+        }
+    };
     FileImageReadResult {
         ok: true,
         error: None,
-        data_url: Some(format!(
-            "data:{mime};base64,{}",
-            base64::engine::general_purpose::STANDARD.encode(bytes)
-        )),
+        data_url: Some(format!("data:{mime};base64,{encoded}")),
     }
 }
 

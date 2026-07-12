@@ -56,6 +56,8 @@ pub fn set_project_root_authority(
     // identityを先にclear/storeしても、root readerは後段のauthzで両方を照合するためfail-closed。
     identity_slot.store(identity.map(Arc::new));
     root_slot.store(root.map(Arc::new));
+    // 旧rootで成立した再照合キャッシュを新authorityへ持ち越さない。
+    crate::commands::authz::invalidate_identity_recheck();
 }
 
 /// active rootに対応するnative approval snapshotをlock-freeに取得する。
