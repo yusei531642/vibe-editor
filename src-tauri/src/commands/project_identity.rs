@@ -59,7 +59,11 @@ fn platform_file_id(path: &Path) -> Result<String, CommandError> {
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
         .open(path)
         .map_err(|error| CommandError::authz(format!("open project root failed: {error}")))?;
+    // SAFETY: `BY_HANDLE_FILE_INFORMATION` は全フィールドが整数の POD なので zeroed 初期化は健全。
     let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    // SAFETY: `file` は直前で成功 open した所有 handle で、この呼び出しの間 drop されず生存する。
+    // `addr_of_mut!(info)` はスタック上の有効かつ整列済みの out-pointer で、API は成功時に
+    // 構造体全体を書き込む。失敗時は直後の `ok == 0` 分岐で `info` を読まずに return する。
     let ok = unsafe {
         GetFileInformationByHandle(file.as_raw_handle() as _, std::ptr::addr_of_mut!(info))
     };
