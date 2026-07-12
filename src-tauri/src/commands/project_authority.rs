@@ -81,7 +81,47 @@ async fn load_ledger() -> CommandResult<ProjectAuthorityLedger> {
 }
 
 async fn write_ledger(ledger: &ProjectAuthorityLedger) -> CommandResult<()> {
+    // grant 集合が変わるので、旧 ledger で成立した workspace 検証キャッシュを即時破棄する。
+    // 全 mutation がこの関数を通るため、revoke は TTL を待たず次の照合から disk を読み直す。
+    invalidate_workspace_recheck();
     write_ledger_to(&authority_path(), ledger).await
+}
+
+/// workspace root 照合 (ledger disk read + blocking identity 取得) の短TTLキャッシュ。
+///
+/// workspace folder への `files_*` IPC は呼び出しごとに `is_authorized_workspace_root` を
+/// 踏むため、ファイルツリー展開の並列 `files_list` で disk I/O が積み上がる (PR #1202
+/// review)。identity 一致で認可済みの canonical key に限り TTL 内は再照合を省略する。
+/// 正の結果のみをキャッシュし、grant の追加・削除 (`write_ledger`) で即時破棄する。
+const WORKSPACE_RECHECK_TTL: std::time::Duration = std::time::Duration::from_secs(2);
+
+static WORKSPACE_RECHECK_CACHE: std::sync::Mutex<
+    Option<std::collections::HashMap<String, std::time::Instant>>,
+> = std::sync::Mutex::new(None);
+
+fn workspace_recently_verified(canonical_key: &str) -> bool {
+    let cache = WORKSPACE_RECHECK_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    cache
+        .as_ref()
+        .and_then(|map| map.get(canonical_key))
+        .is_some_and(|verified_at| verified_at.elapsed() < WORKSPACE_RECHECK_TTL)
+}
+
+fn record_workspace_verified(canonical_key: String) {
+    let mut cache = WORKSPACE_RECHECK_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    cache
+        .get_or_insert_with(std::collections::HashMap::new)
+        .insert(canonical_key, std::time::Instant::now());
+}
+
+fn invalidate_workspace_recheck() {
+    *WORKSPACE_RECHECK_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
 }
 
 /// identity確認済みrootだけを runtime state / watcher / asset scope に反映する唯一の commit 点。
@@ -315,6 +355,10 @@ pub async fn app_restore_authorized_project_root(app: AppHandle) -> String {
 
 /// files系のworkspace gate用。settings.jsonではなくnative ledgerのidentity一致だけを認める。
 pub async fn is_authorized_workspace_root(requested_canonical: &Path) -> bool {
+    let canonical_key = canonical_root_key(requested_canonical);
+    if workspace_recently_verified(&canonical_key) {
+        return true;
+    }
     let ledger = match load_ledger().await {
         Ok(ledger) => ledger,
         Err(error) => {
@@ -326,10 +370,14 @@ pub async fn is_authorized_workspace_root(requested_canonical: &Path) -> bool {
         Ok(identity) => identity,
         Err(_) => return false,
     };
-    ledger
+    let authorized = ledger
         .workspace_roots
         .iter()
-        .any(|known| known == &requested)
+        .any(|known| known == &requested);
+    if authorized {
+        record_workspace_verified(canonical_key);
+    }
+    authorized
 }
 
 /// strict active-root gate用。AppState の文字列だけではなく、private ledgerに保存された

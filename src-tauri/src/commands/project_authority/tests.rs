@@ -37,3 +37,16 @@ async fn missing_ledger_does_not_migrate_renderer_settings_candidates() {
     assert!(ledger.workspace_roots.is_empty());
     assert_eq!(ledger.schema_version, PROJECT_AUTHORITY_SCHEMA_VERSION);
 }
+
+#[test]
+fn workspace_recheck_cache_serves_positive_only_until_invalidated() {
+    invalidate_workspace_recheck();
+    assert!(!workspace_recently_verified("/tmp/ws"));
+    record_workspace_verified("/tmp/ws".to_string());
+    assert!(workspace_recently_verified("/tmp/ws"));
+    // 未検証の key はヒットしない (負の結果はキャッシュされない)。
+    assert!(!workspace_recently_verified("/tmp/other"));
+    // ledger mutation (write_ledger) 相当の破棄で即座に失効する。
+    invalidate_workspace_recheck();
+    assert!(!workspace_recently_verified("/tmp/ws"));
+}
