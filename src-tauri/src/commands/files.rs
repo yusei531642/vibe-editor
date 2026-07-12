@@ -7,41 +7,18 @@ mod encoding;
 // crate 内に公開する。`sha256_hex` / `mtime_ms_of` の 2 関数だけが対象。
 pub(crate) mod hash;
 mod path_safety;
+pub mod image_preview;
+mod root_gate;
+
+pub(crate) use root_gate::assert_workspace_project_root_via;
 
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::commands::authz::ProjectRoot;
-use crate::commands::error::CommandResult;
-use crate::state::AppState;
 use encoding::{detect_text_or_binary, encode_for_save};
 
-/// Issue #932 / #954 / #963: renderer 由来の `project_root` を検証する files_* 共通ゲート。
-///
-/// 当初 (#932) は write 系を active project との厳格一致で守っていたが、multi-root
-/// workspace (settings.workspaceFolders, Issue #4) の追加ルート内ファイル操作
-/// (新規作成 / リネーム / 削除 / 貼り付け) まで拒否してしまう退行があった (#963)。
-/// read 側 (#954) と同じ `assert_readable_project_root` (active root ∪ settings.json
-/// SSOT の workspaceFolders、workspace folder には `is_safe_watch_root` 検証を追加要求)
-/// に read/write とも統一する。
-///
-/// async command が `State` (参照入力) を取ると Tauri が `Result` 返却を強制するため、非 `Result`
-/// を返す既存 FS コマンド契約 (renderer は構造体をそのまま受ける) を保てない。owned/'static な
-/// `AppHandle` 経由で state を引くことでこの制約を回避し、既存の戻り値型を維持したまま
-/// ゲートを各コマンド先頭に挿せるようにする。
-async fn assert_workspace_project_root_via(
-    app: &AppHandle,
-    project_root: &str,
-) -> CommandResult<ProjectRoot> {
-    let state = app.state::<AppState>();
-    crate::commands::authz::assert_readable_project_root(
-        &state.project_root,
-        &state.project_root_identity,
-        project_root,
-    )
-    .await
-}
 use hash::{mtime_ms_of, sha256_hex};
 // safe_join は外部 (commands/git.rs) からも呼ばれるので pub use で再 export する。
 pub use path_safety::safe_join;
@@ -52,9 +29,6 @@ pub use path_safety::safe_join;
 /// モジュールスコープに昇格した。これを超えるサイズのファイルは全読込せず conflict 扱いに
 /// する (`tokio::fs::read` での GB 級一括読込による OOM/フリーズを防ぐ)。
 pub(crate) const MAX_READ_BYTES: u64 = 50 * 1024 * 1024;
-/// data URL 化する画像 preview の上限。base64 化で約 4/3 に膨らむため、通常ファイルの
-/// 50 MiB 上限を流用せず、renderer メモリを圧迫しない 10 MiB に抑える。
-const MAX_IMAGE_PREVIEW_BYTES: u64 = 10 * 1024 * 1024;
 
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
@@ -95,16 +69,6 @@ pub struct FileReadResult {
     /// クライアントは write 時にこの値を `expected_content_hash` で送り返す。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_hash: Option<String>,
-}
-
-/// Issue #1193: project image previewはglobal asset scopeではなく、files authzを通した
-/// data URLで返す。old project rootをasset://へ追加し続ける権限漏れを防ぐ。
-#[derive(Serialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct FileImageReadResult {
-    pub ok: bool,
-    pub error: Option<String>,
-    pub data_url: Option<String>,
 }
 
 #[derive(Serialize, Default)]
@@ -281,97 +245,6 @@ pub async fn files_read(app: AppHandle, project_root: String, rel_path: String) 
     }
 }
 
-fn image_mime_type(path: &std::path::Path) -> Option<&'static str> {
-    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
-    match extension.as_str() {
-        "png" => Some("image/png"),
-        "jpg" | "jpeg" => Some("image/jpeg"),
-        "gif" => Some("image/gif"),
-        "webp" => Some("image/webp"),
-        "avif" => Some("image/avif"),
-        "bmp" => Some("image/bmp"),
-        "ico" => Some("image/x-icon"),
-        _ => None,
-    }
-}
-
-#[tauri::command]
-pub async fn files_read_image(
-    app: AppHandle,
-    project_root: String,
-    rel_path: String,
-) -> FileImageReadResult {
-    let project_root = match assert_workspace_project_root_via(&app, &project_root).await {
-        Ok(root) => root,
-        Err(error) => {
-            return FileImageReadResult {
-                ok: false,
-                error: Some(error.to_string()),
-                ..Default::default()
-            };
-        }
-    };
-    let Some(abs) = safe_join(&project_root, &rel_path) else {
-        return FileImageReadResult {
-            ok: false,
-            error: Some("invalid path".into()),
-            ..Default::default()
-        };
-    };
-    let Some(mime) = image_mime_type(&abs) else {
-        return FileImageReadResult {
-            ok: false,
-            error: Some("unsupported image type".into()),
-            ..Default::default()
-        };
-    };
-    let metadata = match tokio::fs::metadata(&abs).await {
-        Ok(metadata) if metadata.is_file() => metadata,
-        Ok(_) => {
-            return FileImageReadResult {
-                ok: false,
-                error: Some("image path is not a file".into()),
-                ..Default::default()
-            };
-        }
-        Err(error) => {
-            return FileImageReadResult {
-                ok: false,
-                error: Some(error.to_string()),
-                ..Default::default()
-            };
-        }
-    };
-    if metadata.len() > MAX_IMAGE_PREVIEW_BYTES {
-        return FileImageReadResult {
-            ok: false,
-            error: Some(format!(
-                "image exceeds {} byte safety limit",
-                MAX_IMAGE_PREVIEW_BYTES
-            )),
-            ..Default::default()
-        };
-    }
-    let bytes = match tokio::fs::read(&abs).await {
-        Ok(bytes) => bytes,
-        Err(error) => {
-            return FileImageReadResult {
-                ok: false,
-                error: Some(error.to_string()),
-                ..Default::default()
-            };
-        }
-    };
-    use base64::Engine;
-    FileImageReadResult {
-        ok: true,
-        error: None,
-        data_url: Some(format!(
-            "data:{mime};base64,{}",
-            base64::engine::general_purpose::STANDARD.encode(bytes)
-        )),
-    }
-}
 
 // Issue #939: tauri command は renderer から渡る引数を 1:1 で受けるため引数が多くなるのは
 // 構造上不可避 (引数を struct にまとめると IPC 契約 / shared.ts 側も書き換えが必要)。
@@ -1087,14 +960,6 @@ mod issue_592_tests {
         assert!(validate_basename("README.md").is_ok());
         assert!(validate_basename("日本語.rs").is_ok());
         assert!(validate_basename("a-b_c.1").is_ok());
-    }
-
-    #[test]
-    fn image_preview_accepts_raster_formats_and_rejects_svg() {
-        assert_eq!(image_mime_type(Path::new("photo.JPEG")), Some("image/jpeg"));
-        assert_eq!(image_mime_type(Path::new("icon.webp")), Some("image/webp"));
-        assert_eq!(image_mime_type(Path::new("vector.svg")), None);
-        assert_eq!(image_mime_type(Path::new("no-extension")), None);
     }
 
     #[tokio::test]

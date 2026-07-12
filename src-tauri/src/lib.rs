@@ -215,7 +215,7 @@ pub fn run() {
             // ---- files ----
             commands::files::files_list,
             commands::files::files_read,
-            commands::files::files_read_image,
+            commands::files::image_preview::files_read_image,
             commands::files::files_write,
             // Issue #592: VS Code 互換のファイルツリー右クリック操作
             commands::files::files_create,
@@ -254,9 +254,9 @@ pub fn run() {
             // ---- settings ----
             commands::settings::settings_load,
             commands::settings::settings_save,
-            commands::settings::settings_pick_custom_mascot,
-            commands::settings::settings_load_custom_mascot,
-            commands::settings::settings_clear_custom_mascot,
+            commands::settings_mascot::settings_pick_custom_mascot,
+            commands::settings_mascot::settings_load_custom_mascot,
+            commands::settings_mascot::settings_clear_custom_mascot,
             // ---- role profiles ----
             commands::role_profiles::role_profiles_load,
             commands::role_profiles::role_profiles_save,

@@ -16,6 +16,7 @@ pub mod handoffs;
 pub mod logs;
 // Issue #1193 (Security): native project-root authority ledger / picker commands.
 pub mod project_authority;
+pub mod project_identity;
 pub mod role_profiles;
 // Issue #936: 永続化ファイルの安全読み込み (破損時は default 前に原本退避) 共通基盤。
 pub mod safe_load;
@@ -23,6 +24,7 @@ pub mod safe_load;
 pub mod schema_version;
 pub mod sessions;
 pub mod settings;
+pub mod settings_mascot;
 // Issue #996: settings.json parse 失敗時の原本退避 + v11 スナップショット復旧。
 pub mod settings_recovery;
 pub mod team_diagnostics;
