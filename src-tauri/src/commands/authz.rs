@@ -24,7 +24,7 @@ use crate::state::current_project_root;
 use crate::team_hub::TeamHub;
 
 mod active_project;
-pub use active_project::{assert_active_project_root, invalidate_identity_recheck};
+pub use active_project::{assert_active_project_root, assert_active_project_root_fresh, assert_spawn_cwd_identity, invalidate_identity_recheck};
 pub(crate) use active_project::{assert_active_project_root_with_raw, AuthorizedActiveProjectRoot};
 
 /// canonicalize 済み、かつ AppState の active project_root あるいは許可済み workspace folder と

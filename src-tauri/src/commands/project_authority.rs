@@ -353,6 +353,16 @@ pub async fn app_restore_authorized_project_root(app: AppHandle) -> String {
     crate::state::current_project_root(&app.state::<AppState>().project_root).unwrap_or_default()
 }
 
+/// 起動境界の fresh 照合用 (Issue #1200)。TTL キャッシュを使わず ledger を読み直し、
+/// canonical key が一致する workspace grant の identity を返す。
+pub async fn workspace_identity_for(canonical_key: &str) -> Option<ProjectRootIdentity> {
+    let ledger = load_ledger().await.ok()?;
+    ledger
+        .workspace_roots
+        .into_iter()
+        .find(|known| known.canonical_root == canonical_key)
+}
+
 /// files系のworkspace gate用。settings.jsonではなくnative ledgerのidentity一致だけを認める。
 pub async fn is_authorized_workspace_root(requested_canonical: &Path) -> bool {
     let canonical_key = canonical_root_key(requested_canonical);
