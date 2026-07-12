@@ -8,7 +8,7 @@
   "src-tauri/src/commands/settings.rs": 877,
   "src-tauri/src/commands/team_history.rs": 1114,
   "src-tauri/src/commands/team_state.rs": 596,
-  "src-tauri/src/commands/terminal.rs": 1278,
+  "src-tauri/src/commands/terminal.rs": 1002,
   "src-tauri/src/commands/terminal/command_validation.rs": 916,
   "src-tauri/src/commands/terminal_tabs.rs": 817,
   "src-tauri/src/commands/voice.rs": 550,

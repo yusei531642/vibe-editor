@@ -59,11 +59,50 @@ pub async fn assert_active_project_root(
         .map(|authorized| authorized.canonical)
 }
 
+/// identity 再照合キャッシュの利用可否。PTY / MCP の起動境界 (Issue #1200) は必ず
+/// `Fresh` を使い、check-to-use 間の directory 置換を TTL 内でも見逃さない。
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum RecheckPolicy {
+    CachedTtl,
+    Fresh,
+}
+
 /// strict gateと同一snapshotのcanonical capability + active rawを返すcrate内helper。
 pub(crate) async fn assert_active_project_root_with_raw(
     project_root_slot: &ArcSwapOption<String>,
     project_root_identity_slot: &ArcSwapOption<ProjectRootIdentity>,
     given: &str,
+) -> CommandResult<AuthorizedActiveProjectRoot> {
+    assert_active_project_root_policy(
+        project_root_slot,
+        project_root_identity_slot,
+        given,
+        RecheckPolicy::CachedTtl,
+    )
+    .await
+}
+
+/// 起動境界用: identity 再照合の TTL キャッシュを使わず必ず platform identity を取り直す。
+pub async fn assert_active_project_root_fresh(
+    project_root_slot: &ArcSwapOption<String>,
+    project_root_identity_slot: &ArcSwapOption<ProjectRootIdentity>,
+    given: &str,
+) -> CommandResult<ProjectRoot> {
+    assert_active_project_root_policy(
+        project_root_slot,
+        project_root_identity_slot,
+        given,
+        RecheckPolicy::Fresh,
+    )
+    .await
+    .map(|authorized| authorized.canonical)
+}
+
+pub(crate) async fn assert_active_project_root_policy(
+    project_root_slot: &ArcSwapOption<String>,
+    project_root_identity_slot: &ArcSwapOption<ProjectRootIdentity>,
+    given: &str,
+    policy: RecheckPolicy,
 ) -> CommandResult<AuthorizedActiveProjectRoot> {
     let trimmed = given.trim();
     if trimmed.is_empty() {
@@ -135,7 +174,7 @@ pub(crate) async fn assert_active_project_root_with_raw(
             "active project root has no native authority identity",
         ));
     };
-    if !identity_recently_verified(&stored_identity) {
+    if policy == RecheckPolicy::Fresh || !identity_recently_verified(&stored_identity) {
         let observed_identity =
             crate::commands::project_authority::capture_identity(&active_canon).await?;
         if observed_identity != stored_identity {
@@ -155,6 +194,78 @@ pub(crate) async fn assert_active_project_root_with_raw(
         active_raw: active,
         approved_identity: stored_identity,
     })
+}
+
+/// PTY spawn 直前の cwd 再検証 (Issue #1200)。
+///
+/// resume が返した canonical cwd と実際の spawn の間に、同一 path の directory が別 project
+/// へ置換される check-to-use gap を塞ぐ。cwd が active root / 承認済み workspace root と
+/// 同一 directory を指す場合に限り、TTL キャッシュを使わず platform identity を取り直して
+/// native approval と照合し、不一致なら起動を拒否する (fail-closed)。project 外 cwd
+/// (home fallback 等) と project 未選択時は従来どおり対象外。
+pub async fn assert_spawn_cwd_identity(
+    project_root_slot: &ArcSwapOption<String>,
+    project_root_identity_slot: &ArcSwapOption<ProjectRootIdentity>,
+    cwd: &str,
+) -> CommandResult<()> {
+    let cwd_canon = match tokio::fs::canonicalize(cwd.trim()).await {
+        Ok(path) => path,
+        Err(error) => {
+            // resolve_valid_cwd 通過後に消えた = 置換・削除の最中。推測せず fail-closed。
+            tracing::warn!(
+                cwd = %clamp_for_log(cwd),
+                error = %error,
+                "[authz] spawn cwd rejected: canonicalize failed after validation"
+            );
+            return Err(CommandError::authz(
+                "spawn cwd disappeared while being verified",
+            ));
+        }
+    };
+    let cwd_key = crate::commands::project_identity::canonical_root_key(&cwd_canon);
+
+    let active_root = current_project_root(project_root_slot).unwrap_or_default();
+    if !active_root.trim().is_empty() && active_root == cwd_key {
+        // active root と同一 directory: native approval identity と fresh に照合する。
+        let Some(stored) = current_project_root_identity(project_root_identity_slot) else {
+            return Err(CommandError::authz(
+                "active project root has no native authority identity",
+            ));
+        };
+        let observed =
+            crate::commands::project_authority::capture_identity(&cwd_canon).await?;
+        if observed != stored {
+            tracing::warn!(
+                cwd = %clamp_for_log(&cwd_key),
+                "[authz] spawn cwd rejected: active root identity changed before spawn"
+            );
+            return Err(CommandError::authz(
+                "spawn cwd identity no longer matches its native approval",
+            ));
+        }
+        record_identity_verified(&stored);
+        return Ok(());
+    }
+
+    if let Some(known) =
+        crate::commands::project_authority::workspace_identity_for(&cwd_key).await
+    {
+        let observed =
+            crate::commands::project_authority::capture_identity(&cwd_canon).await?;
+        if observed != known {
+            tracing::warn!(
+                cwd = %clamp_for_log(&cwd_key),
+                "[authz] spawn cwd rejected: workspace root identity changed before spawn"
+            );
+            return Err(CommandError::authz(
+                "spawn cwd identity no longer matches its workspace approval",
+            ));
+        }
+        return Ok(());
+    }
+
+    // project 管理外の cwd は #1200 の対象外 (従来挙動を維持)。
+    Ok(())
 }
 
 /// identity 再照合 (blocking canonicalize×2 + platform file id×2) の短TTLキャッシュ。

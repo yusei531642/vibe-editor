@@ -176,10 +176,10 @@ pub async fn app_setup_team_mcp(
     team_name: String,
     members: Vec<TeamMcpMember>,
 ) -> crate::commands::error::CommandResult<SetupTeamMcpResult> {
-    // Issue #1193: TeamHub登録・MCP設定・inbox watcher はすべて副作用である。renderer由来の
-    // rootを先に登録してから認可する旧順序では、foreign rootが永続stateへ残った。
-    // 最初にnative authority付きactive rootを解決し、失敗時は副作用を一切起こさない。
-    let authorized_root = match crate::commands::authz::assert_active_project_root(
+    // Issue #1193: TeamHub登録・MCP設定・inbox watcher はすべて副作用なので、最初にnative
+    // authority付きactive rootを解決し (Issue #1200: MCP 起動境界なので TTL キャッシュを
+    // 使わず fresh に identity を再照合)、失敗時は副作用を一切起こさない。
+    let authorized_root = match crate::commands::authz::assert_active_project_root_fresh(
         &state.project_root,
         &state.project_root_identity,
         &project_root,
