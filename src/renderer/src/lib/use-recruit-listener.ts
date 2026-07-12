@@ -273,7 +273,9 @@ export function useRecruitListener(): void {
               agent: p.engine,
               command: customAgent.command || undefined,
               args: customAgent.args ? cliArgs.args : undefined,
-              cwd: customAgent.cwd || undefined,
+              // Issue #1193: custom settingsのraw cwdはauthorityにしない。CardFrameが
+              // runtime ProjectContextのactive rootを注入する。
+              cwd: undefined,
               roleProfileId: p.roleProfileId,
               role: p.roleProfileId,
               teamId: p.teamId,

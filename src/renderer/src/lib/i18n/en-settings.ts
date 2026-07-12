@@ -19,7 +19,7 @@ export const enSettings: Dict = {
   'mascot.desc.spark': 'Brighter and lighter',
   'mascot.desc.mono': 'A terminal-friendly angular look',
   'mascot.desc.coder': 'A tiny companion typing at a computer',
-  'mascot.desc.custom': 'Use your own image (PNG/GIF/SVG/WebP) as the companion',
+  'mascot.desc.custom': 'Use your own raster image (PNG/GIF/WebP) as the companion',
 
 
   // ---------- Settings ----------

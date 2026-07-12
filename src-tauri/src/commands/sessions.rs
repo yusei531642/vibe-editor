@@ -5,6 +5,7 @@
 
 use crate::commands::authz::AuthorizedActiveProjectRoot;
 use crate::commands::error::CommandResult;
+use crate::commands::project_authority::ProjectRootIdentity;
 use crate::pty::path_norm::encode_project_path;
 use crate::state::AppState;
 use arc_swap::ArcSwapOption;
@@ -57,9 +58,12 @@ pub async fn sessions_list(
     project_root: String,
 ) -> CommandResult<Vec<SessionInfo>> {
     let home = dirs::home_dir().unwrap_or_default();
-    sessions_list_via(&state.project_root, project_root, move |authorized| {
-        sessions_list_from_home(authorized, home)
-    })
+    sessions_list_via(
+        &state.project_root,
+        &state.project_root_identity,
+        project_root,
+        move |authorized| sessions_list_from_home(authorized, home),
+    )
     .await
 }
 
@@ -67,6 +71,7 @@ pub async fn sessions_list(
 /// `AuthorizedActiveProjectRoot` なしでは呼べないため、拒否requestはdirectory I/Oへ進まない。
 pub(crate) async fn sessions_list_via<R, Reader, Fut>(
     project_root_slot: &ArcSwapOption<String>,
+    project_root_identity_slot: &ArcSwapOption<ProjectRootIdentity>,
     project_root: String,
     reader: Reader,
 ) -> CommandResult<R>
@@ -76,6 +81,7 @@ where
 {
     let authorized = crate::commands::authz::assert_active_project_root_with_raw(
         project_root_slot,
+        project_root_identity_slot,
         &project_root,
     )
     .await?;

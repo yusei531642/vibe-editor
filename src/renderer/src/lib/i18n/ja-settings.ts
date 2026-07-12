@@ -19,7 +19,7 @@ export const jaSettings: Dict = {
   'mascot.desc.spark': '明るめで軽い印象',
   'mascot.desc.mono': '端末になじむ角ばった見た目',
   'mascot.desc.coder': 'PCでカタカタ作業する相棒',
-  'mascot.desc.custom': '自分で用意した画像 (PNG/GIF/SVG/WebP) を相棒として使う',
+  'mascot.desc.custom': '自分で用意したラスター画像 (PNG/GIF/WebP) を相棒として使う',
 
 
   // ---------- Settings ----------

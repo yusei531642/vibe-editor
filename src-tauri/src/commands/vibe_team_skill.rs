@@ -223,15 +223,26 @@ pub async fn app_install_vibe_team_skill(
     // するか canonicalize 比較する。一致しないとユーザー HOME 等の任意ディレクトリ配下に
     // .claude/skills/vibe-team/SKILL.md を作成できてしまい AI hijack 経路になる。
     // Issue #1149: 認可をauthz helperへ一本化し、認可失敗は従来どおりresult.errorで返す。
-    Ok(install_skill_for_active_root(&state.project_root, &project_root, force).await)
+    Ok(install_skill_for_active_root(
+        &state.project_root,
+        &state.project_root_identity,
+        &project_root,
+        force,
+    )
+    .await)
 }
 
 async fn install_skill_for_active_root(
     project_root_slot: &arc_swap::ArcSwapOption<String>,
+    project_root_identity_slot: &arc_swap::ArcSwapOption<
+        crate::commands::project_authority::ProjectRootIdentity,
+    >,
     project_root: &str,
     force: bool,
 ) -> InstallSkillResult {
-    match assert_active_project_root(project_root_slot, project_root).await {
+    match assert_active_project_root(project_root_slot, project_root_identity_slot, project_root)
+        .await
+    {
         Ok(root) => install_skill_at(root.as_path(), force).await,
         Err(error) => InstallSkillResult {
             ok: false,
@@ -287,14 +298,31 @@ mod tests {
         ArcSwapOption::from(path.map(|path| Arc::new(path.to_string_lossy().into_owned())))
     }
 
+    async fn active_identity(
+        path: Option<&Path>,
+    ) -> ArcSwapOption<crate::commands::project_authority::ProjectRootIdentity> {
+        let identity = match path {
+            Some(path) => crate::commands::project_authority::capture_identity(path)
+                .await
+                .ok(),
+            None => None,
+        };
+        ArcSwapOption::from(identity.map(Arc::new))
+    }
+
     #[tokio::test]
     async fn active_root_install_preserves_result_contract() {
         let project = tempfile::tempdir().expect("project");
         let slot = active_root(Some(project.path()));
+        let identity = active_identity(Some(project.path())).await;
 
-        let result =
-            install_skill_for_active_root(&slot, project.path().to_string_lossy().as_ref(), false)
-                .await;
+        let result = install_skill_for_active_root(
+            &slot,
+            &identity,
+            project.path().to_string_lossy().as_ref(),
+            false,
+        )
+        .await;
 
         assert!(result.ok);
         assert!(!result.skipped);
@@ -315,13 +343,17 @@ mod tests {
         let active = tempfile::tempdir().expect("active");
         let foreign = tempfile::tempdir().expect("foreign");
         let slot = active_root(Some(active.path()));
+        let identity = active_identity(Some(active.path())).await;
 
-        let empty = install_skill_for_active_root(&slot, "  ", false).await;
+        let empty = install_skill_for_active_root(&slot, &identity, "  ", false).await;
         assert!(!empty.ok);
         assert_eq!(empty.error.as_deref(), Some("project_root is empty"));
 
+        let unconfigured_root = active_root(None);
+        let unconfigured_identity = active_identity(None).await;
         let unconfigured = install_skill_for_active_root(
-            &active_root(None),
+            &unconfigured_root,
+            &unconfigured_identity,
             active.path().to_string_lossy().as_ref(),
             false,
         )
@@ -333,18 +365,26 @@ mod tests {
         );
 
         let missing_path = active.path().join("missing");
-        let missing =
-            install_skill_for_active_root(&slot, missing_path.to_string_lossy().as_ref(), false)
-                .await;
+        let missing = install_skill_for_active_root(
+            &slot,
+            &identity,
+            missing_path.to_string_lossy().as_ref(),
+            false,
+        )
+        .await;
         assert!(!missing.ok);
         assert!(missing
             .error
             .as_deref()
             .is_some_and(|error| error.starts_with("canonicalize requested project_root failed:")));
 
-        let mismatch =
-            install_skill_for_active_root(&slot, foreign.path().to_string_lossy().as_ref(), false)
-                .await;
+        let mismatch = install_skill_for_active_root(
+            &slot,
+            &identity,
+            foreign.path().to_string_lossy().as_ref(),
+            false,
+        )
+        .await;
         assert!(!mismatch.ok);
         assert_eq!(
             mismatch.error.as_deref(),

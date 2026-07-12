@@ -14,14 +14,20 @@ async fn non_directory_keeps_active_root_result_contract() {
     let slot = arc_swap::ArcSwapOption::from(Some(std::sync::Arc::new(
         file.path().to_string_lossy().into_owned(),
     )));
-    let result =
-        install_skill_for_active_root(&slot, file.path().to_string_lossy().as_ref(), false).await;
+    let identity = arc_swap::ArcSwapOption::from(None);
+    let result = install_skill_for_active_root(
+        &slot,
+        &identity,
+        file.path().to_string_lossy().as_ref(),
+        false,
+    )
+    .await;
 
     assert_failed_without_path(&result);
-    assert!(result
-        .error
-        .as_deref()
-        .is_some_and(|error| error.starts_with("secure skill install failed:")));
+    assert_eq!(
+        result.error.as_deref(),
+        Some("active project root has no native authority identity")
+    );
 }
 
 #[cfg(unix)]

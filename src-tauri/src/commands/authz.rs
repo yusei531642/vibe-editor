@@ -95,23 +95,21 @@ fn clamp_team_id_for_log(raw: &str) -> String {
 /// Issue #954 / #963: ファイル系 IPC (`files_*`) 用のゲート。
 ///
 /// `assert_active_project_root` は active project との厳格一致だが、ファイルツリーは
-/// multi-root workspace (`settings.workspaceFolders`, Issue #4) で active 以外の追加
+/// multi-root workspace (native authority ledger, Issue #1193) で active 以外の追加
 /// ルートも正当に列挙・閲覧・編集するため、厳格一致だとこの機能が壊れる
 /// (#954 で read 側、#963 で write 側に適用)。本 helper は「active project root
-/// **または** settings.json に永続化された workspaceFolders のいずれか」に
+/// **または** native picker由来のworkspace grant のいずれか」に
 /// canonicalize 一致する場合のみ許可する。
 ///
-/// - workspaceFolders の参照先は **Rust 側 settings.json (SSOT)** であり、呼び出しごとの
-///   renderer 引数ではない (renderer が任意 path を主張しても settings に無ければ reject)。
-/// - workspaceFolders 経由の許可は `fs_watch::is_safe_watch_root` (system 領域 / home /
-///   drive root の denylist) も併せて要求する (#963)。settings_save は workspaceFolders を
-///   無検証で受けるため、ここで通過させると write 系がシステム領域に届いてしまう。
-///   active root は `app_set_project_root` 入口で同検証済み (#639) なので再検証しない。
-/// - settings 読込は active 不一致のときだけ走る (primary root の通常フローでは I/O 追加なし)。
+/// - settings.workspaceFolders は renderer が更新できる表示用設定であり、認可根拠にしない。
+/// - ledgerのgrantはcanonical pathだけでなくfilesystem identityも再照合する。
 /// - active が未設定 (起動直後) でも workspaceFolders 一致なら許可する (起動時の
 ///   追加ルート列挙を transient reject しない)。
 pub async fn assert_readable_project_root(
     project_root_slot: &ArcSwapOption<String>,
+    project_root_identity_slot: &ArcSwapOption<
+        crate::commands::project_authority::ProjectRootIdentity,
+    >,
     given: &str,
 ) -> CommandResult<ProjectRoot> {
     let trimmed = given.trim();
@@ -136,21 +134,25 @@ pub async fn assert_readable_project_root(
         }
     };
 
-    // 1. active project root と一致するか (最頻パス、settings I/O なし)
+    // 1. active project root と一致するか。active stateは#1193のprivate activation helper
+    // だけが更新し、rendererから生pathを書き込めるIPCは存在しない。
     let active = current_project_root(project_root_slot).unwrap_or_default();
     if !active.trim().is_empty() {
         if let Ok(active_canon) = tokio::fs::canonicalize(active.trim()).await {
             if req_canon == active_canon {
-                return Ok(ProjectRoot::from_canonical(active_canon));
+                return assert_active_project_root(
+                    project_root_slot,
+                    project_root_identity_slot,
+                    given,
+                )
+                .await;
             }
         }
     }
 
-    // 2. settings.workspaceFolders (Rust 側 SSOT) に含まれるか
-    if let Ok(settings) = crate::commands::settings::settings_load().await {
-        if matches_any_workspace_folder(&req_canon, &settings.workspace_folders).await {
-            return Ok(ProjectRoot::from_canonical(req_canon));
-        }
+    // 2. native picker由来のworkspace grantに含まれるか。
+    if crate::commands::project_authority::is_authorized_workspace_root(&req_canon).await {
+        return Ok(ProjectRoot::from_canonical(req_canon));
     }
 
     tracing::warn!(
@@ -158,7 +160,7 @@ pub async fn assert_readable_project_root(
         "[authz] assert_readable_project_root rejected: not active project nor workspace folder"
     );
     Err(CommandError::authz(
-        "project_root does not match active project or workspace folders",
+        "project_root does not match active project or authorized workspace root",
     ))
 }
 
@@ -169,6 +171,7 @@ pub async fn assert_readable_project_root(
 /// PR #962 auto-review: canonicalize は folder ごとに blocking I/O を伴うため、NFS/SMB 等の
 /// 低速マウントで folder 数分の直列待ちにならないよう `JoinSet` で並列実行し、
 /// 一致を見つけた時点で残りを打ち切る。
+#[allow(dead_code)]
 async fn matches_any_workspace_folder(req_canon: &std::path::Path, folders: &[String]) -> bool {
     let mut set = tokio::task::JoinSet::new();
     for folder in folders {
@@ -263,21 +266,39 @@ mod tests {
     use super::*;
     use tempfile::tempdir;
 
-    /// Issue #739: テスト用の `ArcSwapOption<String>` を作る (旧 `Mutex<Option<String>>` の後継)。
-    fn make_lock(value: Option<String>) -> ArcSwapOption<String> {
-        ArcSwapOption::from(value.map(std::sync::Arc::new))
+    /// Issue #1193: テスト用のactive rootとnative identity snapshotを対で作る。
+    async fn make_lock(
+        value: Option<String>,
+    ) -> (
+        ArcSwapOption<String>,
+        ArcSwapOption<crate::commands::project_authority::ProjectRootIdentity>,
+    ) {
+        let identity = match value.as_deref() {
+            Some(path) if !path.trim().is_empty() => {
+                crate::commands::project_authority::capture_identity(path)
+                    .await
+                    .ok()
+            }
+            _ => None,
+        };
+        (
+            ArcSwapOption::from(value.map(std::sync::Arc::new)),
+            ArcSwapOption::from(identity.map(std::sync::Arc::new)),
+        )
     }
 
     #[tokio::test]
     async fn rejects_empty_given() {
-        let lock = make_lock(Some("/tmp/whatever".to_string()));
-        let err = assert_active_project_root(&lock, "").await.unwrap_err();
+        let (lock, identity) = make_lock(Some("/tmp/whatever".to_string())).await;
+        let err = assert_active_project_root(&lock, &identity, "")
+            .await
+            .unwrap_err();
         assert!(
             matches!(err, CommandError::Authz(ref m) if m.contains("empty")),
             "got: {err}"
         );
         // 全角空白を含む whitespace のみも reject
-        let err = assert_active_project_root(&lock, "   \t  ")
+        let err = assert_active_project_root(&lock, &identity, "   \t  ")
             .await
             .unwrap_err();
         assert!(matches!(err, CommandError::Authz(ref m) if m.contains("empty")));
@@ -285,32 +306,34 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_when_no_active_project_root() {
-        let lock = make_lock(None);
+        let (lock, identity) = make_lock(None).await;
         let dir = tempdir().expect("tempdir");
-        let err = assert_active_project_root(&lock, dir.path().to_string_lossy().as_ref())
-            .await
-            .unwrap_err();
+        let err =
+            assert_active_project_root(&lock, &identity, dir.path().to_string_lossy().as_ref())
+                .await
+                .unwrap_err();
         assert!(
             matches!(err, CommandError::Authz(ref m) if m.contains("no active project_root")),
             "got: {err}"
         );
 
         // active が "" / whitespace のみのときも No active 判定。
-        let lock = make_lock(Some("   ".to_string()));
-        let err = assert_active_project_root(&lock, dir.path().to_string_lossy().as_ref())
-            .await
-            .unwrap_err();
+        let (lock, identity) = make_lock(Some("   ".to_string())).await;
+        let err =
+            assert_active_project_root(&lock, &identity, dir.path().to_string_lossy().as_ref())
+                .await
+                .unwrap_err();
         assert!(matches!(err, CommandError::Authz(ref m) if m.contains("no active project_root")));
     }
 
     #[tokio::test]
     async fn rejects_when_given_does_not_exist() {
         let active = tempdir().expect("active tempdir");
-        let lock = make_lock(Some(active.path().to_string_lossy().into_owned()));
+        let (lock, identity) = make_lock(Some(active.path().to_string_lossy().into_owned())).await;
 
         // 存在しない path → canonicalize fail で reject
         let bogus = active.path().join("does-not-exist-xyz123");
-        let err = assert_active_project_root(&lock, bogus.to_string_lossy().as_ref())
+        let err = assert_active_project_root(&lock, &identity, bogus.to_string_lossy().as_ref())
             .await
             .unwrap_err();
         assert!(
@@ -324,12 +347,17 @@ mod tests {
         let project_a = tempdir().expect("project A");
         let project_b = tempdir().expect("project B");
         // active は project_a
-        let lock = make_lock(Some(project_a.path().to_string_lossy().into_owned()));
+        let (lock, identity) =
+            make_lock(Some(project_a.path().to_string_lossy().into_owned())).await;
 
         // 攻撃: renderer から project_b を渡す → canonicalize 比較で reject
-        let err = assert_active_project_root(&lock, project_b.path().to_string_lossy().as_ref())
-            .await
-            .unwrap_err();
+        let err = assert_active_project_root(
+            &lock,
+            &identity,
+            project_b.path().to_string_lossy().as_ref(),
+        )
+        .await
+        .unwrap_err();
         assert!(
             matches!(err, CommandError::Authz(ref m) if m.contains("does not match active project")),
             "got: {err}"
@@ -339,12 +367,13 @@ mod tests {
     #[tokio::test]
     async fn accepts_when_paths_match() {
         let project = tempdir().expect("project");
-        let lock = make_lock(Some(project.path().to_string_lossy().into_owned()));
+        let (lock, identity) = make_lock(Some(project.path().to_string_lossy().into_owned())).await;
 
         // 同じ path を渡す → 一致して canonical path が返る
-        let canon = assert_active_project_root(&lock, project.path().to_string_lossy().as_ref())
-            .await
-            .expect("matching paths should pass");
+        let canon =
+            assert_active_project_root(&lock, &identity, project.path().to_string_lossy().as_ref())
+                .await
+                .expect("matching paths should pass");
         assert_eq!(
             canon.as_path(),
             std::fs::canonicalize(project.path())
@@ -358,10 +387,14 @@ mod tests {
     #[tokio::test]
     async fn readable_accepts_active_project_root() {
         let project = tempdir().expect("project");
-        let lock = make_lock(Some(project.path().to_string_lossy().into_owned()));
-        let canon = assert_readable_project_root(&lock, project.path().to_string_lossy().as_ref())
-            .await
-            .expect("active root must be readable");
+        let (lock, identity) = make_lock(Some(project.path().to_string_lossy().into_owned())).await;
+        let canon = assert_readable_project_root(
+            &lock,
+            &identity,
+            project.path().to_string_lossy().as_ref(),
+        )
+        .await
+        .expect("active root must be readable");
         assert_eq!(
             canon.as_path(),
             std::fs::canonicalize(project.path()).unwrap().as_path()
@@ -372,18 +405,23 @@ mod tests {
     async fn readable_rejects_empty_and_foreign_paths() {
         let active = tempdir().expect("active");
         let foreign = tempdir().expect("foreign");
-        let lock = make_lock(Some(active.path().to_string_lossy().into_owned()));
+        let (lock, identity) = make_lock(Some(active.path().to_string_lossy().into_owned())).await;
 
-        let err = assert_readable_project_root(&lock, "").await.unwrap_err();
-        assert!(matches!(err, CommandError::Authz(ref m) if m.contains("empty")));
-
-        // active でも workspace folder でもない実在 path → reject
-        // (テスト環境の settings.json に tempdir が登録されていることはない)
-        let err = assert_readable_project_root(&lock, foreign.path().to_string_lossy().as_ref())
+        let err = assert_readable_project_root(&lock, &identity, "")
             .await
             .unwrap_err();
+        assert!(matches!(err, CommandError::Authz(ref m) if m.contains("empty")));
+
+        // activeでもnative authority ledgerのworkspace grantでもない実在path → reject
+        let err = assert_readable_project_root(
+            &lock,
+            &identity,
+            foreign.path().to_string_lossy().as_ref(),
+        )
+        .await
+        .unwrap_err();
         assert!(
-            matches!(err, CommandError::Authz(ref m) if m.contains("workspace folders")),
+            matches!(err, CommandError::Authz(ref m) if m.contains("authorized workspace root")),
             "got: {err}"
         );
     }
@@ -433,14 +471,14 @@ mod tests {
         // active path に末尾 separator や `./` を加えても canonicalize で同一になるなら通る。
         let project = tempdir().expect("project");
         let active_raw = project.path().to_string_lossy().into_owned();
-        let lock = make_lock(Some(active_raw.clone()));
+        let (lock, identity) = make_lock(Some(active_raw.clone())).await;
 
         // 末尾 separator を付けた variant を given にする
         let mut given = active_raw.clone();
         if !given.ends_with(std::path::MAIN_SEPARATOR) {
             given.push(std::path::MAIN_SEPARATOR);
         }
-        let canon = assert_active_project_root(&lock, &given)
+        let canon = assert_active_project_root(&lock, &identity, &given)
             .await
             .expect("trailing separator should canonicalize equal");
         assert_eq!(

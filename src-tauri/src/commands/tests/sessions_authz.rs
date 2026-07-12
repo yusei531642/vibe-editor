@@ -24,6 +24,25 @@ fn active_slot(path: Option<&std::path::Path>) -> ArcSwapOption<String> {
     ArcSwapOption::from(path.map(|path| Arc::new(path.to_string_lossy().into_owned())))
 }
 
+async fn sessions_list_via_native_identity<R, Reader, Fut>(
+    slot: &ArcSwapOption<String>,
+    requested: String,
+    reader: Reader,
+) -> crate::commands::error::CommandResult<R>
+where
+    Reader: FnOnce(crate::commands::authz::AuthorizedActiveProjectRoot) -> Fut,
+    Fut: std::future::Future<Output = R>,
+{
+    let identity = match crate::state::current_project_root(slot) {
+        Some(root) => crate::commands::project_authority::capture_identity(root)
+            .await
+            .ok(),
+        None => None,
+    };
+    let identity_slot = ArcSwapOption::from(identity.map(Arc::new));
+    sessions_list_via(slot, &identity_slot, requested, reader).await
+}
+
 fn fake_session(id: &str) -> SessionInfo {
     SessionInfo {
         id: id.to_string(),
@@ -38,7 +57,7 @@ fn fake_session(id: &str) -> SessionInfo {
 
 async fn assert_authz_rejection_skips_reader(slot: &ArcSwapOption<String>, requested: String) {
     let called = AtomicBool::new(false);
-    let result = sessions_list_via(slot, requested, |_authorized| async {
+    let result = sessions_list_via_native_identity(slot, requested, |_authorized| async {
         called.store(true, Ordering::SeqCst);
         vec![fake_session("must-not-run")]
     })
@@ -56,7 +75,7 @@ async fn assert_authz_rejection_skips_reader(slot: &ArcSwapOption<String>, reque
 async fn sessions_list_active_root_returns_reader_result() {
     let active = tempdir().unwrap();
     let slot = active_slot(Some(active.path()));
-    let result = sessions_list_via(
+    let result = sessions_list_via_native_identity(
         &slot,
         active.path().to_string_lossy().into_owned(),
         |_authorized| async { vec![fake_session("active")] },
@@ -135,7 +154,7 @@ async fn sessions_list_canonical_alias_reads_only_active_raw_directory() {
 
     let slot = active_slot(Some(active.path()));
     let home_path = home.path().to_path_buf();
-    let result = sessions_list_via(&slot, alias_raw, move |authorized| {
+    let result = sessions_list_via_native_identity(&slot, alias_raw, move |authorized| {
         sessions_list_from_home(authorized, home_path)
     })
     .await
@@ -204,7 +223,7 @@ async fn sessions_list_symlink_retarget_keeps_gate_time_canonical_identity() {
 
     let slot = active_slot(Some(&active_link));
     let home_path = home.path().to_path_buf();
-    let result = sessions_list_via(&slot, active_raw, move |authorized| async move {
+    let result = sessions_list_via_native_identity(&slot, active_raw, move |authorized| async move {
         std::fs::remove_file(&active_link).unwrap();
         symlink(&foreign, &active_link).unwrap();
         sessions_list_from_home(authorized, home_path).await
@@ -263,7 +282,7 @@ async fn sessions_list_retargeted_foreign_cwd_symlink_is_not_disclosed() {
 
     let slot = active_slot(Some(&active));
     let home_path = home.path().to_path_buf();
-    let result = sessions_list_via(&slot, active_raw, move |authorized| async move {
+    let result = sessions_list_via_native_identity(&slot, active_raw, move |authorized| async move {
         std::fs::remove_file(&foreign_cwd_link).unwrap();
         symlink(&active, &foreign_cwd_link).unwrap();
         sessions_list_from_home(authorized, home_path).await
@@ -327,7 +346,7 @@ async fn sessions_list_missing_or_blank_cwd_collision_is_not_disclosed() {
     .await;
 
     let slot = active_slot(Some(&active));
-    let result = sessions_list_via(&slot, active_raw, |authorized| {
+    let result = sessions_list_via_native_identity(&slot, active_raw, |authorized| {
         sessions_list_from_home(authorized, home.path().to_path_buf())
     })
     .await

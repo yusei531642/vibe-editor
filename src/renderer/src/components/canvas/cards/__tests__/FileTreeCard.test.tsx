@@ -22,6 +22,10 @@ vi.mock('../../../FileTreePanel', () => ({
   FileTreePanel: () => <div data-testid="file-tree-panel-stub" />
 }));
 
+vi.mock('../../../../lib/app-state-context', () => ({
+  useProject: () => ({ projectRoot: '/repo' })
+}));
+
 import FileTreeCard from '../FileTreeCard';
 import { SettingsProvider } from '../../../../lib/settings-context';
 import { ToastProvider } from '../../../../lib/toast-context';

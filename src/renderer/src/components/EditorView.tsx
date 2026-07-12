@@ -28,17 +28,6 @@ interface EditorViewProps {
   onSave: () => void;
 }
 
-/**
- * Issue #325: relPath を projectRoot に結合して OS 絶対パスを作る。
- * convertFileSrc は forward slash でも動作するため `/` で統一し、
- * 重複区切りやバックスラッシュは正規化する。
- */
-function joinAbsolutePath(projectRoot: string, relPath: string): string {
-  const root = projectRoot.replace(/[\\/]+$/, '');
-  const rel = relPath.replace(/^[\\/]+/, '').replace(/\\/g, '/');
-  return `${root}/${rel}`;
-}
-
 export function EditorView({
   path,
   projectRoot,
@@ -73,7 +62,7 @@ export function EditorView({
         </div>
         <div className="diffview__editor">
           <ImagePreview
-            absolutePath={joinAbsolutePath(projectRoot, path)}
+            projectRoot={projectRoot}
             relativePath={path}
           />
         </div>

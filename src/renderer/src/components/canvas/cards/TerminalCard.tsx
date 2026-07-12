@@ -16,6 +16,7 @@ import { useUiStore } from '../../../stores/ui';
 import { useCanvasTerminalFit } from '../../../lib/use-canvas-terminal-fit';
 import { useXtermScrollToBottomOnResize } from '../../../lib/use-xterm-scroll-on-resize';
 import type { TerminalRuntimeStatus } from '../../../lib/terminal-status';
+import { useProject } from '../../../lib/app-state-context';
 
 // Issue #732: payload 型 (旧ローカル `TerminalPayload`) は canvas store の判別可能 union
 // 側 `TerminalCardPayload` に集約。`NodeProps` を `Node<CardDataOf<'terminal'>>` で具体化し、
@@ -27,6 +28,7 @@ function TerminalCardImpl({ id, data }: NodeProps<Node<CardDataOf<'terminal'>>>)
   // wrapper div の ref を ResizeObserver に渡して末尾追従させる。
   const termContainerRef = useRef<HTMLDivElement | null>(null);
   const { settings } = useSettings();
+  const { projectRoot } = useProject();
   const payload = data?.payload ?? {};
   const title = (data?.title as string) ?? 'Terminal';
   const [, setStatus] = useState<TerminalRuntimeStatus | null>(null);
@@ -46,9 +48,8 @@ function TerminalCardImpl({ id, data }: NodeProps<Node<CardDataOf<'terminal'>>>)
     [id, setCardPayload]
   );
 
-  // Issue #23: 現在開いているプロジェクト (lastOpenedRoot) を最優先。
-  // claudeCwd / payload.cwd は fallback として残す。
-  const cwd = settings.lastOpenedRoot || settings.claudeCwd || payload.cwd || '';
+  // Issue #1193: renderer が書き換えられる settings / persisted payload を authority にしない。
+  const cwd = projectRoot;
   const isCodex = payload.agent === 'codex';
   const command = payload.command ?? (isCodex ? settings.codexCommand : settings.claudeCommand);
 

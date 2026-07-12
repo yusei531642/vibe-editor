@@ -1459,6 +1459,13 @@ export interface FileReadResult {
   contentHash?: string;
 }
 
+/** Issue #1193: backendのproject-root認可を通して取得する画像preview用data URL。 */
+export interface FileImageReadResult {
+  ok: boolean;
+  error?: string;
+  dataUrl?: string;
+}
+
 export interface FileWriteResult {
   ok: boolean;
   error?: string;

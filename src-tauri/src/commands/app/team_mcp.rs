@@ -176,6 +176,25 @@ pub async fn app_setup_team_mcp(
     team_name: String,
     members: Vec<TeamMcpMember>,
 ) -> crate::commands::error::CommandResult<SetupTeamMcpResult> {
+    // Issue #1193: TeamHub登録・MCP設定・inbox watcher はすべて副作用である。renderer由来の
+    // rootを先に登録してから認可する旧順序では、foreign rootが永続stateへ残った。
+    // 最初にnative authority付きactive rootを解決し、失敗時は副作用を一切起こさない。
+    let authorized_root = match crate::commands::authz::assert_active_project_root(
+        &state.project_root,
+        &state.project_root_identity,
+        &project_root,
+    )
+    .await
+    {
+        Ok(root) => root.as_str().to_string(),
+        Err(error) => {
+            return Ok(SetupTeamMcpResult {
+                ok: false,
+                error: Some(format!("project root authorization failed: {error}")),
+                ..Default::default()
+            });
+        }
+    };
     let hub = state.team_hub.clone();
     // 念のため Hub を起動 (setup でも spawn 済み)
     if let Err(e) = hub.start().await {
@@ -193,8 +212,21 @@ pub async fn app_setup_team_mcp(
         .iter()
         .map(|m| (m.agent_id.clone(), m.role.clone()))
         .collect();
-    hub.register_team(&team_id, &team_name, Some(&project_root), &member_bindings)
-        .await;
+    if let Err(error) = hub
+        .register_team(
+            &team_id,
+            &team_name,
+            Some(&authorized_root),
+            &member_bindings,
+        )
+        .await
+    {
+        return Ok(SetupTeamMcpResult {
+            ok: false,
+            error: Some(error),
+            ..Default::default()
+        });
+    }
 
     // vibe-team Skill ファイルを best-effort で配置/同期する。
     // setupTeamMcp は「_init」ウォームアップ呼び出しでも、実チーム起動でも、復元呼び出しでも走る。
@@ -202,39 +234,14 @@ pub async fn app_setup_team_mcp(
     // 同バージョンヘッダで内容差分があれば自動上書き、ヘッダ無しのユーザー編集ファイルには触らない)
     // なので team_id を問わず常に呼んでよい。アプリ起動毎に最新の SKILL.md が確実に同期される。
     //
-    // Issue #191 (Security): 旧実装は renderer 由来の project_root をそのまま install に流して
-    // いたため、改ざん済み bundled JS から任意ディレクトリ配下に SKILL.md を plant 可能だった
-    // (#135 で app_install_vibe_team_skill だけに付けたガードが、setup 経路では空転していた)。
-    // → app_install_vibe_team_skill と同じく req_canon == active_canon を検証してから install する。
-    let trimmed = project_root.trim();
-    let hook_project_root = if trimmed.is_empty() {
-        None
-    } else {
-        match crate::commands::authz::assert_active_project_root(&state.project_root, trimmed).await
-        {
-            Ok(project_root) => {
-                crate::commands::vibe_team_skill::install_skill_best_effort(project_root.as_str())
-                    .await;
-                Some(project_root.as_str().to_string())
-            }
-            Err(e) => {
-                tracing::warn!("[setup_team_mcp] skill install denied: {e}");
-                None
-            }
-        }
-    };
+    crate::commands::vibe_team_skill::install_skill_best_effort(&authorized_root).await;
     let (socket, token, bridge_path) = hub.info().await;
-    if let Some(project_root) = hook_project_root.as_deref() {
-        let inbox_watch_path = crate::team_hub::inbox_watch::path_from_bridge(&bridge_path);
-        if let Err(e) =
-            crate::mcp_config::claude::setup_project_inbox_hook(project_root, &inbox_watch_path)
-                .await
-        {
-            tracing::warn!("[setup_team_mcp] inbox monitor hook setup failed: {e:#}");
-        }
-    } else if crate::team_hub::delivery_mode::DeliveryMode::from_env().should_install_monitor_hook()
+    let inbox_watch_path = crate::team_hub::inbox_watch::path_from_bridge(&bridge_path);
+    if let Err(e) =
+        crate::mcp_config::claude::setup_project_inbox_hook(&authorized_root, &inbox_watch_path)
+            .await
     {
-        tracing::warn!("[setup_team_mcp] inbox monitor hook setup skipped: project_root not authorized");
+        tracing::warn!("[setup_team_mcp] inbox monitor hook setup failed: {e:#}");
     }
     let desired = crate::mcp_config::bridge_desired(&socket, &token, &bridge_path);
 
@@ -262,7 +269,38 @@ pub async fn app_cleanup_team_mcp(
     project_root: String,
     team_id: String,
 ) -> crate::commands::error::CommandResult<CleanupTeamMcpResult> {
-    let last = state.team_hub.clear_team(&team_id).await;
+    // Issue #1193: cleanupもHub state / PTY / MCP設定を変更する副作用であるため、clearより先に
+    // active-root authorityを確認する。foreign root指定で他projectのteamを消せてはならない。
+    let authorized_root = match crate::commands::authz::assert_active_project_root(
+        &state.project_root,
+        &state.project_root_identity,
+        &project_root,
+    )
+    .await
+    {
+        Ok(root) => root.as_str().to_string(),
+        Err(error) => {
+            return Ok(CleanupTeamMcpResult {
+                ok: false,
+                error: Some(format!("project root authorization failed: {error}")),
+                removed: None,
+            });
+        }
+    };
+    let last = match state
+        .team_hub
+        .clear_team_for_project(&team_id, &authorized_root)
+        .await
+    {
+        Ok(last) => last,
+        Err(error) => {
+            return Ok(CleanupTeamMcpResult {
+                ok: false,
+                error: Some(error),
+                removed: None,
+            });
+        }
+    };
 
     // Issue #937: 従来は hub state / MCP 設定だけを消し PTY registry に触れていなかったため、
     // チームの PTY (と claude CLI が spawn した MCP node 群) は renderer の React unmount kill
@@ -282,19 +320,8 @@ pub async fn app_cleanup_team_mcp(
             error: None,
         });
     }
-    match crate::commands::authz::assert_active_project_root(&state.project_root, &project_root)
-        .await
-    {
-        Ok(project_root) => {
-            if let Err(e) =
-                crate::mcp_config::claude::cleanup_project_inbox_hook(project_root.as_str()).await
-            {
-                tracing::warn!("[cleanup_team_mcp] inbox monitor hook cleanup failed: {e:#}");
-            }
-        }
-        Err(e) => {
-            tracing::warn!("[cleanup_team_mcp] inbox monitor hook cleanup skipped: {e}");
-        }
+    if let Err(e) = crate::mcp_config::claude::cleanup_project_inbox_hook(&authorized_root).await {
+        tracing::warn!("[cleanup_team_mcp] inbox monitor hook cleanup failed: {e:#}");
     }
 
     // Issue #597: 残りアクティブチームが 0 になったら MCP 設定を削除。
@@ -327,7 +354,37 @@ pub async fn app_set_active_leader(
             error: Some("teamId is required".into()),
         });
     }
-    state.team_hub.set_active_leader(&team_id, agent_id).await;
+    let Some(active_root) = crate::state::current_project_root(&state.project_root) else {
+        return Ok(ActiveLeaderResult {
+            ok: false,
+            error: Some("active project root is not set".into()),
+        });
+    };
+    let authorized_root = match crate::commands::authz::assert_active_project_root(
+        &state.project_root,
+        &state.project_root_identity,
+        &active_root,
+    )
+    .await
+    {
+        Ok(root) => root.as_str().to_string(),
+        Err(error) => {
+            return Ok(ActiveLeaderResult {
+                ok: false,
+                error: Some(format!("project root authorization failed: {error}")),
+            });
+        }
+    };
+    if let Err(error) = state
+        .team_hub
+        .set_active_leader_for_project(&team_id, &authorized_root, agent_id)
+        .await
+    {
+        return Ok(ActiveLeaderResult {
+            ok: false,
+            error: Some(error),
+        });
+    }
     Ok(ActiveLeaderResult {
         ok: true,
         error: None,

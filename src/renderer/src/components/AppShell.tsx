@@ -583,7 +583,7 @@ export function AppShell({
             <div className="pane">
               <EditorView
                 path={activeEditorTab.relPath}
-                /* Issue #325: 画像ファイルを開いたとき ImagePreview で convertFileSrc を呼べるように
+                /* Issue #325/#1193: backend files authz経由で画像を読むため、
                    projectRoot (= ワークスペース絶対パス) を渡す。 */
                 projectRoot={activeEditorTab.rootPath}
                 content={activeEditorTab.content}
@@ -839,7 +839,7 @@ export function AppShell({
                       if (el) terminalRefs.current.set(tab.id, el);
                       else terminalRefs.current.delete(tab.id);
                     }}
-                    cwd={tab.cwd || settings.claudeCwd || projectRoot}
+                    cwd={projectRoot}
                     fallbackCwd={projectRoot}
                     command={
                       tab.agent === 'codex'

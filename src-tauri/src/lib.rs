@@ -181,7 +181,14 @@ pub fn run() {
             commands::ping,
             // ---- app ----
             commands::app::app_get_project_root,
-            commands::app::app_set_project_root,
+            commands::project_authority::app_restore_authorized_project_root,
+            commands::project_authority::app_pick_and_activate_project_root,
+            commands::project_authority::app_reconfirm_project_root,
+            commands::project_authority::app_pick_file_and_activate_project_root,
+            commands::project_authority::app_clear_active_project_root,
+            commands::project_authority::app_pick_workspace_root,
+            commands::project_authority::app_activate_authorized_workspace_root,
+            commands::project_authority::app_revoke_workspace_root,
             commands::app::app_restart,
             commands::app::window::app_set_window_title,
             commands::app::window::app_check_claude,
@@ -208,6 +215,7 @@ pub fn run() {
             // ---- files ----
             commands::files::files_list,
             commands::files::files_read,
+            commands::files::files_read_image,
             commands::files::files_write,
             // Issue #592: VS Code 互換のファイルツリー右クリック操作
             commands::files::files_create,
@@ -246,6 +254,9 @@ pub fn run() {
             // ---- settings ----
             commands::settings::settings_load,
             commands::settings::settings_save,
+            commands::settings::settings_pick_custom_mascot,
+            commands::settings::settings_load_custom_mascot,
+            commands::settings::settings_clear_custom_mascot,
             // ---- role profiles ----
             commands::role_profiles::role_profiles_load,
             commands::role_profiles::role_profiles_save,
@@ -335,17 +346,19 @@ pub fn run() {
                 }
             });
 
-            // Issue #29: settings.json の lastOpenedRoot から AppState.project_root を復元する。
-            // Issue #260 PR-1: 同じ settings 読み込みで `theme` も取り出し、glass テーマだったら
+            // Issue #1193: project root はrendererが更新可能なsettingsから復元しない。native
+            // picker由来のprivate authority ledgerだけを信頼する。
+            // Issue #260 PR-1: 同じ task で settings 読み込みからthemeも取り出し、glass テーマだったら
             // 起動時に Acrylic / Vibrancy を初期適用する (renderer の applyTheme から再適用される
             // までの空白で「透過 conf.json なのに effect 未適用 → 完全透明」になるのを防ぐ)。
             let app_handle_for_root = app.handle().clone();
             spawn_observed("settings_restore", async move {
+                commands::project_authority::restore_active_project_root(&app_handle_for_root)
+                    .await;
                 // Issue #493: settings_load は Settings struct を返すようになった。
                 // Issue #905: 一時的な読み取り不能は default 扱いせず Err にする。
                 // ここで復元を諦めることで、原本 settings.json が default で上書きされる
                 // 経路を起動直後から作らない。
-                // last_opened_root を優先し、空なら claudeCwd を fallback。
                 let settings = match commands::settings::settings_load().await {
                     Ok(settings) => settings,
                     Err(e) => {
@@ -353,56 +366,6 @@ pub fn run() {
                         return;
                     }
                 };
-                let root = Some(settings.last_opened_root.clone())
-                    .filter(|s| !s.trim().is_empty())
-                    .or_else(|| Some(settings.claude_cwd.clone()).filter(|s| !s.trim().is_empty()));
-                if let Some(root) = root {
-                    let state = app_handle_for_root.state::<state::AppState>();
-                    // Issue #739: ArcSwapOption の lock-free store で復元する。
-                    state::set_project_root(&state.project_root, Some(root.clone()));
-                    tracing::info!("[setup] project_root restored from settings: {root}");
-                    // Issue #724: assetProtocol.scope は空。renderer が `app_set_project_root` を
-                    // 呼ぶ前 (起動直後のセッション復元等) でも画像プレビューが project_root 配下の
-                    // 画像を `asset://` で開けるよう、復元した root を asset scope に許可しておく。
-                    //
-                    // PR #775 (auto-review): `lastOpenedRoot` は settings.json 由来なので、
-                    // 改ざんされた settings.json に `lastOpenedRoot: "/"` を書かれて再起動
-                    // すると OS 全体が recursive 許可されてしまう。`app_set_project_root` が
-                    // 必須にしているのと同じ `is_safe_watch_root` ガードをここでも通し、
-                    // system 領域 / home 直下 / ルートドライブは reject する。
-                    let root_path = std::path::Path::new(&root);
-                    if commands::fs_watch::is_safe_watch_root(root_path) {
-                        commands::asset_scope::allow_asset_dir(&app_handle_for_root, root_path);
-                    } else {
-                        tracing::warn!(
-                            "[setup] refusing to allow asset scope for unsafe restored root: {root}"
-                        );
-                    }
-                }
-                // Issue #724: mascot custom 画像 (PR #716) はファイルダイアログで選ばれた
-                // 単一画像。assetProtocol.scope は空なので、起動時に settings から復元した
-                // custom path 1 ファイルだけを asset scope に許可する (フォルダごとではない)。
-                //
-                // PR #775 (auto-review): `statusMascotCustomPath` も settings.json 由来。
-                // `is_allowed_mascot_path` (画像拡張子ホワイトリスト + parent ディレクトリの
-                // is_safe_watch_root 検証) を通したものだけを許可し、改ざんされた settings.json
-                // 経由で任意ファイルが asset scope に乗るのを防ぐ。
-                if let Some(mascot_path) = settings
-                    .status_mascot_custom_path
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                {
-                    let mascot = std::path::Path::new(mascot_path);
-                    if commands::asset_scope::is_allowed_mascot_path(mascot) {
-                        commands::asset_scope::allow_asset_file(&app_handle_for_root, mascot);
-                    } else {
-                        tracing::warn!(
-                            "[setup] rejected restored mascot path for asset scope (bad extension or unsafe directory): {}",
-                            mascot.display()
-                        );
-                    }
-                }
                 // Issue #260: theme が glass なら初期 effect を適用。
                 // - tauri.conf.json で `transparent: true` + `backgroundColor: "#171716"` に
                 //   なっており、起動瞬間は claude-dark の bg 相当の不透明色で覆われる。renderer

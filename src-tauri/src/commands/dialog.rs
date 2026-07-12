@@ -16,12 +16,28 @@ pub struct DialogFileFilter {
     pub extensions: Vec<String>,
 }
 
-#[tauri::command]
-pub async fn dialog_open_folder(app: AppHandle, title: Option<String>) -> Option<String> {
+/// Rust 側で native folder picker の結果を直接消費するための共通 helper。
+///
+/// renderer へ path を返して後続 IPC に渡し直させると、その文字列と任意文字列を区別できない。
+/// 権限が絡む呼び出しはこの helper の戻り値を同一 Rust command 内で処理する。
+pub(crate) async fn pick_folder(app: &AppHandle, title: Option<String>) -> Option<String> {
+    pick_folder_starting_at(app, title, None).await
+}
+
+/// recent project の再確認用。`starting_directory` は native dialog の初期表示にしか使わず、
+/// 戻り値としてユーザーが実際に選択した path だけを authority 層へ渡す。
+pub(crate) async fn pick_folder_starting_at(
+    app: &AppHandle,
+    title: Option<String>,
+    starting_directory: Option<String>,
+) -> Option<String> {
     let (tx, rx) = oneshot::channel();
     let mut builder = app.dialog().file();
     if let Some(t) = title {
         builder = builder.set_title(&t);
+    }
+    if let Some(directory) = starting_directory.filter(|value| !value.trim().is_empty()) {
+        builder = builder.set_directory(directory);
     }
     builder.pick_folder(move |result| {
         let _ = tx.send(result.map(|p| p.to_string()));
@@ -29,9 +45,9 @@ pub async fn dialog_open_folder(app: AppHandle, title: Option<String>) -> Option
     rx.await.ok().flatten()
 }
 
-#[tauri::command]
-pub async fn dialog_open_file(
-    app: AppHandle,
+/// Rust 側で native file picker の結果を直接消費するための共通 helper。
+pub(crate) async fn pick_file(
+    app: &AppHandle,
     title: Option<String>,
     filters: Option<Vec<DialogFileFilter>>,
 ) -> Option<String> {
@@ -48,6 +64,20 @@ pub async fn dialog_open_file(
         let _ = tx.send(result.map(|p| p.to_string()));
     });
     rx.await.ok().flatten()
+}
+
+#[tauri::command]
+pub async fn dialog_open_folder(app: AppHandle, title: Option<String>) -> Option<String> {
+    pick_folder(&app, title).await
+}
+
+#[tauri::command]
+pub async fn dialog_open_file(
+    app: AppHandle,
+    title: Option<String>,
+    filters: Option<Vec<DialogFileFilter>>,
+) -> Option<String> {
+    pick_file(&app, title, filters).await
 }
 
 /// Issue #137 (Security): 任意 path をクエリして OS / FS の fingerprint に使われるのを防ぐため、

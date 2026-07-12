@@ -18,9 +18,9 @@ impl TeamHub {
         name: &str,
         project_root: Option<&str>,
         members: &[(String, String)],
-    ) {
+    ) -> Result<(), String> {
         if team_id.is_empty() || team_id == "_init" {
-            return;
+            return Ok(());
         }
         let persisted = match project_root.map(str::trim).filter(|v| !v.is_empty()) {
             Some(root) => {
@@ -35,6 +35,17 @@ impl TeamHub {
         let persisted_dynamic_entries = load_persisted_dynamic_for_team(team_id).await;
 
         let mut s = self.state.lock().await;
+        // Issue #1193: `team_id` は renderer 由来であり、同じ ID を別 project から
+        // register して既存 TeamInfo の project_root を上書きしてはならない。判定と
+        // 登録を同じ lock 内で行い、TOCTOU を作らない。
+        if let (Some(requested_root), Some(existing)) = (
+            project_root.map(str::trim).filter(|root| !root.is_empty()),
+            s.teams.get(team_id),
+        ) {
+            if existing.project_root.as_deref() != Some(requested_root) {
+                return Err("team_id is already owned by another project".to_string());
+            }
+        }
         s.active_teams.insert(team_id.to_string());
         // Issue #800: Canvas spawn 由来の初代 member (leader / worker) は
         // `team_recruit` / `team_create_leader` の recruit grant 経路を通らないため、
@@ -139,11 +150,23 @@ impl TeamHub {
                 crate::team_hub::spool::cleanup_old_spools(&root_owned).await;
             });
         }
+        Ok(())
     }
 
     /// チームを active list から外す。戻り値が true なら active が 0 → MCP 設定削除可
-    pub async fn clear_team(&self, team_id: &str) -> bool {
+    pub async fn clear_team_for_project(
+        &self,
+        team_id: &str,
+        project_root: &str,
+    ) -> Result<bool, String> {
         let mut s = self.state.lock().await;
+        let Some(existing) = s.teams.get(team_id) else {
+            // 未登録 ID に対して global MCP 設定を消す方向へ倒さない。
+            return Ok(false);
+        };
+        if existing.project_root.as_deref() != Some(project_root) {
+            return Err("team_id is not owned by the active project".to_string());
+        }
         s.teams.remove(team_id);
         s.active_teams.remove(team_id);
         // 動的ロールもチーム単位でクリア (チーム破棄でロール定義を残す意味は無い)
@@ -166,6 +189,20 @@ impl TeamHub {
         // (3) (team_id, *) を key に持つ advisory file lock も retain で一括除去。
         s.file_locks.retain(|(tid, _), _| tid != team_id);
 
+        Ok(s.active_teams.is_empty())
+    }
+
+    /// owner を持たないユニットテスト用の teardown。production IPC は必ず
+    /// `clear_team_for_project` を使い、renderer がこの bypass に到達する経路はない。
+    #[cfg(test)]
+    pub async fn clear_team(&self, team_id: &str) -> bool {
+        let mut s = self.state.lock().await;
+        s.teams.remove(team_id);
+        s.active_teams.remove(team_id);
+        s.dynamic_roles.remove(team_id);
+        s.recruit_semaphores.remove(team_id);
+        s.remove_team_agents(team_id);
+        s.file_locks.retain(|(tid, _), _| tid != team_id);
         s.active_teams.is_empty()
     }
 
@@ -187,6 +224,31 @@ impl TeamHub {
         if let Err(e) = self.persist_team_state(team_id).await {
             tracing::warn!("[teamhub] persist active leader failed: {e}");
         }
+    }
+
+    /// renderer IPC 用の leader 切替。未登録 team を暗黙に作成せず、active project が
+    /// 登録時の owner と一致する場合だけ許可する。MCP protocol 内部はすでに
+    /// `RequestContext.team_id` で scope 済みなので、従来の `set_active_leader` を使う。
+    pub async fn set_active_leader_for_project(
+        &self,
+        team_id: &str,
+        project_root: &str,
+        agent_id: Option<String>,
+    ) -> Result<(), String> {
+        if team_id.trim().is_empty() {
+            return Err("team_id is required".to_string());
+        }
+        {
+            let s = self.state.lock().await;
+            let Some(team) = s.teams.get(team_id) else {
+                return Err("team_id is not registered".to_string());
+            };
+            if team.project_root.as_deref() != Some(project_root) {
+                return Err("team_id is not owned by the active project".to_string());
+            }
+        }
+        self.set_active_leader(team_id, agent_id).await;
+        Ok(())
     }
 
     /// Issue #470: TeamHub の in-memory orchestration state を team-state に保存する。
@@ -354,7 +416,9 @@ mod register_team_binding_seed_tests {
             ("leader-0-team-800".to_string(), "leader".to_string()),
             ("worker-1-team-800".to_string(), "programmer".to_string()),
         ];
-        hub.register_team(team_id, "Team 800", None, &members).await;
+        hub.register_team(team_id, "Team 800", None, &members)
+            .await
+            .unwrap();
 
         assert!(
             hub.resolve_pending_recruit("leader-0-team-800", team_id, "leader")
@@ -380,7 +444,9 @@ mod register_team_binding_seed_tests {
             // team-805 を suffix に持たない別 team scope の agent_id。
             ("worker-9-team-other".to_string(), "programmer".to_string()),
         ];
-        hub.register_team(team_id, "Team 805", None, &members).await;
+        hub.register_team(team_id, "Team 805", None, &members)
+            .await
+            .unwrap();
 
         assert!(
             hub.resolve_pending_recruit("leader-0-team-805", team_id, "leader")
@@ -392,6 +458,45 @@ mod register_team_binding_seed_tests {
                 .await,
             "team scope 外の agent_id は seed されず handshake は通らない"
         );
+    }
+
+    #[tokio::test]
+    async fn team_id_cannot_be_rebound_or_cleared_from_another_project() {
+        let hub = make_hub();
+        let owner = tempfile::tempdir().unwrap();
+        let foreign = tempfile::tempdir().unwrap();
+        let owner_root = owner.path().to_string_lossy().into_owned();
+        let foreign_root = foreign.path().to_string_lossy().into_owned();
+        let team_id = "team-1193-owner";
+
+        hub.register_team(team_id, "Owner", Some(&owner_root), &[])
+            .await
+            .unwrap();
+        assert!(hub
+            .register_team(team_id, "Foreign", Some(&foreign_root), &[])
+            .await
+            .is_err());
+        assert!(hub
+            .set_active_leader_for_project(team_id, &foreign_root, Some("leader-foreign".into()))
+            .await
+            .is_err());
+        assert!(hub
+            .clear_team_for_project(team_id, &foreign_root)
+            .await
+            .is_err());
+
+        {
+            let state = hub.state.lock().await;
+            let team = state.teams.get(team_id).expect("owner team remains registered");
+            assert_eq!(team.project_root.as_deref(), Some(owner_root.as_str()));
+            assert_eq!(team.name, "Owner");
+            assert!(team.active_leader_agent_id.is_none());
+        }
+
+        assert!(hub
+            .clear_team_for_project(team_id, &owner_root)
+            .await
+            .unwrap());
     }
 }
 
@@ -503,7 +608,9 @@ mod clear_team_release_tests {
         // team_b 由来の state は一切影響を受けない。
         assert!(s.teams.contains_key(team_b));
         assert!(s.recruit_semaphores.contains_key(team_b));
-        let entry_b = s.agent_entry(team_b, agent_b).expect("team_b entry survives");
+        let entry_b = s
+            .agent_entry(team_b, agent_b)
+            .expect("team_b entry survives");
         assert_eq!(entry_b.active_role(), Some("programmer"));
         assert!(entry_b.last_status_call_at.is_some());
         assert!(s
@@ -610,7 +717,9 @@ mod clear_team_release_tests {
         );
         {
             let s = hub.state.lock().await;
-            let entry = s.agent_entry(team_id, agent_id).expect("entry survives retire");
+            let entry = s
+                .agent_entry(team_id, agent_id)
+                .expect("entry survives retire");
             // binding (Active) は失効したが entry は診断保持のため残る。
             assert_eq!(entry.active_role(), None);
         }

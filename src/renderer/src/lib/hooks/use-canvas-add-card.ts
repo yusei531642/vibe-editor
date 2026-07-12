@@ -107,7 +107,7 @@ export function useCanvasAddCard({ nodes, projectRoot }: UseCanvasAddCardOptions
             agentConfigId: cfg.id,
             command: cfg.command || undefined,
             args: cfg.args ? customArgs.args : undefined,
-            cwd: cfg.cwd || cwd,
+            cwd,
             role: 'leader'
           }
         }

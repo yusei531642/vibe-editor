@@ -2,7 +2,8 @@
 
 use super::{clamp_for_log, ProjectRoot};
 use crate::commands::error::{CommandError, CommandResult};
-use crate::state::current_project_root;
+use crate::commands::project_authority::ProjectRootIdentity;
+use crate::state::{current_project_root, current_project_root_identity};
 use arc_swap::ArcSwapOption;
 
 /// active projectとの照合に成功した同一snapshotを表すcapability。
@@ -40,9 +41,10 @@ impl AuthorizedActiveProjectRoot {
 /// renderer由来のrootがAppState active rootとcanonical一致することを検証する。
 pub async fn assert_active_project_root(
     project_root_slot: &ArcSwapOption<String>,
+    project_root_identity_slot: &ArcSwapOption<ProjectRootIdentity>,
     given: &str,
 ) -> CommandResult<ProjectRoot> {
-    assert_active_project_root_with_raw(project_root_slot, given)
+    assert_active_project_root_with_raw(project_root_slot, project_root_identity_slot, given)
         .await
         .map(|authorized| authorized.canonical)
 }
@@ -50,6 +52,7 @@ pub async fn assert_active_project_root(
 /// strict gateと同一snapshotのcanonical capability + active rawを返すcrate内helper。
 pub(crate) async fn assert_active_project_root_with_raw(
     project_root_slot: &ArcSwapOption<String>,
+    project_root_identity_slot: &ArcSwapOption<ProjectRootIdentity>,
     given: &str,
 ) -> CommandResult<AuthorizedActiveProjectRoot> {
     let trimmed = given.trim();
@@ -110,6 +113,27 @@ pub(crate) async fn assert_active_project_root_with_raw(
         );
         return Err(CommandError::authz(
             "project_root does not match active project",
+        ));
+    }
+
+    let Some(stored_identity) = current_project_root_identity(project_root_identity_slot) else {
+        tracing::warn!(
+            active = %clamp_for_log(&active_canon.to_string_lossy()),
+            "[authz] assert_active_project_root rejected: active root has no native identity"
+        );
+        return Err(CommandError::authz(
+            "active project root has no native authority identity",
+        ));
+    };
+    let observed_identity =
+        crate::commands::project_authority::capture_identity(&active_canon).await?;
+    if observed_identity != stored_identity {
+        tracing::warn!(
+            active = %clamp_for_log(&active_canon.to_string_lossy()),
+            "[authz] assert_active_project_root rejected: active root identity changed"
+        );
+        return Err(CommandError::authz(
+            "active project root identity no longer matches its native approval",
         ));
     }
 

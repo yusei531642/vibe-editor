@@ -5,8 +5,6 @@
 
 pub mod api_agents;
 pub mod app;
-// Issue #724 (Security): `asset://` protocol scope の動的許可ヘルパー。
-pub mod asset_scope;
 pub mod atomic_write;
 pub mod authz;
 pub mod dialog;
@@ -16,6 +14,8 @@ pub mod fs_watch;
 pub mod git;
 pub mod handoffs;
 pub mod logs;
+// Issue #1193 (Security): native project-root authority ledger / picker commands.
+pub mod project_authority;
 pub mod role_profiles;
 // Issue #936: 永続化ファイルの安全読み込み (破損時は default 前に原本退避) 共通基盤。
 pub mod safe_load;

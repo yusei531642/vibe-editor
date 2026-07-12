@@ -5,6 +5,7 @@ use super::{
     STORE,
 };
 use crate::commands::error::CommandResult;
+use crate::commands::project_authority::ProjectRootIdentity;
 use crate::state::AppState;
 use arc_swap::ArcSwapOption;
 use std::collections::HashSet;
@@ -17,6 +18,7 @@ pub async fn team_history_list(
 ) -> CommandResult<Vec<TeamHistoryEntry>> {
     team_history_list_via(
         &state.project_root,
+        &state.project_root_identity,
         project_root,
         team_history_list_authorized,
     )
@@ -27,6 +29,7 @@ pub async fn team_history_list(
 /// 実gate自体は差し替えられないため、拒否requestはSTORE lock/disk I/Oへ進まない。
 pub(crate) async fn team_history_list_via<R, Reader, Fut>(
     project_root_slot: &ArcSwapOption<String>,
+    project_root_identity_slot: &ArcSwapOption<ProjectRootIdentity>,
     project_root: String,
     reader: Reader,
 ) -> CommandResult<R>
@@ -36,6 +39,7 @@ where
 {
     let authorized = crate::commands::authz::assert_active_project_root_with_raw(
         project_root_slot,
+        project_root_identity_slot,
         &project_root,
     )
     .await?;

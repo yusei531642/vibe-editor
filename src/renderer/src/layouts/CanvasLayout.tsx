@@ -39,6 +39,7 @@ import { useCanvasAddCard } from '../lib/hooks/use-canvas-add-card';
 import { useCanvasMenuActions } from '../lib/hooks/use-canvas-menu-actions';
 import { useCanvasSpawn } from '../lib/hooks/use-canvas-spawn';
 import { useLayoutResize } from '../lib/hooks/use-layout-resize';
+import { useProject } from '../lib/app-state-context';
 
 export function CanvasLayout(): JSX.Element {
   const setViewMode = useUiStore((s) => s.setViewMode);
@@ -66,10 +67,8 @@ export function CanvasLayout(): JSX.Element {
   }, []);
   const viewport = useCanvasViewport();
   const { settings, update: updateSettings, reset: resetSettings } = useSettings();
+  const { projectRoot } = useProject();
   const t = useT();
-  // プロジェクトルート: runtime の lastOpenedRoot を優先。ユーザー設定の
-  // claudeCwd (明示指定された作業ディレクトリ) は互換フォールバックとして扱う。
-  const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || '';
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
