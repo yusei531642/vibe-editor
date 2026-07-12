@@ -6,7 +6,7 @@ Tauri ベースの Claude Code / Codex 専用エディタ (v1.4.x)
 このリポジトリで作業する前に、以下の skill を必ず起動すること。
 
 - **`vibeeditor`** skill — プロジェクト全体ガイド (アーキテクチャ / IPC / 命名規則 / 頻出コマンド / Canvas / PTY / TeamHub 等)。コードを書く前・触る前に必ず参照する。
-- **`pullrequest`** skill — PR 作成から bot 自動レビュー → 指摘修正ループ → 自動 merge までの workflow。PR を作る/触るときは必ずこれに従う。
+- **`pullrequest`** skill — PR 作成から bot 自動レビュー → 指摘修正ループ → 品質ゲート確認 → ユーザー明示承認後のマージまでの workflow。PR を作る/触るときは必ずこれに従う。
 
 ## 作業ワークフロー (厳守)
 
@@ -21,13 +21,14 @@ Tauri ベースの Claude Code / Codex 専用エディタ (v1.4.x)
 
 ### 3. `main` への直接 push 禁止
 - いかなる理由があっても `git push origin main` は禁止。
-- 必ず feature branch を切って PR 経由でマージする。merge は **vibe-editor-reviewer (bot) が自動で行う**。手動 merge もしない。
+- 必ず feature branch を切って PR 経由でマージする。**vibe-editor-reviewer (bot) はレビューと判定のみを行い、自動マージしない**。
+- `gh pr merge` は、レビュー指摘・CI を含む品質ゲートを完了し、対象 PR・現在の HEAD・マージについてユーザーの明示承認を得た後にだけ実行できる。reviewer の OK はマージ承認ではない。
 
 ### 4. PR 提出後はレビューループを完走させる
 - PR を出したら **vibe-editor-reviewer (GitHub bot)** が自動レビューする。
-- レビューコメントが付いたら **すべて修正** → push → 再レビュー、を **bot が merge するまで繰り返す**。
+- レビューコメントが付いたら **すべて修正** → push → 再レビューを繰り返し、指摘ゼロと全品質ゲートの成功を確認する。reviewer の OK だけではマージしない。
 - 検知は `loop` skill (または `/loop` ) を使い、`gh pr view <PR#> --json reviews,comments,state` 等で状態を polling する。レビューが来ない間は idle、来たら修正コミットを push する。
-- `gh pr create` 一発で投げっぱなしにしない。**merge されたことを確認するまでがタスク**。
+- `gh pr create` 一発で投げっぱなしにしない。品質ゲート・レビュー結果・現在の HEAD を提示してユーザーの明示承認を得てからマージし、**merge されたことを確認するまでがタスク**。
 
 ### 5. コミットメッセージは Conventional Commits 形式
 - 必ず `<type>: <要約>` または `<type>(<scope>): <要約>` の形式で書く。
