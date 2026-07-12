@@ -458,7 +458,16 @@ where
 
 /// Issue #132 共通ヘルパ: 1 つの新エントリを cache に merge して MAX 件まで圧縮する。
 fn merge_entry(all: &mut Vec<TeamHistoryEntry>, entry: TeamHistoryEntry) {
-    all.retain(|e| e.id != entry.id);
+    // Issue #1194: 置換対象は id + project raw key の複合一致に限定する。id は renderer 指定
+    // 値のため、id 単独の retain だと active 認可を通った save が他 project の同名 id entry
+    // を横断削除できてしまう (認可バイパスの残存)。raw key 比較 (I/O なし) を使うのは
+    // list/delete と同じ理由で、保存済み path の canonicalize は symlink retarget を
+    // 同一 project 扱いに変えてしまうため行わない。
+    let new_entry_raw_key = list::normalize_stored_project_root(&entry.project_root);
+    all.retain(|e| {
+        !(e.id == entry.id
+            && list::normalize_stored_project_root(&e.project_root) == new_entry_raw_key)
+    });
     let new_entry_key = normalize_project_root(&entry.project_root);
     all.sort_by(|a, b| b.last_used_at.cmp(&a.last_used_at));
     let mut kept: Vec<TeamHistoryEntry> = Vec::with_capacity(all.len() + 1);

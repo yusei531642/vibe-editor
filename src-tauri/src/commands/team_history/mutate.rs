@@ -312,4 +312,27 @@ mod tests {
         assert!(!has_scoped_entry(&entries, "/tmp/active", "dup"));
         assert!(has_scoped_entry(&entries, "/tmp/foreign", "dup"));
     }
+
+    /// Issue #1194 (review): active 認可を通った save が foreign project の同名 id entry を
+    /// merge_entry の id 単独 retain 経由で横断削除できないこと。置換は同一 project の
+    /// entry に限られ、foreign 側は id が衝突しても残る。
+    #[test]
+    fn merge_entry_does_not_replace_foreign_project_entry_with_same_id() {
+        let mut all = vec![entry("stolen-id", "/tmp/foreign")];
+        merge_entry(&mut all, entry("stolen-id", "/tmp/active"));
+        let mut rows: Vec<(&str, &str)> = all
+            .iter()
+            .map(|e| (e.id.as_str(), e.project_root.as_str()))
+            .collect();
+        rows.sort();
+        assert_eq!(
+            rows,
+            vec![("stolen-id", "/tmp/active"), ("stolen-id", "/tmp/foreign")]
+        );
+
+        // 同一 project の同名 id は従来どおり置換される (重複しない)。
+        let mut same = vec![entry("dup", "/tmp/active")];
+        merge_entry(&mut same, entry("dup", "/tmp/active"));
+        assert_eq!(same.len(), 1);
+    }
 }
