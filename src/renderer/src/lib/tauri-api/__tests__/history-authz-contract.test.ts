@@ -88,3 +88,47 @@ describe('sessions/teamHistory list authz IPC contract', () => {
     });
   });
 });
+
+describe('teamHistory mutation authz IPC contract (Issue #1194)', () => {
+  beforeEach(() => {
+    mocks.invoke.mockReset();
+  });
+
+  const activeEntry = historyResponse[0];
+
+  it('sends projectRoot with delete and resolves the MutationResult', async () => {
+    mocks.invoke.mockResolvedValueOnce({ ok: true });
+    await expect(teamHistory.delete('/workspace/active', 'team-1')).resolves.toEqual({
+      ok: true
+    });
+    expect(mocks.invoke).toHaveBeenLastCalledWith('team_history_delete', {
+      projectRoot: '/workspace/active',
+      id: 'team-1'
+    });
+  });
+
+  it.each([
+    ['team_history_save', () => teamHistory.save(activeEntry)],
+    ['team_history_save_batch', () => teamHistory.saveBatch([activeEntry])],
+    ['team_history_delete', () => teamHistory.delete('/workspace/foreign', 'team-1')]
+  ])('maps %s authz rejection to a failed MutationResult with code', async (_command, run) => {
+    mocks.invoke.mockRejectedValueOnce({
+      code: 'authz',
+      message: 'entry project_root must match the active project root notation'
+    });
+
+    await expect(run()).resolves.toEqual({
+      ok: false,
+      code: 'authz',
+      error: 'entry project_root must match the active project root notation'
+    });
+  });
+
+  it('maps non-structured mutation failures without a code', async () => {
+    mocks.invoke.mockRejectedValueOnce('disk exploded');
+    await expect(teamHistory.save(activeEntry)).resolves.toEqual({
+      ok: false,
+      error: 'disk exploded'
+    });
+  });
+});

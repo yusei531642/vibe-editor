@@ -65,7 +65,7 @@ async fn team_history_list_authorized(target: String) -> Vec<TeamHistoryEntry> {
 /// entryをここでcanonicalizeすると、保存後にsymlinkがretargetされたとき「foreignだった
 /// 履歴」がactive rootと再解決されて見えてしまう。disk formatはraw pathのまま維持しつつ、
 /// gate時active raw snapshotと同じ表記のentryだけを安全側で返す。
-fn normalize_stored_project_root(raw: &str) -> String {
+pub(crate) fn normalize_stored_project_root(raw: &str) -> String {
     let normalized = raw.replace('\\', "/");
     let stripped = normalized.trim_end_matches('/');
     if cfg!(windows) {

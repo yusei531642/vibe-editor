@@ -13,6 +13,7 @@ use tokio::fs;
 use tokio::sync::Mutex;
 
 pub(crate) mod list;
+pub(crate) mod mutate;
 #[cfg(test)]
 pub(crate) use list::{filter_team_history_entries, team_history_list_via};
 
@@ -457,7 +458,16 @@ where
 
 /// Issue #132 共通ヘルパ: 1 つの新エントリを cache に merge して MAX 件まで圧縮する。
 fn merge_entry(all: &mut Vec<TeamHistoryEntry>, entry: TeamHistoryEntry) {
-    all.retain(|e| e.id != entry.id);
+    // Issue #1194: 置換対象は id + project raw key の複合一致に限定する。id は renderer 指定
+    // 値のため、id 単独の retain だと active 認可を通った save が他 project の同名 id entry
+    // を横断削除できてしまう (認可バイパスの残存)。raw key 比較 (I/O なし) を使うのは
+    // list/delete と同じ理由で、保存済み path の canonicalize は symlink retarget を
+    // 同一 project 扱いに変えてしまうため行わない。
+    let new_entry_raw_key = list::normalize_stored_project_root(&entry.project_root);
+    all.retain(|e| {
+        !(e.id == entry.id
+            && list::normalize_stored_project_root(&e.project_root) == new_entry_raw_key)
+    });
     let new_entry_key = normalize_project_root(&entry.project_root);
     all.sort_by(|a, b| b.last_used_at.cmp(&a.last_used_at));
     let mut kept: Vec<TeamHistoryEntry> = Vec::with_capacity(all.len() + 1);
@@ -500,141 +510,6 @@ fn validate_entry_size(entry: &TeamHistoryEntry) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
-#[tauri::command]
-pub async fn team_history_save(mut entry: TeamHistoryEntry) -> MutationResult {
-    // Issue #624: DoS 防御 — 1 MiB 超の entry は merge 前に reject する。
-    if let Err(e) = validate_entry_size(&entry) {
-        return MutationResult {
-            ok: false,
-            error: Some(e),
-            external_change_merged: false,
-        };
-    }
-    hydrate_orchestration_summary(&mut entry).await;
-    // Issue #739: 旧 LOCK / CACHE / DISK_FINGERPRINT の 3 段ロックを STORE 1 ロックに統合。
-    let mut store = STORE.lock().await;
-    ensure_loaded(&mut store).await;
-    let TeamHistoryStore { cache, sync_state } = &mut *store;
-    let all = cache.as_mut().expect("ensured");
-
-    // Issue #642: save 直前に disk を再 stat。手編集 / 別 vibe-editor インスタンスが
-    // team-history.json を書き換えていれば fingerprint 不一致になり、disk を reload して
-    // 「今回 save 対象でない id」だけを cache に取り込む。これで外部編集が in-memory cache の
-    // 古い state で blind-overwrite される事故 (= stale-write) を防ぐ。
-    let path = store_path();
-    let mut incoming_ids = HashSet::new();
-    incoming_ids.insert(entry.id.clone());
-    let external_change_merged =
-        reconcile_external_changes(&path, all, sync_state, &incoming_ids).await;
-
-    // Issue #46 + #640: 新エントリは必ず残す。merge_entry で per-project MAX 件まで圧縮。
-    // write-ahead — disk write 成功時だけ cache + sync_state に commit する。
-    let path_for_save = path.clone();
-    apply_with_disk_commit(
-        all,
-        sync_state,
-        external_change_merged,
-        |candidate| merge_entry(candidate, entry),
-        |entries| async move { save_all(&path_for_save, &entries).await },
-    )
-    .await
-}
-
-/// Issue #132: 複数チームの保存を 1 IPC + 1 disk write にまとめる。
-/// CanvasLayout の auto-save が N チーム分 N 回保存していたのを 1 回にする。
-#[tauri::command]
-pub async fn team_history_save_batch(entries: Vec<TeamHistoryEntry>) -> MutationResult {
-    if entries.is_empty() {
-        return MutationResult {
-            ok: true,
-            error: None,
-            external_change_merged: false,
-        };
-    }
-    // Issue #624: 各 entry を merge 前に validate (1 件でも巨大なら全体 reject)。
-    for entry in &entries {
-        if let Err(e) = validate_entry_size(entry) {
-            return MutationResult {
-                ok: false,
-                error: Some(e),
-                external_change_merged: false,
-            };
-        }
-    }
-    // hydrate は disk I/O を伴うので STORE ロックの外で行う (cache mutate は行わないので安全)
-    let mut hydrated: Vec<TeamHistoryEntry> = Vec::with_capacity(entries.len());
-    for mut entry in entries {
-        hydrate_orchestration_summary(&mut entry).await;
-        hydrated.push(entry);
-    }
-
-    // Issue #739: 旧 LOCK / CACHE / DISK_FINGERPRINT の 3 段ロックを STORE 1 ロックに統合。
-    let mut store = STORE.lock().await;
-    ensure_loaded(&mut store).await;
-    let TeamHistoryStore { cache, sync_state } = &mut *store;
-    let all = cache.as_mut().expect("ensured");
-    let path = store_path();
-
-    // Issue #642: batch save の対象 id を `incoming_ids` として束ねる。reconcile が disk を
-    // 読み直したとき、これら以外の id は disk 側を尊重 (= 外部編集を保持) する。
-    let incoming_ids: HashSet<String> = hydrated.iter().map(|e| e.id.clone()).collect();
-    let external_change_merged =
-        reconcile_external_changes(&path, all, sync_state, &incoming_ids).await;
-
-    // Issue #640: write-ahead — disk write 成功時だけ cache + sync_state に commit する。
-    let path_for_save = path.clone();
-    apply_with_disk_commit(
-        all,
-        sync_state,
-        external_change_merged,
-        |candidate| {
-            for entry in hydrated {
-                merge_entry(candidate, entry);
-            }
-        },
-        |entries| async move { save_all(&path_for_save, &entries).await },
-    )
-    .await
-}
-
-#[tauri::command]
-pub async fn team_history_delete(id: String) -> MutationResult {
-    // Issue #739: 旧 LOCK / CACHE / DISK_FINGERPRINT の 3 段ロックを STORE 1 ロックに統合。
-    let mut store = STORE.lock().await;
-    ensure_loaded(&mut store).await;
-    let TeamHistoryStore { cache, sync_state } = &mut *store;
-    let all = cache.as_mut().expect("ensured");
-    let path = store_path();
-
-    // Issue #642: delete 直前にも fingerprint をチェック。削除対象 id 自体は cache 側で
-    // retain で消すため `incoming_ids` に含めて disk から押し戻されないようにする。
-    let mut incoming_ids = HashSet::new();
-    incoming_ids.insert(id.clone());
-    let external_change_merged =
-        reconcile_external_changes(&path, all, sync_state, &incoming_ids).await;
-
-    // 該当 entry が無く、外部変更の merge も無ければ disk write 自体不要 (ok を返す)。
-    // ただし外部変更を merge した場合は disk と cache の差分が変わっている可能性があるため
-    // 必ず save し直して fingerprint を再同期する。
-    if !all.iter().any(|e| e.id == id) && !external_change_merged {
-        return MutationResult {
-            ok: true,
-            error: None,
-            external_change_merged,
-        };
-    }
-
-    // Issue #640: write-ahead — disk write 成功時だけ cache + sync_state に commit する。
-    let path_for_save = path.clone();
-    apply_with_disk_commit(
-        all,
-        sync_state,
-        external_change_merged,
-        |candidate| candidate.retain(|e| e.id != id),
-        |entries| async move { save_all(&path_for_save, &entries).await },
-    )
-    .await
-}
 
 #[cfg(test)]
 mod tests {
