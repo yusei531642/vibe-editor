@@ -23,7 +23,8 @@ export interface WorkspacePreset {
   id: string;
   /** ローカライズキー (i18n.ts の `canvas.preset.<id>`) */
   i18nKey: string;
-  description: string;
+  /** 組み込み説明のローカライズキー。ユーザー保存 preset の自由入力とは別契約。 */
+  descriptionI18nKey: string;
   /** 各メンバーをどのプリセット名でユーザに見せるか (大カテゴリ) */
   category: 'pair' | 'team';
   members: PresetMember[];
@@ -49,14 +50,14 @@ export const BUILTIN_PRESETS: WorkspacePreset[] = [
   {
     id: 'leader-claude',
     i18nKey: 'canvas.preset.leaderClaude',
-    description: 'Leader (Claude Code) のみで起動。必要なメンバーは Leader が動的に呼び出す。',
+    descriptionI18nKey: 'canvas.preset.leaderClaude.description',
     category: 'team',
     members: [{ role: 'leader', agent: 'claude', col: 0, row: 0 }]
   },
   {
     id: 'leader-codex',
     i18nKey: 'canvas.preset.leaderCodex',
-    description: 'Leader (Codex) のみで起動。必要なメンバーは Leader が動的に呼び出す。',
+    descriptionI18nKey: 'canvas.preset.leaderCodex.description',
     category: 'team',
     members: [{ role: 'leader', agent: 'codex', col: 0, row: 0 }]
   }
