@@ -226,12 +226,7 @@ export function AppShell({
       const sess = await window.api.sessions.list(projectRoot);
       setSessions(sess);
     } catch (err) {
-      reportRefreshFailure(
-        'sessions.list',
-        err,
-        t('toast.sessionsRefreshFailed'),
-        showToast
-      );
+      reportRefreshFailure('sessions.list', err, t('toast.sessionsRefreshFailed'), showToast);
     } finally {
       setSessionsLoading(false);
     }
