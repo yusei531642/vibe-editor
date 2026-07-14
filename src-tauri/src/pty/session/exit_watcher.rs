@@ -20,11 +20,12 @@ pub(super) fn spawn_exit_watcher(
 ) {
     std::thread::spawn(move || {
         let exit_status = child.wait().ok();
-        let removed = if registration.wait_until_registered() {
-            registry.remove_if_same(&id, &registration)
-        } else {
-            None
-        };
+        if !registration.wait_until_registered() {
+            // registryに採用されなかった競合loser。idは別の生存handleが使用中のため、
+            // 同じterminal:exitイベントを通知してはならない。
+            return;
+        }
+        let removed = registry.remove_if_same(&id, &registration);
         let exit_record = removed.as_ref().and_then(|handle| {
             handle
                 .team_id

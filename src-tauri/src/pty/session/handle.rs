@@ -256,7 +256,6 @@ impl SessionHandle {
         }
     }
 }
-
 /// Issue #144: SessionHandle が drop されたタイミングで child プロセスを必ず kill する。
 /// SessionRegistry::remove() は kill を呼ばずに Map から外すだけだったため、
 /// Arc の参照が残っている間 reader thread が PTY master を保持し続け、
@@ -266,6 +265,7 @@ impl SessionHandle {
 /// が確実に成立する。kill 時の Mutex poison でも inner を回収し、child kill だけは試みる。
 impl Drop for SessionHandle {
     fn drop(&mut self) {
+        self.registration.mark_rejected();
         // Issue #632: 明示 kill() を経ずに drop されるパスでも watcher を解放する。
         // 例: registry::insert_if_absent が Err を返して caller 側が handle を捨てるとき、
         //     terminal_create の早期 return パスで insert に到達しないとき、等。

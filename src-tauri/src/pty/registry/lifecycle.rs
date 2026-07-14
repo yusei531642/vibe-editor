@@ -107,4 +107,22 @@ mod tests {
         assert!(!rejected_registration.wait_until_registered());
         assert!(registry.get("collision").is_some());
     }
+
+    #[test]
+    fn dropping_pending_handle_rejects_registration_and_unblocks_watcher() {
+        let handle = handle_with(None, None, None, Arc::new(AtomicUsize::new(0)));
+        let registration = handle.registration.clone();
+        let registration_for_watcher = registration.clone();
+        let (done_tx, done_rx) = mpsc::channel();
+
+        std::thread::spawn(move || {
+            done_tx
+                .send(registration_for_watcher.wait_until_registered())
+                .unwrap();
+        });
+
+        assert!(done_rx.recv_timeout(Duration::from_millis(20)).is_err());
+        drop(handle);
+        assert_eq!(done_rx.recv_timeout(Duration::from_secs(1)), Ok(false));
+    }
 }
