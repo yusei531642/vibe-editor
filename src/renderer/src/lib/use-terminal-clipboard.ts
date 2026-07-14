@@ -46,7 +46,12 @@ export function useTerminalClipboard(options: {
     };
 
     const handleImageBlob = async (blob: Blob, mime: string): Promise<void> => {
-      const res = await insertPastedImageToPty(blob, mime, writePastedImageToPty);
+      const res = await insertPastedImageToPty(
+        blob,
+        mime,
+        writePastedImageToPty,
+        translate(langRef.current, 'terminal.diagnostic.unknownError')
+      );
       if (!res.ok) {
         const message = res.errorKey
           ? translate(langRef.current, res.errorKey)

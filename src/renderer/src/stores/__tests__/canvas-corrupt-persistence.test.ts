@@ -32,7 +32,11 @@ describe('Canvas corrupt persistence recovery (Issue #1140)', () => {
     const corrupt = '{not-json';
     localStorage.setItem(CANVAS_PERSIST_NAME, corrupt);
     const originalSetItem = Storage.prototype.setItem;
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key,
+      value
+    ) {
       if (String(key).startsWith(CANVAS_CORRUPT_BACKUP_PREFIX)) {
         throw new DOMException('quota exceeded', 'QuotaExceededError');
       }
@@ -54,7 +58,11 @@ describe('Canvas corrupt persistence recovery (Issue #1140)', () => {
     const corrupt = '{broken-json';
     localStorage.setItem(CANVAS_PERSIST_NAME, corrupt);
     const originalSetItem = Storage.prototype.setItem;
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (key, value) {
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+      this: Storage,
+      key,
+      value
+    ) {
       if (key === 'vibe-editor:canvas:recovery-notice') {
         throw new DOMException('quota exceeded', 'QuotaExceededError');
       }
