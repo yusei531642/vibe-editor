@@ -188,11 +188,19 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
   const optsRef = useRef(opts);
   optsRef.current = opts;
 
-  const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
+  const [terminalTabs, setTerminalTabsState] = useState<TerminalTab[]>([]);
+  const terminalTabsRef = useRef(terminalTabs);
+  terminalTabsRef.current = terminalTabs;
+  const setTerminalTabs = useCallback<React.Dispatch<React.SetStateAction<TerminalTab[]>>>(
+    (action) => {
+      const next = typeof action === 'function' ? action(terminalTabsRef.current) : action;
+      terminalTabsRef.current = next;
+      setTerminalTabsState(next);
+    },
+    [],
+  );
   const [activeTerminalTabId, setActiveTerminalTabId] = useState<number>(0);
   const nextTerminalIdRef = useRef(1);
-  const terminalTabCountRef = useRef(terminalTabs.length);
-  terminalTabCountRef.current = terminalTabs.length;
 
   // Issue #363: hasActivity を terminalTabs に持たせると PTY data 受信ごとに
   // setTerminalTabs が走り、TerminalView の親 App 全体が ~16ms 周期で再レンダーする。
@@ -253,7 +261,7 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
       // cwd/size mapのkeyに使うため、そのタブが次のauto-saveで既定値に破壊されていた。
       // 同期予約数をrefで管理し、上限判定と採番をupdaterより前に確定する。これにより#588の
       // 「同期連打でも上限を超えず、reject時にidを消費しない」契約も維持する。
-      if (terminalTabCountRef.current >= MAX_TERMINALS) {
+      if (terminalTabsRef.current.length >= MAX_TERMINALS) {
         optsRef.current.showToast(
           t('terminal.limitReached', { max: MAX_TERMINALS }),
           { tone: 'warning' }
@@ -261,7 +269,6 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
         return null;
       }
       const id = nextTerminalIdRef.current++;
-      terminalTabCountRef.current += 1;
       const agentType = addOpts?.agent ?? 'claude';
       // Issue #660: client-side UUID 事前注入。
       //   - resumeSessionId が外部指定 (team-history resume / 永続化復元) → そのまま使い
@@ -329,7 +336,7 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
       setActiveTerminalTabId(id);
       return id;
     },
-    [t]
+    [t, setTerminalTabs]
   );
 
   const doCloseTab = useCallback((tabId: number) => {
@@ -347,7 +354,7 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
       });
       return next;
     });
-  }, []);
+  }, [setTerminalTabs]);
 
   const closeTerminalTab = useCallback(
     (tabId: number) => {
@@ -377,7 +384,7 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
           : t
       )
     );
-  }, []);
+  }, [setTerminalTabs]);
 
   /**
    * Issue #660: Claude session が jsonl に永続化された (= `onSessionId` 受信) 時点で呼び、
@@ -392,7 +399,7 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
       next[idx] = { ...prev[idx], freshSessionId: false };
       return next;
     });
-  }, []);
+  }, [setTerminalTabs]);
 
   const restartTerminal = useCallback(() => {
     restartTerminalTab(activeTerminalTabId);
@@ -439,13 +446,13 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
         setDragOverTabId(null);
       }
     }),
-    []
+    [setTerminalTabs]
   );
 
   const resetForProjectSwitch = useCallback(() => {
     setTerminalTabs([]);
     setActiveTerminalTabId(0);
-  }, []);
+  }, [setTerminalTabs]);
 
   return {
     terminalTabs,

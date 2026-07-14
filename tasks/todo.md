@@ -765,7 +765,7 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1137
 ### 計画
 
 - [x] `addTerminalTab` の同期戻り値と永続化mapの依存関係を確認する。
-- [x] 同期予約数refで上限判定とID採番をupdater前に確定する。
+- [x] stateと同期更新するrefで上限判定とID採番をupdater前に確定する。
 - [x] 同一batchの連続追加が全IDを同期返却する退行テストを追加する。
 - [x] #588上限契約を含む関連テストと全品質ゲートを実行する。
 
@@ -776,7 +776,7 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1137
 
 ### 検証結果
 
-- [x] `use-terminal-tabs` Vitest: PASS (10 tests)
+- [x] `use-terminal-tabs` Vitest: PASS (11 tests、同一batchの削除→追加を含む)
 - [x] `npm run typecheck`: PASS
 - [x] `npm run test`: PASS (86 files / 520 tests)
 - [x] `npm run lint`: PASS (0 errors / 既存 12 warnings)
