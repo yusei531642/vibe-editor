@@ -130,6 +130,22 @@ describe('useTeamHistorySync', () => {
     expect(showToast).toHaveBeenCalledWith('teamHistory.alreadyOpen', { tone: 'info' });
   });
 
+  it('allows resuming a team whose previous IDE terminal tab has exited (#1138)', async () => {
+    installApi();
+    const addTerminalTab = vi.fn(() => 2);
+    const exitedTab = {
+      teamId: 'team-1',
+      exited: true
+    } as UseTeamHistorySyncOptions['terminalTabs'][number];
+    const { result } = renderHook(() =>
+      useTeamHistorySync(options({ terminalTabs: [exitedTab], addTerminalTab }))
+    );
+
+    await act(async () => result.current.handleResumeTeam(teamEntry()));
+
+    expect(addTerminalTab).toHaveBeenCalledTimes(teamEntry().members.length);
+  });
+
   it('reserves the team id so rapid resume clicks spawn members only once (#1138)', async () => {
     installApi();
     const addTerminalTab = vi.fn(() => 1);

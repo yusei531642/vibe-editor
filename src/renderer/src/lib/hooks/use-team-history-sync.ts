@@ -143,7 +143,7 @@ export function useTeamHistorySync(
       if (!projectRoot) return;
       if (
         resumingTeamIdsRef.current.has(entry.id) ||
-        terminalTabs.some((tab) => tab.teamId === entry.id)
+        terminalTabs.some((tab) => tab.teamId === entry.id && !tab.exited)
       ) {
         showToast(t('teamHistory.alreadyOpen', { name: entry.name || entry.id }), {
           tone: 'info'
