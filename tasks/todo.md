@@ -762,23 +762,71 @@ Branch: `feature/issue-452`
 
 Issue: https://github.com/yusei531642/vibe-editor/issues/1142
 
-### 計画
+### 計画・進捗
 
 - [x] 対象3モーダルとglobal capture Escapeの競合を確認する。
 - [x] document captureで初期focus・Tab trap・Escape・focus復帰を共通化する。
 - [x] global Escapeが実際にfocusを持つ最前面UIへ所有権を譲る判定を追加する。
-- [x] Disclaimerへaccessible nameを配線する。
-- [x] a11y関連テストと全品質ゲートを実行する。
+- [x] bodyへfocusが落ちた場合とforeground paletteの回帰テストを追加する。
+- [x] reviewer指摘を修正してfeature branchへpushする。
+- [x] 最新mainを取り込み、CIと再レビューを確認する。
+
+### 検証結果
+
+- [x] modal a11y Vitest: PASS（1 file / 4 tests）
+- [x] `npm run typecheck`: PASS
+- [x] `npm run lint`: PASS（0 errors / 既存12 warnings）
+- [x] `npm run lint:file-size`: PASS
+- [x] `git diff --check`: PASS
+
+## PR #1208 - file-size ratchet修正 (2026-07-14 / Codex)
+
+### RCA結果
+
+- [x] 症状: `AppShell.tsx` が982行となり、baseline上限977行を超えてCIが失敗した。
+- [x] 再現: `npm run lint:file-size` が同じ982/977でFAILした。
+- [x] 原因: 共通通知処理は別moduleへ切り出し済みだが、その呼び出しを6行展開して行数を純増させた。
+- [x] 代替原因除外: baseline変更漏れではなく、branch差分の5行純増とCI計測値が一致した。
+- [x] 修正方針: 機能・責務・baselineを変えず、既存helper呼び出しだけを1行に整形する。
+- [x] 判定: A=YES、B=YES、C=YES、D=YES（Root Cause Confirmed）。
+
+### Next Steps
+
+- [x] 修正前と同じ `npm run lint:file-size` でPASSを確認する。
+- [x] 関連テスト、typecheck、lint、build、diff checkを実行する。
+- [ ] PR #1208へpushし、CIと再レビューを確認する。
+
+### 修正後検証
+
+- [x] `npm run lint:file-size`: PASS（485 files、baseline免除39件）。
+- [x] targeted Vitest: PASS（2 files / 5 tests）。
+- [x] `npm run typecheck`: PASS。
+- [x] `npm run lint`: PASS（0 errors / 既存11 warnings）。
+- [x] `npm run build:vite`: PASS（既存warningのみ）。
+- [x] `git diff --check`: PASS。
+
+## Issue #1139 - セッション/Git再取得失敗を通知 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1139
+
+### 計画
+
+- [x] IDEのsessions/Git refresh失敗経路とCanvas側の処理状況を確認する。
+- [x] console.warnとerror toastの共通通知を追加する。
+- [x] Git refreshのrejection吸収・loading解除・通知をテストする。
+- [x] 関連テストと全品質ゲートを実行する。
 
 ### Next Steps
 
 - [x] 検証結果を記録する。
-- [ ] reviewer指摘修正をコミットして feature branch をpushする。
-- [x] modal a11y Vitest: PASS（1 file / 4 tests）
-- [x] targeted Vitest: PASS（2 files / 9 tests）
+- [x] コミットして feature branch をpushする。
+
+### 検証結果
+
+- [x] 関連 Vitest: PASS (2 files / 5 tests)
 - [x] `npm run typecheck`: PASS
-- [x] `npm run test`: PASS（87 files / 521 tests）
-- [x] `npm run lint`: PASS（0 errors / 既存12 warnings）
+- [x] `npm run test`: PASS (87 files / 522 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 11 warnings)
 - [x] `npm run build:vite`: PASS
 - [x] `git diff --check`: PASS
 - [x] `npm run typecheck`: PASS
