@@ -13,7 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Mic, MicOff } from 'lucide-react';
-import { useT } from '../../lib/i18n';
+import { translate, useT } from '../../lib/i18n';
 import { useSettings } from '../../lib/settings-context';
 import { useVoiceStore } from '../../stores/voice';
 import { useVoiceRealtime } from '../../lib/hooks/use-voice-realtime';
@@ -23,6 +23,16 @@ import { VoiceVisualizer } from './VoiceVisualizer';
 import { VoiceConfirmModal } from './VoiceConfirmModal';
 
 const INLINE_TRAIL_HOLD_MS = 3000;
+
+export function buildVoiceAvailablePresets(
+  language: 'ja' | 'en'
+): VoiceAvailablePreset[] {
+  return BUILTIN_PRESETS.map((preset) => ({
+    id: preset.id,
+    label: preset.id,
+    description: translate(language, preset.descriptionI18nKey)
+  }));
+}
 
 export interface VoiceControlButtonProps {
   /**
@@ -78,16 +88,11 @@ export function VoiceControlButton({
   const errorMessage = useVoiceStore((s) => s.errorMessage);
   const pendingFunctionCall = useVoiceStore((s) => s.pendingFunctionCall);
 
-  // BUILTIN_PRESETS から AI に見せる summary を組み立てる。i18n には依存させず id ベース。
-  // (AI には id を渡すだけで OK で、ユーザー向けラベルは spawn 時に CanvasLayout 側で解決される)
+  // BUILTIN_PRESETS から AI に見せる summary を現在の UI 言語で組み立てる。
+  // id は安定値のまま維持し、説明だけ locale 切替へ追従させる。
   const availablePresets = useMemo<VoiceAvailablePreset[]>(
-    () =>
-      BUILTIN_PRESETS.map((p) => ({
-        id: p.id,
-        label: p.id,
-        description: p.description
-      })),
-    []
+    () => buildVoiceAvailablePresets(settings.language ?? 'ja'),
+    [settings.language]
   );
 
   const { toggle, approvePending, cancelPending, disconnect } = useVoiceRealtime(

@@ -1,5 +1,25 @@
 # vibe-editor Tauri ハイブリッド移行 + 無限キャンバス UI 革新 TODO
 
+## Issue #1146 - API agent session削除失敗を伝播 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1146
+
+### 計画
+
+- [x] 現行の削除処理・エラー型・既存テスト構成を確認する。
+- [x] `NotFound` のみ成功扱いにし、その他のI/Oエラーを伝播する。
+- [x] 成功・NotFound・その他エラーのunit testを追加する。
+- [x] Rust関連品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 検証結果を記録する。
+- [ ] コミットして feature branch をpushする。
+- [x] targeted Rust test: PASS（2 passed / 0 failed）
+- [x] `cargo check --locked --manifest-path src-tauri\\Cargo.toml --all-targets`: PASS
+- [x] `git diff --check`: PASS
+- [ ] repository-wide `cargo fmt --check`: FAIL（今回の差分外に既存不整形あり）
+
 ## #736 team_hub/state.rs god-file 分割 + team_send 段階関数化 (完了)
 
 方針: 振る舞いを一切変えない純粋なリファクタ。lock の取得/解放タイミング・
@@ -757,6 +777,104 @@ Branch: `feature/issue-452`
 
 #### 検証結果（代替で PASS 済み）
 - [x] `git diff --check`: PASS
+
+## Issue #1137 - 複数タブ復元時のcwdマッピング破壊を防止 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1137
+
+### 計画
+
+- [x] `addTerminalTab` の同期戻り値と永続化mapの依存関係を確認する。
+- [x] stateと同期更新するrefで上限判定とID採番をupdater前に確定する。
+- [x] 同一batchの連続追加が全IDを同期返却する退行テストを追加する。
+- [x] 同一batchの削除後追加が上限判定で拒否されない退行テストを追加する。
+- [x] #588上限契約を含む関連テストと全品質ゲートを実行する。
+
+### Next Steps
+
+- [x] reviewer指摘を修正してfeature branchへpushする。
+- [x] 最新mainを取り込み、CIと再レビューを確認する。
+
+### 検証結果
+
+- [x] `use-terminal-tabs` Vitest: PASS (11 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run lint`: PASS (0 errors / 既存12 warnings)
+- [x] `npm run lint:file-size`: PASS
+- [x] `git diff --check`: PASS
+
+## PR #1208 - file-size ratchet修正 (2026-07-14 / Codex)
+
+### RCA結果
+
+- [x] 症状: `AppShell.tsx` が982行となり、baseline上限977行を超えてCIが失敗した。
+- [x] 再現: `npm run lint:file-size` が同じ982/977でFAILした。
+- [x] 原因: 共通通知処理は別moduleへ切り出し済みだが、その呼び出しを6行展開して行数を純増させた。
+- [x] 代替原因除外: baseline変更漏れではなく、branch差分の5行純増とCI計測値が一致した。
+- [x] 修正方針: 機能・責務・baselineを変えず、既存helper呼び出しだけを1行に整形する。
+- [x] 判定: A=YES、B=YES、C=YES、D=YES（Root Cause Confirmed）。
+
+### Next Steps
+
+- [x] 修正前と同じ `npm run lint:file-size` でPASSを確認する。
+- [x] 関連テスト、typecheck、lint、build、diff checkを実行する。
+- [ ] PR #1208へpushし、CIと再レビューを確認する。
+
+### 修正後検証
+
+- [x] `npm run lint:file-size`: PASS（485 files、baseline免除39件）。
+- [x] targeted Vitest: PASS（2 files / 5 tests）。
+- [x] `npm run typecheck`: PASS。
+- [x] `npm run lint`: PASS（0 errors / 既存11 warnings）。
+- [x] `npm run build:vite`: PASS（既存warningのみ）。
+- [x] `git diff --check`: PASS。
+
+## Issue #1139 - セッション/Git再取得失敗を通知 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1139
+
+### 計画
+
+- [x] IDEのsessions/Git refresh失敗経路とCanvas側の処理状況を確認する。
+- [x] console.warnとerror toastの共通通知を追加する。
+- [x] Git refreshのrejection吸収・loading解除・通知をテストする。
+- [x] 関連テストと全品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 検証結果を記録する。
+- [x] コミットして feature branch をpushする。
+
+### 検証結果
+
+- [x] 関連 Vitest: PASS (2 files / 5 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (87 files / 522 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 11 warnings)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
+## Issue #1161 - Release quality gate (2026-07-14 / Codex)
+
+### 計画
+
+- [x] 現行 release / CI workflow と署名前の gate 欠落を確認する。
+- [x] `tasks/fortress-implement/issue-1161/mission-brief.md` に Mission Brief と Slice 境界を記録する。
+- [x] Slice 1: `ci.yml` を reusable workflow 化し、既存品質ゲートを release から呼び出せるようにする。
+- [x] Slice 2: v* tag / main ancestry guard と quality gate dependency を署名 build の前段へ追加する。
+- [x] release workflow の静的契約 lint と RPM 記載を追加する。
+
+### Next Steps
+
+- [x] `npm run lint:release-workflow`、typecheck、Vitest、Clippy を実行する。
+- [ ] PR 上の GitHub Actions で workflow 構文と全品質ゲートを確認する。
+
+### 検証結果
+
+- [x] `npm run lint:release-workflow`: PASS
+- [x] `npm run typecheck`: PASS
+- [x] `npm test`: PASS（87 files / 522 tests）
+- [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
+- [ ] `cargo test --locked --manifest-path src-tauri/Cargo.toml`: 環境制約で未完了（リンク用 archive 生成時に OS error 112、ディスク空き容量不足）。同じ Rust tree の Clippy は PASS。PR CI で再検証する。
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）
@@ -2038,37 +2156,34 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1045
 - [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
 - [x] `git diff --check`: PASS
 
-## Issue #1165 - lightテーマのprimary buttonコントラスト (2026-07-14 / Codex)
+## Issue #1143 - 組み込みプリセット説明の i18n (2026-07-14 / Codex)
 
-Issue: https://github.com/yusei531642/vibe-editor/issues/1165
+Issue: https://github.com/yusei531642/vibe-editor/issues/1143
 
 ### 計画
 
-- [x] 設定primary buttonの文字色を`--accent-foreground`へ接続する。
-- [x] `#rrggbb`背景に対して黒・白の高コントラスト側を返す純関数を追加する。
-- [x] Canvas role dotへ背景色と対になるforegroundを注入する。
-- [x] 未使用の旧avatar CSSを削除する。
-- [x] unit/component test、typecheck、全テスト、lint、Vite buildを実行する。
+- [x] 組み込みプリセットの説明を生文字列から翻訳キーへ置き換える。
+- [x] Canvas の組み込み項目と voice metadata を現在の言語へ同期する。
+- [x] ユーザー保存プリセットの自由入力説明は原文のまま維持する。
+- [x] 翻訳契約と表示経路の回帰テストを追加し、品質ゲートを実行する。
 
 ### Next Steps
 
 - [x] 最小差分を実装する。
-- [x] light/dark色と不正入力の回帰テストを追加する。
-- [ ] feature branchをpushし、PR作成の明示承認を待つ。
+- [x] typecheck、対象テスト、全テスト、lint、Vite build を実行する。
+- [ ] feature branch を push し、PR 作成の明示承認を待つ。
 
 ### 進捗
 
-- [x] light themeの黒いaccent上でprimary labelを白へ切り替えた。
-- [x] role/custom agentの任意`#rrggbb`色から高コントラストforegroundを算出した。
-- [x] 不正形式ではtheme tokenへ安全にfallbackする。
-- [x] JSX参照のない`.canvas-agent-card__avatar` CSSを削除した。
+- [x] 組み込み2プリセットの説明を `descriptionI18nKey` へ置換した。
+- [x] Canvas popover と voice metadata を ja/en 辞書へ接続した。
+- [x] 保存プリセットの自由入力説明を変更しない回帰テストを追加した。
 
 ### 検証結果
 
-- [x] 算出foregroundのcontrast ratio: テスト対象すべて4.5:1以上
 - [x] `npm run typecheck`: PASS
-- [x] 対象Vitest: PASS (3 files / 12 tests)
-- [x] `npm run test`: PASS (89 files / 531 tests)
-- [x] `npm run lint`: PASS (0 errors / 既存warnings 12)
+- [x] 対象 Vitest: PASS (2 files / 6 tests)
+- [x] `npm run test`: PASS (87 files / 522 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 warnings 12)
 - [x] `npm run build:vite`: PASS
 - [x] `git diff --check`: PASS

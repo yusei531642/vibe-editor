@@ -36,11 +36,13 @@ function RoleDot({
 export function BuiltinPresetItem({
   preset,
   label,
+  description,
   agentCountLabel,
   onClick
 }: {
   preset: WorkspacePreset;
   label: string;
+  description: string;
   agentCountLabel: string;
   onClick: () => void;
 }): JSX.Element {
@@ -50,6 +52,7 @@ export function BuiltinPresetItem({
         <span className="canvas-popover__preset-title">{label}</span>
         <span className="canvas-popover__preset-sub">{agentCountLabel}</span>
       </span>
+      <span className="canvas-popover__preset-desc">{description}</span>
       <span className="canvas-popover__preset-roles">
         {(preset.organizations ?? [{ id: 'primary', color: '', members: preset.members }]).map(
           (org, orgIndex) => (
