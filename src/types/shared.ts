@@ -1545,6 +1545,7 @@ export interface TerminalCreateOptions {
    * あれば spawn せず既存 id を返す。HMR 復帰経路用。
    */
   attachIfExists?: boolean;
+  attachOnly?: boolean;
   /**
    * Claude 用のシステム指示文。main プロセス側で一時ファイルに書き出して
    * `--append-system-prompt-file <path>` を args に差し込む。
@@ -1577,7 +1578,6 @@ export interface TerminalWarning {
   messageKey: string;
   params: Record<string, string>;
 }
-
 export interface TerminalCreateResult {
   ok: boolean;
   id?: string;
@@ -1596,6 +1596,7 @@ export interface TerminalCreateResult {
    * initialMessage 自動送信や session id watcher のセットアップを行いたいケースで参照する。
    */
   attached?: boolean;
+  attachMiss?: boolean;
   /**
    * Issue #285 follow-up: attach 経路で renderer に渡す既存 PTY の直近出力 snapshot。
    * HMR remount や Canvas/IDE 切替で xterm が新規生成されると、既存 PTY の banner /
@@ -1605,7 +1606,6 @@ export interface TerminalCreateResult {
    */
   replay?: string;
 }
-
 export interface TerminalExitInfo {
   exitCode: number;
   signal?: number;

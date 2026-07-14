@@ -24,10 +24,17 @@ describe('Issue #271: TerminalCreateOptions HMR fields', () => {
       cols: 80,
       rows: 24,
       sessionKey: 'term:1',
-      attachIfExists: true
+      attachIfExists: true,
+      attachOnly: true
     };
     expect(opts.sessionKey).toBe('term:1');
     expect(opts.attachIfExists).toBe(true);
+    expect(opts.attachOnly).toBe(true);
+  });
+
+  it('attach missを構造化結果として扱える', () => {
+    const result: TerminalCreateResult = { ok: false, attachMiss: true };
+    expect(result.attachMiss).toBe(true);
   });
 
   it('TerminalCreateResult.attached を読めるが optional として扱える', () => {

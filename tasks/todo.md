@@ -2110,3 +2110,18 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1045
 - [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
 - [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
 - [x] `git diff --check`: PASS
+## Issue #1178 Rust PTY lifecycle (2026-07-14 / Codex)
+
+- [x] `TerminationReason` を `SessionHandle` に first-writer-wins で保持する。
+- [x] user close / team cleanup / app shutdown / ID collision の kill origin を記録する。
+- [x] expected termination は registry / broker cleanup のみ行い、renderer / TeamHub の exit 通知を抑止する。
+- [x] 同一 `agent_id` の暗黙 replace-kill を廃止し、registry lock 内で重複登録を拒否する。
+- [x] first-writer-wins・通知判定・重複拒否の回帰テストを追加する。
+
+### Next Tasks
+
+- [x] 新規spawnを150ms間隔へ整流し、queued中のunmountでcreateを取消可能にする。
+- [x] `attachOnly` / `attachMiss` の2段契約でattach hitを即時、missだけをpaced spawnにする。
+- [x] replay前のlistener queueとclient id再購読の順序を回帰テストする。
+- [x] renderer 24 tests、typecheck、Rust attach契約test、cargo check/clippy、file-sizeを通す。
+- [ ] PR #1235 を基準にpush・PR作成し、CI / reviewerを完走する。

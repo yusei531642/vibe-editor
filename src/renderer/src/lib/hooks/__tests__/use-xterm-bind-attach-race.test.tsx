@@ -108,10 +108,9 @@ describe('useXtermBind: Issue #633 attach 経路 pre-subscribe race fix', () => 
 
     const create = vi.fn(async (opts: { id?: string; attachIfExists?: boolean }) => {
       createCalledAt = ++counter;
-      // attach 経路: id は未指定 (Rust 側 find_attach_target が session_key から探す),
-      // attachIfExists=true。
+      // attachOnly preflightはfallback spawn用のclient idも同時に渡す。
       expect(opts.attachIfExists).toBe(true);
-      expect(opts.id).toBeUndefined();
+      expect(opts.id).toBeTruthy();
       return {
         ok: true,
         id: cachedPtyId,
@@ -247,5 +246,64 @@ describe('useXtermBind: Issue #633 attach 経路 pre-subscribe race fix', () => 
       'post-snapshot-chunk-1',
       'post-snapshot-chunk-2'
     ]);
+  });
+
+  it('attach missは旧listenerを外してclient idへ購読後に新規spawnする', async () => {
+    const term = makeTerminal();
+    const fit = { fit: vi.fn() } as unknown as FitAddon;
+    const targets: string[] = [];
+    const create = vi.fn(async (opts: {
+      id?: string;
+      attachIfExists?: boolean;
+      attachOnly?: boolean;
+    }) => {
+      if (create.mock.calls.length === 1) {
+        expect(opts.attachIfExists).toBe(true);
+        expect(opts.attachOnly).toBe(true);
+        return { ok: false, attachMiss: true };
+      }
+      expect(opts.attachIfExists).toBe(false);
+      expect(opts.attachOnly).toBe(false);
+      return { ok: true, id: opts.id, attached: false, command: 'claude' };
+    });
+    (window as TestWindow).api = {
+      terminal: {
+        onDataReady: vi.fn(async (id: string) => {
+          targets.push(id);
+          return vi.fn();
+        }),
+        onExitReady: vi.fn(async () => vi.fn()),
+        onSessionIdReady: vi.fn(async () => vi.fn()),
+        onData: vi.fn(() => vi.fn()),
+        onExit: vi.fn(() => vi.fn()),
+        onSessionId: vi.fn(() => vi.fn()),
+        create,
+        write: vi.fn(async () => undefined),
+        resize: vi.fn(async () => undefined),
+        kill: vi.fn(async () => undefined)
+      }
+    };
+    const ptyIdRef = makeRef<string | null>(null);
+
+    renderHook(() =>
+      useXtermBind({
+        cwd: '/tmp/work',
+        command: 'claude',
+        sessionKey: 'sk-633',
+        termRef: makeRef<Terminal | null>(term),
+        fitRef: makeRef<FitAddon | null>(fit),
+        snapRef: makeRef<PtySpawnSnapshot>({}),
+        callbacksRef: makeRef<PtySessionCallbacks>({}),
+        ptyIdRef,
+        disposedRef: makeRef(false),
+        observeChunk: vi.fn(),
+        unscaledFit: false
+      })
+    );
+
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(2));
+    const clientId = create.mock.calls[0][0].id;
+    await waitFor(() => expect(ptyIdRef.current).toBe(clientId));
+    expect(targets).toEqual([mockCachedEntry.ptyId, clientId]);
   });
 });

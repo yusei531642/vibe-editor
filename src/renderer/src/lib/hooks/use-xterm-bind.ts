@@ -22,7 +22,11 @@ import { useEffect, useRef, useState } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 import type { Terminal } from '@xterm/xterm';
 import type { FitAddon } from '@xterm/addon-fit';
-import type { TerminalExitInfo, TerminalWarning } from '../../../../types/shared';
+import type {
+  TerminalCreateOptions,
+  TerminalExitInfo,
+  TerminalWarning
+} from '../../../../types/shared';
 import { computeUnscaledGrid } from '../compute-unscaled-grid';
 import { getXtermRuntimeCellSize } from '../get-xterm-runtime-cell-size';
 import type { CellSize } from '../measure-cell-size';
@@ -31,6 +35,7 @@ import {
   type TerminalInputGateResetReason
 } from '../terminal-input-gate';
 import type { TerminalRuntimeStatus } from '../terminal-status';
+import { scheduleTerminalSpawn } from '../terminal-spawn-scheduler';
 import {
   acquireGeneration,
   cacheDelete,
@@ -208,6 +213,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
     // effect-local な localDisposed を併用し、再 run でも確実に古い spawn を無効化する。
     let localDisposed = false;
     let repairFrame: number | null = null;
+    let cancelScheduledSpawn: (() => void) | null = null;
 
     const scheduleRenderRepair = (): void => {
       if (repairFrame !== null) return;
@@ -559,23 +565,13 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           }
         };
 
-        // client-generated id: Rust 側で文字種検証 + 既存衝突チェックを通る。
-        // crypto.randomUUID は Tauri 2 の WebView (Edge WebView2 / WKWebView) では
-        // 必ず使えるが、安全側で文字列フォールバックを残す。
         const requestedId =
-          wantAttach
-            ? null
-            : typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-              ? crypto.randomUUID()
-              : `term-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : `term-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
-        // Issue #633: attach 経路では cachedPtyId を pre-subscribe ターゲットにする。
-        // Rust 側 `find_attach_target` は session_key / agent_id / team_id 一致で同じ id
-        // を返すため、HMR remount の通常ケースでは res.id === cachedPtyId が成り立つ。
-        // 万一不一致 (cache 失効で find_attach_target が miss → 新規 spawn フォールバック等)
-        // の場合は create 後の mismatch 再 subscribe で復旧する。
-        const preSubscribeTargetId: string | null =
-          requestedId ?? (wantAttach && cachedPtyId ? cachedPtyId : null);
+        let preSubscribeTargetId: string | null =
+          wantAttach && cachedPtyId ? cachedPtyId : requestedId;
 
         if (preSubscribeTargetId) {
           const ok = await attemptPreSubscribe(
@@ -592,8 +588,8 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           return;
         }
 
-        const res = await window.api.terminal.create({
-          id: requestedId ?? undefined,
+        const createInput: TerminalCreateOptions = {
+          id: requestedId,
           cwd,
           fallbackCwd,
           command,
@@ -606,9 +602,43 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           role: snap.role,
           sessionKey: skey,
           attachIfExists: wantAttach,
+          attachOnly: wantAttach,
           claudeInstructions: snap.claudeInstructions,
           codexInstructions: snap.codexInstructions
-        });
+        };
+        let scheduledCreate = scheduleTerminalSpawn(
+          () => window.api.terminal.create(createInput),
+          !wantAttach
+        );
+        cancelScheduledSpawn = scheduledCreate.cancel;
+        let res = await scheduledCreate.promise;
+        cancelScheduledSpawn = null;
+        if (res?.attachMiss && wantAttach) {
+          unsubscribePtyListeners();
+          const ok = await attemptPreSubscribe(
+            requestedId,
+            newSpawnDataCb,
+            newSpawnExitCb,
+            newSpawnSessionIdCb
+          );
+          if (!ok) return;
+          preSubscribeTargetId = requestedId;
+          scheduledCreate = scheduleTerminalSpawn(
+            () => window.api.terminal.create({
+              ...createInput,
+              attachIfExists: false,
+              attachOnly: false
+            }),
+            true
+          );
+          cancelScheduledSpawn = scheduledCreate.cancel;
+          res = await scheduledCreate.promise;
+          cancelScheduledSpawn = null;
+        }
+        if (!res) {
+          unsubscribePtyListeners();
+          return;
+        }
 
         if (localDisposed || disposedRef.current) {
           // 古い effect の戻り値だった場合の race 処理。
@@ -641,13 +671,8 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           return;
         }
 
-        // Issue #285: 新規 spawn 経路 (requestedId !== null) では Rust 側が
-        // `is_valid_terminal_id` か registry 衝突で UUID 再生成にフォールバックする
-        // 稀ケースがある。万一 mismatch したら、pre-subscribe したリスナーは別 id
-        // (誰も emit しない死 channel) を購読してしまっているので、`res.id` で
-        // 再 pre-subscribe (`*Ready`) する。post-subscribe (sync) だと初期出力を
-        // 取り逃がしうる (Issue #285 の元症状) ので必ず *Ready で再 await。
-        if (requestedId && res.id !== requestedId) {
+        // Rust側でidが変わった場合は、実idへ購読し直して初期出力のraceを防ぐ。
+        if (res.attached !== true && res.id !== requestedId) {
           unsubscribePtyListeners();
           const ok = await attemptPreSubscribe(
             res.id,
@@ -662,11 +687,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         }
 
         ptyIdRef.current = res.id;
-        // Issue #271: HMR remount で再 attach できるよう ptyId と世代番号を退避。
         cacheUpsert(skey, res.id, myGeneration);
-        // Issue #818: warning は Rust 側から `{ messageKey, params }` で来る。
-        // 表示文字列の組み立ては i18n を持つ呼び元 (TerminalView) に委ねる。
-        // formatTerminalWarning 未指定の経路 (tests 等) では messageKey 表示で fallback。
         if (res.warning) {
           const formatter = callbacksRef.current.formatTerminalWarning;
           const formatted = formatter
@@ -678,32 +699,8 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         }
         const attached = res.attached === true;
 
-        // Issue #285 follow-up + Issue #633: attach 経路の race と表示順序を両立させる設計。
-        //
-        // 旧設計の問題点 (#285 follow-up までの状態):
-        //   問題 1 (Codex Lane 0): snapshot 取得 〜 renderer 側 listener ready の間に届いた新着が lost
-        //   問題 2 (Codex Lane 3): listener ready 〜 term.write(replay) の間の新着が replay より先に描画 → 順序逆転
-        //
-        // Issue #633 で問題 1 が「listener を create 後に張っていた」ことに起因して残っていた
-        // ことが判明し、本実装では attach listener を `terminal.create` 呼び出し**前**に
-        // pre-subscribe (cachedPtyId 経由) するよう変更した。これにより:
-        //   (a) create 前から queue モードで受信開始 → create-return 後の新着は確実に受信
-        //   (b) listener callback は queue モード中は term.write せず buffer に溜める
-        //   (c) replay snapshot を term.write してから queue を順次 flush する
-        //   (d) flush 完了後 callback の挙動を「直接 term.write」に切替える
-        //
-        // この順序で:
-        //   - replay (snapshot 時点までの過去出力) が先に画面に書かれる
-        //   - その後 queue に溜まっていた「snapshot 取得時点 〜 buffering 切替時点」の新着が
-        //     順序通り flush される (snapshot の前後で欠落なし)
-        //   - 以降の通常 listener が直接 term.write する
-        //
-        // 注: snapshot 末尾と queue 先頭が一部 byte レベルで重複する可能性はあるが、
-        // それは「終端 prompt の再描画」程度で機能性には影響しない (xterm の re-render で吸収される)。
+        // attachはpre-subscribe中にqueueし、replay後にflushして欠落と順序逆転を防ぐ。
         if (attached) {
-          // Issue #633: pre-subscribe したターゲット id (= cachedPtyId) と Rust が返した
-          // res.id が不一致の場合のみ、orphan listener を解除して res.id で再 subscribe する。
-          // 通常の HMR remount ケースでは一致するので no-op。
           if (preSubscribeTargetId !== res.id) {
             unsubscribePtyListeners();
             const ok = await attemptPreSubscribe(
@@ -843,6 +840,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
     return () => {
       localDisposed = true;
       disposedRef.current = true;
+      cancelScheduledSpawn?.();
       dataSub.dispose();
       textarea?.removeEventListener('compositionstart', onCompStart);
       textarea?.removeEventListener('compositionend', onCompEnd);
