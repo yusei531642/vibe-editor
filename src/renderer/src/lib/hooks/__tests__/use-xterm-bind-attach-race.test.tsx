@@ -35,11 +35,6 @@ import {
   type PtySpawnSnapshot
 } from '../use-xterm-bind';
 
-type TestWindow = Window &
-  typeof globalThis & {
-    api?: unknown;
-  };
-
 type TestTerminal = Terminal & {
   textarea: HTMLTextAreaElement;
 };
@@ -67,11 +62,11 @@ describe('useXtermBind: Issue #633 attach 経路 pre-subscribe race fix', () => 
   let originalFontsDescriptor: PropertyDescriptor | undefined;
 
   beforeEach(() => {
-    originalApi = (window as TestWindow).api;
+    originalApi = window.api;
     originalFontsDescriptor = Object.getOwnPropertyDescriptor(document, 'fonts');
     Object.defineProperty(document, 'fonts', {
       configurable: true,
-      value: { ready: Promise.resolve() } as Partial<FontFaceSet>
+      value: { ready: Promise.resolve({} as FontFaceSet) }
     });
   });
 
@@ -79,14 +74,14 @@ describe('useXtermBind: Issue #633 attach 経路 pre-subscribe race fix', () => 
     cleanup();
     vi.restoreAllMocks();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
-      (window as TestWindow).api = originalApi;
+      Object.defineProperty(window, 'api', { configurable: true, writable: true, value: originalApi });
     }
     if (originalFontsDescriptor) {
       Object.defineProperty(document, 'fonts', originalFontsDescriptor);
     } else {
-      delete (document as Document & { fonts?: unknown }).fonts;
+      Reflect.deleteProperty(document, 'fonts');
     }
   });
 
@@ -120,7 +115,7 @@ describe('useXtermBind: Issue #633 attach 経路 pre-subscribe race fix', () => 
       };
     });
 
-    (window as TestWindow).api = {
+    Object.defineProperty(window, 'api', { configurable: true, writable: true, value: {
       terminal: {
         onDataReady,
         onExitReady: vi.fn(async () => vi.fn()),
@@ -131,9 +126,10 @@ describe('useXtermBind: Issue #633 attach 経路 pre-subscribe race fix', () => 
         create,
         write: vi.fn(async () => undefined),
         resize: vi.fn(async () => undefined),
+        savePastedImage: vi.fn(async () => ''),
         kill: vi.fn(async () => undefined)
       }
-    };
+    } });
 
     const ptyIdRef = makeRef<string | null>(null);
 
@@ -198,7 +194,7 @@ describe('useXtermBind: Issue #633 attach 経路 pre-subscribe race fix', () => 
       };
     });
 
-    (window as TestWindow).api = {
+    Object.defineProperty(window, 'api', { configurable: true, writable: true, value: {
       terminal: {
         onDataReady,
         onExitReady: vi.fn(async () => vi.fn()),
@@ -209,9 +205,10 @@ describe('useXtermBind: Issue #633 attach 経路 pre-subscribe race fix', () => 
         create,
         write: vi.fn(async () => undefined),
         resize: vi.fn(async () => undefined),
+        savePastedImage: vi.fn(async () => ''),
         kill: vi.fn(async () => undefined)
       }
-    };
+    } });
 
     const ptyIdRef = makeRef<string | null>(null);
 

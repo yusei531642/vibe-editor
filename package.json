@@ -16,6 +16,7 @@
     "test": "vitest run",
     "lint:safe-load": "node build/check-safe-load.mjs",
     "lint:file-size": "node build/check-file-size-ratchet.mjs",
+    "lint:css-vars": "node build/check-css-custom-properties.mjs",
     "lint:release-workflow": "node build/check-release-workflow.mjs",
     "lint:command-result": "node build/check-command-result.mjs",
     "lint:team-events": "node build/check-team-event-payloads.mjs",

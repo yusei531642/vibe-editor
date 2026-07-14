@@ -73,10 +73,6 @@ const edgeTypes = {
 };
 
 // React Flow に渡す静的な props はモジュール定数にしてレンダー間で参照を保つ。
-// インラインオブジェクトだと毎レンダーで新しい識別子になり MiniMap / Background が
-// memoization を活かせない。
-const MINIMAP_STYLE = { background: '#0d0d12' } as const;
-const MINIMAP_MASK_COLOR = 'rgba(0,0,0,0.6)';
 const FLOW_DELETE_KEYS = ['Delete'];
 const FLOW_PAN_BUTTONS = [0, 1, 2];
 const FLOW_PRO_OPTIONS = { hideAttribution: true } as const;
@@ -517,8 +513,6 @@ function FlowApp({ actions }: FlowAppProps): JSX.Element {
           pannable
           zoomable
           nodeColor={minimapColor}
-          maskColor={MINIMAP_MASK_COLOR}
-          style={MINIMAP_STYLE}
         />
       </ReactFlow>
 

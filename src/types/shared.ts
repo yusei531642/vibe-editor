@@ -1,6 +1,6 @@
 // main/preload/renderer で共有する型定義
 import type { FileLockConflictSnapshot } from './generated/team-events';
-
+export type { TerminalWriteOutcome, TerminalWriteResult } from './terminal-write';
 export type ThemeName =
   | 'claude-dark'
   | 'claude-light'

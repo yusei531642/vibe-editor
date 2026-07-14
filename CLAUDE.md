@@ -1,6 +1,6 @@
 # vibe-editor
 
-Tauri ベースの Claude Code / Codex 専用エディタ (v1.4.x)
+Tauri ベースの Claude Code / Codex 専用エディタ。正確なアプリ版は `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` を参照する。
 
 ## 必須スキル
 このリポジトリで作業する前に、以下の skill を必ず起動すること。
@@ -63,11 +63,11 @@ Tauri ベースの Claude Code / Codex 専用エディタ (v1.4.x)
 ## アーキテクチャ原則
 - Rust 側 (`src-tauri/`): ファイル I/O、git、PTY (portable-pty)、設定永続化、TeamHub、MCP 設定、updater
 - レンダラー (`src/renderer/`): UI 描画のみ
-- IPC: `@tauri-apps/api/core` の `invoke()` + `listen()`。renderer からは `window.api` 互換層 (`src/renderer/src/lib/tauri-api.ts`) を経由
+- IPC: `@tauri-apps/api/core` の `invoke()` + `listen()`。renderer からは `window.api` 互換層 (`src/renderer/src/lib/tauri-api/`) を経由
 - 状態管理: React hooks + Context (Settings, Toast) + zustand (canvas / ui)
 
 ## 技術スタック
-- Tauri 2 + Vite 8 + React 18 + TypeScript 5.6
+- Tauri 2 + Vite 8 + React 19 + TypeScript 6
 - Rust 1.85 (tokio, portable-pty, notify, anyhow, serde, encoding_rs, sha2)
 - Monaco Editor (diff + エディタ、選択的言語インポート)
 - xterm.js + portable-pty (ターミナル)
@@ -78,7 +78,7 @@ Tauri ベースの Claude Code / Codex 専用エディタ (v1.4.x)
 
 ## ディレクトリ構成
 - `src-tauri/` — Rust 側
-  - `src/commands/` — IPC handler (app, git, terminal, settings, dialog, sessions, team_history, files, fs_watch, atomic_write, role_profiles, vibe_team_skill)
+  - `src/commands/` — IPC handler。正確なモジュール一覧は同ディレクトリと `src/lib.rs` の登録を参照
   - `src/pty/` — portable-pty + batcher + claude session watcher
   - `src/team_hub/` — マルチエージェント用の socket hub
   - `src/mcp_config/` — MCP サーバー設定 (codex 連携用)
@@ -110,7 +110,7 @@ Tauri ベースの Claude Code / Codex 専用エディタ (v1.4.x)
 - [x] ターミナル統合 (xterm.js + portable-pty、複数タブ同時実行)
 - [x] セッション履歴 (過去の Claude Code セッション閲覧・再開)
 - [x] コマンドパレット (Ctrl+Shift+P、ファジー検索)
-- [x] 複数テーマ対応 (claude-dark/light, dark, midnight, light)
+- [x] 6テーマ対応 (claude-dark, claude-light, dark, midnight, light, glass)
 - [x] i18n (日本語/英語)
 - [x] 情報密度設定 (compact/normal/comfortable)
 - [x] 設定モーダル (テーマ、フォント、密度、Claude/Codex オプション、MCP 設定)

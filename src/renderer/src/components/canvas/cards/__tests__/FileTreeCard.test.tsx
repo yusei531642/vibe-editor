@@ -31,23 +31,26 @@ import { SettingsProvider } from '../../../../lib/settings-context';
 import { ToastProvider } from '../../../../lib/toast-context';
 import { DEFAULT_SETTINGS } from '../../../../../../types/shared';
 
-type TestWindow = Window &
-  typeof globalThis & {
-    api?: unknown;
-  };
-
 function installApi(): void {
-  (window as TestWindow).api = {
+  window.api = {
+    ...window.api,
     settings: {
+      ...window.api?.settings,
       load: vi.fn(async () => DEFAULT_SETTINGS),
-      save: vi.fn(async () => undefined)
+      save: vi.fn(async () => undefined),
+      pickCustomMascot: vi.fn(async () => null),
+      loadCustomMascot: vi.fn(async () => null),
+      clearCustomMascot: vi.fn(async () => undefined)
     },
     app: {
-      setProjectRoot: vi.fn(async () => undefined),
+      ...window.api?.app,
       setZoomLevel: vi.fn(async () => undefined)
     },
     dialog: {
-      openFolder: vi.fn(async () => null)
+      ...window.api?.dialog,
+      openFolder: vi.fn(async () => null),
+      openFile: vi.fn(async () => null),
+      isFolderEmpty: vi.fn(async () => true)
     }
   };
 }
@@ -87,19 +90,19 @@ function renderCard() {
 }
 
 describe('FileTreeCard (smoke)', () => {
-  let originalApi: unknown;
+  let originalApi: typeof window.api | undefined;
 
   beforeEach(() => {
-    originalApi = (window as TestWindow).api;
+    originalApi = window.api;
     installApi();
   });
 
   afterEach(() => {
     cleanup();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
-      (window as TestWindow).api = originalApi;
+      window.api = originalApi;
     }
     vi.restoreAllMocks();
   });

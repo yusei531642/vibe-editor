@@ -128,6 +128,8 @@
   --surface-active: var(--bg-active);
   --surface-glass: rgba(20, 20, 19, 0.62);
   --surface-overlay: rgba(6, 6, 7, 0.48);
+  --canvas-minimap-bg: var(--surface-elev);
+  --canvas-minimap-mask: color-mix(in srgb, var(--surface-panel) 70%, transparent);
 
   /* ---------- Glass Effect ---------- */
   --glass-blur: 16px;

@@ -29,19 +29,15 @@ vi.mock('@tauri-apps/plugin-dialog', () => ({
 
 const askMock = vi.mocked(ask);
 
-type TestWindow = Window &
-  typeof globalThis & {
-    api?: unknown;
-  };
+type TestWindow = { api?: unknown };
 
 function installApiStub(): void {
-  (window as TestWindow).api = {
+  (window as unknown as TestWindow).api = {
     settings: {
       load: vi.fn(async () => DEFAULT_SETTINGS),
       save: vi.fn(async () => undefined)
     },
     app: {
-      setProjectRoot: vi.fn(async () => undefined),
       setZoomLevel: vi.fn(async () => undefined)
     }
   };
@@ -74,7 +70,7 @@ describe('useConfirmRemoveCard (Issue #595)', () => {
   let originalApi: unknown;
 
   beforeEach(() => {
-    originalApi = (window as TestWindow).api;
+    originalApi = (window as unknown as TestWindow).api;
     installApiStub();
     askMock.mockReset();
     askMock.mockResolvedValue(true);
@@ -84,9 +80,9 @@ describe('useConfirmRemoveCard (Issue #595)', () => {
 
   afterEach(() => {
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      delete (window as unknown as TestWindow).api;
     } else {
-      (window as TestWindow).api = originalApi;
+      (window as unknown as TestWindow).api = originalApi;
     }
     __resetEditorCardDirtyRegistry();
     useCanvasStore.setState({ nodes: [], edges: [], teamLocks: {} } as never);

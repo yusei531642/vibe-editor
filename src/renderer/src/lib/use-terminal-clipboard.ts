@@ -4,6 +4,7 @@ import type { Terminal } from '@xterm/xterm';
 import { insertPastedImageToPty } from './paste-image-client';
 import { translate } from './i18n';
 import type { Language } from '../../../types/shared';
+import type { TerminalWriteResult } from '../../../types/shared';
 
 /**
  * ターミナルのコピー＆ペースト制御を担当するフック。
@@ -23,12 +24,14 @@ export function useTerminalClipboard(options: {
   containerRef: RefObject<HTMLDivElement | null>;
   /** 文字列を pty に書き込むコールバック (pty id が無ければ no-op) */
   writeToPty: (text: string) => void | Promise<void>;
+  /** 画像パス挿入専用。backendのwrite outcomeを呼び元へ返す。 */
+  writePastedImageToPty: (text: string) => Promise<TerminalWriteResult>;
   /** Issue #338: 言語の current を ref 経由で受け取る。
    *  内部 hook が React Context を直接引くと HMR で Context 分裂時にクラッシュ連鎖するため、
    *  caller 側で settings.language を ref に詰めて渡す。 */
   langRef: MutableRefObject<Language>;
 }): void {
-  const { termRef, containerRef, writeToPty, langRef } = options;
+  const { termRef, containerRef, writeToPty, writePastedImageToPty, langRef } = options;
 
   const writeRef = useRef(writeToPty);
   writeRef.current = writeToPty;
@@ -43,9 +46,12 @@ export function useTerminalClipboard(options: {
     };
 
     const handleImageBlob = async (blob: Blob, mime: string): Promise<void> => {
-      const res = await insertPastedImageToPty(blob, mime, (text) => writeRef.current(text));
+      const res = await insertPastedImageToPty(blob, mime, writePastedImageToPty);
       if (!res.ok) {
-        writeError(translate(langRef.current, 'terminal.pasteImageFailed'), res.error);
+        const message = res.errorKey
+          ? translate(langRef.current, res.errorKey)
+          : res.error;
+        writeError(translate(langRef.current, 'terminal.pasteImageFailed'), message);
       }
     };
 
