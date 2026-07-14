@@ -46,7 +46,7 @@ export function useModalA11y(onClose: () => void): ModalA11y {
       }
       const first = focusables[0];
       const last = focusables[focusables.length - 1];
-      if (!activeInside || (event.shiftKey && active === first)) {
+      if (!activeInside || active === root || (event.shiftKey && active === first)) {
         event.preventDefault();
         (event.shiftKey ? last : first).focus();
       } else if (!event.shiftKey && active === last) {

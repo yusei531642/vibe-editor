@@ -57,6 +57,21 @@ describe('useModalA11y (Issue #1142)', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  it('wraps Tab in both directions when the dialog root itself has focus', () => {
+    render(<ModalHarness onClose={vi.fn()} />);
+    const dialog = screen.getByRole('dialog');
+    const first = screen.getByRole('button', { name: 'first' });
+    const last = screen.getByRole('button', { name: 'last' });
+
+    dialog.focus();
+    expect(fireEvent.keyDown(dialog, { key: 'Tab' })).toBe(false);
+    expect(document.activeElement).toBe(first);
+
+    dialog.focus();
+    expect(fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true })).toBe(false);
+    expect(document.activeElement).toBe(last);
+  });
+
   it('keeps focus and uses the latest onClose when its identity changes', () => {
     const firstOnClose = vi.fn();
     const latestOnClose = vi.fn();
