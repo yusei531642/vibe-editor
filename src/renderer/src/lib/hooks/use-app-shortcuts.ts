@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { webviewZoom } from '../webview-zoom';
 import { useUiStore } from '../../stores/ui';
+import { nestedModalOwnsEscape } from './use-modal-a11y';
 
 export interface UseAppShortcutsOptions {
   /** Phase 1-2 (use-file-tabs) hook 戻り値ブリッジ。 */
@@ -59,6 +60,7 @@ export function useAppShortcuts(opts: UseAppShortcutsOptions): void {
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) {
         if (e.key === 'Escape') {
+          if (nestedModalOwnsEscape()) return;
           if (ui.paletteOpen) ui.setPaletteOpen(false);
           else if (ui.settingsOpen) ui.setSettingsOpen(false);
         }

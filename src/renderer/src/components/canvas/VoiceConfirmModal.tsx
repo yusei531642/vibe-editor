@@ -3,6 +3,7 @@
 
 import { AlertTriangle } from 'lucide-react';
 import { useT } from '../../lib/i18n';
+import { useModalA11y } from '../../lib/hooks/use-modal-a11y';
 
 interface Props {
   text: string;
@@ -12,14 +13,19 @@ interface Props {
 
 export function VoiceConfirmModal({ text, onApprove, onCancel }: Props): JSX.Element {
   const t = useT();
+  const modal = useModalA11y(onCancel);
   return (
     <div className="voice-confirm-backdrop" onClick={onCancel} role="presentation">
       <div
+        ref={modal.dialogRef}
         className="voice-confirm-modal"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-labelledby="voice-confirm-title"
+        tabIndex={-1}
+        data-modal-escape-owner="true"
+        onKeyDown={modal.onKeyDown}
       >
         <h3 id="voice-confirm-title" className="voice-confirm-modal__title">
           <AlertTriangle

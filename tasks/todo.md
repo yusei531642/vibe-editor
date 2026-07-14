@@ -757,6 +757,29 @@ Branch: `feature/issue-452`
 
 #### 検証結果（代替で PASS 済み）
 - [x] `git diff --check`: PASS
+
+## Issue #1142 - nested modalのfocus/Escape境界を統一 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1142
+
+### 計画
+
+- [x] 対象3モーダルとglobal capture Escapeの競合を確認する。
+- [x] 初期focus・Tab trap・Escape・focus復帰の共通hookを追加する。
+- [x] global Escapeがnested modalへ所有権を譲るmarkerを追加する。
+- [x] Disclaimerへaccessible nameを配線する。
+- [x] a11y関連テストと全品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 検証結果を記録する。
+- [ ] コミットして feature branch をpushする。
+- [x] targeted Vitest: PASS（2 files / 9 tests）
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS（87 files / 521 tests）
+- [x] `npm run lint`: PASS（0 errors / 既存12 warnings）
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）
