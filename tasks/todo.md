@@ -14,12 +14,13 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1153
 ### Next Steps
 
 - [x] 検証結果を記録する。
-- [ ] コミットして feature branch をpushする。
+- [ ] CI修正をコミットして feature branch をpushする。
 - [x] terminal Rust tests: PASS（117 passed / 0 failed）
 - [x] PTY Rust tests: PASS（169 passed / 0 failed / 2 ignored）
 - [x] `cargo check --locked --manifest-path src-tauri\\Cargo.toml --all-targets`: PASS
 - [x] `cargo clippy --locked --manifest-path src-tauri\\Cargo.toml --all-targets -- -D warnings`: PASS
 - [x] `git diff --check`: PASS
+- [x] `npm run lint:file-size`: PASS（terminal.rs 983行 / 上限1002行）
 
 ## #736 team_hub/state.rs god-file 分割 + team_send 段階関数化 (完了)
 
