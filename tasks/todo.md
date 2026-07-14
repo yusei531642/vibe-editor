@@ -853,6 +853,28 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1139
 - [x] `npm run lint`: PASS (0 errors / 既存 11 warnings)
 - [x] `npm run build:vite`: PASS
 - [x] `git diff --check`: PASS
+## Issue #1161 - Release quality gate (2026-07-14 / Codex)
+
+### 計画
+
+- [x] 現行 release / CI workflow と署名前の gate 欠落を確認する。
+- [x] `tasks/fortress-implement/issue-1161/mission-brief.md` に Mission Brief と Slice 境界を記録する。
+- [x] Slice 1: `ci.yml` を reusable workflow 化し、既存品質ゲートを release から呼び出せるようにする。
+- [x] Slice 2: v* tag / main ancestry guard と quality gate dependency を署名 build の前段へ追加する。
+- [x] release workflow の静的契約 lint と RPM 記載を追加する。
+
+### Next Steps
+
+- [x] `npm run lint:release-workflow`、typecheck、Vitest、Clippy を実行する。
+- [ ] PR 上の GitHub Actions で workflow 構文と全品質ゲートを確認する。
+
+### 検証結果
+
+- [x] `npm run lint:release-workflow`: PASS
+- [x] `npm run typecheck`: PASS
+- [x] `npm test`: PASS（87 files / 522 tests）
+- [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
+- [ ] `cargo test --locked --manifest-path src-tauri/Cargo.toml`: 環境制約で未完了（リンク用 archive 生成時に OS error 112、ディスク空き容量不足）。同じ Rust tree の Clippy は PASS。PR CI で再検証する。
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）
