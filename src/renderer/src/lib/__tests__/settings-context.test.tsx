@@ -21,10 +21,7 @@ import { ToastProvider } from '../toast-context';
 import { DEFAULT_SETTINGS, type AppSettings } from '../../../../types/shared';
 import { BOOTSTRAP_LANGUAGE_STORAGE_KEY } from '../i18n';
 
-type TestWindow = Window &
-  typeof globalThis & {
-    api?: unknown;
-  };
+type TestWindow = { api?: unknown };
 
 interface MockApi {
   settings: {
@@ -50,7 +47,7 @@ function installApi(
       setZoomLevel: vi.fn(async () => undefined)
     }
   };
-  (window as TestWindow).api = api;
+  (window as unknown as TestWindow).api = api;
   return api;
 }
 
@@ -66,7 +63,7 @@ describe('settings-context', () => {
   let originalApi: unknown;
 
   beforeEach(() => {
-    originalApi = (window as TestWindow).api;
+    originalApi = (window as unknown as TestWindow).api;
     window.localStorage.clear();
     document.documentElement.removeAttribute('lang');
   });
@@ -74,9 +71,9 @@ describe('settings-context', () => {
   afterEach(() => {
     cleanup();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      delete (window as unknown as TestWindow).api;
     } else {
-      (window as TestWindow).api = originalApi;
+      (window as unknown as TestWindow).api = originalApi;
     }
     vi.restoreAllMocks();
   });

@@ -1,11 +1,11 @@
 ---
 name: vibeeditor
-description: vibe-editor (Tauri 2 + React 18 製の Claude Code / Codex 専用エディタ) で作業する際に必ず参照するプロジェクト全体ガイド。アーキテクチャ (Rust 側コマンド / React 側 UI / IPC 経由)、ディレクトリ構成、命名規則、頻出コマンド (npm run dev / typecheck / build)、テーマ・i18n・設定永続化・PTY・Canvas モード・自動アップデート等の実装パターンと注意点をまとめる。vibe-editor リポジトリ内で「機能追加」「バグ修正」「リファクタ」「IPC コマンドを足す」「設定項目を追加」「テーマを足す」「Canvas を触る」「ターミナル/PTY を触る」「セッション履歴」「TeamHub」「shared.ts に型を足す」「tauri-api.ts」「@tauri-apps/api/core」「invoke / listen」等のキーワードや作業に少しでも触れるとき、また vibe-editor プロジェクトでコードを書く前に必ずこの skill を起動すること。
+description: vibe-editor (Tauri 2 + React 19 製の Claude Code / Codex 専用エディタ) で作業する際に必ず参照するプロジェクト全体ガイド。アーキテクチャ (Rust 側コマンド / React 側 UI / IPC 経由)、ディレクトリ構成、命名規則、頻出コマンド (npm run dev / typecheck / build)、テーマ・i18n・設定永続化・PTY・Canvas モード・自動アップデート等の実装パターンと注意点をまとめる。vibe-editor リポジトリ内で「機能追加」「バグ修正」「リファクタ」「IPC コマンドを足す」「設定項目を追加」「テーマを足す」「Canvas を触る」「ターミナル/PTY を触る」「セッション履歴」「TeamHub」「shared.ts に型を足す」「tauri-api」「@tauri-apps/api/core」「invoke / listen」等のキーワードや作業に少しでも触れるとき、また vibe-editor プロジェクトでコードを書く前に必ずこの skill を起動すること。
 ---
 
 # vibeeditor
 
-vibe-editor (Tauri 2 + Vite 5 + React 18 + TypeScript 5.6) で開発するときに最初に読み込むナビゲーションスキル。
+vibe-editor (Tauri 2 + Vite 8 + React 19 + TypeScript 6) で開発するときに最初に読み込むナビゲーションスキル。正確なpatch版は `package.json` を参照する。
 個別タスクのフローは別 skill (pullrequest / vibe-team / claude-design など) に委譲し、ここでは「どこに何があるか」「どのレイヤを触るか」を素早く判断するための地図を提供する。
 
 ---
@@ -17,11 +17,11 @@ vibe-editor (Tauri 2 + Vite 5 + React 18 + TypeScript 5.6) で開発するとき
 ```
 ┌─────────────────────────────────────────────────┐
 │ Renderer (src/renderer/) — UI 描画のみ           │
-│   React 18 + TS strict + zustand + Monaco        │
+│   React 19 + TS strict + zustand + Monaco        │
 │   状態: hooks + Context (Settings, Toast)        │
 │        + zustand (canvas / ui)                   │
 └──────────────────┬──────────────────────────────┘
-                   │ window.api (tauri-api.ts 互換層)
+                   │ window.api (lib/tauri-api/ 互換層)
                    │ ↓ invoke() / listen()
 ┌──────────────────┴──────────────────────────────┐
 │ Tauri main (src-tauri/) — Rust                  │
@@ -41,7 +41,7 @@ vibe-editor (Tauri 2 + Vite 5 + React 18 + TypeScript 5.6) で開発するとき
 
 | 触りたいもの                       | 場所                                                         |
 |------------------------------------|--------------------------------------------------------------|
-| Rust IPC コマンド                  | `src-tauri/src/commands/{app,git,terminal,settings,dialog,sessions,team_history,files}.rs` |
+| Rust IPC コマンド                  | `src-tauri/src/commands/` (`src/lib.rs` で登録を確認) |
 | PTY / xterm 連携 (portable-pty)    | `src-tauri/src/pty/`                                         |
 | マルチエージェント socket hub      | `src-tauri/src/team_hub/`                                    |
 | 自動アップデート                   | `src-tauri/src/updater*` (tauri-plugin-updater)              |
@@ -49,7 +49,7 @@ vibe-editor (Tauri 2 + Vite 5 + React 18 + TypeScript 5.6) で開発するとき
 | Canvas モード専用 React            | `src/renderer/src/components/canvas/`                        |
 | レイアウト (CanvasLayout 等)       | `src/renderer/src/layouts/`                                  |
 | zustand store                      | `src/renderer/src/stores/{ui,canvas}.ts`                     |
-| Tauri 互換 API ラッパ              | `src/renderer/src/lib/tauri-api.ts`                          |
+| Tauri 互換 API ラッパ              | `src/renderer/src/lib/tauri-api/`                            |
 | 設定 Context                       | `src/renderer/src/lib/settings-context.tsx`                  |
 | テーマ (CSS 変数)                  | `src/renderer/src/lib/themes*` + `src/renderer/src/styles/`  |
 | i18n (ja/en)                       | `src/renderer/src/lib/i18n*`                                 |
@@ -65,7 +65,7 @@ vibe-editor (Tauri 2 + Vite 5 + React 18 + TypeScript 5.6) で開発するとき
 ```bash
 npm run dev          # = cargo tauri dev (Rust ビルド込み起動)
 npm run build        # = cargo tauri build (リリースビルド)
-npm run typecheck    # tsc --noEmit
+npm run typecheck    # tsc -b --force
 npm run dev:vite     # レンダラーだけ vite で起動 (UI 単体確認用)
 ```
 
@@ -79,7 +79,7 @@ npm run dev:vite     # レンダラーだけ vite で起動 (UI 単体確認用)
 1. `src/types/shared.ts` に Request / Response 型を追加 (camelCase)。
 2. `src-tauri/src/commands/<領域>.rs` に同名構造体を `#[derive(Serialize, Deserialize)] #[serde(rename_all = "camelCase")]` で追加。
 3. `#[tauri::command] async fn ...` を実装し、`tauri::Builder` の `invoke_handler!` に登録。
-4. `src/renderer/src/lib/tauri-api.ts` に `window.api.<名前>` のラッパを追加 (引数・戻り値型は shared.ts のものを使う)。
+4. `src/renderer/src/lib/tauri-api/` の該当領域に `window.api.<名前>` のラッパを追加 (引数・戻り値型は shared.ts のものを使う)。
 5. 呼び出し側 React から `window.api.xxx(...)` で利用。
 6. `npm run typecheck` で両側の型整合を確認。
 
@@ -107,7 +107,7 @@ Rust 側で `app.emit(event_name, payload)` を呼ぶタイミングが「receiv
 | 初期出力が **重要でない** / イベントが定期的に流れ続ける | `subscribeEvent` (sync) | listener 登録完了前の数十 ms は無視しても影響なし。書き心地優先 |
 | 補助: Rust 側で初回 flush を意図的に遅延 | batcher delay | 単独で race を完全排除はできない。pre-subscribe と併用する補助策 |
 
-### 4. tauri-api.ts に subscribe helper を足す
+### 4. tauri-api 互換層に subscribe helper を足す
 
 ```ts
 // 同期版 (post-subscribe race を許容するイベント用)
@@ -187,7 +187,7 @@ async fn terminal_create(opts: TerminalCreateOptions) -> Result<String, String> 
 | ターミナル (最大 10 タブ)     | `src-tauri/src/pty/` + `components/Terminal*`                           |
 | セッション履歴                | `src-tauri/src/commands/sessions.rs` + `~/.claude/projects/<encoded>/`  |
 | コマンドパレット (Ctrl+Shift+P) | `src/renderer/src/lib/commands*` + `components/CommandPalette*`        |
-| テーマ切替 (5 種)             | `lib/themes*` + `styles/themes/`                                        |
+| テーマ切替 (6 種)             | `lib/themes*` + `styles/themes/`                                        |
 | i18n (ja/en)                  | `lib/i18n*`                                                             |
 | 設定モーダル                  | `components/SettingsModal*`                                             |
 | TeamHub (複数エージェント)    | `src-tauri/src/team_hub/` + `components/team*`                          |
@@ -202,7 +202,7 @@ async fn terminal_create(opts: TerminalCreateOptions) -> Result<String, String> 
 - **`src-tauri/target/` と `src-tauri/gen/schemas/` は gitignore 済み**。間違ってコミットしない。
 - **Monaco は CDN ではなく npm パッケージ** (選択的インポートで 27 言語のみ)。新言語が必要なら登録漏れチェック。
 - **node-pty 系の electron-rebuild は不要** (portable-pty を使っているので)。Electron 文脈の解決策をそのまま持ち込まない。
-- **OS は Windows 11**。Rust 側のパス処理・改行・PTY 周りは Windows ネイティブを優先動作確認する。
+- 配布対象は Windows / macOS / Linux。OS 固有のパス処理・改行・PTY を変更した場合は、該当OSのrunnerまたは実機で確認する。
 - **ショートカット**は CLAUDE.md の表が正。新しいショートカットを足したら `commands*` と CLAUDE.md の両方を更新する。
 
 ---
@@ -211,7 +211,7 @@ async fn terminal_create(opts: TerminalCreateOptions) -> Result<String, String> 
 
 このリポジトリで **常に成り立っていてほしい性質**。レビューや実装中の自問はこの欄に照らす。
 
-- **shared.ts の型 ⇄ Rust struct ⇄ tauri-api.ts ラッパは常に同期している**。片側だけ変えない。
+- **shared.ts の型 ⇄ Rust struct ⇄ tauri-api ラッパは常に同期している**。片側だけ変えない。
 - **Renderer は OS リソース (fs / 外部プロセス / network) に直接アクセスしない**。必ず Rust 側コマンド経由。
 - **設定の永続化は Rust 側 (`~/.vibe-editor/settings.json`) を Single Source of Truth とする**。renderer がローカル state にコピーを持つ場合、Rust 側を最新としてこれに合わせる。
 - **IPC event の listener 登録は emit より先に完了させる責務が caller 側にある**。初期出力が重要なイベントは `subscribeEventReady` + client-generated id 経路で pre-subscribe する (Issue #285 / PR #291)。
@@ -224,8 +224,8 @@ async fn terminal_create(opts: TerminalCreateOptions) -> Result<String, String> 
 ## 関連 skill
 
 - **PR を出す / レビュー対応 / merge まで見届ける** → `pullrequest` skill (必ずこちらを使う)
-- **複数 issue をまとめて修正する** → `issue-fix` skill
-- **何度も試したのに直らない最終手段の修正** → `finalfix` skill
+- **Issue の計画を作る** → `issue-plan` skill
+- **PTY の起動問題を調査する** → `pty-portable-debugging` skill
 - **UI を Claude.ai / Claude Code 風にする** → `claude-design` skill
 - **TeamHub を絡めたマルチエージェント作業** → `vibe-team` skill
 

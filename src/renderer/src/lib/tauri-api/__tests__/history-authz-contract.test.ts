@@ -9,7 +9,6 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: mocks.invoke
 }));
 
-import { CommandError } from '../command-error';
 import { sessions } from '../sessions';
 import { teamHistory } from '../team-history';
 
@@ -64,7 +63,7 @@ describe('sessions/teamHistory list authz IPC contract', () => {
       message: 'project_root does not match active project'
     });
 
-    await expect(list()).rejects.toMatchObject<Partial<CommandError>>({
+    await expect(list()).rejects.toMatchObject({
       name: 'CommandError',
       command,
       code: 'authz',
@@ -78,9 +77,7 @@ describe('sessions/teamHistory list authz IPC contract', () => {
       message: 'no active project root'
     });
 
-    await expect(teamHistory.list('/workspace/initializing')).rejects.toMatchObject<
-      Partial<CommandError>
-    >({
+    await expect(teamHistory.list('/workspace/initializing')).rejects.toMatchObject({
       name: 'CommandError',
       command: 'team_history_list',
       code: 'authz',

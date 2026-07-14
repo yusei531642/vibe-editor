@@ -37,10 +37,7 @@ import {
 } from '../hooks/use-xterm-bind';
 import type { CellSize } from '../measure-cell-size';
 
-type TestWindow = Window &
-  typeof globalThis & {
-    api?: unknown;
-  };
+type TestWindow = { api?: unknown };
 
 type TestTerminal = Terminal & {
   textarea: HTMLTextAreaElement;
@@ -85,7 +82,7 @@ function setupTerminalApi(): {
     id: opts.id ?? 'pty-test-runtime-cell'
   }));
   const kill = vi.fn(async () => undefined);
-  (window as TestWindow).api = {
+  (window as unknown as TestWindow).api = {
     terminal: {
       onDataReady: vi.fn(async () => vi.fn()),
       onExitReady: vi.fn(async () => vi.fn()),
@@ -107,12 +104,12 @@ describe('useXtermBind: 初回 spawn の runtime cell 優先 (Issue #503 Fix 1)'
   let originalFontsDescriptor: PropertyDescriptor | undefined;
 
   beforeEach(() => {
-    originalApi = (window as TestWindow).api;
+    originalApi = (window as unknown as TestWindow).api;
     originalFontsDescriptor = Object.getOwnPropertyDescriptor(document, 'fonts');
     // fonts.ready を即時 resolve させて loadInitialMetrics の 300ms timeout 経路を回避。
     Object.defineProperty(document, 'fonts', {
       configurable: true,
-      value: { ready: Promise.resolve() } as Partial<FontFaceSet>
+      value: { ready: Promise.resolve() } as unknown as Partial<FontFaceSet>
     });
     getXtermRuntimeCellSizeMock.mockReset();
   });
@@ -121,14 +118,14 @@ describe('useXtermBind: 初回 spawn の runtime cell 優先 (Issue #503 Fix 1)'
     cleanup();
     vi.restoreAllMocks();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      delete (window as unknown as TestWindow).api;
     } else {
-      (window as TestWindow).api = originalApi;
+      (window as unknown as TestWindow).api = originalApi;
     }
     if (originalFontsDescriptor) {
       Object.defineProperty(document, 'fonts', originalFontsDescriptor);
     } else {
-      delete (document as Document & { fonts?: unknown }).fonts;
+      Reflect.deleteProperty(document, 'fonts');
     }
   });
 

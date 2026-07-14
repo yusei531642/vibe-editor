@@ -284,7 +284,11 @@ export const jaShell: Dict = {
 
 
   // ---------- Terminal (pasteエラー等) ----------
-  'terminal.pasteImageFailed': '画像保存失敗',
+  'terminal.pasteImageFailed': '画像の貼り付け失敗',
+  'terminal.pasteImage.suppressedInjecting': 'プロンプト注入中のため挿入できませんでした',
+  'terminal.pasteImage.droppedTooLarge': '挿入データが大きすぎます',
+  'terminal.pasteImage.droppedRateLimited': '入力が多すぎたため挿入できませんでした',
+  'terminal.pasteImage.sessionNotFound': 'ターミナル接続が見つかりません',
   'terminal.pasteException': 'ペースト例外',
 
 
