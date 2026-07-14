@@ -94,6 +94,20 @@ describe('useTerminalTabs', () => {
 
   // ---- Issue #588: addTerminalTab の同期連打レース ----
 
+  it('returns every assigned id during synchronous batched adds (#1137)', () => {
+    const { result } = renderHook(() => useTerminalTabs(options()));
+    const assigned: Array<number | null> = [];
+
+    act(() => {
+      assigned.push(result.current.addTerminalTab({ agent: 'claude' }));
+      assigned.push(result.current.addTerminalTab({ agent: 'codex' }));
+      assigned.push(result.current.addTerminalTab({ agent: 'claude' }));
+    });
+
+    expect(assigned).toEqual([1, 2, 3]);
+    expect(result.current.terminalTabs.map((tab) => tab.id)).toEqual(assigned);
+  });
+
   it('caps terminal count at MAX_TERMINALS even when invoked synchronously beyond the limit (#588)', () => {
     const showToast = vi.fn();
     const { result } = renderHook(() => useTerminalTabs(options({ showToast })));
