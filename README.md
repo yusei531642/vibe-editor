@@ -205,7 +205,7 @@ Tauri launches with a single Claude Code terminal tab. Open any folder via the p
 ### Other scripts
 
 ```bash
-npm run typecheck    # tsc --noEmit (strict)
+npm run typecheck    # tsc -b --force (strict)
 npm run dev:vite     # Renderer only (no Rust)
 npm run build        # cargo tauri build → src-tauri/target/release/bundle/
 npm run icons        # Regenerate build/icon.ico from build/icon.svg
@@ -227,7 +227,7 @@ src-tauri/                       # Rust side (Tauri host)
 ├── Cargo.toml
 └── tauri.conf.json
 
-src/renderer/src/                # React 18 + TypeScript, UI only
+src/renderer/src/                # React 19 + TypeScript 6, UI only
 ├── App.tsx
 ├── components/
 │   ├── canvas/                  # @xyflow/react infinite-canvas mode
@@ -235,7 +235,7 @@ src/renderer/src/                # React 18 + TypeScript, UI only
 │   └── …
 ├── layouts/                     # CanvasLayout, …
 ├── stores/                      # zustand (ui, canvas)
-└── lib/                         # themes, i18n, tauri-api, commands, role-profiles, …
+└── lib/                         # themes, i18n, tauri-api/, commands, role-profiles, …
 ```
 
 ### How TeamHub works

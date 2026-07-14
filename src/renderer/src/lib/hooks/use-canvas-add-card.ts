@@ -1,6 +1,7 @@
 import type { Node } from '@xyflow/react';
 import type { CardData, CardType } from '../../stores/canvas';
-import { NODE_H, NODE_W, useCanvasStore } from '../../stores/canvas';
+import { useCanvasStore } from '../../stores/canvas';
+import { nextFallbackCardPosition } from '../../stores/canvas-card-identity';
 import { useUiStore } from '../../stores/ui';
 import { engineForAgentConfig } from '../agent-registry';
 import { useSettings } from '../settings-context';
@@ -15,7 +16,7 @@ interface UseCanvasAddCardOptions {
 }
 
 export interface CanvasAddCardApi {
-  /** 既存ノード数から staggered 配置座標を返す */
+  /** 既存ノードが占有していない staggered 配置座標を返す */
   stagger: (kind: CardType) => { x: number; y: number };
   addAgent: (agent: 'claude' | 'codex') => void;
   addCustomAgent: (agentId: string) => void;
@@ -39,20 +40,14 @@ export function useCanvasAddCard({ nodes, projectRoot }: UseCanvasAddCardOptions
 
   // Issue #166: Date.now() % 600 だと連続クリックで数 ms 差しか出ず、全カードが
   // ほぼ同じ x に積み重なって UI 上「追加されていない」ように見えていた。
-  // 既存ノード数 (現在 viewport 内に限らずグローバル) を 6 列グリッドに展開して
-  // staggered レイアウトを返す。
+  // 既存ノード (現在 viewport 内に限らずグローバル) の空き位置を6列グリッドから返す。
   // Issue #442: 旧実装は agent/terminal を 480+32 / 320+32、その他を 360+32 / 240+32 で
   // 並べていたが、addCard / addCards は全 type に NODE_W/NODE_H (= 640x400, Issue #253)
   // を style として付与するため、type 別ピッチは根拠が無くカードが重なっていた。
-  // ピッチを実カードサイズ NODE_W/NODE_H に統一する。
-  const stagger = (_kind: CardType): { x: number; y: number } => {
-    const idx = nodes.length; // 全 type 共通の連番でも視覚的に十分散る
-    const cols = 6;
-    return {
-      x: (idx % cols) * (NODE_W + 32),
-      y: Math.floor(idx / cols) * (NODE_H + 32)
-    };
-  };
+  // Issue #1141: nodes.length採番では削除後に既存slotへ重なるため、store fallbackと
+  // 同じ占有スロット探索を使う。kindに関係なく全カードは同じ既定寸法/ピッチを共有する。
+  const stagger = (_kind: CardType): { x: number; y: number } =>
+    nextFallbackCardPosition(nodes);
 
   const addAgent = (agent: 'claude' | 'codex'): void => {
     const cwd = projectRoot;

@@ -49,6 +49,7 @@
 :root[data-theme='glass'] .notes-panel,
 :root[data-theme='glass'] .canvas-agent-card,
 :root[data-theme='glass'] .canvas-card-frame,
+:root[data-theme='glass'] .react-flow__minimap,
 :root[data-theme='glass'] .canvas-toolbar {
   -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate))
     brightness(var(--glass-brightness, 1));

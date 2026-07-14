@@ -667,7 +667,7 @@ export function AppShell({
               {tabCreateMenuOpen && (
                 <>
                   <div
-                    style={{ position: 'fixed', inset: 0, zIndex: 499 /* = tokens.css --z-cmd-backdrop */ }}
+                    style={{ position: 'fixed', inset: 0, zIndex: 'var(--z-cmd-backdrop)' }}
                     onClick={() => setTabCreateMenuOpen(false)}
                   />
                   <div className="tab-create-menu" style={{ top: '100%', bottom: 'auto', right: 0, marginTop: 4 }}>

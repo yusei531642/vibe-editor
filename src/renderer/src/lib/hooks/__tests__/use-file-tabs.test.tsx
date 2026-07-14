@@ -11,11 +11,6 @@ vi.mock('../../use-native-confirm', () => ({
   useNativeConfirm: () => vi.fn(async () => true)
 }));
 
-type TestWindow = Window &
-  typeof globalThis & {
-    api?: MockApi;
-  };
-
 interface MockApi {
   files: {
     read: ReturnType<typeof vi.fn>;
@@ -69,7 +64,7 @@ function installApi(): MockApi {
       }))
     }
   };
-  (window as TestWindow).api = api;
+  Object.defineProperty(window, 'api', { configurable: true, writable: true, value: api });
   return api;
 }
 
@@ -84,18 +79,18 @@ function options(overrides: Partial<UseFileTabsOptions> = {}): UseFileTabsOption
 }
 
 describe('useFileTabs.openEditorTab', () => {
-  let originalApi: MockApi | undefined;
+  let originalApi: Window['api'] | undefined;
 
   beforeEach(() => {
-    originalApi = (window as TestWindow).api;
+    originalApi = window.api;
   });
 
   afterEach(() => {
     cleanup();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
-      (window as TestWindow).api = originalApi;
+      Object.defineProperty(window, 'api', { configurable: true, writable: true, value: originalApi });
     }
     vi.restoreAllMocks();
   });

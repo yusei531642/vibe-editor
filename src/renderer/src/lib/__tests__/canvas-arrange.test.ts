@@ -19,7 +19,7 @@ function makeNode(
     id,
     type,
     position,
-    data: { cardType: type, title: id, payload: { kept: true } },
+    data: { cardType: type, title: id } as CardData,
     style: {
       width: size?.width ?? NODE_W,
       height: size?.height ?? NODE_H

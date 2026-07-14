@@ -8,9 +8,10 @@ pub(crate) mod shell_policy;
 mod codex_prompt;
 mod paste_image;
 mod prompt_files;
+pub(crate) mod write_outcome;
 
 use crate::pty::session::TerminalWarning;
-use crate::pty::{spawn_session, SpawnOptions, UserWriteOutcome};
+use crate::pty::{spawn_session, SpawnOptions};
 use crate::state::AppState;
 use codex_prompt::inject_codex_prompt_to_pty;
 use crate::util::log_redact::redact_home;
@@ -550,22 +551,14 @@ pub async fn terminal_create(
             let is_claude_command = command.to_lowercase().contains("claude");
             if is_claude_command || is_codex_command {
                 let watcher_id = id.clone();
-                // Issue #739: ArcSwapOption の lock-free load で現在値を読む。
-                let watcher_root =
-                    crate::state::current_project_root(&state.project_root).unwrap_or_default();
-                let actual_root = if watcher_root.is_empty() {
-                    // PTY spawn 時の cwd を流用
-                    std::env::current_dir()
-                        .map(|p| p.to_string_lossy().into_owned())
-                        .unwrap_or_default()
-                } else {
-                    watcher_root
-                };
                 // Issue #632: SessionHandle が公開する watcher_cancel token を渡す。
                 // PTY が `kill()` / `Drop` で寿命終了した瞬間に flip され、watcher は
                 // 100ms 以内に exit する。registry.get(...).is_some() を 500ms ごとに
                 // polling していた旧実装より反応が早く、cleanup の遅延を解消する。
                 if let Some(handle) = state.pty_registry.get(&watcher_id) {
+                    // Issue #1154: watcherの照合対象はactive projectではなく、このPTYを
+                    // 実際にspawnしたcwd。resolve_valid_cwd後のSSOTをhandleから読む。
+                    let actual_root = handle.cwd.clone();
                     let cancel = handle.watcher_cancel_token();
                     if is_codex_command {
                         crate::pty::codex_watcher::spawn_watcher(
@@ -615,38 +608,6 @@ pub async fn terminal_create(
             ..Default::default()
         }),
     }
-}
-
-#[tauri::command]
-pub async fn terminal_write(
-    state: State<'_, AppState>,
-    id: String,
-    data: String,
-) -> crate::commands::error::CommandResult<()> {
-    if let Some(s) = state.pty_registry.get(&id) {
-        let data_len = data.len();
-        let data_bytes = data.into_bytes();
-        let outcome = tokio::task::spawn_blocking(move || s.user_write(&data_bytes))
-            .await
-            .map_err(|e| format!("[terminal] terminal_write spawn_blocking failed for {id}: {e}"))?
-            .map_err(|e| e.to_string())?;
-        match outcome {
-            UserWriteOutcome::Written | UserWriteOutcome::SuppressedInjecting => {}
-            UserWriteOutcome::DroppedTooLarge => {
-                tracing::warn!(
-                    "[terminal] dropped oversized terminal_write payload for {id}: {} bytes",
-                    data_len
-                );
-            }
-            UserWriteOutcome::DroppedRateLimited => {
-                tracing::warn!(
-                    "[terminal] rate-limited terminal_write for {id}: {} bytes",
-                    data_len
-                );
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Issue #1076: `terminal_resize` の下限クランプ値。spawn 経路 (`session/spawn.rs` の

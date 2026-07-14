@@ -72,6 +72,10 @@ jobs:
       - name: ESLint
         run: npm run lint
 
+      # Issue #1166: CSS var(--x)をCSS/TSXの定義と照合し、未定義tokenを防ぐ。
+      - name: CSS custom property lint
+        run: npm run lint:css-vars
+
       # Issue #948: 永続化ファイルの生 serde parse 握りつぶし (`serde_json::from_*(...).ok()`)
       # を検出して fail させる。読込は safe_load 共通基盤 (#936) 経由を強制する。
       # 例外は該当行直前の `// safe-load-exempt: <理由>` で明示 opt-out。
@@ -182,6 +186,12 @@ jobs:
       # 各 OS でも clippy を走らせて cfg-gated コードの lint 違反を捕捉する。
       - name: Cargo clippy (cfg-gated, -D warnings)
         run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      # Issue #1158: cfg(windows)配下のConPTY / Job Object unit testはLinuxでは列挙も実行も
+      # されないため、Windows runnerでlib testを実行する。#[ignore]付き実機E2Eは対象外。
+      - name: Cargo test (Windows cfg-gated unit tests)
+        if: runner.os == 'Windows'
+        run: "cargo test --locked --manifest-path src-tauri/Cargo.toml --lib pty::"
 
   # Issue #745: 既存の `npm audit` / `cargo audit` は advisory DB ベースの依存脆弱性検査で、
   # 「うっかり API key / token / 暗号鍵をコミットした」を検知できない。

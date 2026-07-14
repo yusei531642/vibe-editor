@@ -24,14 +24,11 @@ import {
   type AppSettings
 } from '../../../../../types/shared';
 
-type TestWindow = Window &
-  typeof globalThis & {
-    api?: unknown;
-  };
-
 function installApi(): void {
-  (window as TestWindow).api = {
+  window.api = {
+    ...window.api,
     settings: {
+      ...window.api?.settings,
       load: vi.fn(async () => DEFAULT_SETTINGS),
       save: vi.fn(async () => undefined),
       pickCustomMascot: vi.fn(async () => null),
@@ -39,7 +36,7 @@ function installApi(): void {
       clearCustomMascot: vi.fn(async () => undefined)
     },
     app: {
-      setProjectRoot: vi.fn(async () => undefined),
+      ...window.api?.app,
       setZoomLevel: vi.fn(async () => undefined)
     }
   };
@@ -54,10 +51,10 @@ function Wrapper({ children }: { children: ReactNode }): JSX.Element {
 }
 
 describe('SettingsModal', () => {
-  let originalApi: unknown;
+  let originalApi: typeof window.api | undefined;
 
   beforeEach(() => {
-    originalApi = (window as TestWindow).api;
+    originalApi = window.api;
     installApi();
     vi.useFakeTimers();
     // useSpringMount / RAF が動かないと mounted が反転しないため即時実行に。
@@ -72,9 +69,9 @@ describe('SettingsModal', () => {
     cleanup();
     vi.useRealTimers();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
-      (window as TestWindow).api = originalApi;
+      window.api = originalApi;
     }
     vi.restoreAllMocks();
   });
@@ -183,6 +180,7 @@ describe('SettingsModal', () => {
     const agent: AgentConfig = {
       id: 'custom-1',
       name: 'My Agent',
+      runtime: 'cli',
       command: 'my-agent',
       args: '--flag'
     };
