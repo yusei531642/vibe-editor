@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { translate } from '../i18n';
-import { formatTerminalDiagnostic } from '../terminal-diagnostics';
+import {
+  formatTerminalDiagnostic,
+  formatTerminalDiagnosticFallback,
+  renderTerminalDiagnostic
+} from '../terminal-diagnostics';
 
 describe('terminal diagnostics', () => {
   it.each([
@@ -34,5 +38,20 @@ describe('terminal diagnostics', () => {
     expect(formatTerminalDiagnostic({ kind: 'exception', error: 'boom' }, t).message).toBe(
       exceptionMessage
     );
+  });
+
+  it('formatter未指定時も英語fallbackとANSI tailを維持する', () => {
+    const diagnostic = {
+      kind: 'exited' as const,
+      info: { exitCode: 7, signal: 'SIGTERM', tail: 'line1\nline2' }
+    };
+    const rendered = renderTerminalDiagnostic(
+      diagnostic,
+      formatTerminalDiagnosticFallback(diagnostic)
+    );
+
+    expect(rendered).toContain('[Process exited: exitCode=7, signal=SIGTERM]');
+    expect(rendered).toContain('── Final output (possible cause) ──');
+    expect(rendered).toContain('line1\r\nline2');
   });
 });

@@ -31,10 +31,7 @@ import {
   type TerminalInputGateResetReason
 } from '../terminal-input-gate';
 import type { TerminalRuntimeStatus } from '../terminal-status';
-import type {
-  FormattedTerminalDiagnostic,
-  TerminalDiagnostic
-} from '../terminal-diagnostics';
+import { createTerminalDiagnosticWriter, type FormattedTerminalDiagnostic, type TerminalDiagnostic } from '../terminal-diagnostics';
 import {
   acquireGeneration,
   cacheDelete,
@@ -80,9 +77,7 @@ export interface PtySessionCallbacks {
    */
   formatTerminalWarning?: (warning: TerminalWarning) => string;
   /** Issue #1144: renderer生成の診断ラベルを現在言語で整形する。 */
-  formatTerminalDiagnostic?: (
-    diagnostic: TerminalDiagnostic
-  ) => FormattedTerminalDiagnostic;
+  formatTerminalDiagnostic?: (diagnostic: TerminalDiagnostic) => FormattedTerminalDiagnostic;
 }
 
 export interface UseXtermBindOptions {
@@ -415,31 +410,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
       return true;
     };
 
-    const writeTerminalDiagnostic = (diagnostic: TerminalDiagnostic): void => {
-      const formatter = callbacksRef.current.formatTerminalDiagnostic;
-      const formatted = formatter
-        ? formatter(diagnostic)
-        : diagnostic.kind === 'exited'
-          ? {
-              message: `[Process exited: exitCode=${diagnostic.info.exitCode}${diagnostic.info.signal ? `, signal=${diagnostic.info.signal}` : ''}]`,
-              tone: 'warning' as const,
-              tailHeading: diagnostic.info.tail
-                ? '── Final output (possible cause) ──'
-                : undefined
-            }
-          : {
-              message:
-                diagnostic.kind === 'spawn_failed'
-                  ? `[Start error] ${diagnostic.error || 'Unknown error'}`
-                  : `[Exception] ${diagnostic.error}`,
-              tone: 'error' as const
-            };
-      const color = formatted.tone === 'warning' ? '\x1b[33m' : '\x1b[31m';
-      const tail = diagnostic.kind === 'exited' ? diagnostic.info.tail : undefined;
-      term.writeln(
-        `\r\n${color}${formatted.message}\x1b[0m${tail && formatted.tailHeading ? `\r\n\x1b[90m${formatted.tailHeading}\x1b[0m\r\n${tail.replace(/\n/g, '\r\n')}` : ''}`
-      );
-    };
+    const writeTerminalDiagnostic = createTerminalDiagnosticWriter(term.writeln.bind(term), () => callbacksRef.current.formatTerminalDiagnostic);
 
     // === Helper 3: setupPostSubscribe ===
     // attach 経路 (HMR remount): pre-subscribe を skip しているのでここで sync
