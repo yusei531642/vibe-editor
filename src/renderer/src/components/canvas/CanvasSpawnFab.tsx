@@ -168,6 +168,7 @@ export function CanvasSpawnFab({
                   key={preset.id}
                   preset={preset}
                   label={t(preset.i18nKey)}
+                  description={t(preset.descriptionI18nKey)}
                   agentCountLabel={formatOrganizationAgentCount(
                     presetOrganizationCount(preset),
                     presetMemberCount(preset),
