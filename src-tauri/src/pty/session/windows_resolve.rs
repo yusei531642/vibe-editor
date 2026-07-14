@@ -163,18 +163,30 @@ fn is_wsl_bash_launcher(path: &Path) -> bool {
 pub(crate) fn trusted_wsl_executable(
     path: &Path,
     system_root: Option<&std::ffi::OsStr>,
+    local_app_data: Option<&std::ffi::OsStr>,
 ) -> Option<PathBuf> {
     let expected_dir = PathBuf::from(system_root?).join("System32");
     let parent = path.parent()?;
-    if normalized_windows_path(parent) != normalized_windows_path(&expected_dir) {
+    let windows_apps_dir = local_app_data
+        .map(PathBuf::from)
+        .map(|base| base.join("Microsoft").join("WindowsApps"));
+    let is_trusted_launcher = normalized_windows_path(parent)
+        == normalized_windows_path(&expected_dir)
+        || windows_apps_dir
+            .as_deref()
+            .is_some_and(|dir| normalized_windows_path(parent) == normalized_windows_path(dir));
+    if !is_trusted_launcher {
         return None;
     }
     Some(expected_dir.join("wsl.exe"))
 }
 
 fn wsl_launcher_has_distro(path: &Path) -> bool {
-    let Some(wsl_exe) = trusted_wsl_executable(path, std::env::var_os("SystemRoot").as_deref())
-    else {
+    let Some(wsl_exe) = trusted_wsl_executable(
+        path,
+        std::env::var_os("SystemRoot").as_deref(),
+        std::env::var_os("LOCALAPPDATA").as_deref(),
+    ) else {
         return false;
     };
     std::process::Command::new(wsl_exe)

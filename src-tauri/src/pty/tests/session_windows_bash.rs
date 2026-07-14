@@ -99,7 +99,12 @@ fn explicit_wsl_bash_path_remains_supported() {
 fn wsl_probe_is_limited_to_system_root_system32() {
     let tmp = tempfile::tempdir().unwrap();
     let system_root = tmp.path().join("Windows");
+    let local_app_data = tmp.path().join("AppData").join("Local");
     let trusted_bash = system_root.join("System32").join("bash.exe");
+    let windows_apps_bash = local_app_data
+        .join("Microsoft")
+        .join("WindowsApps")
+        .join("bash.exe");
     let spoofed_bash = tmp
         .path()
         .join("project")
@@ -108,12 +113,31 @@ fn wsl_probe_is_limited_to_system_root_system32() {
         .join("bash.exe");
 
     assert_eq!(
-        trusted_wsl_executable(&trusted_bash, Some(system_root.as_os_str())),
+        trusted_wsl_executable(
+            &trusted_bash,
+            Some(system_root.as_os_str()),
+            Some(local_app_data.as_os_str())
+        ),
         Some(system_root.join("System32").join("wsl.exe"))
     );
     assert_eq!(
-        trusted_wsl_executable(&spoofed_bash, Some(system_root.as_os_str())),
+        trusted_wsl_executable(
+            &windows_apps_bash,
+            Some(system_root.as_os_str()),
+            Some(local_app_data.as_os_str())
+        ),
+        Some(system_root.join("System32").join("wsl.exe"))
+    );
+    assert_eq!(
+        trusted_wsl_executable(
+            &spoofed_bash,
+            Some(system_root.as_os_str()),
+            Some(local_app_data.as_os_str())
+        ),
         None
     );
-    assert_eq!(trusted_wsl_executable(&trusted_bash, None), None);
+    assert_eq!(
+        trusted_wsl_executable(&trusted_bash, None, Some(local_app_data.as_os_str())),
+        None
+    );
 }
