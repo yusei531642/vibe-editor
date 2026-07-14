@@ -432,4 +432,11 @@ export const jaShell: Dict = {
   'imagePreview.devUnavailable': 'dev:vite モードでは画像プレビューを利用できません。',
   'imagePreview.loadError': '画像を表示できません: {path}',
 
+  // ---------- 起動・クラッシュ復帰 ----------
+  'bootstrap.rootMissing': '#root が見つかりません',
+  'bootstrap.renderError.title': '画面の描画で問題が発生しました',
+  'bootstrap.renderError.body':
+    '真っ黒な画面にならないよう停止しました。再読み込みで復帰できます。',
+  'bootstrap.renderError.reload': '再読み込み',
+
 };
