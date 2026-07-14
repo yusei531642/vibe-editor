@@ -26,11 +26,6 @@ type MockApi = {
   };
 };
 
-type TestWindow = Window &
-  typeof globalThis & {
-    api?: MockApi;
-  };
-
 function installApi(): MockApi {
   const api: MockApi = {
     teamHistory: {
@@ -39,7 +34,7 @@ function installApi(): MockApi {
       delete: vi.fn(async () => undefined)
     }
   };
-  (window as TestWindow).api = api;
+  Object.defineProperty(window, 'api', { configurable: true, writable: true, value: api });
   return api;
 }
 
@@ -60,19 +55,19 @@ function options(
 }
 
 describe('useTeamHistorySync', () => {
-  let originalApi: MockApi | undefined;
+  let originalApi: Window['api'] | undefined;
 
   beforeEach(() => {
-    originalApi = (window as TestWindow).api;
+    originalApi = window.api;
     mocks.mcpAutoSetup = false;
   });
 
   afterEach(() => {
     cleanup();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
-      (window as TestWindow).api = originalApi;
+      Object.defineProperty(window, 'api', { configurable: true, writable: true, value: originalApi });
     }
     vi.restoreAllMocks();
   });

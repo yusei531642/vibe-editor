@@ -6,16 +6,6 @@ import { useCanvasAutoSave } from '../use-canvas-auto-save';
 import type { CardData } from '../../../stores/canvas';
 import type { TeamHistoryEntry } from '../../../../../types/shared';
 
-type TestWindow = Window &
-  typeof globalThis & {
-    api?: {
-      teamHistory: {
-        saveBatch: ReturnType<typeof vi.fn>;
-        list: ReturnType<typeof vi.fn>;
-      };
-    };
-  };
-
 function makeAgentNode(): Node<CardData> {
   return {
     id: 'agent-card',
@@ -43,23 +33,23 @@ describe('useCanvasAutoSave (Issue #894)', () => {
 
   beforeEach(() => {
     vi.useFakeTimers();
-    originalApi = (window as TestWindow).api;
-    saveBatch = vi.fn(async () => ({ externalChangeMerged: false }));
-    (window as TestWindow).api = {
+    originalApi = window.api;
+    saveBatch = vi.fn<(entries: TeamHistoryEntry[]) => Promise<{ externalChangeMerged: boolean }>>(async () => ({ externalChangeMerged: false }));
+    Object.defineProperty(window, 'api', { configurable: true, writable: true, value: {
       teamHistory: {
         saveBatch,
         list: vi.fn(async () => [])
       }
-    };
+    } });
   });
 
   afterEach(() => {
     cleanup();
     vi.useRealTimers();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
-      (window as TestWindow).api = originalApi as TestWindow['api'];
+      Object.defineProperty(window, 'api', { configurable: true, writable: true, value: originalApi });
     }
     vi.restoreAllMocks();
   });

@@ -757,6 +757,40 @@ Branch: `feature/issue-452`
 
 #### 検証結果（代替で PASS 済み）
 - [x] `git diff --check`: PASS
+
+## Issue #1157 テストコードの型チェック有効化 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1157
+
+### 計画
+
+- [x] `tsconfig.web.json`、Vitest、CI、テスト配置、既存計画を確認する。
+- [x] `__tests__`除外を削除し、productionと同じstrict設定でテストも型検査する。
+- [x] 初回typecheckで顕在化するtest型エラーを本番契約に合わせて修正する。
+- [x] 再excludeを防ぐcontract testと、実態に合う`__tests__`配置規約を追加する。
+- [x] typecheck、test、build:vite、lint、diff checkを実行する。
+- [ ] commit/push後、PR draftを提示して作成承認を得る。
+
+### スコープ境界
+
+- allowed: `tsconfig.web.json`、test型エラーが実在するテスト・mock、`.claude/skills/test-setup-vitest/SKILL.md`、contract test、`tasks/todo.md`
+- non-goals: テスト83件の移動、production strictness緩和、`any`による一括回避、E2E導入
+
+### Next Steps
+
+- [ ] commit/push後、PR draftを提示して作成承認を得る。
+
+### 検証結果
+
+- [x] 初回`npm run typecheck`: FAIL（test mockの既存型不整合を検出）
+- [x] 修正後`npm run typecheck`: PASS
+- [x] `npm test`: 87 files / 520 tests PASS
+- [x] `npm run build:vite`: PASS
+- [x] `npm run lint`: PASS（error 0、既存warning 12件）
+- [x] `git diff --check`: PASS
+- [x] components担当: 8 files / 22 tests PASS
+- [x] hooks担当: 9 files / 39 tests PASS
+- [x] lib担当: 54 files / 372 tests PASS
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）
