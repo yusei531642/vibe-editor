@@ -9,6 +9,7 @@ import {
 } from '../settings-context';
 import { useUiStore } from '../../stores/ui';
 import { dedupPrepend, listContainsPath } from '../path-norm';
+import { reportRefreshFailure } from '../refresh-error';
 
 type ToastFn = (
   msg: string,
@@ -231,10 +232,17 @@ export function useProjectLoader(
     try {
       const gs = await window.api.git.status(projectRoot);
       setGitStatus(gs);
+    } catch (err) {
+      reportRefreshFailure(
+        'git.status',
+        err,
+        t('toast.gitRefreshFailed'),
+        optsRef.current.showToast
+      );
     } finally {
       setGitLoading(false);
     }
-  }, [projectRoot]);
+  }, [projectRoot, t]);
 
   // ---- Phase 2 (Issue #487): プロジェクトメニュー / ワークスペース ----
 
