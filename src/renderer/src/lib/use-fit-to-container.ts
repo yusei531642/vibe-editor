@@ -47,6 +47,8 @@ export interface UseFitToContainerOptions {
    * 渡されない場合は内部で生成 (IDE モード等で実害なし)。
    */
   lastScheduledRef?: MutableRefObject<{ cols: number; rows: number } | null>;
+  /** PTY create待機中に算出した最新grid。id確定後にuseXtermBindが1回flushする。 */
+  pendingPtyResizeRef?: MutableRefObject<{ cols: number; rows: number } | null>;
 }
 
 export function useFitToContainer(options: UseFitToContainerOptions): void {
@@ -61,7 +63,8 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
     getCellSize,
     zoomSubscribe,
     getZoom,
-    lastScheduledRef: externalLastScheduledRef
+    lastScheduledRef: externalLastScheduledRef,
+    pendingPtyResizeRef
   } = options;
 
   // visible / unscaledFit / getCellSize の最新値を ref で見る (RO 再マウント不要)
@@ -95,6 +98,10 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
   // 安定化。内部で参照する lastScheduledRef / ptyResizeTimerRef / ptyIdRef / lastSizeRef は
   // 全て ref なので deps は空で stale closure なし。
   const schedulePtyResize = useCallback((cols: number, rows: number): void => {
+    if (!ptyIdRef.current) {
+      if (pendingPtyResizeRef) pendingPtyResizeRef.current = { cols, rows };
+      return;
+    }
     if (
       lastScheduledRef.current &&
       lastScheduledRef.current.cols === cols &&
@@ -172,9 +179,7 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
         lastApplied.cols === grid.cols &&
         lastApplied.rows === grid.rows
       ) {
-        if (ptyIdRef.current) {
-          schedulePtyResize(grid.cols, grid.rows);
-        }
+        schedulePtyResize(grid.cols, grid.rows);
         if (import.meta.env.DEV) {
           console.debug('pty.resize', {
             cols: grid.cols,
@@ -193,9 +198,7 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
         term.resize(grid.cols, grid.rows);
         term.refresh(0, Math.max(0, term.rows - 1));
         lastAppliedGridRef.current = { cols: grid.cols, rows: grid.rows };
-        if (ptyIdRef.current) {
-          schedulePtyResize(grid.cols, grid.rows);
-        }
+        schedulePtyResize(grid.cols, grid.rows);
         if (import.meta.env.DEV) {
           console.debug('pty.resize', {
             cols: grid.cols,
@@ -231,9 +234,7 @@ export function useFitToContainer(options: UseFitToContainerOptions): void {
         term.refresh(0, Math.max(0, term.rows - 1));
         lastAppliedGridRef.current = { cols: term.cols, rows: term.rows };
       }
-      if (ptyIdRef.current) {
-        schedulePtyResize(term.cols, term.rows);
-      }
+      schedulePtyResize(term.cols, term.rows);
       if (import.meta.env.DEV) {
         console.debug('pty.resize', {
           cols: term.cols,
