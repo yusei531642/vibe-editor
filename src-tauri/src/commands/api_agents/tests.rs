@@ -40,6 +40,26 @@ fn session_path_rejects_traversal_ids() {
 }
 
 #[test]
+fn session_delete_result_accepts_success_and_not_found() {
+    assert!(map_session_delete_result(Ok(())).is_ok());
+    assert!(
+        map_session_delete_result(Err(std::io::Error::from(std::io::ErrorKind::NotFound))).is_ok()
+    );
+}
+
+#[test]
+fn session_delete_result_propagates_other_io_errors() {
+    let error = map_session_delete_result(Err(std::io::Error::new(
+        std::io::ErrorKind::PermissionDenied,
+        "session file is locked",
+    )))
+    .expect_err("permission errors must not be reported as successful deletion");
+
+    assert_eq!(error.code(), "io");
+    assert!(error.to_string().contains("session file is locked"));
+}
+
+#[test]
 fn build_skills_context_truncates_to_budget_and_stays_utf8() {
     // MAX_SKILL_BYTES を大きく超えるマルチバイト本文でも panic せず、
     // 出力は valid UTF-8 で概ね予算内に収まる。
