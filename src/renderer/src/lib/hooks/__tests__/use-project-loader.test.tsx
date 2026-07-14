@@ -188,4 +188,21 @@ describe('useProjectLoader', () => {
     expect(api.git.status).toHaveBeenLastCalledWith('/repo-next');
     expect(result.current.projectRoot).toBe('/repo-next');
   });
+
+  it('refreshGitのIPC失敗を処理してerror toastを表示する (#1139)', async () => {
+    const api = installApi();
+    api.app.restoreAuthorizedProjectRoot.mockResolvedValueOnce('/repo');
+    const showToast = vi.fn();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { result } = renderHook(() => useProjectLoader(options({ showToast })));
+    await waitFor(() => expect(result.current.projectRoot).toBe('/repo'));
+    const error = new Error('git IPC failed');
+    api.git.status.mockRejectedValueOnce(error);
+
+    await act(async () => result.current.refreshGit());
+
+    expect(warn).toHaveBeenCalledWith('[refresh] git.status failed:', error);
+    expect(showToast).toHaveBeenCalledWith('toast.gitRefreshFailed', { tone: 'error' });
+    expect(result.current.gitLoading).toBe(false);
+  });
 });

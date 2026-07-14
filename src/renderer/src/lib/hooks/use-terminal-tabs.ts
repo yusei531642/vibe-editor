@@ -188,7 +188,17 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
   const optsRef = useRef(opts);
   optsRef.current = opts;
 
-  const [terminalTabs, setTerminalTabs] = useState<TerminalTab[]>([]);
+  const [terminalTabs, setTerminalTabsState] = useState<TerminalTab[]>([]);
+  const terminalTabsRef = useRef(terminalTabs);
+  terminalTabsRef.current = terminalTabs;
+  const setTerminalTabs = useCallback<React.Dispatch<React.SetStateAction<TerminalTab[]>>>(
+    (action) => {
+      const next = typeof action === 'function' ? action(terminalTabsRef.current) : action;
+      terminalTabsRef.current = next;
+      setTerminalTabsState(next);
+    },
+    [],
+  );
   const [activeTerminalTabId, setActiveTerminalTabId] = useState<number>(0);
   const nextTerminalIdRef = useRef(1);
 
@@ -246,19 +256,19 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
 
   const addTerminalTab = useCallback(
     (addOpts?: AddTerminalTabOptions): number | null => {
-      // Issue #588: 旧実装は updater 外で `nextTerminalIdRef.current++` と
-      // `let accepted = false` を行い、updater 内で `accepted = true` をセットしていた。
-      // React 18 の自動 batching 下では setState の updater は同期実行されないことがあり、
-      // 同期で N 回連打した場合に
-      //   (a) `accepted` が false のまま return null されて `setActiveTerminalTabId` がスキップ、
-      //   (b) reject 分まで `nextTerminalIdRef.current` が無駄消費される
-      // という race が起きていた。
-      //
-      // 修正: id 採番と active 切替を updater 内に閉じ込め、reject 時は (return prev で) 純粋に
-      // 何も起こらない設計に変える。これで updater が直列に走ってもタブ数は MAX_TERMINALS で
-      // 確実に頭打ちになり、id ref も accepted 数しか進まない。`setActiveTerminalTabId` を
-      // updater 内から呼ぶのは「同コンポーネント内の setState を queue する」だけなので
-      // strict mode の二重実行下でも同じ id を再代入するだけで idempotent。
+      // Issue #1137: id を state updater 内で採番すると、React batching 中の2回目以降は
+      // updaterが同期実行されず、タブ自体は追加されても戻り値が null になる。復元側は戻り値を
+      // cwd/size mapのkeyに使うため、そのタブが次のauto-saveで既定値に破壊されていた。
+      // 同期予約数をrefで管理し、上限判定と採番をupdaterより前に確定する。これにより#588の
+      // 「同期連打でも上限を超えず、reject時にidを消費しない」契約も維持する。
+      if (terminalTabsRef.current.length >= MAX_TERMINALS) {
+        optsRef.current.showToast(
+          t('terminal.limitReached', { max: MAX_TERMINALS }),
+          { tone: 'warning' }
+        );
+        return null;
+      }
+      const id = nextTerminalIdRef.current++;
       const agentType = addOpts?.agent ?? 'claude';
       // Issue #660: client-side UUID 事前注入。
       //   - resumeSessionId が外部指定 (team-history resume / 永続化復元) → そのまま使い
@@ -266,7 +276,7 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
       //   - 未指定 & claude → UUID v4 を採番して `--session-id` 経路で起動 (新規 jsonl 作成)
       //   - 未指定 & codex/その他 → resumeSessionId は null (--session-id も --resume も付けない)
       // updater の外で生成するのは副作用 (UUID) のため。strict mode 二重呼び出しでも同 UUID で
-      // idempotent。MAX_TERMINALS で reject されたら 1 個無駄になるが極小コストなので許容。
+      // idempotent。上限判定後なのでrejectされた追加ではUUIDを生成しない。
       let resumeSessionId: string | null;
       let freshSessionId: boolean;
       if (addOpts?.resumeSessionId !== undefined) {
@@ -279,17 +289,7 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
         resumeSessionId = null;
         freshSessionId = false;
       }
-      let assignedId: number | null = null;
       setTerminalTabs((prev) => {
-        if (prev.length >= MAX_TERMINALS) {
-          optsRef.current.showToast(
-            t('terminal.limitReached', { max: MAX_TERMINALS }),
-            { tone: 'warning' }
-          );
-          return prev;
-        }
-        const id = nextTerminalIdRef.current++;
-        assignedId = id;
         // ラベル自動生成: チームロール or 連番
         let label: string;
         if (addOpts?.role) {
@@ -331,14 +331,12 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
             { tone: 'info' }
           );
         }
-        // 新タブを active に切り替える。reject パスは return prev で先に抜けているので、
-        // ここに到達する = タブ追加が確定している。
-        setActiveTerminalTabId(id);
         return [...prev, tab];
       });
-      return assignedId;
+      setActiveTerminalTabId(id);
+      return id;
     },
-    [t]
+    [t, setTerminalTabs]
   );
 
   const doCloseTab = useCallback((tabId: number) => {
@@ -356,7 +354,7 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
       });
       return next;
     });
-  }, []);
+  }, [setTerminalTabs]);
 
   const closeTerminalTab = useCallback(
     (tabId: number) => {
@@ -386,7 +384,7 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
           : t
       )
     );
-  }, []);
+  }, [setTerminalTabs]);
 
   /**
    * Issue #660: Claude session が jsonl に永続化された (= `onSessionId` 受信) 時点で呼び、
@@ -401,7 +399,7 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
       next[idx] = { ...prev[idx], freshSessionId: false };
       return next;
     });
-  }, []);
+  }, [setTerminalTabs]);
 
   const restartTerminal = useCallback(() => {
     restartTerminalTab(activeTerminalTabId);
@@ -448,13 +446,13 @@ export function useTerminalTabs(opts: UseTerminalTabsOptions): UseTerminalTabsRe
         setDragOverTabId(null);
       }
     }),
-    []
+    [setTerminalTabs]
   );
 
   const resetForProjectSwitch = useCallback(() => {
     setTerminalTabs([]);
     setActiveTerminalTabId(0);
-  }, []);
+  }, [setTerminalTabs]);
 
   return {
     terminalTabs,

@@ -7,6 +7,7 @@ on:
     tags-ignore:
       - 'v*'
   pull_request:
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -86,6 +87,10 @@ jobs:
       # 行数を上限として固定し、悪化のみ fail させる。縮小時は baseline 引き下げを促す。
       - name: File-size ratchet
         run: npm run lint:file-size
+
+      # Issue #1161: release workflow の署名 job が依存する品質契約を静的に固定する。
+      - name: Release workflow contract
+        run: npm run lint:release-workflow
 
       # Issue #931: #[tauri::command] の戻り値を CommandResult<T> ({ code, message } の
       # 構造化エラー) に強制する。旧 3 流派 (Option<T> / ok+error 埋め込み) は baseline
