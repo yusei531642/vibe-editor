@@ -6,12 +6,11 @@ import type { FitAddon } from '@xterm/addon-fit';
 import { usePtySession } from '../use-pty-session';
 import type { PtySessionCallbacks, PtySpawnSnapshot } from '../use-pty-session';
 
-type TestWindow = Window &
-  typeof globalThis & {
-    api?: unknown;
-  };
+type TestWindow = { api?: unknown };
 
-type TestTerminal = Terminal & {
+type TestTerminal = Omit<Terminal, 'cols' | 'rows'> & {
+  cols: number;
+  rows: number;
   textarea: HTMLTextAreaElement;
 };
 
@@ -55,7 +54,7 @@ describe('usePtySession font readiness', () => {
   let originalFontsDescriptor: PropertyDescriptor | undefined;
 
   beforeEach(() => {
-    originalApi = (window as TestWindow).api;
+    originalApi = (window as unknown as TestWindow).api;
     originalFontsDescriptor = Object.getOwnPropertyDescriptor(document, 'fonts');
   });
 
@@ -63,14 +62,14 @@ describe('usePtySession font readiness', () => {
     cleanup();
     vi.restoreAllMocks();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      delete (window as unknown as TestWindow).api;
     } else {
-      (window as TestWindow).api = originalApi;
+      (window as unknown as TestWindow).api = originalApi;
     }
     if (originalFontsDescriptor) {
       Object.defineProperty(document, 'fonts', originalFontsDescriptor);
     } else {
-      delete (document as Document & { fonts?: unknown }).fonts;
+      Reflect.deleteProperty(document, 'fonts');
     }
   });
 
@@ -78,7 +77,7 @@ describe('usePtySession font readiness', () => {
     const fontsReady = deferred();
     Object.defineProperty(document, 'fonts', {
       configurable: true,
-      value: { ready: fontsReady.promise } as Partial<FontFaceSet>
+      value: { ready: fontsReady.promise } as unknown as Partial<FontFaceSet>
     });
 
     const term = makeTerminal();
@@ -93,7 +92,7 @@ describe('usePtySession font readiness', () => {
       id: opts.id ?? 'pty-fonts'
     }));
 
-    (window as TestWindow).api = {
+    (window as unknown as TestWindow).api = {
       terminal: {
         onDataReady: vi.fn(async () => vi.fn()),
         onExitReady: vi.fn(async () => vi.fn()),
@@ -104,6 +103,7 @@ describe('usePtySession font readiness', () => {
         create,
         write: vi.fn(async () => undefined),
         resize: vi.fn(async () => undefined),
+        savePastedImage: vi.fn(async () => ({ ok: true, path: 'C:/tmp/paste.png' })),
         kill: vi.fn(async () => undefined)
       }
     };
@@ -114,7 +114,7 @@ describe('usePtySession font readiness', () => {
       usePtySession({
         cwd: 'C:/workspace',
         command: 'claude',
-        termRef: makeRef<Terminal | null>(term),
+        termRef: makeRef<Terminal | null>(term as Terminal),
         fitRef: makeRef<FitAddon | null>(fit),
         snapRef: makeRef<PtySpawnSnapshot>({}),
         callbacksRef: makeRef<PtySessionCallbacks>({}),

@@ -29,28 +29,31 @@ import { ToastProvider } from '../../../../lib/toast-context';
 import { DEFAULT_SETTINGS } from '../../../../../../types/shared';
 import type { ReactNode } from 'react';
 
-type TestWindow = Window &
-  typeof globalThis & {
-    api?: unknown;
-  };
-
 function installApi(): { diff: ReturnType<typeof vi.fn> } {
   const diff = vi.fn(async () => ({
-    relPath: 'src/foo.ts',
-    headContent: 'old',
-    workingContent: 'new',
-    isBinary: false
+    ok: true,
+    path: 'src/foo.ts',
+    isNew: false,
+    isDeleted: false,
+    isBinary: false,
+    original: 'old',
+    modified: 'new'
   }));
-  (window as TestWindow).api = {
+  window.api = {
+    ...window.api,
     settings: {
+      ...window.api?.settings,
       load: vi.fn(async () => DEFAULT_SETTINGS),
-      save: vi.fn(async () => undefined)
+      save: vi.fn(async () => undefined),
+      pickCustomMascot: vi.fn(async () => null),
+      loadCustomMascot: vi.fn(async () => null),
+      clearCustomMascot: vi.fn(async () => undefined)
     },
     app: {
-      setProjectRoot: vi.fn(async () => undefined),
+      ...window.api?.app,
       setZoomLevel: vi.fn(async () => undefined)
     },
-    git: { diff }
+    git: { ...window.api?.git, diff }
   };
   return { diff };
 }
@@ -88,18 +91,18 @@ function renderCard() {
 }
 
 describe('DiffCard (smoke)', () => {
-  let originalApi: unknown;
+  let originalApi: typeof window.api | undefined;
 
   beforeEach(() => {
-    originalApi = (window as TestWindow).api;
+    originalApi = window.api;
   });
 
   afterEach(() => {
     cleanup();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
-      (window as TestWindow).api = originalApi;
+      window.api = originalApi;
     }
     vi.restoreAllMocks();
   });
