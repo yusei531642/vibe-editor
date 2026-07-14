@@ -76,6 +76,11 @@ jobs:
       - name: CSS custom property lint
         run: npm run lint:css-vars
 
+      # Issue #1164: app と upstream が同じ Zustand / marked を共有し、
+      # nested copy が再導入されてbundleを膨らませないことを固定する。
+      - name: Dependency dedupe lint
+        run: npm run lint:dependency-dedupe
+
       # Issue #948: 永続化ファイルの生 serde parse 握りつぶし (`serde_json::from_*(...).ok()`)
       # を検出して fail させる。読込は safe_load 共通基盤 (#936) 経由を強制する。
       # 例外は該当行直前の `// safe-load-exempt: <理由>` で明示 opt-out。

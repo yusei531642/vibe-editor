@@ -18,6 +18,42 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1146
 - [x] targeted Rust test: PASS（2 passed / 0 failed）
 - [x] `cargo check --locked --manifest-path src-tauri\\Cargo.toml --all-targets`: PASS
 - [x] `git diff --check`: PASS
+
+## Issue #1164 - Zustand / marked の重複依存解消 (2026-07-15 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1164
+
+### 計画
+
+- [x] npm registry と現行 lockfile から重複原因・互換範囲を再確認する。
+- [x] root の Zustand / marked を upstream が要求する版へ揃え、nested copy が消えることを確認する。
+- [x] Zustand store、Markdown preview、Monaco、Canvas の自動テストと全品質ゲートを通す。
+- [x] build artifact の module ownership とJS総量を変更前後で比較する。
+
+### Next Steps
+
+- [x] 依存版を最小変更し、lockfileを再生成する。
+- [x] `npm ls zustand marked --all` で単一化を実証する。
+- [x] CIに単一copy契約を追加し、将来のupstream更新による再重複を検出する。
+
+### 進捗
+
+- [x] rootを `zustand@4.5.7` / `marked@14.0.0` に固定し、upstreamと共有した。
+- [x] `@xyflow/react` 配下のZustandとMonaco配下のmarkedをlockfileから削除した。
+- [x] JS総量を 5,674,055 bytes から 5,669,172 bytesへ4,883 bytes削減した。
+- [x] production dependency auditは0 vulnerabilitiesだった。
+
+### 検証結果
+
+- [x] `npm run lint:dependency-dedupe`: PASS（各1 copy）
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS（105 files / 602 tests）
+- [x] `npm run lint`: PASS（0 errors / 既存warnings 11）
+- [x] `npm run lint:file-size`: PASS
+- [x] `npm run lint:css-vars`: PASS
+- [x] `npm run build:vite`: PASS
+- [x] `npm audit --omit=dev --audit-level=high`: PASS（0 vulnerabilities）
+- [x] `git diff --check`: PASS
 - [ ] repository-wide `cargo fmt --check`: FAIL（今回の差分外に既存不整形あり）
 
 ## #736 team_hub/state.rs god-file 分割 + team_send 段階関数化 (完了)

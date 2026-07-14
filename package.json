@@ -17,6 +17,7 @@
     "lint:safe-load": "node build/check-safe-load.mjs",
     "lint:file-size": "node build/check-file-size-ratchet.mjs",
     "lint:css-vars": "node build/check-css-custom-properties.mjs",
+    "lint:dependency-dedupe": "node build/check-dependency-dedupe.mjs",
     "lint:release-workflow": "node build/check-release-workflow.mjs",
     "lint:command-result": "node build/check-command-result.mjs",
     "lint:team-events": "node build/check-team-event-payloads.mjs",
@@ -42,11 +43,11 @@
     "@xyflow/react": "^12.11.0",
     "dompurify": "^3.4.11",
     "lucide-react": "^1.11.0",
-    "marked": "^18.0.5",
+    "marked": "14.0.0",
     "monaco-editor": "^0.55.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "zustand": "^5.0.14"
+    "zustand": "4.5.7"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
