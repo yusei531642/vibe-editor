@@ -2037,3 +2037,39 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1045
 - [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
 - [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
 - [x] `git diff --check`: PASS
+
+## Issue #1166 - 未定義CSS custom propertyの解消 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1166
+
+### 計画
+
+- [x] 旧4tokenの21参照を既存semantic tokenへ置換する。
+- [x] CSS・TS/TSXの定義を収集するcustom property lintを追加する。
+- [x] 外部所有tokenだけを理由付きallowlistに限定する。
+- [x] npm scriptとCI verify jobへlintを接続する。
+- [x] fail/pass fixtureと全品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 21参照を置換する。
+- [x] lint scriptとfixture testを実装する。
+- [ ] feature branchをpushし、PR作成の明示承認を待つ。
+
+### 進捗
+
+- [x] modal 8件とcanvas 13件を既存semantic tokenへ置換した。
+- [x] CSS declaration、TS setProperty、TSX computed style keyをdefinitionとして収集した。
+- [x] fallback付きunknownも失敗し、コメント内tokenは無視するfixtureを追加した。
+- [x] optional override 10件だけを理由付きexact allowlistとし、外部prefix許可は導入していない。
+- [x] `lint:css-vars`をCIのESLint直後へ接続した。
+
+### 検証結果
+
+- [x] 旧4token参照: 0件
+- [x] `npm run lint:css-vars`: PASS (2207 usages / 185 definitions)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (86 files / 519 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存warnings 12)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS

@@ -408,7 +408,7 @@
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: var(--color-fg);
+  color: var(--fg);
   cursor: pointer;
 }
 
@@ -429,7 +429,7 @@
 
 .skill-import > summary {
   cursor: pointer;
-  color: var(--color-fg);
+  color: var(--fg);
   user-select: none;
 }
 
@@ -463,19 +463,19 @@
 
 .skill-import__name {
   font-weight: 500;
-  color: var(--color-fg);
+  color: var(--fg);
 }
 
 .skill-import__badge {
   font-size: 10px;
-  color: var(--muted);
+  color: var(--fg-muted);
   text-transform: uppercase;
   letter-spacing: 0.03em;
 }
 
 .skill-import__desc {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--fg-muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -489,14 +489,14 @@
   padding: 2px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm, 6px);
-  background: var(--surface-muted);
+  background: var(--surface-panel);
 }
 
 .segmented-control button {
   min-width: 56px;
   height: 26px;
   padding: 0 10px;
-  color: var(--muted);
+  color: var(--fg-muted);
   background: transparent;
   border: 0;
   border-radius: calc(var(--radius-sm, 6px) - 2px);
@@ -506,7 +506,7 @@
 
 .segmented-control button.is-active {
   color: var(--fg);
-  background: var(--surface);
+  background: var(--surface-elev);
 }
 .toolbar__btn--danger {
   color: var(--warning, #d4a27f);

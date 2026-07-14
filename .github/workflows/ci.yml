@@ -71,6 +71,10 @@ jobs:
       - name: ESLint
         run: npm run lint
 
+      # Issue #1166: CSS var(--x)をCSS/TSXの定義と照合し、未定義tokenを防ぐ。
+      - name: CSS custom property lint
+        run: npm run lint:css-vars
+
       # Issue #948: 永続化ファイルの生 serde parse 握りつぶし (`serde_json::from_*(...).ok()`)
       # を検出して fail させる。読込は safe_load 共通基盤 (#936) 経由を強制する。
       # 例外は該当行直前の `// safe-load-exempt: <理由>` で明示 opt-out。
