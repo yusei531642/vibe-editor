@@ -5,7 +5,8 @@ import { subscribeEvent, subscribeEventReady } from '../subscribe-event';
 import type {
   TerminalCreateOptions,
   TerminalCreateResult,
-  TerminalExitInfo
+  TerminalExitInfo,
+  TerminalWriteResult
 } from '../../../../types/shared';
 
 export interface SavePastedImageResult {
@@ -17,7 +18,7 @@ export interface SavePastedImageResult {
 export const terminal = {
   create: (opts: TerminalCreateOptions): Promise<TerminalCreateResult> =>
     invokeCommand('terminal_create', { opts }),
-  write: (id: string, data: string): Promise<void> =>
+  write: (id: string, data: string): Promise<TerminalWriteResult> =>
     invokeCommand('terminal_write', { id, data }),
   resize: (id: string, cols: number, rows: number): Promise<void> =>
     invokeCommand('terminal_resize', { id, cols, rows }),

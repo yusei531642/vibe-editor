@@ -1,5 +1,30 @@
 # vibe-editor Tauri ハイブリッド移行 + 無限キャンバス UI 革新 TODO
 
+## Issue #1156 - 画像pasteのwrite結果を可視化 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1156
+
+### 計画
+
+- [x] backendで判別済みのwrite outcomeがIPCで消える経路を確認する。
+- [x] terminal_writeの結果を構造化し、session不在を含めてrendererへ返す。
+- [x] 画像paste経路だけ結果を判定し、非writtenを現在言語で表示する。
+- [x] Rust/JS関連テストと全品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 検証結果を記録する。
+- [ ] コミットして feature branch をpushする。
+- [x] Rust outcome tests: PASS（2 passed / 0 failed）
+- [x] targeted Vitest: PASS（1 file / 5 tests）
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS（87 files / 524 tests）
+- [x] `npm run lint`: PASS（0 errors / 既存12 warnings）
+- [x] `npm run build:vite`: PASS
+- [x] `cargo check --locked --manifest-path src-tauri\\Cargo.toml --all-targets`: PASS
+- [x] `cargo clippy --locked --manifest-path src-tauri\\Cargo.toml --all-targets -- -D warnings`: PASS
+- [x] `git diff --check`: PASS
+
 ## #736 team_hub/state.rs god-file 分割 + team_send 段階関数化 (完了)
 
 方針: 振る舞いを一切変えない純粋なリファクタ。lock の取得/解放タイミング・

@@ -75,6 +75,33 @@ pub struct TerminalCreateResult {
     pub replay: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TerminalWriteOutcome {
+    Written,
+    SuppressedInjecting,
+    DroppedTooLarge,
+    DroppedRateLimited,
+    SessionNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalWriteResult {
+    pub outcome: TerminalWriteOutcome,
+}
+
+impl From<UserWriteOutcome> for TerminalWriteOutcome {
+    fn from(value: UserWriteOutcome) -> Self {
+        match value {
+            UserWriteOutcome::Written => Self::Written,
+            UserWriteOutcome::SuppressedInjecting => Self::SuppressedInjecting,
+            UserWriteOutcome::DroppedTooLarge => Self::DroppedTooLarge,
+            UserWriteOutcome::DroppedRateLimited => Self::DroppedRateLimited,
+        }
+    }
+}
+
 #[derive(Serialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct SavePastedImageResult {
@@ -622,7 +649,7 @@ pub async fn terminal_write(
     state: State<'_, AppState>,
     id: String,
     data: String,
-) -> crate::commands::error::CommandResult<()> {
+) -> crate::commands::error::CommandResult<TerminalWriteResult> {
     if let Some(s) = state.pty_registry.get(&id) {
         let data_len = data.len();
         let data_bytes = data.into_bytes();
@@ -645,8 +672,13 @@ pub async fn terminal_write(
                 );
             }
         }
+        return Ok(TerminalWriteResult {
+            outcome: outcome.into(),
+        });
     }
-    Ok(())
+    Ok(TerminalWriteResult {
+        outcome: TerminalWriteOutcome::SessionNotFound,
+    })
 }
 
 /// Issue #1076: `terminal_resize` の下限クランプ値。spawn 経路 (`session/spawn.rs` の
@@ -935,6 +967,45 @@ mod codex_resume_filter_tests {
         let input = s(&["-c", "k=v", "resume", "abc;rm -rf /"]);
         let out = filter_codex_resume_id_in_place(true, input.clone());
         assert_eq!(out, input);
+    }
+}
+
+#[cfg(test)]
+mod terminal_write_outcome_tests {
+    use super::{TerminalWriteOutcome, UserWriteOutcome};
+
+    #[test]
+    fn maps_all_internal_write_outcomes_to_ipc_contract() {
+        let cases = [
+            (UserWriteOutcome::Written, TerminalWriteOutcome::Written),
+            (
+                UserWriteOutcome::SuppressedInjecting,
+                TerminalWriteOutcome::SuppressedInjecting,
+            ),
+            (
+                UserWriteOutcome::DroppedTooLarge,
+                TerminalWriteOutcome::DroppedTooLarge,
+            ),
+            (
+                UserWriteOutcome::DroppedRateLimited,
+                TerminalWriteOutcome::DroppedRateLimited,
+            ),
+        ];
+        for (internal, expected) in cases {
+            assert_eq!(TerminalWriteOutcome::from(internal), expected);
+        }
+    }
+
+    #[test]
+    fn serializes_write_outcomes_as_camel_case_strings() {
+        assert_eq!(
+            serde_json::to_string(&TerminalWriteOutcome::SuppressedInjecting).unwrap(),
+            r#""suppressedInjecting""#
+        );
+        assert_eq!(
+            serde_json::to_string(&TerminalWriteOutcome::SessionNotFound).unwrap(),
+            r#""sessionNotFound""#
+        );
     }
 }
 

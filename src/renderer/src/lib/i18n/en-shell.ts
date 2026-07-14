@@ -285,6 +285,10 @@ export const enShell: Dict = {
 
   // ---------- Terminal (paste errors) ----------
   'terminal.pasteImageFailed': 'Paste image failed',
+  'terminal.pasteImage.suppressedInjecting': 'Could not insert while prompt injection is active',
+  'terminal.pasteImage.droppedTooLarge': 'The inserted data is too large',
+  'terminal.pasteImage.droppedRateLimited': 'Could not insert because input was rate-limited',
+  'terminal.pasteImage.sessionNotFound': 'The terminal session was not found',
   'terminal.pasteException': 'Paste exception',
 
 

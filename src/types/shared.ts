@@ -1606,6 +1606,17 @@ export interface TerminalCreateResult {
   replay?: string;
 }
 
+export type TerminalWriteOutcome =
+  | 'written'
+  | 'suppressedInjecting'
+  | 'droppedTooLarge'
+  | 'droppedRateLimited'
+  | 'sessionNotFound';
+
+export interface TerminalWriteResult {
+  outcome: TerminalWriteOutcome;
+}
+
 export interface TerminalExitInfo {
   exitCode: number;
   signal?: number;
