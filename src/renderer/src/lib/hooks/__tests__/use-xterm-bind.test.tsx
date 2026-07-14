@@ -228,7 +228,7 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
       () => new Promise<{ ok: true; id: string }>((resolve) => (resolveCreate = resolve))
     );
     const resize = vi.fn(async () => undefined);
-    (window as TestWindow).api = {
+    Object.defineProperty(window, 'api', { configurable: true, writable: true, value: {
       terminal: {
         onDataReady: vi.fn(async () => vi.fn()),
         onExitReady: vi.fn(async () => vi.fn()),
@@ -241,7 +241,7 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
         resize,
         kill: vi.fn(async () => undefined)
       }
-    };
+    } });
     const pendingPtyResizeRef = makeRef<{ cols: number; rows: number } | null>(null);
     const lastScheduledRef = makeRef<{ cols: number; rows: number } | null>(null);
 

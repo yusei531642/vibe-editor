@@ -201,7 +201,6 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     // これにより SIGWINCH の二重発火を防ぐ。
     const lastScheduledRef = useRef<{ cols: number; rows: number } | null>(null);
     const pendingPtyResizeRef = useRef<{ cols: number; rows: number } | null>(null);
-
     // 不変式 #2: args / env / teamId / agentId / role / initialMessage は
     // spawn 時に一度だけ使う値。ref 経由で usePtySession 内部に渡す。
     const snapRef = useRef<PtySpawnSnapshot>({
@@ -227,7 +226,6 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     // useAutoInitialMessage は snap とは別に initialMessage を再参照するので ref を渡す
     const initialMessageRef = useRef(initialMessage);
     initialMessageRef.current = initialMessage;
-
     // Issue #818: Rust 側から structured (i18n key + params) で来る warning を
     // 現在言語で評価して banner 文字列を返す。空 requested / 空 fallback は i18n の
     // `terminal.cwd.unsetLabel` で言語に応じた placeholder (`(未設定)` / `(unset)`) に
@@ -248,7 +246,6 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     const formatDiagnostic = useCallback(
       (diagnostic: TerminalDiagnostic) => formatTerminalDiagnostic(diagnostic, t), [t]
     );
-
     // callbacks は毎レンダー更新されるので ref で安定化
     const callbacksRef = useRef<PtySessionCallbacks>({
       onStatus,
