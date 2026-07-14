@@ -762,20 +762,14 @@ Branch: `feature/issue-452`
 
 ### 計画
 
-- [x] 現行の registry 登録、終了 watcher、同一 ID 競合の順序を確認する。
-- [x] `tasks/fortress-implement/issue-1155/mission-brief.md` に Mission Brief と Slice 境界を記録する。
-- [x] Slice 1 を RED → GREEN で実装する。
-- [x] Slice 1 の検証後、Slice 2 を実装し全品質ゲートを実行する。
-
-### Next Steps
-
+- [x] registry登録、終了watcher、同一ID競合の順序を確認する。
 - [x] registry採否latchとidentity-safe removalを実装する。
 - [x] 即死、同一ID競合、collision loserの回帰テストを追加する。
 
 ### RCA結果
 
 - [x] Root Cause Confirmed: exit watcherがregistry insert前に開始し、終了時にIDだけで無条件removeしていた。
-- [x] 即死時はremove(None)後にdead handleがinsertされ、衝突時は古いwatcherが別handleを削除できることをコード経路と回帰テストで固定した。
+- [x] 即死時はremove(None)後にdead handleがinsertされ、衝突時は古いwatcherが別handleを削除できる経路をテストで固定した。
 
 ### 検証結果
 
@@ -784,7 +778,58 @@ Branch: `feature/issue-452`
 - [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
 - [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
 - [x] `npm run lint:file-size`: PASS（spawn.rs 733 → 688行）
-- [x] `npm run typecheck`: PASS（`npm ci`で依存をlockfileへ同期後に再実行）
+- [x] `npm run typecheck`: PASS
+
+## PR #1208 - file-size ratchet修正 (2026-07-14 / Codex)
+
+### RCA結果
+
+- [x] 症状: `AppShell.tsx` が982行となり、baseline上限977行を超えてCIが失敗した。
+- [x] 再現: `npm run lint:file-size` が同じ982/977でFAILした。
+- [x] 原因: 共通通知処理は別moduleへ切り出し済みだが、その呼び出しを6行展開して行数を純増させた。
+- [x] 代替原因除外: baseline変更漏れではなく、branch差分の5行純増とCI計測値が一致した。
+- [x] 修正方針: 機能・責務・baselineを変えず、既存helper呼び出しだけを1行に整形する。
+- [x] 判定: A=YES、B=YES、C=YES、D=YES（Root Cause Confirmed）。
+
+### Next Steps
+
+- [x] 修正前と同じ `npm run lint:file-size` でPASSを確認する。
+- [x] 関連テスト、typecheck、lint、build、diff checkを実行する。
+- [ ] PR #1208へpushし、CIと再レビューを確認する。
+
+### 修正後検証
+
+- [x] `npm run lint:file-size`: PASS（485 files、baseline免除39件）。
+- [x] targeted Vitest: PASS（2 files / 5 tests）。
+- [x] `npm run typecheck`: PASS。
+- [x] `npm run lint`: PASS（0 errors / 既存11 warnings）。
+- [x] `npm run build:vite`: PASS（既存warningのみ）。
+- [x] `git diff --check`: PASS。
+
+## Issue #1139 - セッション/Git再取得失敗を通知 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1139
+
+### 計画
+
+- [x] IDEのsessions/Git refresh失敗経路とCanvas側の処理状況を確認する。
+- [x] console.warnとerror toastの共通通知を追加する。
+- [x] Git refreshのrejection吸収・loading解除・通知をテストする。
+- [x] 関連テストと全品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 検証結果を記録する。
+- [x] コミットして feature branch をpushする。
+
+### 検証結果
+
+- [x] 関連 Vitest: PASS (2 files / 5 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (87 files / 522 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 11 warnings)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）
