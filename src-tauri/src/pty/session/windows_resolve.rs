@@ -160,10 +160,41 @@ fn is_wsl_bash_launcher(path: &Path) -> bool {
         || normalized.ends_with("\\microsoft\\windowsapps\\bash.exe")
 }
 
+fn wsl_launcher_has_distro(path: &Path) -> bool {
+    let Some(wsl_exe) = path.parent().map(|parent| parent.join("wsl.exe")) else {
+        return false;
+    };
+    std::process::Command::new(wsl_exe)
+        .args(["--list", "--quiet"])
+        .output()
+        .map(|output| {
+            output.status.success()
+                && output
+                    .stdout
+                    .iter()
+                    .any(|byte| *byte != 0 && !byte.is_ascii_whitespace())
+        })
+        .unwrap_or(false)
+}
+
 pub(super) fn resolve_windows_command_path(
     command: &str,
     search_dirs: &[PathBuf],
     pathext: &[String],
+) -> Result<PathBuf> {
+    resolve_windows_command_path_with_wsl_probe(
+        command,
+        search_dirs,
+        pathext,
+        wsl_launcher_has_distro,
+    )
+}
+
+pub(crate) fn resolve_windows_command_path_with_wsl_probe(
+    command: &str,
+    search_dirs: &[PathBuf],
+    pathext: &[String],
+    wsl_has_distro: impl Fn(&Path) -> bool,
 ) -> Result<PathBuf> {
     let direct_path = PathBuf::from(command);
     if direct_path.is_absolute() || command_has_path_separator(command) {
@@ -199,7 +230,7 @@ pub(super) fn resolve_windows_command_path(
     for dir in search_dirs {
         for candidate in candidate_paths(&dir.join(command), pathext) {
             if candidate.is_file() {
-                if is_bare_bash && is_wsl_bash_launcher(&candidate) {
+                if is_bare_bash && is_wsl_bash_launcher(&candidate) && !wsl_has_distro(&candidate) {
                     rejected_wsl_bash = true;
                     continue;
                 }

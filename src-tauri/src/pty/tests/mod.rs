@@ -11,3 +11,4 @@ mod batcher;
 mod session_env;
 mod session_spawn;
 mod session_windows;
+mod session_windows_bash;

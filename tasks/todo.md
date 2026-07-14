@@ -766,7 +766,7 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1179
 
 - [x] Windows resolverと既存テスト境界を確認する。
 - [x] bare `bash` に限ってGit Bashを優先する。
-- [x] WSLランチャしかない場合は説明可能なエラーを返す。
+- [x] WSLランチャしかない場合はdistro有無を確認し、未設定時だけ説明可能なエラーを返す。
 - [x] 明示パスによるWSL bash起動は維持する。
 - [x] Windows限定テストとRust品質ゲートを実行する。
 
@@ -785,6 +785,7 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1179
 - [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
 - [x] `git diff --check`: PASS
 - [x] `npm run typecheck`: PASS
+- [x] `npm run lint:file-size`: PASS（bash resolver testsを専用ファイルへ分離）
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）
 - [x] `npm run test`: PASS（26 files / 185 tests、既存 jsdom `getContext` stderr あり、exit 0）
