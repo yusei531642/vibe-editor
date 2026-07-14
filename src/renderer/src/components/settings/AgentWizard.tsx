@@ -169,7 +169,6 @@ export function AgentWizard({ onCreate, onCancel }: Props): JSX.Element {
       aria-label={t('settings.agentWizard.title')}
       tabIndex={-1}
       data-modal-escape-owner="true"
-      onKeyDown={modal.onKeyDown}
     >
       <div className="agent-wizard__card glass-surface">
         <div className="agent-wizard__progress" aria-hidden>

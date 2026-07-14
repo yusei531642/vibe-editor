@@ -765,15 +765,16 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1142
 ### 計画
 
 - [x] 対象3モーダルとglobal capture Escapeの競合を確認する。
-- [x] 初期focus・Tab trap・Escape・focus復帰の共通hookを追加する。
-- [x] global Escapeがnested modalへ所有権を譲るmarkerを追加する。
+- [x] document captureで初期focus・Tab trap・Escape・focus復帰を共通化する。
+- [x] global Escapeが実際にfocusを持つ最前面UIへ所有権を譲る判定を追加する。
 - [x] Disclaimerへaccessible nameを配線する。
 - [x] a11y関連テストと全品質ゲートを実行する。
 
 ### Next Steps
 
 - [x] 検証結果を記録する。
-- [ ] コミットして feature branch をpushする。
+- [ ] reviewer指摘修正をコミットして feature branch をpushする。
+- [x] modal a11y Vitest: PASS（1 file / 4 tests）
 - [x] targeted Vitest: PASS（2 files / 9 tests）
 - [x] `npm run typecheck`: PASS
 - [x] `npm run test`: PASS（87 files / 521 tests）

@@ -25,7 +25,6 @@ export function VoiceConfirmModal({ text, onApprove, onCancel }: Props): JSX.Ele
         aria-labelledby="voice-confirm-title"
         tabIndex={-1}
         data-modal-escape-owner="true"
-        onKeyDown={modal.onKeyDown}
       >
         <h3 id="voice-confirm-title" className="voice-confirm-modal__title">
           <AlertTriangle

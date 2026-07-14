@@ -468,7 +468,6 @@ function DisclaimerModal({
         aria-labelledby="voice-disclaimer-title"
         tabIndex={-1}
         data-modal-escape-owner="true"
-        onKeyDown={modal.onKeyDown}
       >
         <h3 id="voice-disclaimer-title">
           <Mic size={16} strokeWidth={1.75} />

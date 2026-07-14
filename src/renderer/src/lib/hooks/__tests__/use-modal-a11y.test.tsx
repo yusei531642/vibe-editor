@@ -10,7 +10,6 @@ function ModalHarness({ onClose }: { onClose: () => void }): JSX.Element {
       role="dialog"
       tabIndex={-1}
       data-modal-escape-owner="true"
-      onKeyDown={modal.onKeyDown}
     >
       <button type="button">first</button>
       <button type="button">last</button>
@@ -41,5 +40,36 @@ describe('useModalA11y (Issue #1142)', () => {
     expect(nestedModalOwnsEscape()).toBe(true);
     expect(fireEvent.keyDown(first, { key: 'Escape' })).toBe(false);
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers Tab and Escape after focus falls back to document.body', () => {
+    const onClose = vi.fn();
+    render(<ModalHarness onClose={onClose} />);
+    const first = screen.getByRole('button', { name: 'first' });
+    first.blur();
+
+    expect(document.activeElement).toBe(document.body);
+    expect(nestedModalOwnsEscape()).toBe(true);
+    fireEvent.keyDown(document.body, { key: 'Tab' });
+    expect(document.activeElement).toBe(first);
+    first.blur();
+    fireEvent.keyDown(document.body, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('yields Escape ownership while focus is in a foreground palette', () => {
+    const onClose = vi.fn();
+    render(
+      <>
+        <ModalHarness onClose={onClose} />
+        <input aria-label="palette" />
+      </>,
+    );
+    const palette = screen.getByRole('textbox', { name: 'palette' });
+    palette.focus();
+
+    expect(nestedModalOwnsEscape()).toBe(false);
+    fireEvent.keyDown(palette, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
