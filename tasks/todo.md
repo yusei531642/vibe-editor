@@ -1,5 +1,25 @@
 # vibe-editor Tauri ハイブリッド移行 + 無限キャンバス UI 革新 TODO
 
+## Issue #1151 - atomic writeのsync失敗を伝播 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1151
+
+### 計画
+
+- [x] `sync_all`失敗の握り潰しと既存atomic write契約を確認する。
+- [x] sync失敗時にrenameせず、handle close後にtempを掃除してErrを返す。
+- [x] fault injectionで旧target保持・temp削除・error伝播を検証する。
+- [x] Rust関連品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 検証結果を記録する。
+- [ ] コミットして feature branch をpushする。
+- [x] `cargo test --locked --manifest-path src-tauri\\Cargo.toml --lib commands::atomic_write`: PASS（5 passed / 0 failed）
+- [x] `cargo check --locked --manifest-path src-tauri\\Cargo.toml --all-targets`: PASS
+- [x] `git diff --check`: PASS
+- [x] `sync_all().await.ok()` 残存確認: 0件
+
 ## #736 team_hub/state.rs god-file 分割 + team_send 段階関数化 (完了)
 
 方針: 振る舞いを一切変えない純粋なリファクタ。lock の取得/解放タイミング・

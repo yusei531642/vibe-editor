@@ -14,6 +14,7 @@
 // Windows は no-op で fallback。Windows ACL 強制は別 issue で対応)。
 
 use anyhow::{anyhow, Result};
+use std::future::Future;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -89,7 +90,10 @@ pub async fn atomic_write_with_mode(
         f.write_all(bytes).await?;
         f.flush().await?;
         // sync_all で metadata も含めてディスクへ flush
-        f.sync_all().await.ok();
+        sync_temp_file(f, &tmp, target, |file| async move {
+            file.sync_all().await
+        })
+        .await?;
     }
 
     // rename で atomic 置換。Windows は同 volume 内なら既存ファイルの置換もアトミック
@@ -121,6 +125,27 @@ pub async fn atomic_write_with_mode(
     Ok(())
 }
 
+async fn sync_temp_file<F, Fut>(file: fs::File, tmp: &Path, target: &Path, sync: F) -> Result<()>
+where
+    F: FnOnce(fs::File) -> Fut,
+    Fut: Future<Output = std::io::Result<()>>,
+{
+    let result = sync(file).await;
+    if let Err(error) = result {
+        if let Err(cleanup_error) = fs::remove_file(tmp).await {
+            tracing::warn!(
+                "[atomic_write] temp cleanup after sync failure failed for {}: {cleanup_error}",
+                tmp.display()
+            );
+        }
+        return Err(anyhow!(
+            "atomic_write sync failed before replacing {}: {error}",
+            target.display()
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -147,6 +172,29 @@ mod tests {
         let got = fs::read(&target).await.unwrap();
         assert_eq!(&got, b"v2");
         let _ = fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn sync_failure_preserves_target_and_removes_temp() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("settings.json");
+        let tmp = dir.path().join(".settings.json.tmp.test");
+        fs::write(&target, b"old").await.unwrap();
+        fs::write(&tmp, b"new").await.unwrap();
+        let file = fs::OpenOptions::new().write(true).open(&tmp).await.unwrap();
+
+        let error = sync_temp_file(file, &tmp, &target, |_file| async {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "injected sync failure",
+            ))
+        })
+        .await
+        .expect_err("sync failure must abort the atomic replacement");
+
+        assert!(error.to_string().contains("injected sync failure"));
+        assert_eq!(fs::read(&target).await.unwrap(), b"old");
+        assert!(!fs::try_exists(&tmp).await.unwrap());
     }
 
     #[tokio::test]
