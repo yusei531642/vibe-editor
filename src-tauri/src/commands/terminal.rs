@@ -8,9 +8,10 @@ pub(crate) mod shell_policy;
 mod codex_prompt;
 mod paste_image;
 mod prompt_files;
+pub(crate) mod write_outcome;
 
 use crate::pty::session::TerminalWarning;
-use crate::pty::{spawn_session, SpawnOptions, UserWriteOutcome};
+use crate::pty::{spawn_session, SpawnOptions};
 use crate::state::AppState;
 use codex_prompt::inject_codex_prompt_to_pty;
 use crate::util::log_redact::redact_home;
@@ -615,38 +616,6 @@ pub async fn terminal_create(
             ..Default::default()
         }),
     }
-}
-
-#[tauri::command]
-pub async fn terminal_write(
-    state: State<'_, AppState>,
-    id: String,
-    data: String,
-) -> crate::commands::error::CommandResult<()> {
-    if let Some(s) = state.pty_registry.get(&id) {
-        let data_len = data.len();
-        let data_bytes = data.into_bytes();
-        let outcome = tokio::task::spawn_blocking(move || s.user_write(&data_bytes))
-            .await
-            .map_err(|e| format!("[terminal] terminal_write spawn_blocking failed for {id}: {e}"))?
-            .map_err(|e| e.to_string())?;
-        match outcome {
-            UserWriteOutcome::Written | UserWriteOutcome::SuppressedInjecting => {}
-            UserWriteOutcome::DroppedTooLarge => {
-                tracing::warn!(
-                    "[terminal] dropped oversized terminal_write payload for {id}: {} bytes",
-                    data_len
-                );
-            }
-            UserWriteOutcome::DroppedRateLimited => {
-                tracing::warn!(
-                    "[terminal] rate-limited terminal_write for {id}: {} bytes",
-                    data_len
-                );
-            }
-        }
-    }
-    Ok(())
 }
 
 /// Issue #1076: `terminal_resize` の下限クランプ値。spawn 経路 (`session/spawn.rs` の
