@@ -70,6 +70,10 @@ export const jaCanvas: Dict = {
   'canvas.preset': 'プリセット',
   'canvas.preset.leaderClaude': 'Leader のみで起動 (Claude Code)',
   'canvas.preset.leaderCodex': 'Leader のみで起動 (Codex)',
+  'canvas.preset.leaderClaude.description':
+    'Leader (Claude Code) のみで起動。必要なメンバーは Leader が動的に呼び出します。',
+  'canvas.preset.leaderCodex.description':
+    'Leader (Codex) のみで起動。必要なメンバーは Leader が動的に呼び出します。',
   'canvas.preset.builtinHeader': '組み込み',
   'canvas.preset.savedHeader': '保存済み',
   'canvas.preset.leaderCustom': 'Leader のみで起動 ({name})',

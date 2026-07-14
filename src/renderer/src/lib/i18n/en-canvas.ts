@@ -70,6 +70,10 @@ export const enCanvas: Dict = {
   'canvas.preset': 'Preset',
   'canvas.preset.leaderClaude': 'Leader only (Claude Code)',
   'canvas.preset.leaderCodex': 'Leader only (Codex)',
+  'canvas.preset.leaderClaude.description':
+    'Starts with only a Claude Code leader. The leader recruits members as needed.',
+  'canvas.preset.leaderCodex.description':
+    'Starts with only a Codex leader. The leader recruits members as needed.',
   'canvas.preset.builtinHeader': 'Built-in',
   'canvas.preset.savedHeader': 'Saved',
   'canvas.preset.leaderCustom': 'Leader only ({name})',
