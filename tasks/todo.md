@@ -757,6 +757,35 @@ Branch: `feature/issue-452`
 
 #### 検証結果（代替で PASS 済み）
 - [x] `git diff --check`: PASS
+
+## Issue #1160 tsbuildinfoの追跡解除 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1160
+
+### 計画
+
+- [x] Issue本文、追跡状態、TypeScript build mode、既存ignore規則を確認する。
+- [x] `.gitignore`へ`*.tsbuildinfo`を追加し、既存2ファイルを追跡対象から削除する。
+- [x] `npm run typecheck`を連続2回実行し、両方PASSすることを確認する。
+- [x] buildinfo再生成後も`git status`へ差分が増えないことを確認する。
+- [ ] commit/push後、PR draftを提示して作成承認を得る。
+
+### スコープ境界
+
+- allowed: `.gitignore`、`tsconfig.node.tsbuildinfo`、`tsconfig.web.tsbuildinfo`、`tasks/todo.md`
+- non-goals: TypeScript設定、`--force`、他生成物のignore規則、アプリ挙動の変更
+
+### Next Steps
+
+- [ ] commit/push後、PR draftを提示して作成承認を得る。
+
+### 検証結果
+
+- [x] `npm run typecheck` 2回連続: PASS
+- [x] `git ls-files '*.tsbuildinfo'`: 0件
+- [x] `git check-ignore -v`: 2ファイルとも`.gitignore:20:*.tsbuildinfo`に一致
+- [x] 1回目と2回目の`git status --short`: 同一（buildinfo差分の増加なし）
+- [x] `git diff --check` / `git diff --cached --check`: PASS
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）
