@@ -8,6 +8,8 @@ import {
   presetPosition
 } from '../workspace-presets';
 import { NODE_H, NODE_W } from '../../stores/canvas';
+import { translate } from '../i18n';
+import { buildVoiceAvailablePresets } from '../../components/canvas/VoiceControlButton';
 
 const t = (key: string): string => key;
 
@@ -38,6 +40,18 @@ describe('workspace presets', () => {
     expect(presetMemberCount(preset!)).toBe(1);
     expect(organizations).toHaveLength(1);
     expect(organizations[0].members[0]?.agent).toBe('codex');
+  });
+
+  it('組み込み説明と voice metadata を日本語・英語へ切り替える', () => {
+    for (const preset of BUILTIN_PRESETS) {
+      expect(translate('ja', preset.descriptionI18nKey)).toMatch(/のみで起動/);
+      expect(translate('en', preset.descriptionI18nKey)).toMatch(/^Starts with only/);
+    }
+
+    expect(buildVoiceAvailablePresets('ja').every((preset) => preset.description.includes('起動')))
+      .toBe(true);
+    expect(buildVoiceAvailablePresets('en').every((preset) => preset.description.startsWith('Starts')))
+      .toBe(true);
   });
 
   // Issue #442: presetPosition のピッチは実カードサイズ NODE_W/NODE_H に追随する。
