@@ -8,19 +8,20 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1152
 
 - [x] create待機中のresize取りこぼし経路を確認する。
 - [x] ptyId未確定時の最新gridをpending refへ保存する。
-- [x] create成功直後にpending gridを1回flushし、失敗・cleanup時は破棄する。
+- [x] create成功直後に変更済みpending gridだけを1回flushし、現行spawn失敗時だけ破棄する。
 - [x] 関連テストと全JS品質ゲートを実行する。
 
 ### Next Steps
 
 - [x] 検証結果を記録する。
-- [ ] コミットして feature branch をpushする。
-- [x] targeted Vitest: PASS（2 files / 7 tests）
+- [ ] reviewer指摘修正をコミットして feature branch をpushする。
+- [x] targeted Vitest: PASS（3 files / 9 tests）
 - [x] `npm run typecheck`: PASS
 - [x] `npm run test`: PASS（86 files / 521 tests）
 - [x] `npm run lint`: PASS（0 errors / 既存12 warnings）
 - [x] `npm run build:vite`: PASS
 - [x] `git diff --check`: PASS
+- [x] `npm run lint:file-size`: PASS（485 files / baseline免除39件）
 
 ## #736 team_hub/state.rs god-file 分割 + team_send 段階関数化 (完了)
 
