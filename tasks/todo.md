@@ -757,6 +757,31 @@ Branch: `feature/issue-452`
 
 #### 検証結果（代替で PASS 済み）
 - [x] `git diff --check`: PASS
+
+## Issue #1141 - カード削除後の追加位置重複を防止 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1141
+
+### 計画
+
+- [x] hookのstagger計算とstoreの空きスロット探索を比較する。
+- [x] 単体追加経路を共通 `nextFallbackCardPosition` へ統一する。
+- [x] 削除後の明示position追加が重複しない退行テストを追加する。
+- [x] 関連テストと全品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 検証結果を記録する。
+- [x] コミットして feature branch をpushする。
+
+### 検証結果
+
+- [x] カード位置 Vitest: PASS (3 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (86 files / 520 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 12 warnings)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { NODE_H, NODE_W, useCanvasStore } from '../canvas';
+import { nextFallbackCardPosition } from '../canvas-card-identity';
 
 const GAP = 32;
 
@@ -47,5 +48,35 @@ describe('useCanvasStore.addCard fallback placement (Issue #840)', () => {
     expect(useCanvasStore.getState().nodes.find((node) => node.id === id)?.position).toEqual(
       explicit
     );
+  });
+
+  it('削除後の明示position経路も共通空きスロット探索なら重複しない (#1141)', () => {
+    const store = useCanvasStore.getState();
+    const ids = Array.from({ length: 3 }, (_, index) =>
+      store.addCard({
+        type: 'terminal',
+        title: `Terminal ${index + 1}`,
+        payload: undefined,
+        position: nextFallbackCardPosition(useCanvasStore.getState().nodes)
+      })
+    );
+    store.removeCard(ids[1], { cascadeTeam: false });
+
+    const nextPosition = nextFallbackCardPosition(useCanvasStore.getState().nodes);
+    const nextId = store.addCard({
+      type: 'terminal',
+      title: 'Terminal next',
+      payload: undefined,
+      position: nextPosition
+    });
+
+    expect(useCanvasStore.getState().nodes.find((node) => node.id === nextId)?.position).toEqual({
+      x: NODE_W + GAP,
+      y: 0
+    });
+    const positions = useCanvasStore.getState().nodes.map(
+      (node) => `${node.position.x},${node.position.y}`
+    );
+    expect(new Set(positions).size).toBe(positions.length);
   });
 });
