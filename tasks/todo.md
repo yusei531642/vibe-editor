@@ -762,24 +762,61 @@ Branch: `feature/issue-452`
 
 Issue: https://github.com/yusei531642/vibe-editor/issues/1138
 
-### 計画
-
-- [x] IDE再開経路とCanvas側の既存ガードを比較する。
 - [x] 既存teamIdタブとin-flight resume予約を同時に検査する。
 - [x] 既存チーム再開と高速二重クリックの退行テストを追加する。
+- [x] `use-team-history-sync` Vitest: PASS (3 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run lint:file-size`: PASS
+- [x] 最新mainを取り込み、再CI対象にする。
+
+## PR #1208 - file-size ratchet修正 (2026-07-14 / Codex)
+
+### RCA結果
+
+- [x] 症状: `AppShell.tsx` が982行となり、baseline上限977行を超えてCIが失敗した。
+- [x] 再現: `npm run lint:file-size` が同じ982/977でFAILした。
+- [x] 原因: 共通通知処理は別moduleへ切り出し済みだが、その呼び出しを6行展開して行数を純増させた。
+- [x] 代替原因除外: baseline変更漏れではなく、branch差分の5行純増とCI計測値が一致した。
+- [x] 修正方針: 機能・責務・baselineを変えず、既存helper呼び出しだけを1行に整形する。
+- [x] 判定: A=YES、B=YES、C=YES、D=YES（Root Cause Confirmed）。
+
+### Next Steps
+
+- [x] 修正前と同じ `npm run lint:file-size` でPASSを確認する。
+- [x] 関連テスト、typecheck、lint、build、diff checkを実行する。
+- [ ] PR #1208へpushし、CIと再レビューを確認する。
+
+### 修正後検証
+
+- [x] `npm run lint:file-size`: PASS（485 files、baseline免除39件）。
+- [x] targeted Vitest: PASS（2 files / 5 tests）。
+- [x] `npm run typecheck`: PASS。
+- [x] `npm run lint`: PASS（0 errors / 既存11 warnings）。
+- [x] `npm run build:vite`: PASS（既存warningのみ）。
+- [x] `git diff --check`: PASS。
+
+## Issue #1139 - セッション/Git再取得失敗を通知 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1139
+
+### 計画
+
+- [x] IDEのsessions/Git refresh失敗経路とCanvas側の処理状況を確認する。
+- [x] console.warnとerror toastの共通通知を追加する。
+- [x] Git refreshのrejection吸収・loading解除・通知をテストする。
 - [x] 関連テストと全品質ゲートを実行する。
 
 ### Next Steps
 
 - [x] 検証結果を記録する。
-- [x] コミットして feature branch を push する。
+- [x] コミットして feature branch をpushする。
 
 ### 検証結果
 
-- [x] `use-team-history-sync` Vitest: PASS (3 tests)
+- [x] 関連 Vitest: PASS (2 files / 5 tests)
 - [x] `npm run typecheck`: PASS
-- [x] `npm run test`: PASS (86 files / 521 tests)
-- [x] `npm run lint`: PASS (0 errors / 既存 12 warnings)
+- [x] `npm run test`: PASS (87 files / 522 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 11 warnings)
 - [x] `npm run build:vite`: PASS
 - [x] `git diff --check`: PASS
 - [x] `npm run typecheck`: PASS
