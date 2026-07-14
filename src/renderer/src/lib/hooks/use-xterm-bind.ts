@@ -26,6 +26,7 @@ import type { TerminalExitInfo, TerminalWarning } from '../../../../types/shared
 import { computeUnscaledGrid } from '../compute-unscaled-grid';
 import { getXtermRuntimeCellSize } from '../get-xterm-runtime-cell-size';
 import type { CellSize } from '../measure-cell-size';
+import { takePendingPtyResize } from '../pending-pty-resize';
 import {
   createTerminalInputGate,
   type TerminalInputGateResetReason
@@ -122,6 +123,7 @@ export interface UseXtermBindOptions {
    * useFitToContainer の visible-effect refit が IPC を二重発火させずに済む。
    */
   lastScheduledRef?: MutableRefObject<{ cols: number; rows: number } | null>;
+  pendingPtyResizeRef?: MutableRefObject<{ cols: number; rows: number } | null>;
   /**
    * Issue #662: 永続化復元時の PTY 初回 spawn cols/rows seed。
    * 指定があると `fit.fit()` / `computeUnscaledGrid` より先に `term.resize(seed)` を
@@ -152,6 +154,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
     getCellSize,
     containerRef,
     lastScheduledRef,
+    pendingPtyResizeRef,
     initialCols: persistedInitialCols,
     initialRows: persistedInitialRows
   } = options;
@@ -610,10 +613,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         });
 
         if (localDisposed || disposedRef.current) {
-          // 古い effect の戻り値だった場合の race 処理。
-          // - 通常 cleanup (タブ close / restart): kill する
-          // - HMR cleanup (hmrDisposeArmed.current = true 中): kill せず cache に id を残し、
-          //   次の remount で attach できるようにする
+          // 古い effect は通常 kill、HMR 中だけ次の remount 用に cache する。
           unsubscribePtyListeners();
           if (res.ok && res.id) {
             if (hmrDisposeArmed.current && skey) {
@@ -626,6 +626,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         }
 
         if (!res.ok || !res.id) {
+          if (pendingPtyResizeRef) pendingPtyResizeRef.current = null;
           // pre-subscribe 経路で create が失敗した場合は orphan listener を必ず解除。
           unsubscribePtyListeners();
           const errMsg = res.error ?? 'Unknown error';
@@ -640,12 +641,8 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           return;
         }
 
-        // Issue #285: 新規 spawn 経路 (requestedId !== null) では Rust 側が
-        // `is_valid_terminal_id` か registry 衝突で UUID 再生成にフォールバックする
-        // 稀ケースがある。万一 mismatch したら、pre-subscribe したリスナーは別 id
-        // (誰も emit しない死 channel) を購読してしまっているので、`res.id` で
-        // 再 pre-subscribe (`*Ready`) する。post-subscribe (sync) だと初期出力を
-        // 取り逃がしうる (Issue #285 の元症状) ので必ず *Ready で再 await。
+        // Issue #285: Rust が id を再生成した場合、実 id の Ready listener へ張り直す。
+        // sync listener では初期出力を取り逃がすため使わない。
         if (requestedId && res.id !== requestedId) {
           unsubscribePtyListeners();
           const ok = await attemptPreSubscribe(
@@ -655,17 +652,20 @@ export function useXtermBind(options: UseXtermBindOptions): void {
             newSpawnSessionIdCb
           );
           if (!ok) {
+            if (pendingPtyResizeRef) pendingPtyResizeRef.current = null;
             void window.api.terminal.kill(res.id);
             return;
           }
         }
 
         ptyIdRef.current = res.id;
+        const pendingResize = takePendingPtyResize(pendingPtyResizeRef, lastScheduledRef, { cols: initialCols, rows: initialRows });
+        if (pendingResize) {
+          void window.api.terminal.resize(res.id, pendingResize.cols, pendingResize.rows);
+        }
         // Issue #271: HMR remount で再 attach できるよう ptyId と世代番号を退避。
         cacheUpsert(skey, res.id, myGeneration);
-        // Issue #818: warning は Rust 側から `{ messageKey, params }` で来る。
-        // 表示文字列の組み立ては i18n を持つ呼び元 (TerminalView) に委ねる。
-        // formatTerminalWarning 未指定の経路 (tests 等) では messageKey 表示で fallback。
+        // Issue #818: warning は呼び元で i18n 化し、未指定時だけ key 表示へ戻す。
         if (res.warning) {
           const formatter = callbacksRef.current.formatTerminalWarning;
           const formatted = formatter
