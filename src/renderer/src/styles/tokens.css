@@ -703,6 +703,34 @@ samp,
   gap: calc(var(--gap) - 4px);
 }
 
+/* ---- sidebar list rows (changes / sessions / team history) ---- */
+:root[data-density] .gitfile {
+  min-height: calc(var(--row-h) + 2px);
+  gap: var(--gap);
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: calc(var(--pad) + 1px);
+  padding-right: calc(var(--pad) + 2px);
+}
+
+:root[data-density] .session {
+  min-height: var(--row-h);
+  gap: max(3px, calc(var(--gap) - 5px));
+  padding-top: var(--pad);
+  padding-bottom: var(--pad);
+  padding-left: calc(var(--pad) + 4px);
+  padding-right: calc(var(--pad) + 4px);
+}
+
+:root[data-density] .team-history-item__main {
+  min-height: var(--row-h);
+  gap: max(2px, calc(var(--gap) - 7px));
+  padding-top: max(4px, calc(var(--pad) - 2px));
+  padding-bottom: max(4px, calc(var(--pad) - 2px));
+  padding-left: var(--pad);
+  padding-right: var(--pad);
+}
+
 /* ---- tab bar (エディタ/ターミナルタブ) ---- */
 :root[data-density] .tabbar__tab {
   min-height: var(--row-h);

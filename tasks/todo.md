@@ -757,6 +757,37 @@ Branch: `feature/issue-452`
 
 #### 検証結果（代替で PASS 済み）
 - [x] `git diff --check`: PASS
+
+## Issue #1171 - サイドバー一覧へ情報密度設定を反映 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1171
+
+### 計画
+
+- [x] 固定値のまま残る変更・セッション・チーム履歴の3行を確認する。
+- [x] normal の現行寸法を維持しながら `--row-h` / `--pad` / `--gap` を配線する。
+- [x] 3セレクタへのトークン配線をCSS契約テストで固定する。
+- [x] 関連テストと品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 検証結果を記録する。
+- [x] コミットして feature branch を push する。
+
+### 進捗
+
+- [x] 3一覧行へ density の行高・余白・gapトークンを配線した。
+- [x] normal の既存寸法を維持し、compact / comfortable のみ連動させた。
+- [x] 対象3セレクタ以外のスタイルとDOMは変更していない。
+
+### 検証結果
+
+- [x] 契約 Vitest: PASS (1 file / 3 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (87 files / 522 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 12 warnings)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）
