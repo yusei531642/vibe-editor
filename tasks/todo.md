@@ -757,6 +757,7 @@ Branch: `feature/issue-452`
 
 #### 検証結果（代替で PASS 済み）
 - [x] `git diff --check`: PASS
+
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）
@@ -1960,6 +1961,38 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1042
 
 - [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
 - [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
+- [x] `git diff --check`: PASS
+
+## Issue #1170 - Canvas モードでオンボーディングを前面表示 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1170
+
+### 計画
+
+- [x] Canvas root とオンボーディングのレイヤー順序を確認する。
+- [x] オンボーディング専用 z-index トークンを追加し、Canvas より前面へ移す。
+- [x] CSS 契約テストでトークン参照とレイヤー順序を固定する。
+- [x] 関連テストと品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 最小差分を実装する。
+- [x] 検証結果を記録する。
+- [x] コミットして feature branch を push する。
+
+### 進捗
+
+- [x] `--z-onboarding: 9700` を追加し、Canvas / context menu / palette より前面にした。
+- [x] `.onboarding` の数値指定を共有トークン参照へ置き換えた。
+- [x] レイヤー順序と数値 z-index の再混入を検出する契約テストを追加した。
+
+### 検証結果
+
+- [x] 関連 Vitest: PASS (2 files / 5 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (87 files / 521 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 12 warnings)
+- [x] `npm run build:vite`: PASS
 - [x] `git diff --check`: PASS
 
 ## Release v1.6.6 startup hotfix (2026-06-15 / Codex)
