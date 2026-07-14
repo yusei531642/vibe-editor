@@ -2037,3 +2037,37 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1045
 - [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
 - [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
 - [x] `git diff --check`: PASS
+
+## Issue #1169 - glass accent actionのコントラスト (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1169
+
+### 計画
+
+- [x] Agent Wizard主要ボタンをaccent foreground tokenへ接続する。
+- [x] API chat送信CTAをtheme管理のaccent背景・前景ペアへ固定する。
+- [x] 固定白色と任意agent色背景の再導入をCSS contract testで防ぐ。
+- [x] glass実値の4.5:1以上を既存contrast testで確認する。
+- [x] typecheck、対象テスト、全テスト、lint、Vite buildを実行する。
+
+### Next Steps
+
+- [x] CSS 3宣言と契約テストだけを変更する。
+- [ ] feature branchをpushし、PR作成の明示承認を待つ。
+
+### 進捗
+
+- [x] Wizard主要ボタンを`--accent` / `--accent-foreground`ペアへ接続した。
+- [x] API send CTAを任意agent色からtheme accentペアへ分離した。
+- [x] agent識別色はbanner、marker、focusなど既存箇所で維持した。
+- [x] disabled opacity、hover filter、active transformは変更していない。
+
+### 検証結果
+
+- [x] 対象CSS/theme contrast: PASS (2 files / 4 tests)
+- [x] Glass accent pair: 4.5:1以上
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (87 files / 521 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存warnings 12)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
