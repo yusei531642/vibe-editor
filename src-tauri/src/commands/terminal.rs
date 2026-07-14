@@ -454,19 +454,22 @@ pub async fn terminal_create(
     // Issue #1200: resume が返した cwd と spawn の check-to-use gap を塞ぐ。cwd が
     // active / workspace root と同一 directory を指す場合のみ、TTL キャッシュを使わず
     // platform identity を再照合し、置換されていれば起動しない (fail-closed)。
-    if let Err(error) = crate::commands::authz::assert_spawn_cwd_identity(
+    let spawn_cwd_identity = match crate::commands::authz::assert_spawn_cwd_identity(
         &state.project_root,
         &state.project_root_identity,
         &cwd,
     )
     .await
     {
-        return Ok(TerminalCreateResult {
-            ok: false,
-            error: Some(format!("spawn cwd authorization failed: {error}")),
-            ..Default::default()
-        });
-    }
+        Ok(identity) => identity,
+        Err(error) => {
+            return Ok(TerminalCreateResult {
+                ok: false,
+                error: Some(format!("spawn cwd authorization failed: {error}")),
+                ..Default::default()
+            });
+        }
+    };
 
     let spawn_opts = SpawnOptions {
         command: command.clone(),
@@ -489,6 +492,7 @@ pub async fn terminal_create(
         initial_id,
         spawn_opts,
         state.pty_registry.clone(),
+        spawn_cwd_identity,
     )
     .await;
 

@@ -207,7 +207,7 @@ pub async fn assert_spawn_cwd_identity(
     project_root_slot: &ArcSwapOption<String>,
     project_root_identity_slot: &ArcSwapOption<ProjectRootIdentity>,
     cwd: &str,
-) -> CommandResult<()> {
+) -> CommandResult<Option<ProjectRootIdentity>> {
     let cwd_canon = match tokio::fs::canonicalize(cwd.trim()).await {
         Ok(path) => path,
         Err(error) => {
@@ -244,7 +244,7 @@ pub async fn assert_spawn_cwd_identity(
             ));
         }
         record_identity_verified(&stored);
-        return Ok(());
+        return Ok(Some(stored));
     }
 
     if let Some(known) =
@@ -261,11 +261,11 @@ pub async fn assert_spawn_cwd_identity(
                 "spawn cwd identity no longer matches its workspace approval",
             ));
         }
-        return Ok(());
+        return Ok(Some(known));
     }
 
     // project 管理外の cwd は #1200 の対象外 (従来挙動を維持)。
-    Ok(())
+    Ok(None)
 }
 
 /// identity 再照合 (blocking canonicalize×2 + platform file id×2) の短TTLキャッシュ。

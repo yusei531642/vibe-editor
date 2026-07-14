@@ -89,7 +89,7 @@ fn platform_file_id(_path: &Path) -> Result<String, CommandError> {
 
 /// canonicalize と identity取得の間に root が差し替えられていないことを二重snapshotで確認する。
 /// directory が継続的に変化している場合は推測せず fail-closed にする。
-fn capture_identity_blocking(candidate: PathBuf) -> CommandResult<ProjectRootIdentity> {
+pub(crate) fn capture_identity_blocking(candidate: PathBuf) -> CommandResult<ProjectRootIdentity> {
     if !crate::commands::fs_watch::is_safe_watch_root(&candidate) {
         return Err(CommandError::validation(
             "project root rejected by safety check (system / home / non-existent dir)",
