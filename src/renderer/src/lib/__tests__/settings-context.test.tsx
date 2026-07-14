@@ -19,6 +19,7 @@ import type { ReactNode } from 'react';
 import { SettingsProvider, useSettings } from '../settings-context';
 import { ToastProvider } from '../toast-context';
 import { DEFAULT_SETTINGS, type AppSettings } from '../../../../types/shared';
+import { BOOTSTRAP_LANGUAGE_STORAGE_KEY } from '../i18n';
 
 type TestWindow = Window &
   typeof globalThis & {
@@ -66,6 +67,8 @@ describe('settings-context', () => {
 
   beforeEach(() => {
     originalApi = (window as TestWindow).api;
+    window.localStorage.clear();
+    document.documentElement.removeAttribute('lang');
   });
 
   afterEach(() => {
@@ -86,6 +89,8 @@ describe('settings-context', () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.settings.language).toBe('en');
     expect(result.current.settings.editorFontSize).toBe(16);
+    expect(window.localStorage.getItem(BOOTSTRAP_LANGUAGE_STORAGE_KEY)).toBe('en');
+    expect(document.documentElement.lang).toBe('en');
   });
 
   it('settings の root候補は backend authority を変更しない', async () => {
@@ -119,6 +124,22 @@ describe('settings-context', () => {
       { timeout: 1500 }
     );
     expect(api.settings.save.mock.calls[0][0]).toMatchObject({ editorFontSize: 18 });
+  });
+
+  it('language の更新をクラッシュ復帰用キャッシュと html lang に同期する', async () => {
+    const api = installApi({ language: 'ja' });
+    const { result } = renderHook(() => useSettings(), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await act(async () => {
+      await result.current.update({ language: 'en' });
+    });
+
+    expect(window.localStorage.getItem(BOOTSTRAP_LANGUAGE_STORAGE_KEY)).toBe('en');
+    expect(document.documentElement.lang).toBe('en');
+    await waitFor(() => expect(api.settings.save).toHaveBeenCalledTimes(1), {
+      timeout: 1500
+    });
   });
 
   it('reset() は DEFAULT_SETTINGS を clone して live state と保存値に使う', async () => {

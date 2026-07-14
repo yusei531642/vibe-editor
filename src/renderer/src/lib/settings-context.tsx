@@ -14,7 +14,7 @@ import { DEFAULT_SETTINGS, type AppSettings } from '../../../types/shared';
 import { migrateSettings } from './settings-migrate';
 import { applyDensity, applyTheme, THEMES, type MonacoThemeName } from './themes';
 import { bridgedToast } from './toast-bridge';
-import { translate } from './i18n';
+import { syncBootstrapLanguage, translate } from './i18n';
 
 interface SettingsContextValue {
   settings: AppSettings;
@@ -91,6 +91,7 @@ export function SettingsProvider({ children }: { children: ReactNode }): JSX.Ele
 
   const commitState = useCallback(
     (nextSettings: AppSettings, nextLoading: boolean): void => {
+      syncBootstrapLanguage(nextSettings.language ?? 'ja');
       settingsRef.current = nextSettings;
       loadingRef.current = nextLoading;
       snapshotRef.current = { settings: nextSettings, loading: nextLoading };

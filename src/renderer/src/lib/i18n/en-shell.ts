@@ -422,4 +422,11 @@ export const enShell: Dict = {
   'imagePreview.devUnavailable': 'Image preview is unavailable in dev:vite mode.',
   'imagePreview.loadError': 'Unable to display image: {path}',
 
+  // ---------- Bootstrap and crash recovery ----------
+  'bootstrap.rootMissing': '#root was not found',
+  'bootstrap.renderError.title': 'Something went wrong while rendering the screen',
+  'bootstrap.renderError.body':
+    'Rendering stopped to avoid a blank screen. Reload the app to recover.',
+  'bootstrap.renderError.reload': 'Reload',
+
 };

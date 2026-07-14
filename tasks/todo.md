@@ -2037,3 +2037,37 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1045
 - [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
 - [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
 - [x] `git diff --check`: PASS
+
+## Issue #1145 - ErrorBoundary の表示言語同期 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1145
+
+### 計画
+
+- [x] Provider 外でも参照できる起動時言語の解決・同期処理を i18n 層へ追加する。
+- [x] ErrorBoundary と root 要素欠落エラーを日本語・英語辞書へ接続する。
+- [x] 設定の load / update / reset で言語キャッシュと `<html lang>` を同期する。
+- [x] 言語解決、クラッシュ画面、設定同期の回帰テストを追加する。
+- [x] typecheck、関連テスト、全テスト、lint、Vite build を実行する。
+
+### Next Steps
+
+- [x] 最小差分を実装する。
+- [x] 品質ゲートを実行し、結果を記録する。
+- [ ] feature branch を push し、PR 作成の明示承認を待つ。
+
+### 進捗
+
+- [x] 起動時言語キャッシュを `ja` / `en` に限定し、無効値・storage 例外時はブラウザ言語へフォールバックした。
+- [x] ErrorBoundary を独立コンポーネント化し、設定 Provider の外側でも辞書を参照できるようにした。
+- [x] 設定 commit 時に言語キャッシュと `<html lang>` を同期した。
+- [x] 例外詳細、ネイティブダイアログ、他画面の翻訳にはスコープを広げていない。
+
+### 検証結果
+
+- [x] `npm run typecheck`: PASS
+- [x] 対象 Vitest: PASS (3 files / 14 tests)
+- [x] `npm run test`: PASS (88 files / 527 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 warnings 12)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
