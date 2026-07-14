@@ -757,6 +757,41 @@ Branch: `feature/issue-452`
 
 #### 検証結果（代替で PASS 済み）
 - [x] `git diff --check`: PASS
+
+## Issue #1158 Windows専用RustテストのCI実行 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1158
+
+### 計画
+
+- [x] Issue本文、既存計画、CI matrix、Windows専用testを確認する。
+- [x] Windows matrix legだけで`cargo test --locked --manifest-path src-tauri/Cargo.toml --lib pty::`を実行する。
+- [x] ローカルWindowsでtest一覧にJob Objectとsession_windows testが含まれることを確認する。
+- [x] workflow step、Rust unit test、check、clippy、diff checkを検証する。
+- [ ] commit/push後、PR draftを提示して作成承認を得る。
+
+### スコープ境界
+
+- allowed: `.github/workflows/ci.yml`、`tasks/todo.md`
+- non-goals: Rust production code、ignored実機E2E、macOS test追加、PTY testの書き換え
+
+### Next Steps
+
+- [ ] commit/push後、PR draftを提示して作成承認を得る。
+
+### 検証結果
+
+- [x] `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib pty::`: 127 PASS / 2 ignored
+- [x] `win_job_object` 2件と`session_windows` non-ignored testをWindows上で実行・PASS
+- [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
+- [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
+- [x] `git diff --check`: PASS
+- [ ] `actionlint`: ローカル未導入のため未実行。GitHub Actionsで構文を確認する。
+
+### 実測した制約
+
+- full `--lib`は908件PASS後、対象外の`vibe_team_skill::secure_install_tests::rejects_each_parent_directory_junction`がjunction fixture作成失敗でFAILした。
+- Issue #1158の対象を漏らさず、無関係な既存fixtureにCIを阻まれないよう`pty::` filterへ限定した。
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）
