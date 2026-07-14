@@ -184,10 +184,7 @@ mod tests {
         let file = fs::OpenOptions::new().write(true).open(&tmp).await.unwrap();
 
         let error = sync_temp_file(file, &tmp, &target, |_file| async {
-            Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "injected sync failure",
-            ))
+            Err(std::io::Error::other("injected sync failure"))
         })
         .await
         .expect_err("sync failure must abort the atomic replacement");
