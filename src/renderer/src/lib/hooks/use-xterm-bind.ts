@@ -566,15 +566,12 @@ export function useXtermBind(options: UseXtermBindOptions): void {
             /* noop */
           }
         };
-
         const requestedId =
           typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
             ? crypto.randomUUID()
             : `term-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-
         let preSubscribeTargetId: string | null =
           wantAttach && cachedPtyId ? cachedPtyId : requestedId;
-
         if (preSubscribeTargetId) {
           const ok = await attemptPreSubscribe(
             preSubscribeTargetId,
@@ -589,7 +586,6 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           spawnDeferredRef.current = true;
           return;
         }
-
         const createInput: TerminalCreateOptions = {
           id: requestedId,
           cwd,
@@ -641,7 +637,6 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           unsubscribePtyListeners();
           return;
         }
-
         if (localDisposed || disposedRef.current) {
           // 古い effect は通常 kill、HMR 中だけ次の remount 用に cache する。
           unsubscribePtyListeners();
@@ -654,7 +649,6 @@ export function useXtermBind(options: UseXtermBindOptions): void {
           }
           return;
         }
-
         if (!res.ok || !res.id) {
           if (pendingPtyResizeRef) pendingPtyResizeRef.current = null;
           // pre-subscribe 経路で create が失敗した場合は orphan listener を必ず解除。
