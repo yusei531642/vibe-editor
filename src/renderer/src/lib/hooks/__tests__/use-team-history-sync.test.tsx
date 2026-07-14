@@ -149,4 +149,18 @@ describe('useTeamHistorySync', () => {
     expect(addTerminalTab).toHaveBeenCalledTimes(entry.members.length);
     expect(showToast).toHaveBeenCalledWith('teamHistory.alreadyOpen', { tone: 'info' });
   });
+
+  it('does not reserve a team rejected for another project', async () => {
+    installApi();
+    const addTerminalTab = vi.fn(() => 1);
+    const { result } = renderHook(() => useTeamHistorySync(options({ addTerminalTab })));
+    const entry = { ...teamEntry(), projectRoot: '/workspace/other' };
+
+    await act(async () => result.current.handleResumeTeam(entry));
+    await act(async () =>
+      result.current.handleResumeTeam({ ...entry, projectRoot: '/workspace/active' }),
+    );
+
+    expect(addTerminalTab).toHaveBeenCalledTimes(entry.members.length);
+  });
 });

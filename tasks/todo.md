@@ -764,7 +764,8 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1138
 
 - [x] 既存teamIdタブとin-flight resume予約を同時に検査する。
 - [x] 既存チーム再開と高速二重クリックの退行テストを追加する。
-- [x] `use-team-history-sync` Vitest: PASS (3 tests)
+- [x] 拒否された再開では予約を残さず、条件解消後に再試行できるようにする。
+- [x] `use-team-history-sync` Vitest: PASS (4 tests)
 - [x] `npm run typecheck`: PASS
 - [x] `npm run lint:file-size`: PASS
 - [x] 最新mainを取り込み、再CI対象にする。

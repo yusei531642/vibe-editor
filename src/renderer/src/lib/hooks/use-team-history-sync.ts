@@ -154,7 +154,6 @@ export function useTeamHistorySync(
         showToast(t('teamHistory.resume.emptyMembers'), { tone: 'warning' });
         return;
       }
-      resumingTeamIdsRef.current.add(entry.id);
       if (entry.projectRoot && entry.projectRoot !== projectRoot) {
         showToast(
           t('teamHistory.resume.otherProject', {
@@ -171,6 +170,7 @@ export function useTeamHistorySync(
         });
         return;
       }
+      resumingTeamIdsRef.current.add(entry.id);
 
       // 再利用時刻を更新
       const updated: TeamHistoryEntry = {
