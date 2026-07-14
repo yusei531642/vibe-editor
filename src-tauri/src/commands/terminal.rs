@@ -551,22 +551,14 @@ pub async fn terminal_create(
             let is_claude_command = command.to_lowercase().contains("claude");
             if is_claude_command || is_codex_command {
                 let watcher_id = id.clone();
-                // Issue #739: ArcSwapOption の lock-free load で現在値を読む。
-                let watcher_root =
-                    crate::state::current_project_root(&state.project_root).unwrap_or_default();
-                let actual_root = if watcher_root.is_empty() {
-                    // PTY spawn 時の cwd を流用
-                    std::env::current_dir()
-                        .map(|p| p.to_string_lossy().into_owned())
-                        .unwrap_or_default()
-                } else {
-                    watcher_root
-                };
                 // Issue #632: SessionHandle が公開する watcher_cancel token を渡す。
                 // PTY が `kill()` / `Drop` で寿命終了した瞬間に flip され、watcher は
                 // 100ms 以内に exit する。registry.get(...).is_some() を 500ms ごとに
                 // polling していた旧実装より反応が早く、cleanup の遅延を解消する。
                 if let Some(handle) = state.pty_registry.get(&watcher_id) {
+                    // Issue #1154: watcherの照合対象はactive projectではなく、このPTYを
+                    // 実際にspawnしたcwd。resolve_valid_cwd後のSSOTをhandleから読む。
+                    let actual_root = handle.cwd.clone();
                     let cancel = handle.watcher_cancel_token();
                     if is_codex_command {
                         crate::pty::codex_watcher::spawn_watcher(
