@@ -6,6 +6,10 @@ import type { Dict } from './types';
  * 追加キーは領域の合うファイルへ。merge は index.ts 側で行う。
  */
 export const enCanvas: Dict = {
+  'canvas.persistence.corruptBackedUp':
+    'Canvas data was corrupt and was reset. The original data was backed up as "{key}"',
+  'canvas.persistence.corruptBackupFailed':
+    'Canvas data is corrupt and could not be backed up. Automatic saving is disabled to protect it',
   // ---------- Canvas HUD ----------
   'canvas.apiAgent.teamRole': 'Team role',
   'canvas.apiAgent.teamRolePlaceholder': 'e.g. reviewer',

@@ -40,6 +40,8 @@ import { useCanvasMenuActions } from '../lib/hooks/use-canvas-menu-actions';
 import { useCanvasSpawn } from '../lib/hooks/use-canvas-spawn';
 import { useLayoutResize } from '../lib/hooks/use-layout-resize';
 import { useProject } from '../lib/app-state-context';
+import { useToast } from '../lib/toast-context';
+import { takeCanvasRecoveryNotice } from '../stores/canvas-persistence';
 
 export function CanvasLayout(): JSX.Element {
   const setViewMode = useUiStore((s) => s.setViewMode);
@@ -69,6 +71,22 @@ export function CanvasLayout(): JSX.Element {
   const { settings, update: updateSettings, reset: resetSettings } = useSettings();
   const { projectRoot } = useProject();
   const t = useT();
+  const { showToast } = useToast();
+  useEffect(() => {
+    const notice = takeCanvasRecoveryNotice();
+    if (!notice) return;
+    if (notice.backupKey) {
+      showToast(t('canvas.persistence.corruptBackedUp', { key: notice.backupKey }), {
+        tone: 'warning',
+        duration: 12000
+      });
+      return;
+    }
+    showToast(t('canvas.persistence.corruptBackupFailed'), {
+      tone: 'error',
+      duration: 12000
+    });
+  }, [showToast, t]);
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);

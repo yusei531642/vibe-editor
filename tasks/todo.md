@@ -757,6 +757,32 @@ Branch: `feature/issue-452`
 
 #### 検証結果（代替で PASS 済み）
 - [x] `git diff --check`: PASS
+
+## Issue #1140 - 破損Canvasデータの上書き消失を防止 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1140
+
+### 計画
+
+- [x] localStorage parse失敗とZustand persistの保存境界を確認する。
+- [x] 破損原文をtimestamp付き別キーへbyte-for-byteで退避する。
+- [x] 退避失敗時は本キーへの自動保存をfail-closedする。
+- [x] CanvasLayoutで復旧結果を1回通知する。
+- [x] 関連テストと全品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 検証結果を記録する。
+- [x] コミットして feature branch をpushする。
+
+### 検証結果
+
+- [x] 破損永続化 Vitest: PASS (2 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (87 files / 521 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 12 warnings)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）

@@ -7,6 +7,15 @@ import {
 
 export const CANVAS_PERSIST_NAME = 'vibe-editor:canvas';
 export const CANVAS_PERSIST_VERSION = 6;
+export const CANVAS_CORRUPT_BACKUP_PREFIX = `${CANVAS_PERSIST_NAME}:corrupt-backup:`;
+const CANVAS_RECOVERY_NOTICE_KEY = `${CANVAS_PERSIST_NAME}:recovery-notice`;
+
+export interface CanvasRecoveryNotice {
+  backupKey: string | null;
+}
+
+let pendingRecoveryNotice: CanvasRecoveryNotice | null = null;
+const writeBlockedKeys = new Set<string>();
 
 type CanvasPersistState = Pick<
   CanvasState,
@@ -24,20 +33,61 @@ function canvasStorage(): Storage | null {
 
 export const canvasPersistStorage: PersistStorage<CanvasPersistState> = {
   getItem: (name) => {
-    const raw = canvasStorage()?.getItem(name);
+    const storage = canvasStorage();
+    const raw = storage?.getItem(name);
     if (!raw) return null;
-    return JSON.parse(raw) as StorageValue<CanvasPersistState>;
+    try {
+      return JSON.parse(raw) as StorageValue<CanvasPersistState>;
+    } catch (error) {
+      const backupKey = `${CANVAS_CORRUPT_BACKUP_PREFIX}${Date.now()}`;
+      try {
+        storage?.setItem(backupKey, raw);
+        storage?.setItem(
+          CANVAS_RECOVERY_NOTICE_KEY,
+          JSON.stringify({ backupKey } satisfies CanvasRecoveryNotice)
+        );
+        storage?.removeItem(name);
+        writeBlockedKeys.delete(name);
+        pendingRecoveryNotice = { backupKey };
+      } catch (backupError) {
+        writeBlockedKeys.add(name);
+        pendingRecoveryNotice = { backupKey: null };
+        console.error('[canvas-persistence] corrupt data backup failed:', backupError);
+      }
+      console.error('[canvas-persistence] corrupt data detected:', error);
+      return null;
+    }
   },
   setItem: (name, value) => {
     // Issue #864/#835: drag 中は nodes が毎フレーム変わるため、localStorage への
     // JSON.stringify が UI スレッドを詰まらせる。drag 終了時に明示 flush する。
     if (canvasPersistPaused()) return;
+    if (writeBlockedKeys.has(name)) return;
     canvasStorage()?.setItem(name, JSON.stringify(value));
   },
   removeItem: (name) => {
+    writeBlockedKeys.delete(name);
     canvasStorage()?.removeItem(name);
   }
 };
+
+export function takeCanvasRecoveryNotice(): CanvasRecoveryNotice | null {
+  if (pendingRecoveryNotice) {
+    const notice = pendingRecoveryNotice;
+    pendingRecoveryNotice = null;
+    canvasStorage()?.removeItem(CANVAS_RECOVERY_NOTICE_KEY);
+    return notice;
+  }
+  const storage = canvasStorage();
+  const raw = storage?.getItem(CANVAS_RECOVERY_NOTICE_KEY);
+  if (!raw) return null;
+  storage?.removeItem(CANVAS_RECOVERY_NOTICE_KEY);
+  try {
+    return JSON.parse(raw) as CanvasRecoveryNotice;
+  } catch {
+    return null;
+  }
+}
 
 let isPaused = false;
 
