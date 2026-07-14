@@ -108,6 +108,16 @@ pub(super) fn windows_search_dirs(env: &std::collections::HashMap<String, String
         push_dir(base.join("Microsoft").join("WindowsApps"));
         push_dir(base.join("OpenAI").join("Codex").join("bin"));
     }
+    if let Some(program_files) = env_value(env, "ProgramFiles") {
+        let git = PathBuf::from(program_files).join("Git");
+        push_dir(git.join("bin"));
+        push_dir(git.join("usr").join("bin"));
+    }
+    if let Some(program_files_x86) = env_value(env, "ProgramFiles(x86)") {
+        let git = PathBuf::from(program_files_x86).join("Git");
+        push_dir(git.join("bin"));
+        push_dir(git.join("usr").join("bin"));
+    }
 
     dirs
 }
@@ -132,10 +142,84 @@ fn candidate_paths(base: &Path, pathext: &[String]) -> Vec<PathBuf> {
     out
 }
 
+fn normalized_windows_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('/', "\\")
+        .to_ascii_lowercase()
+}
+
+fn is_git_bash_path(path: &Path) -> bool {
+    let normalized = normalized_windows_path(path);
+    normalized.ends_with("\\git\\bin\\bash.exe")
+        || normalized.ends_with("\\git\\usr\\bin\\bash.exe")
+}
+
+fn is_wsl_bash_launcher(path: &Path) -> bool {
+    let normalized = normalized_windows_path(path);
+    normalized.ends_with("\\windows\\system32\\bash.exe")
+        || normalized.ends_with("\\microsoft\\windowsapps\\bash.exe")
+}
+
+pub(crate) fn trusted_wsl_executable(
+    path: &Path,
+    system_root: Option<&std::ffi::OsStr>,
+    local_app_data: Option<&std::ffi::OsStr>,
+) -> Option<PathBuf> {
+    let expected_dir = PathBuf::from(system_root?).join("System32");
+    let parent = path.parent()?;
+    let windows_apps_dir = local_app_data
+        .map(PathBuf::from)
+        .map(|base| base.join("Microsoft").join("WindowsApps"));
+    let is_trusted_launcher = normalized_windows_path(parent)
+        == normalized_windows_path(&expected_dir)
+        || windows_apps_dir
+            .as_deref()
+            .is_some_and(|dir| normalized_windows_path(parent) == normalized_windows_path(dir));
+    if !is_trusted_launcher {
+        return None;
+    }
+    Some(expected_dir.join("wsl.exe"))
+}
+
+fn wsl_launcher_has_distro(path: &Path) -> bool {
+    let Some(wsl_exe) = trusted_wsl_executable(
+        path,
+        std::env::var_os("SystemRoot").as_deref(),
+        std::env::var_os("LOCALAPPDATA").as_deref(),
+    ) else {
+        return false;
+    };
+    std::process::Command::new(wsl_exe)
+        .args(["--list", "--quiet"])
+        .output()
+        .map(|output| {
+            output.status.success()
+                && output
+                    .stdout
+                    .iter()
+                    .any(|byte| *byte != 0 && !byte.is_ascii_whitespace())
+        })
+        .unwrap_or(false)
+}
+
 pub(super) fn resolve_windows_command_path(
     command: &str,
     search_dirs: &[PathBuf],
     pathext: &[String],
+) -> Result<PathBuf> {
+    resolve_windows_command_path_with_wsl_probe(
+        command,
+        search_dirs,
+        pathext,
+        wsl_launcher_has_distro,
+    )
+}
+
+pub(crate) fn resolve_windows_command_path_with_wsl_probe(
+    command: &str,
+    search_dirs: &[PathBuf],
+    pathext: &[String],
+    wsl_has_distro: impl Fn(&Path) -> bool,
 ) -> Result<PathBuf> {
     let direct_path = PathBuf::from(command);
     if direct_path.is_absolute() || command_has_path_separator(command) {
@@ -150,18 +234,45 @@ pub(super) fn resolve_windows_command_path(
         ));
     }
 
-    if command_has_extension(command) {
+    let is_bash_command =
+        command.eq_ignore_ascii_case("bash") || command.eq_ignore_ascii_case("bash.exe");
+
+    if command_has_extension(command) && !is_bash_command {
         if let Ok(found) = which::which(command) {
             return Ok(found);
         }
     }
 
+    if is_bash_command {
+        for dir in search_dirs {
+            for candidate in candidate_paths(&dir.join(command), pathext) {
+                if candidate.is_file() && is_git_bash_path(&candidate) {
+                    return Ok(candidate);
+                }
+            }
+        }
+    }
+
+    let mut rejected_wsl_bash = false;
     for dir in search_dirs {
         for candidate in candidate_paths(&dir.join(command), pathext) {
             if candidate.is_file() {
+                if is_bash_command
+                    && is_wsl_bash_launcher(&candidate)
+                    && !wsl_has_distro(&candidate)
+                {
+                    rejected_wsl_bash = true;
+                    continue;
+                }
                 return Ok(candidate);
             }
         }
+    }
+
+    if rejected_wsl_bash {
+        return Err(anyhow!(
+            "bare bash resolved only to the Windows WSL launcher; configure a default WSL distro, use explicit wsl.exe, or install/configure Git Bash"
+        ));
     }
 
     Err(anyhow!(
