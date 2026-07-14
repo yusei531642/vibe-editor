@@ -1,5 +1,25 @@
 # vibe-editor Tauri ハイブリッド移行 + 無限キャンバス UI 革新 TODO
 
+## Issue #1146 - API agent session削除失敗を伝播 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1146
+
+### 計画
+
+- [x] 現行の削除処理・エラー型・既存テスト構成を確認する。
+- [x] `NotFound` のみ成功扱いにし、その他のI/Oエラーを伝播する。
+- [x] 成功・NotFound・その他エラーのunit testを追加する。
+- [x] Rust関連品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 検証結果を記録する。
+- [ ] コミットして feature branch をpushする。
+- [x] targeted Rust test: PASS（2 passed / 0 failed）
+- [x] `cargo check --locked --manifest-path src-tauri\\Cargo.toml --all-targets`: PASS
+- [x] `git diff --check`: PASS
+- [ ] repository-wide `cargo fmt --check`: FAIL（今回の差分外に既存不整形あり）
+
 ## #736 team_hub/state.rs god-file 分割 + team_send 段階関数化 (完了)
 
 方針: 振る舞いを一切変えない純粋なリファクタ。lock の取得/解放タイミング・
@@ -757,6 +777,104 @@ Branch: `feature/issue-452`
 
 #### 検証結果（代替で PASS 済み）
 - [x] `git diff --check`: PASS
+
+## Issue #1137 - 複数タブ復元時のcwdマッピング破壊を防止 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1137
+
+### 計画
+
+- [x] `addTerminalTab` の同期戻り値と永続化mapの依存関係を確認する。
+- [x] stateと同期更新するrefで上限判定とID採番をupdater前に確定する。
+- [x] 同一batchの連続追加が全IDを同期返却する退行テストを追加する。
+- [x] 同一batchの削除後追加が上限判定で拒否されない退行テストを追加する。
+- [x] #588上限契約を含む関連テストと全品質ゲートを実行する。
+
+### Next Steps
+
+- [x] reviewer指摘を修正してfeature branchへpushする。
+- [x] 最新mainを取り込み、CIと再レビューを確認する。
+
+### 検証結果
+
+- [x] `use-terminal-tabs` Vitest: PASS (11 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run lint`: PASS (0 errors / 既存12 warnings)
+- [x] `npm run lint:file-size`: PASS
+- [x] `git diff --check`: PASS
+
+## PR #1208 - file-size ratchet修正 (2026-07-14 / Codex)
+
+### RCA結果
+
+- [x] 症状: `AppShell.tsx` が982行となり、baseline上限977行を超えてCIが失敗した。
+- [x] 再現: `npm run lint:file-size` が同じ982/977でFAILした。
+- [x] 原因: 共通通知処理は別moduleへ切り出し済みだが、その呼び出しを6行展開して行数を純増させた。
+- [x] 代替原因除外: baseline変更漏れではなく、branch差分の5行純増とCI計測値が一致した。
+- [x] 修正方針: 機能・責務・baselineを変えず、既存helper呼び出しだけを1行に整形する。
+- [x] 判定: A=YES、B=YES、C=YES、D=YES（Root Cause Confirmed）。
+
+### Next Steps
+
+- [x] 修正前と同じ `npm run lint:file-size` でPASSを確認する。
+- [x] 関連テスト、typecheck、lint、build、diff checkを実行する。
+- [ ] PR #1208へpushし、CIと再レビューを確認する。
+
+### 修正後検証
+
+- [x] `npm run lint:file-size`: PASS（485 files、baseline免除39件）。
+- [x] targeted Vitest: PASS（2 files / 5 tests）。
+- [x] `npm run typecheck`: PASS。
+- [x] `npm run lint`: PASS（0 errors / 既存11 warnings）。
+- [x] `npm run build:vite`: PASS（既存warningのみ）。
+- [x] `git diff --check`: PASS。
+
+## Issue #1139 - セッション/Git再取得失敗を通知 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1139
+
+### 計画
+
+- [x] IDEのsessions/Git refresh失敗経路とCanvas側の処理状況を確認する。
+- [x] console.warnとerror toastの共通通知を追加する。
+- [x] Git refreshのrejection吸収・loading解除・通知をテストする。
+- [x] 関連テストと全品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 検証結果を記録する。
+- [x] コミットして feature branch をpushする。
+
+### 検証結果
+
+- [x] 関連 Vitest: PASS (2 files / 5 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (87 files / 522 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 11 warnings)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
+## Issue #1161 - Release quality gate (2026-07-14 / Codex)
+
+### 計画
+
+- [x] 現行 release / CI workflow と署名前の gate 欠落を確認する。
+- [x] `tasks/fortress-implement/issue-1161/mission-brief.md` に Mission Brief と Slice 境界を記録する。
+- [x] Slice 1: `ci.yml` を reusable workflow 化し、既存品質ゲートを release から呼び出せるようにする。
+- [x] Slice 2: v* tag / main ancestry guard と quality gate dependency を署名 build の前段へ追加する。
+- [x] release workflow の静的契約 lint と RPM 記載を追加する。
+
+### Next Steps
+
+- [x] `npm run lint:release-workflow`、typecheck、Vitest、Clippy を実行する。
+- [ ] PR 上の GitHub Actions で workflow 構文と全品質ゲートを確認する。
+
+### 検証結果
+
+- [x] `npm run lint:release-workflow`: PASS
+- [x] `npm run typecheck`: PASS
+- [x] `npm test`: PASS（87 files / 522 tests）
+- [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
+- [ ] `cargo test --locked --manifest-path src-tauri/Cargo.toml`: 環境制約で未完了（リンク用 archive 生成時に OS error 112、ディスク空き容量不足）。同じ Rust tree の Clippy は PASS。PR CI で再検証する。
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）
@@ -2037,88 +2155,35 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1045
 - [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
 - [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
 - [x] `git diff --check`: PASS
-## Open Issue / PR cleanup and merge sweep (2026-07-14 / Codex)
 
-Repository: https://github.com/yusei531642/vibe-editor
+## Issue #1143 - 組み込みプリセット説明の i18n (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1143
 
 ### 計画
 
-- [x] 実行モード、repo root、`main` HEAD、dirty state、GitHub live stateを確認する。
-- [x] repoの `AGENTS.md`、`CLAUDE.md`、manifest、品質ゲートを確認する。
-- [ ] `orchestrate-frontier-team` を通常より一段低い推論設定で実行し、Issue/PR分類を独立レビューする。
-- [ ] open Issueを本文・コメント・重複・関連PR・現行コードで棚卸しし、根拠を示せる過剰/無効/重複Issueだけcloseする。
-- [ ] open PRごとにhead SHA、mergeability、required checks、review、未解決thread、関連Issueを確認する。
-- [ ] stale/重複/包含済みなど、マージすべきでないPRは根拠コメント付きでcloseする。
-- [ ] 残すPRを低リスク・依存関係順に処理し、競合は最新`main`を取り込んで最小差分で解消する。
-- [ ] 競合解消や修正を行ったPRは、変更範囲に対応するlint・typecheck・test・Rust checkを実行してpushする。
-- [ ] 各PRのlive state、head SHA、checks、review、未解決threadを再確認してからmergeする。
-- [ ] 関連Issueのcloseout条件を確認し、満たす場合だけ根拠コメント・ラベル遷移・close・`CLOSED`再確認を行う。
-- [ ] 最後にopen Issue/PR、`main` HEAD、作業ツリー、未完了gateを再棚卸しする。
+- [x] 組み込みプリセットの説明を生文字列から翻訳キーへ置き換える。
+- [x] Canvas の組み込み項目と voice metadata を現在の言語へ同期する。
+- [x] ユーザー保存プリセットの自由入力説明は原文のまま維持する。
+- [x] 翻訳契約と表示経路の回帰テストを追加し、品質ゲートを実行する。
 
 ### Next Steps
 
-- [x] ユーザー確認後、Issue/PRの分類結果を確定してGitHubのclose/merge操作を開始する。
-
-### 現時点の確認結果
-
-- `main` HEAD: `aea5f41ade3c32ab2ac58a7128af0add383171e6`
-- open PR: 18件（2026-07-14開始時点）。機能PR #1078 / #1079 / #1105 は `DIRTY`、残り15件はDependabot。
-- `vibeeditor` / `pullrequest` skillはrepo内の `.claude/skills/` に実在し、全文を確認済み。
-- Issueタイトルだけでcloseせず、本文・重複・関連PR・現行実装まで確認して判定する。
+- [x] 最小差分を実装する。
+- [x] typecheck、対象テスト、全テスト、lint、Vite build を実行する。
+- [ ] feature branch を push し、PR 作成の明示承認を待つ。
 
 ### 進捗
 
-- [x] `orchestrate-frontier-team` のSol / Fable laneを通常より一段低い推論設定で実行し、終了後にskill本体の設定を復元した。
-- [x] Issue #1188 を情報不足・ローカル設定事象として `invalid / NOT_PLANNED` でcloseし、`CLOSED`を確認した。
-- [x] Dependabot PR 15件を、各head SHA・CI・mergeability・未解決threadのlive gate後にsquash mergeした。
-- [x] PR #1105 は後発PR #1132でIssue #1032が実装済みのため、supersededとしてcloseした。
-- [x] PR #1079 は最新mainとの競合2件を解消し、ローカル検証とCI run `29308201188` PASS後にmergeした。
-- [x] PR #1078 は後発PR #1099 / #1100 / #1101で3件すべて実装済みのため、supersededとしてcloseした。
-- [x] 最終GitHub実状態でopen PRが0件、main HEADが`af7e6ba13685f81697c65c09727cd213ba1f3c89`であることを確認した。
+- [x] 組み込み2プリセットの説明を `descriptionI18nKey` へ置換した。
+- [x] Canvas popover と voice metadata を ja/en 辞書へ接続した。
+- [x] 保存プリセットの自由入力説明を変更しない回帰テストを追加した。
 
 ### 検証結果
 
-- [x] PR #1079: `cargo test --locked --manifest-path src-tauri/Cargo.toml --lib team_hub::`: PASS。
-- [x] PR #1079: `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS。
-- [x] PR #1079: `npm run typecheck`: PASS。
-- [x] PR #1079: `npm run test`: PASS（86 files / 519 tests）。
-- [x] PR #1079: CI run `29308201188`: verify / Windows cargo-cfg / macOS cargo-cfg / secrets-scan 全PASS。
-- [ ] PR #1079の最新review warning 2件はmergeと同時刻に到着し、未解決のまま残った。Critical/Highではないが、`since_id`上限と初回watermark再送を残存リスクとして報告する。
-
-### Next Tasks
-
-- [ ] PR #1079 reviewer warning 2件を別Issueとして追跡するか、人間が判断する。
-
-## Issue #1159 文書環境記述の同期 (2026-07-14 / Codex)
-
-Issue: https://github.com/yusei531642/vibe-editor/issues/1159
-
-### 計画
-
-- [x] Issue本文・既存計画・現行manifest・対象文書のdriftを実測する。
-- [x] `vibeeditor`、`pullrequest`、`orchestrate-frontier-team` skillを確認する。
-- [x] standard riskでfrontier-teamのSol baselineを完了する。Fableは未認証のためadaptive degradedとして記録する。
-- [x] `CLAUDE.md`、`.claude/skills/vibeeditor/SKILL.md`、`README.md`、`README-ja.md`を現行SSOTへ同期する。
-- [x] 古い主要version・OS固定・非実在skill参照の再混入を検出するcontract testを追加する。
-- [x] 対象test、`npm run typecheck`、`npm run lint`、`npm run test`、`git diff --check`を実行する。
-- [x] 差分を再読し、allowed paths外の機能変更と検証済みblockerがないことを確認する。Fable post-diff reviewは未認証のため未実行。
-- [ ] feature branchへcommit/pushし、PR draftをユーザーへ提示して作成承認を得る。
-
-### スコープ境界
-
-- allowed: `CLAUDE.md`、`.claude/skills/vibeeditor/SKILL.md`、`README.md`、`README-ja.md`、`src/renderer/src/lib/__tests__/documentation-contract.test.ts`、`tasks/todo.md`
-- non-goals: dependency更新、アプリ挙動変更、全ドキュメントの全面リライト、他Issueの同時修正
-- merge: PR・HEAD・品質ゲートを提示し、ユーザーの明示承認後のみ実行する
-
-### Next Steps
-
-- [ ] commit/push後、PR title/body draftを提示して作成承認を得る。
-
-### 検証結果
-
-- [x] `npm run test -- src/renderer/src/lib/__tests__/documentation-contract.test.ts`: 3 tests PASS
 - [x] `npm run typecheck`: PASS
-- [x] `npm run lint`: PASS（error 0、既存warning 12件）
-- [x] `npm run test`: 87 files / 522 tests PASS
+- [x] 対象 Vitest: PASS (2 files / 6 tests)
+- [x] `npm run test`: PASS (87 files / 522 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 warnings 12)
+- [x] `npm run build:vite`: PASS
 - [x] `git diff --check`: PASS
-- [x] 旧表記検索: 対象4文書で該当0件
