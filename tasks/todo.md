@@ -2113,3 +2113,35 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1045
 - [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
 - [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
 - [x] `git diff --check`: PASS
+
+## Issue #1143 - 組み込みプリセット説明の i18n (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1143
+
+### 計画
+
+- [x] 組み込みプリセットの説明を生文字列から翻訳キーへ置き換える。
+- [x] Canvas の組み込み項目と voice metadata を現在の言語へ同期する。
+- [x] ユーザー保存プリセットの自由入力説明は原文のまま維持する。
+- [x] 翻訳契約と表示経路の回帰テストを追加し、品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 最小差分を実装する。
+- [x] typecheck、対象テスト、全テスト、lint、Vite build を実行する。
+- [ ] feature branch を push し、PR 作成の明示承認を待つ。
+
+### 進捗
+
+- [x] 組み込み2プリセットの説明を `descriptionI18nKey` へ置換した。
+- [x] Canvas popover と voice metadata を ja/en 辞書へ接続した。
+- [x] 保存プリセットの自由入力説明を変更しない回帰テストを追加した。
+
+### 検証結果
+
+- [x] `npm run typecheck`: PASS
+- [x] 対象 Vitest: PASS (2 files / 6 tests)
+- [x] `npm run test`: PASS (87 files / 522 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 warnings 12)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
