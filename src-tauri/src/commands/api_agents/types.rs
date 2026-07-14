@@ -113,6 +113,18 @@ pub struct ApiAgentSkillMeta {
     pub description: String,
 }
 
+/// skill 本文込みの IPC 表現。`api_agent_skill_load_bodies` が renderer へ返す (Issue #1125)。
+/// CLI エージェントの prompt-file 注入 (codex の `model_instructions_file` 等) で、renderer が
+/// 本文を system prompt に前置するために使う。内部表現の `ApiAgentSkill` とは別に持ち、
+/// vibe-team の強制同梱はせず「選択された skill だけ」を返す。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApiAgentSkillBody {
+    pub id: String,
+    pub name: String,
+    pub body: String,
+}
+
 /// import 元 (Claude / Codex) の skill メタ。`api_agent_skill_sources_list` が返す (Issue #1017)。
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -135,6 +147,28 @@ pub struct ImportSkillRequest {
     /// 'claude' | 'codex'
     pub source: String,
     pub id: String,
+}
+
+/// Issue #1119 / PR #1120 review: skill materialize のステータス。TS 側 literal union と
+/// 1:1 対応する型付き enum (kebab-case で 'created' 等にシリアライズ) にして型契約を揃える。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SkillApplyStatus {
+    Created,
+    Updated,
+    Unchanged,
+    Missing,
+    Invalid,
+    /// 書き込み先が symlink でプロジェクト外へ escape したため拒否。
+    Unsafe,
+}
+
+/// Issue #1119: skill を project の `.claude/skills` へ materialize した結果。
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillApplyResult {
+    pub id: String,
+    pub status: SkillApplyStatus,
 }
 
 /// team 参加コンテキスト。renderer (apiAgent カード) が所属チーム情報を渡す (Issue #1004)。

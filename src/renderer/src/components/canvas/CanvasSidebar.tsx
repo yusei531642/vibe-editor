@@ -12,13 +12,13 @@ import { Sidebar, type SidebarView } from '../Sidebar';
 import { useCanvasStore } from '../../stores/canvas';
 import { useSettings } from '../../lib/settings-context';
 import { useT } from '../../lib/i18n';
-import { useNativeConfirm } from '../../lib/use-native-confirm';
 import { useUiStore } from '../../stores/ui';
 import { ROLE_META } from '../../lib/team-roles';
 import { useFilesChanged } from '../../lib/use-files-changed';
 import { spawnTeam, type SpawnTeamMember } from '../../lib/canvas-team-spawn';
 import { findExistingTeamNode } from '../../lib/canvas-existing-team';
 import { useToast } from '../../lib/toast-context';
+import { useProject } from '../../lib/app-state-context';
 
 interface CanvasSidebarProps {
   /** 外部 (CanvasLayout の Rail) から制御したい場合に渡す。省略時はローカル state */
@@ -36,14 +36,14 @@ export function CanvasSidebar({
   onChangeCount,
   onGitOk
 }: CanvasSidebarProps = {}): JSX.Element {
-  const { settings, update } = useSettings();
+  const { settings } = useSettings();
+  const {
+    projectRoot,
+    handleAddWorkspaceFolder,
+    handleRemoveWorkspaceFolder
+  } = useProject();
   const t = useT();
-  const confirm = useNativeConfirm();
   const { showToast } = useToast();
-  // Issue #23: projectRoot は「現在開いているプロジェクト」= lastOpenedRoot を優先。
-  // claudeCwd は Claude CLI 起動時の作業ディレクトリ設定 (別用途) としてだけ使う。
-  // lastOpenedRoot が空 (初回) のときだけ claudeCwd にフォールバック。
-  const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || '';
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
 
   const addCard = useCanvasStore((s) => s.addCard);
@@ -60,14 +60,9 @@ export function CanvasSidebar({
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [teamHistory, setTeamHistory] = useState<TeamHistoryEntry[]>([]);
-  const [recentProjects, setRecentProjects] = useState<string[]>(
-    settings.recentProjects ?? []
-  );
-
   useEffect(() => {
     setWorkspaceFolders(settings.workspaceFolders ?? []);
-    setRecentProjects(settings.recentProjects ?? []);
-  }, [settings.workspaceFolders, settings.recentProjects]);
+  }, [settings.workspaceFolders]);
 
   const refreshGit = useCallback(async (): Promise<void> => {
     if (!projectRoot) return;
@@ -88,7 +83,7 @@ export function CanvasSidebar({
       setSessions(await window.api.sessions.list(projectRoot));
       setTeamHistory(await window.api.teamHistory.list(projectRoot));
     } catch (err) {
-      console.warn('[canvas-sidebar] sessions.list failed:', err);
+      console.warn('[canvas-sidebar] session/history refresh failed:', err);
     } finally {
       setSessionsLoading(false);
     }
@@ -203,85 +198,16 @@ export function CanvasSidebar({
 
   const handleDeleteTeamHistory = useCallback(
     async (id: string): Promise<void> => {
+      if (!projectRoot) return;
       try {
-        await window.api.teamHistory.delete(id);
+        await window.api.teamHistory.delete(projectRoot, id);
         setTeamHistory((prev) => prev.filter((t) => t.id !== id));
       } catch (err) {
         console.warn('[canvas-sidebar] team-history delete failed:', err);
       }
     },
-    []
+    [projectRoot]
   );
-
-  // ---- Project / workspace folder handlers (永続化は settings.update 経由) ----
-  const pushRecent = useCallback(
-    async (path: string): Promise<void> => {
-      const next = [path, ...recentProjects.filter((p) => p !== path)].slice(0, 12);
-      setRecentProjects(next);
-      // Issue #23: 開いたフォルダは lastOpenedRoot に記録する。
-      // claudeCwd は Claude CLI の作業ディレクトリ設定 (別の意味) なので上書きしない。
-      await update({ recentProjects: next, lastOpenedRoot: path });
-    },
-    [recentProjects, update]
-  );
-
-  const handleNewProject = useCallback(async () => {
-    const picked = await window.api.dialog.openFolder(t('appMenu.newDialogTitle'));
-    if (picked) await pushRecent(picked);
-  }, [pushRecent, t]);
-
-  const handleOpenFolder = useCallback(async () => {
-    const picked = await window.api.dialog.openFolder(t('appMenu.openFolderDialogTitle'));
-    if (picked) await pushRecent(picked);
-  }, [pushRecent, t]);
-
-  const handleOpenFileDialog = useCallback(async () => {
-    const picked = await window.api.dialog.openFile(t('appMenu.openFileDialogTitle'));
-    if (picked) {
-      const dir = picked.replace(/[\\/][^\\/]+$/, '');
-      const name = picked.slice(dir.length + 1);
-      handleOpenFile(dir, name);
-    }
-  }, [handleOpenFile, t]);
-
-  const handleAddWorkspaceFolder = useCallback(async () => {
-    const picked = await window.api.dialog.openFolder(t('appMenu.addWorkspaceDialogTitle'));
-    if (!picked) return;
-    if (workspaceFolders.includes(picked)) return;
-    const next = [...workspaceFolders, picked];
-    setWorkspaceFolders(next);
-    await update({ workspaceFolders: next });
-  }, [workspaceFolders, update, t]);
-
-  const handleRemoveWorkspaceFolder = useCallback(
-    async (path: string) => {
-      const isPrimary = path === projectRoot;
-      if (isPrimary) {
-        const name = path.split(/[\\/]/).pop() ?? path;
-        if (!(await confirm(t('workspace.removePrimaryConfirm', { name })))) return;
-      }
-      const nextPrimary = isPrimary ? workspaceFolders.find((p) => p !== path) ?? '' : projectRoot;
-      const next = workspaceFolders.filter((p) => p !== path && p !== nextPrimary);
-      setWorkspaceFolders(next);
-      await update({
-        workspaceFolders: next,
-        ...(isPrimary ? { lastOpenedRoot: nextPrimary } : {})
-      });
-    },
-    [workspaceFolders, projectRoot, update, t, confirm]
-  );
-
-  const handleOpenRecent = useCallback(
-    async (path: string) => {
-      await pushRecent(path);
-    },
-    [pushRecent]
-  );
-
-  const handleClearRecent = useCallback(async () => {
-    setRecentProjects([]);
-    await update({ recentProjects: [] });
-  }, [update]);
 
   return (
     <Sidebar

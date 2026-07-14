@@ -170,10 +170,8 @@ fn utf32_decode(bytes: &[u8], little_endian: bool) -> Option<String> {
         } else {
             u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]])
         };
-        match char::from_u32(u) {
-            Some(c) => out.push(c),
-            None => return None,
-        }
+        let c = char::from_u32(u)?;
+        out.push(c);
     }
     Some(out)
 }
@@ -197,6 +195,46 @@ mod detect_tests {
         assert!(!bin);
         assert_eq!(content, "hi");
         assert_eq!(enc, "utf-16le");
+    }
+
+    #[test]
+    fn utf32_le_with_bom_is_text() {
+        // "Aあ" in UTF-32 LE with BOM
+        let bytes = [
+            0xFF, 0xFE, 0x00, 0x00, 0x41, 0x00, 0x00, 0x00, 0x42, 0x30, 0x00, 0x00,
+        ];
+        let (bin, content, enc) = detect_text_or_binary(&bytes);
+        assert!(!bin);
+        assert_eq!(content, "Aあ");
+        assert_eq!(enc, "utf-32le");
+    }
+
+    #[test]
+    fn utf32_be_with_bom_is_text() {
+        // "Aあ" in UTF-32 BE with BOM
+        let bytes = [
+            0x00, 0x00, 0xFE, 0xFF, 0x00, 0x00, 0x00, 0x41, 0x00, 0x00, 0x30, 0x42,
+        ];
+        let (bin, content, enc) = detect_text_or_binary(&bytes);
+        assert!(!bin);
+        assert_eq!(content, "Aあ");
+        assert_eq!(enc, "utf-32be");
+    }
+
+    #[test]
+    fn utf32_invalid_scalars_are_binary() {
+        let invalid_bodies = [
+            [0x00, 0xD8, 0x00, 0x00], // surrogate U+D800
+            [0x00, 0x00, 0x11, 0x00], // out of range U+110000
+        ];
+
+        for body in invalid_bodies {
+            let bytes = [0xFF, 0xFE, 0x00, 0x00, body[0], body[1], body[2], body[3]];
+            let (bin, content, enc) = detect_text_or_binary(&bytes);
+            assert!(bin);
+            assert!(content.is_empty());
+            assert_eq!(enc, "binary");
+        }
     }
 
     #[test]

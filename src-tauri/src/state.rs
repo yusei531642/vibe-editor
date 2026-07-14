@@ -1,5 +1,6 @@
 // アプリ全体の共有 state
 
+use crate::commands::project_authority::ProjectRootIdentity;
 use crate::pty::{InFlightTracker, SessionRegistry};
 use crate::task_supervisor::TaskSupervisor;
 use crate::team_hub::TeamHub;
@@ -18,6 +19,9 @@ pub struct AppState {
     ///   **構造的に発生しえない** 状態になった。poison 概念も無くなる。
     ///   読み出しは `current_project_root`、書き込みは `set_project_root` ヘルパを使う。
     pub project_root: ArcSwapOption<String>,
+    /// Issue #1193: active rootのnative approval時filesystem identity。path文字列だけの
+    /// `project_root` と常に対で更新し、strict authzがdirectory置換をfail-closedに検出する。
+    pub project_root_identity: ArcSwapOption<ProjectRootIdentity>,
     pub pty_registry: Arc<SessionRegistry>,
     pub team_hub: TeamHub,
     /// Issue #952: watcher / cleanup / poller / inject 系 background task の共通 supervisor。
@@ -40,10 +44,27 @@ pub fn current_project_root(slot: &ArcSwapOption<String>) -> Option<String> {
     slot.load().as_deref().cloned()
 }
 
-/// Issue #739: project_root を更新する。`Some("")` のような空文字はそのまま保持する
-/// (空判定 / trim は呼び出し側の責務 — 旧 Mutex 実装と同じセマンティクス)。
-pub fn set_project_root(slot: &ArcSwapOption<String>, value: Option<String>) {
-    slot.store(value.map(Arc::new));
+/// active rootのpathとidentityを一体で更新する。読取側はidentityを再検証してから副作用へ進む。
+pub fn set_project_root_authority(
+    root_slot: &ArcSwapOption<String>,
+    identity_slot: &ArcSwapOption<ProjectRootIdentity>,
+    identity: Option<ProjectRootIdentity>,
+) {
+    let root = identity
+        .as_ref()
+        .map(|identity| identity.canonical_root.clone());
+    // identityを先にclear/storeしても、root readerは後段のauthzで両方を照合するためfail-closed。
+    identity_slot.store(identity.map(Arc::new));
+    root_slot.store(root.map(Arc::new));
+    // 旧rootで成立した再照合キャッシュを新authorityへ持ち越さない。
+    crate::commands::authz::invalidate_identity_recheck();
+}
+
+/// active rootに対応するnative approval snapshotをlock-freeに取得する。
+pub fn current_project_root_identity(
+    slot: &ArcSwapOption<ProjectRootIdentity>,
+) -> Option<ProjectRootIdentity> {
+    slot.load().as_deref().cloned()
 }
 
 impl AppState {
@@ -57,6 +78,7 @@ impl AppState {
         let team_hub = TeamHub::with_inflight(pty_registry.clone(), pty_inflight.clone());
         Self {
             project_root: ArcSwapOption::from(None),
+            project_root_identity: ArcSwapOption::from(None),
             pty_registry,
             team_hub,
             task_supervisor,

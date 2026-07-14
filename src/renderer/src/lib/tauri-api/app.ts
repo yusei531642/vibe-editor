@@ -56,11 +56,42 @@ export interface TeamHubInfo {
   bridgePath: string;
 }
 
+export interface PickedProjectFile {
+  projectRoot: string;
+  filePath: string;
+}
+
 export const app = {
   getProjectRoot: (): Promise<string> => invokeCommand('app_get_project_root'),
-  /** Issue #29: renderer 側で project root が切り替わったとき Rust 側 state を同期する */
-  setProjectRoot: (projectRoot: string): Promise<void> =>
-    invokeCommand('app_set_project_root', { projectRoot }),
+  /** startup raceを避けるため、native authority ledgerの復元完了後のactive rootを返す。 */
+  restoreAuthorizedProjectRoot: (): Promise<string> =>
+    invokeCommand('app_restore_authorized_project_root'),
+  /**
+   * Issue #1193: native folder pickerの結果をRust側で検証・永続化・active化する。
+   * 任意pathを受け取るsetterは公開しない。
+   */
+  pickAndActivateProjectRoot: (title?: string): Promise<string | null> =>
+    invokeCommand('app_pick_and_activate_project_root', { title: title ?? null }),
+  /** recent pathはdialog初期位置にだけ使い、native再選択の結果をactive化する。 */
+  reconfirmProjectRoot: (initialRoot: string, title?: string): Promise<string | null> =>
+    invokeCommand('app_reconfirm_project_root', {
+      initialRoot,
+      title: title ?? null
+    }),
+  /** native file pickerの選択ファイルの親directoryを同一Rust transaction内でactive化する。 */
+  pickFileAndActivateProjectRoot: (title?: string): Promise<PickedProjectFile | null> =>
+    invokeCommand('app_pick_file_and_activate_project_root', { title: title ?? null }),
+  clearActiveProjectRoot: (): Promise<void> =>
+    invokeCommand('app_clear_active_project_root'),
+  /** native pickerで選んだrootだけをworkspace authorityへ追加する。 */
+  pickWorkspaceRoot: (title?: string): Promise<string | null> =>
+    invokeCommand('app_pick_workspace_root', { title: title ?? null }),
+  /** native pickerで承認済みのworkspaceだけをprimary projectとして有効化する。 */
+  activateAuthorizedWorkspaceRoot: (projectRoot: string): Promise<string> =>
+    invokeCommand('app_activate_authorized_workspace_root', { projectRoot }),
+  /** authorityを追加しないrevoke操作。 */
+  revokeWorkspaceRoot: (projectRoot: string): Promise<void> =>
+    invokeCommand('app_revoke_workspace_root', { projectRoot }),
   restart: (): Promise<void> => invokeCommand('app_restart'),
   setWindowTitle: (title: string): Promise<void> => invokeCommand('app_set_window_title', { title }),
   checkClaude: (command: string): Promise<ClaudeCheckResult> =>

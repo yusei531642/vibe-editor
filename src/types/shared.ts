@@ -31,8 +31,11 @@ export interface DialogFileFilter {
  * Issue #618 で `terminalForceUtf8` (default true) を追加し v11。Windows + cmd.exe / PowerShell
  * で起動時に `chcp 65001` を inject して CP932 シェルでの U+FFFD 化を防ぐ。
  * Issue #994 で API 駆動エージェントを追加し、customAgents を `runtime: cli|api` に拡張して v12。
+ * Issue #1113 で custom agent に descriptor フィールド (engine/env/icon/tags/defaultSkillIds/
+ * skillInjection) を追加し v13。すべて additive-optional なので migration block は不要だが、
+ * 旧 build (#641 save-guard) が新フィールドを silent drop しないよう版数を上げる。
  */
-export const APP_SETTINGS_SCHEMA_VERSION = 12;
+export const APP_SETTINGS_SCHEMA_VERSION = 13;
 
 /**
  * API agent provider preset。`openai-compatible` 系は base URL と request shape を共有し、
@@ -54,11 +57,35 @@ export type ApiAgentProviderId =
 
 export type AgentRuntime = 'cli' | 'api';
 
+/**
+ * エージェントの挙動系統 (engine)。識別子 (TerminalAgent) とは別概念で、
+ * args/resume/inject の組み立てや team tool 配線がこの値で分岐する。
+ * custom CLI agent は claude / codex のどちらかの engine 上で動く。
+ */
+export type AgentEngine = 'claude' | 'codex';
+
+/**
+ * CLI agent に skill (.claude/skills/<id>/SKILL.md) をどう効かせるか (Issue #1113 Phase4 / #1125)。
+ *  - 'claude-dir'  : 起動前にプロジェクトの .claude/skills へ materialize し CLI の自動探索に任せる
+ *                    (claude エンジン既定)
+ *  - 'prompt-file' : skill 本文を system prompt に前置し、一時ファイル経由で起動フラグへ渡す
+ *                    (codex の `--config model_instructions_file=` / claude の
+ *                    `--append-system-prompt-file`)。codex エンジン既定。
+ *  - 'none'        : skill 注入を行わない (注入手段が不明な custom CLI 等)
+ *
+ * Issue #1125: 到達不能だった 'append-flag' を撤去し、全モードが配線済み・有意になるよう整理した。
+ */
+export type AgentSkillInjection = 'claude-dir' | 'prompt-file' | 'none';
+
 export interface AgentConfigBase {
   id: string;
   name: string;
   /** Canvas カードの accent カラー (省略時は --accent) */
   color?: string;
+  /** Issue #1113: カード表示用アイコン (lucide アイコン名)。省略時は engine/runtime 既定。 */
+  icon?: string;
+  /** Issue #1113: 分類・フィルタ用タグ。 */
+  tags?: string[];
 }
 
 /**
@@ -70,6 +97,17 @@ export interface CliAgentConfig extends AgentConfigBase {
   command: string;
   args: string;
   cwd?: string;
+  /**
+   * Issue #1113: この custom CLI が動作する engine (default 'claude')。
+   * args/resume/inject の組み立てと team tool 配線がこの値で claude 互換 / codex 互換に分岐する。
+   */
+  engine?: AgentEngine;
+  /** Issue #1113: 起動時に注入する環境変数。 */
+  env?: Record<string, string>;
+  /** Issue #1113: 定義レベルの既定 skill 群 (ノードインスタンスで上書き可能, Phase4)。 */
+  defaultSkillIds?: string[];
+  /** Issue #1113: skill の注入方式 (Phase4)。省略時は engine から既定を決める。 */
+  skillInjection?: AgentSkillInjection;
 }
 
 /**
@@ -521,6 +559,17 @@ export interface ApiAgentSkillMeta {
   description: string;
 }
 
+/**
+ * skill 本文込みの表現。`api_agent_skill_load_bodies` が選択 skill の本文を返す (Issue #1125)。
+ * CLI エージェントの prompt-file 注入で、renderer が本文を system prompt へ前置するために使う。
+ * `load_skill_bodies` (API 経路) と異なり vibe-team は強制同梱しない。
+ */
+export interface ApiAgentSkillBody {
+  id: string;
+  name: string;
+  body: string;
+}
+
 /** import 元の種別 (Issue #1017)。 */
 export type ApiAgentSkillSource = 'claude' | 'codex';
 
@@ -537,6 +586,21 @@ export interface ApiAgentImportableSkill {
   scope: 'user' | 'project';
   /** vibe-editor 専用フォルダへ import 済みか。 */
   imported: boolean;
+}
+
+/**
+ * Issue #1119: skill を現在のプロジェクトの `.claude/skills/<id>/SKILL.md` へ materialize した
+ * 結果。claude/codex はこのフォルダを自動探索するため、CLI エージェントでも skill が効く。
+ *  - 'created'   : 新規配置
+ *  - 'updated'   : 既存と差分があり上書き
+ *  - 'unchanged' : 既存と同一 (no-op, idempotent)
+ *  - 'missing'   : import 済みフォルダに該当 skill が無い
+ *  - 'invalid'   : 不正な skill id
+ *  - 'unsafe'    : 書き込み先が symlink でプロジェクト外へ escape したため拒否
+ */
+export interface SkillApplyResult {
+  id: string;
+  status: 'created' | 'updated' | 'unchanged' | 'missing' | 'invalid' | 'unsafe';
 }
 
 export interface ApiAgentSendResult {
@@ -1043,6 +1107,19 @@ export interface TeamHistoryEntry {
   latestHandoff?: HandoffReference;
   /** Issue #470: TeamHub orchestration state の軽量要約 */
   orchestration?: TeamOrchestrationSummary;
+  /**
+   * Issue #1192: 保存時点の project root filesystem identity snapshot。
+   * backend の save gate が native approval identity から付与する読み取り専用値で、
+   * renderer が値を渡しても常に上書きされる。undefined は #1192 以前の legacy entry。
+   */
+  projectIdentity?: ProjectRootIdentitySnapshot;
+}
+
+/** Issue #1192: project root を path 表記ではなく filesystem object として識別する snapshot。 */
+export interface ProjectRootIdentitySnapshot {
+  version: number;
+  canonicalRoot: string;
+  platformFileId: string;
 }
 
 export interface TeamCanvasNode {
@@ -1395,6 +1472,13 @@ export interface FileReadResult {
   contentHash?: string;
 }
 
+/** Issue #1193: backendのproject-root認可を通して取得する画像preview用data URL。 */
+export interface FileImageReadResult {
+  ok: boolean;
+  error?: string;
+  dataUrl?: string;
+}
+
 export interface FileWriteResult {
   ok: boolean;
   error?: string;
@@ -1525,6 +1609,7 @@ export interface TerminalCreateResult {
 export interface TerminalExitInfo {
   exitCode: number;
   signal?: number;
+  tail?: string; // Issue #1098: ANSI 除去済みの exit 直前末尾出力 (死因可視化用)。Rust exit_info.rs と camelCase 対応
 }
 
 // ---------- IDE 端末タブ永続化 (Issue #661) ----------

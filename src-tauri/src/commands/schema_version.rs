@@ -20,7 +20,10 @@ use crate::commands::error::{CommandError, CommandResult};
 /// `~/.vibe-editor/settings.json` の現行 schema version。
 /// renderer 側 `src/types/shared.ts` の `APP_SETTINGS_SCHEMA_VERSION` と同期。
 /// Issue #75 / #449 / #618 で bump されてきた。
-pub const SETTINGS_SCHEMA_VERSION: u32 = 12;
+/// Issue #1113 で custom agent descriptor フィールド (engine/env/icon/tags/defaultSkillIds/
+/// skillInjection) を追加し v13。additive-optional だが #641 save-guard が旧 build による
+/// 新フィールド silent drop を防ぐよう版数を上げる。
+pub const SETTINGS_SCHEMA_VERSION: u32 = 13;
 
 /// `~/.vibe-editor/team-state/*.json` (TeamHub orchestration state) の現行 schema version。
 /// Issue #470 で導入。

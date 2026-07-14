@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   API_AGENT_PROVIDER_PRESETS,
   type AgentConfig,
+  type AgentEngine,
   type ApiAgentConfig,
   type ApiAgentProviderId,
   type ApiAgentSkillMeta,
@@ -11,6 +12,7 @@ import {
 import { useT } from '../../lib/i18n';
 import { useToast } from '../../lib/toast-context';
 import { SkillImportPanel } from './SkillImportPanel';
+import { CliAgentSkillsField } from './CliAgentSkillsField';
 import { useNativeConfirm } from '../../lib/use-native-confirm';
 import { parseShellArgsStrict } from '../../lib/parse-args';
 import type { UpdateSetting } from './types';
@@ -116,10 +118,10 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
       .catch(() => setAvailableSkills([]));
   }, []);
 
+  // Issue #1119: CLI でも skill を選べるよう runtime に関わらず一覧をロードする。
   useEffect(() => {
-    if (agent.runtime !== 'api') return;
     reloadSkills();
-  }, [agent.runtime, reloadSkills]);
+  }, [reloadSkills]);
 
   const toggleSkill = (id: string): void => {
     if (!apiAgent) return;
@@ -128,6 +130,16 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
       ? current.filter((s) => s !== id)
       : [...current, id];
     patchApiAgent({ skillIds: next });
+  };
+
+  // Issue #1119: CLI agent の defaultSkillIds をトグルする (UI は CliAgentSkillsField へ分離)。
+  const toggleCliSkill = (id: string): void => {
+    if (!cliAgent) return;
+    const current = cliAgent.defaultSkillIds ?? [];
+    const next = current.includes(id)
+      ? current.filter((s) => s !== id)
+      : [...current, id];
+    patchAgent({ defaultSkillIds: next });
   };
 
   const switchRuntime = (runtime: 'cli' | 'api'): void => {
@@ -276,6 +288,24 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
               spellCheck={false}
             />
           </label>
+
+          <label className="modal__label modal__label--full">
+            <span>{t('settings.customAgents.engine')}</span>
+            <select
+              value={cliAgent.engine ?? 'claude'}
+              onChange={(e) => patchAgent({ engine: e.target.value as AgentEngine })}
+            >
+              <option value="claude">{t('settings.customAgents.engineClaude')}</option>
+              <option value="codex">{t('settings.customAgents.engineCodex')}</option>
+            </select>
+          </label>
+
+          <CliAgentSkillsField
+            agent={cliAgent}
+            availableSkills={availableSkills}
+            onToggle={toggleCliSkill}
+            reloadSkills={reloadSkills}
+          />
         </>
       )}
 
@@ -414,6 +444,46 @@ export function CustomAgentEditor({ agent, draft, update }: Props): JSX.Element 
           value={agent.color ?? ''}
           onChange={(e) => patchAgent({ color: e.target.value || undefined })}
           placeholder="#d97757"
+          spellCheck={false}
+        />
+      </label>
+
+      <label className="modal__label modal__label--full">
+        <span>{t('settings.customAgents.icon')}</span>
+        <input
+          type="text"
+          value={agent.icon ?? ''}
+          onChange={(e) => patchAgent({ icon: e.target.value || undefined })}
+          placeholder="Terminal"
+          spellCheck={false}
+          list="custom-agent-icon-list"
+        />
+        <datalist id="custom-agent-icon-list">
+          <option value="Sparkles" />
+          <option value="Terminal" />
+          <option value="Bot" />
+          <option value="Boxes" />
+          <option value="Cloud" />
+          <option value="Cpu" />
+          <option value="Rocket" />
+          <option value="Wrench" />
+        </datalist>
+      </label>
+
+      <label className="modal__label modal__label--full">
+        <span>{t('settings.customAgents.tags')}</span>
+        <input
+          type="text"
+          value={(agent.tags ?? []).join(', ')}
+          onChange={(e) =>
+            patchAgent({
+              tags: e.target.value
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean)
+            })
+          }
+          placeholder={t('settings.customAgents.tagsPlaceholder')}
           spellCheck={false}
         />
       </label>

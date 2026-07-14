@@ -17,6 +17,7 @@ import { Hand, Plus, Save, Trash2 } from 'lucide-react';
 import { useT } from '../../lib/i18n';
 import { useToast } from '../../lib/toast-context';
 import { useSettings } from '../../lib/settings-context';
+import { useProject } from '../../lib/app-state-context';
 import { useCanvasNodes } from '../../stores/canvas-selectors';
 import { useCanvasStore, NODE_W, NODE_H, type CardData } from '../../stores/canvas';
 import type {
@@ -105,10 +106,10 @@ function buildPresetFromCanvas(
 export function TeamPresetsPanel({ open, onClose }: TeamPresetsPanelProps): JSX.Element | null {
   const t = useT();
   const { showToast } = useToast();
-  // Issue #611: handleApply で setupTeamMcp / projectRoot / cwd payload が必要になるため、
-  //   IDE / Canvas 共通の settings から projectRoot を解決する。
   const { settings } = useSettings();
-  const projectRoot = settings.lastOpenedRoot || settings.claudeCwd || '';
+  // Issue #1193: settings の path は表示用であり、実行時 root は native authority と
+  // 同期した ProjectContext だけを使う。
+  const { projectRoot } = useProject();
   const allNodes = useCanvasNodes();
   const addCards = useCanvasStore((s) => s.addCards);
   const agentNodes = useMemo(

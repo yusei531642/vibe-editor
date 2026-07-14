@@ -2,6 +2,15 @@
 // 親 skills.rs の private fn / 型に `use super::*` でアクセスする。
 
 use super::*;
+use crate::commands::api_agents::types::SkillApplyStatus;
+
+#[test]
+fn apply_status_is_idempotent_and_detects_changes() {
+    // 不在 → Created、内容一致 → Unchanged (再適用は no-op)、差分 → Updated。
+    assert_eq!(apply_status(None, "x"), SkillApplyStatus::Created);
+    assert_eq!(apply_status(Some("x"), "x"), SkillApplyStatus::Unchanged);
+    assert_eq!(apply_status(Some("old"), "new"), SkillApplyStatus::Updated);
+}
 
 #[test]
 fn parse_meta_reads_frontmatter() {
@@ -107,6 +116,29 @@ async fn load_skill_bodies_always_includes_vibe_team_via_bundle() {
     assert!(!skills.iter().any(|s| s.id == "unknown"));
     let vt = skills.iter().find(|s| s.id == VIBE_TEAM_SKILL_ID).unwrap();
     assert!(vt.body.contains("vibe-team"));
+}
+
+#[tokio::test]
+async fn load_selected_skill_bodies_excludes_vibe_team() {
+    // prompt-file 注入用ローダは vibe-team を強制同梱しない (standalone への混入回避, Issue #1125)。
+    let dir = tempfile::tempdir().unwrap();
+    write_skill(dir.path(), "my-skill", "---\nname: Mine\ndescription: d\n---\nhello body").await;
+    let skills =
+        load_selected_skill_bodies_from(dir.path(), &["my-skill".to_string()]).await;
+    assert!(skills.iter().any(|s| s.id == "my-skill"));
+    assert!(
+        !skills.iter().any(|s| s.id == VIBE_TEAM_SKILL_ID),
+        "selected loader must not auto-inject vibe-team"
+    );
+}
+
+#[tokio::test]
+async fn load_selected_skill_bodies_includes_vibe_team_only_when_requested() {
+    // 明示的に vibe-team を選んだ場合はバンドル本文へフォールバックして返す。
+    let dir = tempfile::tempdir().unwrap();
+    let skills =
+        load_selected_skill_bodies_from(dir.path(), &[VIBE_TEAM_SKILL_ID.to_string()]).await;
+    assert!(skills.iter().any(|s| s.id == VIBE_TEAM_SKILL_ID));
 }
 
 #[tokio::test]

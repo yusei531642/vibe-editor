@@ -12,6 +12,8 @@ use uuid::Uuid;
 
 use crate::commands::team_history::HandoffReference;
 
+mod list;
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct HandoffContent {
@@ -275,9 +277,13 @@ async fn write_handoff(
         .map_err(|e| e.to_string())?;
     restrict_private_file(json_path)?;
     let markdown = render_markdown(handoff);
-    crate::commands::atomic_write::atomic_write_with_mode(md_path, markdown.as_bytes(), Some(0o600))
-        .await
-        .map_err(|e| e.to_string())?;
+    crate::commands::atomic_write::atomic_write_with_mode(
+        md_path,
+        markdown.as_bytes(),
+        Some(0o600),
+    )
+    .await
+    .map_err(|e| e.to_string())?;
     restrict_private_file(md_path)
 }
 
@@ -298,9 +304,12 @@ pub async fn handoffs_create(
     // 既存 caller の挙動を壊さないため、Authz reject は `Ok(error 入り result)` で返す
     // (Issue #737: 外側は `CommandResult<HandoffCreateResult>` だが、失敗は一貫して内部
     //  error フィールドで表現し、外側 `Err` 経路は使わない)。
-    if let Err(e) =
-        crate::commands::authz::assert_active_project_root(&state.project_root, &req.project_root)
-            .await
+    if let Err(e) = crate::commands::authz::assert_active_project_root(
+        &state.project_root,
+        &state.project_root_identity,
+        &req.project_root,
+    )
+    .await
     {
         return Ok(HandoffCreateResult {
             ok: false,
@@ -343,18 +352,20 @@ pub async fn handoffs_create(
         markdown_path: markdown_path.to_string_lossy().into_owned(),
         content: req.content,
     };
-    Ok(match write_handoff(&handoff, &json_path, &markdown_path).await {
-        Ok(()) => HandoffCreateResult {
-            ok: true,
-            handoff: Some(handoff),
-            error: None,
+    Ok(
+        match write_handoff(&handoff, &json_path, &markdown_path).await {
+            Ok(()) => HandoffCreateResult {
+                ok: true,
+                handoff: Some(handoff),
+                error: None,
+            },
+            Err(e) => HandoffCreateResult {
+                ok: false,
+                error: Some(e.to_string()),
+                handoff: None,
+            },
         },
-        Err(e) => HandoffCreateResult {
-            ok: false,
-            error: Some(e.to_string()),
-            handoff: None,
-        },
-    })
+    )
 }
 
 #[tauri::command]
@@ -367,32 +378,18 @@ pub async fn handoffs_list(
     // reject 時は空 Vec を `Ok` で返し既存 caller (renderer) の挙動を維持する
     // (Issue #737: 外側は `CommandResult` だが、この command は失敗を `Err` ではなく
     //  「空 Vec を Ok」で表現する設計を維持する)。
-    if crate::commands::authz::assert_active_project_root(&state.project_root, &project_root)
-        .await
-        .is_err()
+    if crate::commands::authz::assert_active_project_root(
+        &state.project_root,
+        &state.project_root_identity,
+        &project_root,
+    )
+    .await
+    .is_err()
     {
         return Ok(Vec::new());
     }
     let dir = handoff_dir(&project_root, team_id.as_deref());
-    let mut out = Vec::new();
-    let Ok(mut rd) = fs::read_dir(&dir).await else {
-        return Ok(out);
-    };
-    while let Ok(Some(entry)) = rd.next_entry().await {
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("json") {
-            continue;
-        }
-        let Ok(bytes) = fs::read(&path).await else {
-            continue;
-        };
-        let Ok(handoff) = serde_json::from_slice::<HandoffCheckpoint>(&bytes) else {
-            continue;
-        };
-        out.push(handoff);
-    }
-    out.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-    Ok(out)
+    Ok(list::load_handoffs_from_dir(&dir).await)
 }
 
 #[tauri::command]
@@ -405,9 +402,13 @@ pub async fn handoffs_read(
     // Issue #606 (Security): cross-project read を阻止。reject 時は `Ok(None)` で返し
     // 既存の「該当なし」挙動を維持する (Issue #737: 外側は `CommandResult` だが、失敗は
     //  `Err` ではなく `Ok(None)` で表現する設計を維持する)。
-    if crate::commands::authz::assert_active_project_root(&state.project_root, &project_root)
-        .await
-        .is_err()
+    if crate::commands::authz::assert_active_project_root(
+        &state.project_root,
+        &state.project_root_identity,
+        &project_root,
+    )
+    .await
+    .is_err()
     {
         return Ok(None);
     }
@@ -434,9 +435,12 @@ pub async fn handoffs_update_status(
     // Issue #606 (Security): cross-project write を阻止。Authz reject は内部 error フィールド
     // で表現し、renderer 側は従来通り `result.ok` で分岐する (Issue #737: 外側 `Err` 経路は
     // 使わず、失敗は常に内部 error フィールドで返す)。
-    if let Err(e) =
-        crate::commands::authz::assert_active_project_root(&state.project_root, &project_root)
-            .await
+    if let Err(e) = crate::commands::authz::assert_active_project_root(
+        &state.project_root,
+        &state.project_root_identity,
+        &project_root,
+    )
+    .await
     {
         return Ok(HandoffMutationResult {
             ok: false,
@@ -444,26 +448,28 @@ pub async fn handoffs_update_status(
             handoff: None,
         });
     }
-    Ok(match update_handoff_status_file(
-        &project_root,
-        team_id.as_deref(),
-        &handoff_id,
-        &status,
-        to_agent_id,
+    Ok(
+        match update_handoff_status_file(
+            &project_root,
+            team_id.as_deref(),
+            &handoff_id,
+            &status,
+            to_agent_id,
+        )
+        .await
+        {
+            Ok(handoff) => HandoffMutationResult {
+                ok: true,
+                handoff: Some(handoff),
+                error: None,
+            },
+            Err(e) => HandoffMutationResult {
+                ok: false,
+                error: Some(e.to_string()),
+                handoff: None,
+            },
+        },
     )
-    .await
-    {
-        Ok(handoff) => HandoffMutationResult {
-            ok: true,
-            handoff: Some(handoff),
-            error: None,
-        },
-        Err(e) => HandoffMutationResult {
-            ok: false,
-            error: Some(e.to_string()),
-            handoff: None,
-        },
-    })
 }
 
 pub async fn update_handoff_status_file(

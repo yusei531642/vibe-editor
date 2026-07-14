@@ -72,7 +72,7 @@ describe('resolveAgentConfig', () => {
       name: 'Aider',
       command: 'aider',
       args: '--yes',
-      cwd: 'F:/workspace',
+      cwd: '',
       color: '#00ffaa'
     });
   });

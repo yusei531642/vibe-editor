@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import { useReactFlow } from '@xyflow/react';
 import { useT } from '../../lib/i18n';
-import { useSettings } from '../../lib/settings-context';
+import { useProject } from '../../lib/app-state-context';
 import {
   useCanvasStore,
   agentPayloadOf,
@@ -53,6 +53,7 @@ export function StageHud(): JSX.Element {
   const tidyTerminalCards = useCanvasStore((s) => s.tidyTerminalCards);
   const unifyTerminalCardSize = useCanvasStore((s) => s.unifyTerminalCardSize);
   const { fitView, zoomIn, zoomOut } = useReactFlow();
+  const { projectRoot } = useProject();
 
   const [arrangeOpen, setArrangeOpen] = useState(false);
   const arrangeWrapRef = useRef<HTMLDivElement | null>(null);
@@ -218,10 +219,9 @@ export function StageHud(): JSX.Element {
     return n;
   }, [agentNodes, healthSnapshot, healthNowTick]);
 
-  // Issue #514 / #615: dashboard に渡す teamId / projectRoot を canvas state + settings から導出。
+  // Issue #514 / #615: dashboard に渡す teamId / projectRoot を canvas state + runtime authority から導出。
   // dual preset で 2 team が並ぶケースに対応するため、active な全 teamId を array で渡す。
   // ソート順は「Leader カードがある team を先頭」。Leader 不在の team は末尾に。
-  const { settings } = useSettings();
   const dashboardTeamIds = useMemo<string[]>(() => {
     const leaderTeams = new Set<string>();
     const allTeams: string[] = [];
@@ -244,7 +244,7 @@ export function StageHud(): JSX.Element {
       return la - lb;
     });
   }, [agentNodes]);
-  const dashboardProjectRoot = settings.lastOpenedRoot || null;
+  const dashboardProjectRoot = projectRoot || null;
 
   return (
     <>

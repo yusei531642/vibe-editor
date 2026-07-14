@@ -79,6 +79,10 @@ import AgentNodeCard from '../AgentNodeCard';
 import { SettingsProvider } from '../../../../lib/settings-context';
 import { ToastProvider } from '../../../../lib/toast-context';
 import type { ReactNode } from 'react';
+
+vi.mock('../../../../lib/app-state-context', () => ({
+  useProject: () => ({ projectRoot: '/repo' })
+}));
 import { DEFAULT_SETTINGS } from '../../../../../../types/shared';
 
 type TestWindow = Window &
@@ -235,7 +239,7 @@ describe('AgentNodeCard', () => {
     expect(api.handoffsCreate).toHaveBeenCalledTimes(1);
     const arg = api.handoffsCreate.mock.calls[0][0];
     expect(arg).toMatchObject({
-      projectRoot: '/tmp/work',
+      projectRoot: '/repo',
       teamId: 'team-1',
       kind: 'leader',
       fromAgentId: 'leader-agent-1'

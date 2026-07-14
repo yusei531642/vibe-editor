@@ -6,6 +6,11 @@ import type {
 } from '../../../../types/shared';
 import { useT } from '../i18n';
 import { useNativeConfirm } from '../use-native-confirm';
+import {
+  applyEditorTabReadError,
+  applyEditorTabReadResult,
+  createLoadingEditorTab
+} from './file-tab-state';
 
 export interface DiffTab {
   id: string;
@@ -131,7 +136,7 @@ export function useFileTabs(opts: UseFileTabsOptions): UseFileTabsResult {
 
   const optsRef = useRef(opts);
   optsRef.current = opts;
-
+  const editorReadTokensRef = useRef<Map<string, symbol>>(new Map());
   // tabs: diff タブと editor タブを並立させ、id プレフィックスで判別する
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [diffTabs, setDiffTabs] = useState<DiffTab[]>([]);
@@ -253,34 +258,36 @@ export function useFileTabs(opts: UseFileTabsOptions): UseFileTabsResult {
       // Issue #4: 同じ相対パスが別ルートに存在しうるので id に root も混ぜる
       const id = `edit:${effectiveRoot}\u0001${relPath}`;
       setActiveTabId(id);
-      // Issue #480: 最近開いたファイル履歴を更新 (先頭へ移動、上限制限)
+      // Issue #480/#1136: 再選択時も active/recent は必ず更新する
       setRecentFiles((prev) => {
         const filtered = prev.filter(
           (entry) => !(entry.rootPath === effectiveRoot && entry.relPath === relPath)
         );
         return [{ rootPath: effectiveRoot, relPath }, ...filtered].slice(0, RECENT_FILES_LIMIT);
       });
-      setEditorTabs((prev) => {
-        if (prev.some((t) => t.id === id)) return prev;
-        return [
-          ...prev,
-          {
-            id,
-            rootPath: effectiveRoot,
-            relPath,
-            content: '',
-            originalContent: '',
-            isBinary: false,
-            lossyEncoding: false,
-            encoding: 'utf-8',
-            loading: true,
-            error: null,
-            pinned: false
-          }
-        ];
-      });
+      const existingTab = editorTabs.find((tab) => tab.id === id);
+      const isDirty = Boolean(
+        existingTab && !existingTab.isBinary && existingTab.content !== existingTab.originalContent
+      );
+      const readSnapshot = {
+        content: existingTab?.content ?? '',
+        originalContent: existingTab?.originalContent ?? ''
+      };
+      // 未保存編集と進行中の読込は保持する。clean/error は従来どおり再読込・再試行する。
+      if (existingTab?.loading || isDirty) return;
+      // in-flight 中にタブが閉じられていた場合も、再選択で表示先を復元する。
+      setEditorTabs((prev) =>
+        prev.some((tab) => tab.id === id)
+          ? prev
+          : [...prev, createLoadingEditorTab(id, effectiveRoot, relPath)]
+      );
+      // 同一 render 内では editorTabs の closure が更新されないため、ref で二重 read を防ぐ。
+      if (editorReadTokensRef.current.has(id)) return;
+      const requestToken = Symbol(id);
+      editorReadTokensRef.current.set(id, requestToken);
       try {
         const res = await window.api.files.read(effectiveRoot, relPath);
+        if (editorReadTokensRef.current.get(id) !== requestToken) return;
         const lossy = res.encoding === 'lossy';
         // Issue #35: lossy 読み込み時はユーザーに明示的に通知する
         if (lossy) {
@@ -291,34 +298,24 @@ export function useFileTabs(opts: UseFileTabsOptions): UseFileTabsResult {
         }
         setEditorTabs((prev) =>
           prev.map((tab) =>
-            tab.id === id
-              ? {
-                  ...tab,
-                  loading: false,
-                  error: res.ok ? null : res.error ?? 'error',
-                  content: res.content,
-                  originalContent: res.content,
-                  isBinary: res.isBinary,
-                  lossyEncoding: lossy,
-                  encoding: res.encoding || 'utf-8',
-                  mtimeMs: res.mtimeMs,
-                  sizeBytes: res.sizeBytes,
-                  contentHash: res.contentHash
-                }
-              : tab
+            tab.id === id ? applyEditorTabReadResult(tab, res, lossy, readSnapshot) : tab
           )
         );
       } catch (err) {
+        if (editorReadTokensRef.current.get(id) !== requestToken) return;
         setEditorTabs((prev) =>
           prev.map((tab) =>
-            tab.id === id ? { ...tab, loading: false, error: String(err) } : tab
+            tab.id === id ? applyEditorTabReadError(tab, err, readSnapshot) : tab
           )
         );
+      } finally {
+        if (editorReadTokensRef.current.get(id) === requestToken) {
+          editorReadTokensRef.current.delete(id);
+        }
       }
     },
-    [t]
+    [editorTabs, t]
   );
-
   const updateEditorContent = useCallback((id: string, content: string) => {
     setEditorTabs((prev) =>
       prev.map((t) => (t.id === id ? { ...t, content } : t))
@@ -484,6 +481,7 @@ export function useFileTabs(opts: UseFileTabsOptions): UseFileTabsResult {
   );
 
   const resetForProjectSwitch = useCallback(() => {
+    editorReadTokensRef.current.clear();
     setDiffTabs([]);
     setEditorTabs([]);
     setRecentlyClosed([]);

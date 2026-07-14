@@ -2,6 +2,8 @@ name: ci
 
 on:
   push:
+    branches:
+      - main
     tags-ignore:
       - 'v*'
   pull_request:
@@ -19,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -28,7 +30,7 @@ jobs:
           cache: npm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-04-26
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master @ 2026-04-26
         with:
           toolchain: stable
           # Issue #939: clippy ゲート用。dtolnay/rust-toolchain は minimal profile なので明示する。
@@ -132,7 +134,7 @@ jobs:
       # cargo-audit を毎回 source ビルドすると 1-2 分かかり、Swatinem/rust-cache は
       # ~/.cargo/bin を共有しないため再利用も効きにくい。pre-built バイナリを取得する。
       - name: Install cargo-audit
-        uses: taiki-e/install-action@b8cecb83565409bcc297b2df6e77f030b2a468d5 # v2.82.0
+        uses: taiki-e/install-action@c93ccc03e00cd0e08e494f5fd058a6c55a6a1907 # v2.82.8
         with:
           tool: cargo-audit
 
@@ -154,10 +156,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master @ 2026-04-26
+        uses: dtolnay/rust-toolchain@fa04a1451ff1842e2626ccb99004d0195b455a88 # master @ 2026-04-26
         with:
           toolchain: stable
           # Issue #939: cfg-gated コード (win_job_object 等の #[cfg(windows)]) も clippy 検査する。
@@ -187,13 +189,13 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           # full history が無いと PR の base..head 差分 scan / push の before..after 差分 scan が
           # commit を取得できず "fatal: bad revision" になる。trufflehog の git driver 要件。
           fetch-depth: 0
 
       - name: Secrets scan (trufflehog, verified-only)
-        uses: trufflesecurity/trufflehog@d411fff7b8879a62509f3fa98c07f247ac089a51 # v3.95.5
+        uses: trufflesecurity/trufflehog@00155c9dc586f34d189adc83d3ac2698c2ec551f # v3.95.8
         with:
           extra_args: --only-verified

@@ -57,6 +57,9 @@ import {
 import { resolveAgentVisual } from '../../../../lib/agent-visual';
 import { parseShellArgs } from '../../../../lib/parse-args';
 import { resolveAgentConfig } from '../../../../lib/agent-resolver';
+import { resolveAgentDescriptor } from '../../../../lib/agent-registry';
+import type { AgentEngine } from '../../../../../../types/shared';
+import { useSkillInjection } from '../../../../lib/use-skill-injection';
 import { useToast } from '../../../../lib/toast-context';
 import {
   deriveCardSummary,
@@ -70,6 +73,7 @@ import { CardPresentation } from './CardPresentation';
 import { CardHandoff } from './CardHandoff';
 import { CardInject } from './CardInject';
 import { CardSummary, type CardSummaryHealth } from './CardSummary';
+import { useProject } from '../../../../lib/app-state-context';
 
 // Issue #732: `NodeProps` を `Node<CardDataOf<'agent'>>` で具体化することで
 // `data.payload` が `AgentPayload` として読め、`unknown` からの inline cast が不要になる。
@@ -79,6 +83,7 @@ function AgentNodeCardImpl({
 }: NodeProps<Node<CardDataOf<'agent'>>>): JSX.Element {
   const termRef = useRef<TerminalViewHandle | null>(null);
   const { settings } = useSettings();
+  const { projectRoot } = useProject();
   const t = useT();
   const confirmRemoveCard = useConfirmRemoveCard();
   const setCardPayload = useCanvasStore((s) => s.setCardPayload);
@@ -94,6 +99,12 @@ function AgentNodeCardImpl({
   const profile = visual.profile;
   const accent = visual.agentAccent;
   const organizationAccent = visual.organizationAccent;
+  // Issue #1115: エージェント種別 (claude/codex/custom) の正規化記述子。ヘッダーのアイコン/
+  // 表示名/accent はこれを使い、custom が Claude に偽装されず一目で区別できるようにする。
+  const agentDescriptor = useMemo(
+    () => resolveAgentDescriptor({ agentConfigId: payload.agentConfigId, engine: payload.agent }, settings),
+    [payload.agentConfigId, payload.agent, settings]
+  );
   const title = data?.title ?? visual.label;
   const [status, setStatus] = useState<TerminalRuntimeStatus | null>(null);
   const [activity, setActivityState] = useState<AgentStatus>('idle');
@@ -118,12 +129,17 @@ function AgentNodeCardImpl({
     return () => clearActivity(id);
   }, [id, clearActivity]);
 
+  // Issue #1121 / #1125: skill 注入 (claude-dir = .claude/skills へ materialize /
+  // prompt-file = 本文を preamble 化) は `useSkillInjection` hook に集約。prompt-file 経路の
+  // preamble を受け取り、下で team ロール prompt と結合して instructions にする。
+  const skillPreamble = useSkillInjection(agentDescriptor);
+
   // Issue #23 + カスタムエージェント対応:
   // agent-resolver 経由で built-in (claude/codex) + customAgents のコマンド/引数/cwd を解決する。
-  // lastOpenedRoot を最優先とし、エージェント固有 cwd があればそれを fallback として使う。
-  // payload.command / payload.cwd が先に指定されていればそちらを優先 (legacy 互換)。
+  // native authority と同期した active root だけを cwd に使う。settings / persisted payload の
+  // raw path は侵害 renderer が書き換えられるため authority にしない。
   const resolved = resolveAgentConfig(payload.agent ?? 'claude', settings);
-  const cwd = settings.lastOpenedRoot || resolved.cwd || payload.cwd || '';
+  const cwd = projectRoot;
   const command = payload.command ?? resolved.command;
 
   // ----- チームのシステムプロンプトを構築 -----
@@ -142,13 +158,13 @@ function AgentNodeCardImpl({
   const teamMembers = useMemo(() => {
     if (!payload.teamId) return null;
     if (teamMembersSig === '')
-      return [] as { agentId: string; roleProfileId: string; agent: 'claude' | 'codex' }[];
+      return [] as { agentId: string; roleProfileId: string; agent: AgentEngine }[];
     return teamMembersSig.split(';').map((s) => {
       const [agentId, roleProfileId, agent] = s.split(':');
       return {
         agentId,
         roleProfileId,
-        agent: agent as 'claude' | 'codex'
+        agent: agent as AgentEngine
       };
     });
   }, [teamMembersSig, payload.teamId]);
@@ -258,8 +274,16 @@ function AgentNodeCardImpl({
     settings.codexArgs
   ]);
 
-  const claudeInstructions = isClaude ? sysPrompt : undefined;
-  const codexInstructions = isCodex ? sysPrompt : undefined;
+  // Issue #1125: skill 本文 (prompt-file 注入) と team ロール prompt を結合して instructions とする。
+  // claude は通常 claude-dir のため skillPreamble は空 (materialize 経路) で、二重注入は起きない。
+  const instructions = useMemo(() => {
+    const parts = [skillPreamble, sysPrompt]
+      .map((s) => (s ?? '').trim())
+      .filter((s) => s.length > 0);
+    return parts.length > 0 ? parts.join('\n\n') : undefined;
+  }, [skillPreamble, sysPrompt]);
+  const claudeInstructions = isClaude ? instructions : undefined;
+  const codexInstructions = isCodex ? instructions : undefined;
 
   // ---------- Issue #509: 未読 inbox 数の event-driven 集計 ----------
   //
@@ -378,7 +402,9 @@ function AgentNodeCardImpl({
           cardId={id}
           title={title}
           roleLabel={visual.label}
-          glyph={profile.visual.glyph}
+          typeIcon={agentDescriptor.icon}
+          typeName={agentDescriptor.displayName}
+          typeAccent={agentDescriptor.accentColor}
           organizationName={payload.organization?.name}
           activity={activity}
           status={terminalStatus}

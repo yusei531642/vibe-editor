@@ -23,7 +23,8 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
-use super::handle::{SessionHandle, TerminalExitInfo};
+use super::exit_info::{normalize_exit_code, summarize_exit_tail, TerminalExitInfo};
+use super::handle::SessionHandle;
 use super::spawn_metrics::{build_cmd_label, engine_label, log_spawn_outcome, platform_label};
 
 /// Issue #818: ターミナル spawn 時の警告 (cwd フォールバック等) を renderer 側に
@@ -443,15 +444,7 @@ pub fn spawn_session(
     let id_for_exit = id.clone();
     std::thread::spawn(move || {
         let exit_status = child.wait().ok();
-        let info = TerminalExitInfo {
-            exit_code: exit_status
-                .as_ref()
-                .map(|s| s.exit_code() as i64)
-                .unwrap_or(-1),
-            signal: None,
-        };
-        // child.wait() が返った時点で kill 不要だが、registry::remove は handle.kill() を呼ぶ。
-        // SessionHandle::kill() は何度呼んでも安全 (ChildKiller 内部で no-op)。
+        // child.wait() 後は kill 不要だが registry::remove が handle.kill() を呼ぶ (二重 kill は no-op で安全)。
         let removed = registry_for_exit.remove(&id_for_exit);
         let exit_record = removed.as_ref().and_then(|handle| {
             if let (Some(team_id), Some(agent_id)) =
@@ -462,8 +455,7 @@ pub fn spawn_session(
                 None
             }
         });
-        // Windows ConPTY は master drop 後に reader EOF → batcher final flush となる。
-        // `removed` を保持したまま待つと master も残り、final flush が進まない。
+        // Windows ConPTY は master drop 後に reader EOF → batcher final flush となる (removed 保持中は master が残り進まない)。
         drop(removed);
 
         let exit_flush_wait_timeout = Duration::from_secs(2);
@@ -481,6 +473,14 @@ pub fn spawn_session(
             .as_ref()
             .and_then(|(_, _, scrollback)| scrollback_to_string(scrollback));
 
+        let info = TerminalExitInfo {
+            exit_code: exit_status
+                .as_ref()
+                .map(|s| normalize_exit_code(s.exit_code()))
+                .unwrap_or(-1),
+            signal: None,
+            tail: summarize_exit_tail(output_tail.as_deref()),
+        };
         if let Err(e) = app_for_exit.emit(&exit_event_clone, info.clone()) {
             tracing::warn!("emit {exit_event_clone} failed: {e}");
         }

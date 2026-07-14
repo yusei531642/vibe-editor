@@ -28,6 +28,10 @@ vi.mock('../../../TerminalView', () => ({
   }
 }));
 
+vi.mock('../../../../lib/app-state-context', () => ({
+  useProject: () => ({ projectRoot: '/repo' })
+}));
+
 import TerminalCard from '../TerminalCard';
 import { SettingsProvider } from '../../../../lib/settings-context';
 import { ToastProvider } from '../../../../lib/toast-context';

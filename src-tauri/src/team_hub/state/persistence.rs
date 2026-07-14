@@ -18,9 +18,9 @@ impl TeamHub {
         name: &str,
         project_root: Option<&str>,
         members: &[(String, String)],
-    ) {
+    ) -> Result<(), String> {
         if team_id.is_empty() || team_id == "_init" {
-            return;
+            return Ok(());
         }
         let persisted = match project_root.map(str::trim).filter(|v| !v.is_empty()) {
             Some(root) => {
@@ -35,6 +35,17 @@ impl TeamHub {
         let persisted_dynamic_entries = load_persisted_dynamic_for_team(team_id).await;
 
         let mut s = self.state.lock().await;
+        // Issue #1193: `team_id` は renderer 由来であり、同じ ID を別 project から
+        // register して既存 TeamInfo の project_root を上書きしてはならない。判定と
+        // 登録を同じ lock 内で行い、TOCTOU を作らない。
+        if let (Some(requested_root), Some(existing)) = (
+            project_root.map(str::trim).filter(|root| !root.is_empty()),
+            s.teams.get(team_id),
+        ) {
+            if existing.project_root.as_deref() != Some(requested_root) {
+                return Err("team_id is already owned by another project".to_string());
+            }
+        }
         s.active_teams.insert(team_id.to_string());
         // Issue #800: Canvas spawn 由来の初代 member (leader / worker) は
         // `team_recruit` / `team_create_leader` の recruit grant 経路を通らないため、
@@ -139,14 +150,38 @@ impl TeamHub {
                 crate::team_hub::spool::cleanup_old_spools(&root_owned).await;
             });
         }
+        Ok(())
     }
 
     /// チームを active list から外す。戻り値が true なら active が 0 → MCP 設定削除可
-    pub async fn clear_team(&self, team_id: &str) -> bool {
-        // Issue #1072 Part3: 破棄前に message log を最終 flush (dirty 分を確実に永続化)。
-        // flush_team_now は内部で state.lock を取るので、下の lock を取得する前に呼ぶ (deadlock 回避)。
+    pub async fn clear_team_for_project(
+        &self,
+        team_id: &str,
+        project_root: &str,
+    ) -> Result<bool, String> {
+        // Issue #1072 Part3: 破棄前に message log を最終 flush する。
+        // flush は await を伴うため、先に owner を確認して lock を解放し、flush 後に
+        // owner を再確認してから削除する。これにより別 project の team へ副作用を
+        // 起こさず、待機中の owner 変更も TOCTOU として見逃さない。
+        {
+            let s = self.state.lock().await;
+            let Some(existing) = s.teams.get(team_id) else {
+                return Ok(false);
+            };
+            if existing.project_root.as_deref() != Some(project_root) {
+                return Err("team_id is not owned by the active project".to_string());
+            }
+        }
         self.flush_team_now(team_id).await;
+
         let mut s = self.state.lock().await;
+        let Some(existing) = s.teams.get(team_id) else {
+            // 未登録 ID に対して global MCP 設定を消す方向へ倒さない。
+            return Ok(false);
+        };
+        if existing.project_root.as_deref() != Some(project_root) {
+            return Err("team_id is not owned by the active project".to_string());
+        }
         s.teams.remove(team_id);
         s.active_teams.remove(team_id);
         // 動的ロールもチーム単位でクリア (チーム破棄でロール定義を残す意味は無い)
@@ -169,6 +204,21 @@ impl TeamHub {
         // (3) (team_id, *) を key に持つ advisory file lock も retain で一括除去。
         s.file_locks.retain(|(tid, _), _| tid != team_id);
 
+        Ok(s.active_teams.is_empty())
+    }
+
+    /// owner を持たないユニットテスト用の teardown。production IPC は必ず
+    /// `clear_team_for_project` を使い、renderer がこの bypass に到達する経路はない。
+    #[cfg(test)]
+    pub async fn clear_team(&self, team_id: &str) -> bool {
+        self.flush_team_now(team_id).await;
+        let mut s = self.state.lock().await;
+        s.teams.remove(team_id);
+        s.active_teams.remove(team_id);
+        s.dynamic_roles.remove(team_id);
+        s.recruit_semaphores.remove(team_id);
+        s.remove_team_agents(team_id);
+        s.file_locks.retain(|(tid, _), _| tid != team_id);
         s.active_teams.is_empty()
     }
 
@@ -190,6 +240,31 @@ impl TeamHub {
         if let Err(e) = self.persist_team_state(team_id).await {
             tracing::warn!("[teamhub] persist active leader failed: {e}");
         }
+    }
+
+    /// renderer IPC 用の leader 切替。未登録 team を暗黙に作成せず、active project が
+    /// 登録時の owner と一致する場合だけ許可する。MCP protocol 内部はすでに
+    /// `RequestContext.team_id` で scope 済みなので、従来の `set_active_leader` を使う。
+    pub async fn set_active_leader_for_project(
+        &self,
+        team_id: &str,
+        project_root: &str,
+        agent_id: Option<String>,
+    ) -> Result<(), String> {
+        if team_id.trim().is_empty() {
+            return Err("team_id is required".to_string());
+        }
+        {
+            let s = self.state.lock().await;
+            let Some(team) = s.teams.get(team_id) else {
+                return Err("team_id is not registered".to_string());
+            };
+            if team.project_root.as_deref() != Some(project_root) {
+                return Err("team_id is not owned by the active project".to_string());
+            }
+        }
+        self.set_active_leader(team_id, agent_id).await;
+        Ok(())
     }
 
     /// Issue #470: TeamHub の in-memory orchestration state を team-state に保存する。
@@ -330,315 +405,6 @@ async fn load_persisted_dynamic_for_team(
     out
 }
 
-/// Issue #800: `register_team` が team member の `agent_role_bindings` を seed することの単体テスト。
-///
-/// PR #742 (Security) で handshake が「Hub 発行の recruit grant か既存 binding が必須」に
-/// 強化された結果、Canvas の team spawn で renderer が直接生成する初代 leader / worker
-/// (`leader-0-team-<id>` / `worker-N-team-<id>` 形式) が grant 経路を通らず全 reject される
-/// 回帰が発生した。`register_team` が member の binding を事前 seed することで、
-/// `resolve_pending_recruit` が既存 binding 経路でこれらを許可することを検証する。
 #[cfg(test)]
-mod register_team_binding_seed_tests {
-    use crate::pty::SessionRegistry;
-    use crate::team_hub::TeamHub;
-    use std::sync::Arc;
-
-    fn make_hub() -> TeamHub {
-        TeamHub::new(Arc::new(SessionRegistry::new()))
-    }
-
-    /// `register_team` で seed された team member は、recruit grant が無くても
-    /// handshake (`resolve_pending_recruit`) を通る。leader / worker いずれも対象。
-    #[tokio::test]
-    async fn register_team_seeds_member_bindings_so_handshake_passes_without_grant() {
-        let hub = make_hub();
-        let team_id = "team-800";
-        let members = [
-            ("leader-0-team-800".to_string(), "leader".to_string()),
-            ("worker-1-team-800".to_string(), "programmer".to_string()),
-        ];
-        hub.register_team(team_id, "Team 800", None, &members).await;
-
-        assert!(
-            hub.resolve_pending_recruit("leader-0-team-800", team_id, "leader")
-                .await,
-            "seeded leader should pass handshake without a recruit grant"
-        );
-        assert!(
-            hub.resolve_pending_recruit("worker-1-team-800", team_id, "programmer")
-                .await,
-            "seeded worker should pass handshake without a recruit grant"
-        );
-    }
-
-    /// PR #805 review: `team_id` を suffix に持たない (= 別 team / 不正な) agent_id は
-    /// binding seed されず handshake も通らない。renderer 入力で任意の binding を
-    /// 注入できないこと (#742 の binding 強制が後退しないこと) を検証する。
-    #[tokio::test]
-    async fn register_team_skips_member_agent_id_outside_team_scope() {
-        let hub = make_hub();
-        let team_id = "team-805";
-        let members = [
-            ("leader-0-team-805".to_string(), "leader".to_string()),
-            // team-805 を suffix に持たない別 team scope の agent_id。
-            ("worker-9-team-other".to_string(), "programmer".to_string()),
-        ];
-        hub.register_team(team_id, "Team 805", None, &members).await;
-
-        assert!(
-            hub.resolve_pending_recruit("leader-0-team-805", team_id, "leader")
-                .await,
-            "team scope 内の leader は seed され handshake を通る"
-        );
-        assert!(
-            !hub.resolve_pending_recruit("worker-9-team-other", team_id, "programmer")
-                .await,
-            "team scope 外の agent_id は seed されず handshake は通らない"
-        );
-    }
-}
-
-/// Issue #829: `clear_team` が team scope の全 in-memory state を漏れなく解放することの単体テスト。
-///
-/// 旧実装は `teams` / `active_teams` / `dynamic_roles` の 3 つしか掃除せず、
-/// `recruit_semaphores` / `file_locks` / `agent_role_bindings` / `member_diagnostics` /
-/// `last_status_call_at` が破棄済みチーム分も残り続け、長時間運用で in-memory state が
-/// 単調増加していた (= メモリリーク)。
-#[cfg(test)]
-mod clear_team_release_tests {
-    use crate::pty::SessionRegistry;
-    use crate::team_hub::{TeamHub, TeamInfo};
-    use std::sync::Arc;
-    use std::time::Instant;
-    use tokio::sync::Semaphore;
-
-    fn make_hub() -> TeamHub {
-        TeamHub::new(Arc::new(SessionRegistry::new()))
-    }
-
-    /// `clear_team` は破棄対象 team scope の recruit_semaphores / file_locks /
-    /// AgentEntry (role binding / diagnostics / status rate limit) を全て解放し、
-    /// 別 team の同種 state は保持する (Issue #829 → #934)。
-    #[tokio::test]
-    async fn clear_team_releases_all_team_scoped_state() {
-        let hub = make_hub();
-        let team_a = "team-829-a";
-        let agent_a = "vc-829-a";
-        let team_b = "team-829-b";
-        let agent_b = "vc-829-b";
-
-        // 両 team に AgentEntry (binding + diagnostics + status timestamp) / semaphore を仕込む。
-        {
-            let mut s = hub.state.lock().await;
-            s.teams
-                .entry(team_a.to_string())
-                .or_insert_with(TeamInfo::default);
-            s.active_teams.insert(team_a.to_string());
-            s.teams
-                .entry(team_b.to_string())
-                .or_insert_with(TeamInfo::default);
-            s.active_teams.insert(team_b.to_string());
-
-            s.seed_role_binding(team_a, agent_a, "programmer");
-            s.seed_role_binding(team_b, agent_b, "programmer");
-            s.agent_entry_mut(team_a, agent_a).last_status_call_at = Some(Instant::now());
-            s.agent_entry_mut(team_b, agent_b).last_status_call_at = Some(Instant::now());
-
-            s.recruit_semaphores
-                .insert(team_a.to_string(), Arc::new(Semaphore::new(1)));
-            s.recruit_semaphores
-                .insert(team_b.to_string(), Arc::new(Semaphore::new(1)));
-        }
-
-        // file lock は public method 経由で取得する (内部で state.lock するのでガード保持外で呼ぶ)。
-        hub.try_acquire_file_locks_with_cap(
-            team_a,
-            agent_a,
-            "programmer",
-            &["src/a.rs".to_string()],
-            16,
-        )
-        .await
-        .expect("team_a lock acquire");
-        hub.try_acquire_file_locks_with_cap(
-            team_b,
-            agent_b,
-            "programmer",
-            &["src/b.rs".to_string()],
-            16,
-        )
-        .await
-        .expect("team_b lock acquire");
-
-        // 破棄前の前提条件 (team_a 側が確かに積まれている)。
-        {
-            let s = hub.state.lock().await;
-            assert!(s.recruit_semaphores.contains_key(team_a));
-            assert!(s.agent_entry(team_a, agent_a).is_some());
-            assert_eq!(s.bound_role(team_a, agent_a).as_deref(), Some("programmer"));
-            assert!(s
-                .file_locks
-                .contains_key(&(team_a.to_string(), "src/a.rs".to_string())));
-        }
-
-        // team_a を破棄。team_b がまだ active なので戻り値は false。
-        let active_empty = hub.clear_team(team_a).await;
-        assert!(!active_empty, "team_b がまだ active なので false のはず");
-
-        let s = hub.state.lock().await;
-        // team_a 由来の state は全て解放されている (leak していないこと)。
-        assert!(!s.teams.contains_key(team_a));
-        assert!(!s.active_teams.contains(team_a));
-        assert!(
-            !s.recruit_semaphores.contains_key(team_a),
-            "recruit_semaphores leak"
-        );
-        assert!(
-            s.agent_entry(team_a, agent_a).is_none(),
-            "AgentEntry (diagnostics / binding / status rate limit) leak"
-        );
-        assert!(
-            !s.file_locks
-                .contains_key(&(team_a.to_string(), "src/a.rs".to_string())),
-            "file_locks leak"
-        );
-
-        // team_b 由来の state は一切影響を受けない。
-        assert!(s.teams.contains_key(team_b));
-        assert!(s.recruit_semaphores.contains_key(team_b));
-        let entry_b = s.agent_entry(team_b, agent_b).expect("team_b entry survives");
-        assert_eq!(entry_b.active_role(), Some("programmer"));
-        assert!(entry_b.last_status_call_at.is_some());
-        assert!(s
-            .file_locks
-            .contains_key(&(team_b.to_string(), "src/b.rs".to_string())));
-    }
-
-    /// 同一 agent_id が複数 team に在籍している (実運用では稀) 場合、entry は
-    /// `(team_id, agent_id)` で per-team に分離されているため、破棄した team 以外の
-    /// entry (diagnostics / binding) は影響を受けない。
-    /// 旧実装 (agent_id 単独キー + roster 逆引き防御) の cross-team 防御コードは
-    /// per-team entry 化で概念ごと不要になった (Issue #934)。
-    #[tokio::test]
-    async fn clear_team_keeps_other_team_entry_for_shared_agent() {
-        let hub = make_hub();
-        let team_a = "team-829-shared-a";
-        let team_b = "team-829-shared-b";
-        let shared_agent = "vc-shared";
-        {
-            let mut s = hub.state.lock().await;
-            s.teams
-                .entry(team_a.to_string())
-                .or_insert_with(TeamInfo::default);
-            s.active_teams.insert(team_a.to_string());
-            s.teams
-                .entry(team_b.to_string())
-                .or_insert_with(TeamInfo::default);
-            s.active_teams.insert(team_b.to_string());
-            // 同一 agent_id を両 team に bind (per-team entry が 2 つできる)。
-            s.seed_role_binding(team_a, shared_agent, "programmer");
-            s.seed_role_binding(team_b, shared_agent, "programmer");
-            s.agent_entry_mut(team_b, shared_agent).last_status_call_at = Some(Instant::now());
-        }
-
-        hub.clear_team(team_a).await;
-
-        let s = hub.state.lock().await;
-        // team_a の entry は消えるが、team_b の entry (binding / diagnostics) は残る。
-        assert!(s.agent_entry(team_a, shared_agent).is_none());
-        let entry_b = s
-            .agent_entry(team_b, shared_agent)
-            .expect("shared agent entry for team_b must survive");
-        assert_eq!(entry_b.active_role(), Some("programmer"));
-        assert!(entry_b.last_status_call_at.is_some());
-    }
-
-    /// Issue #829 (旧支配的経路の回帰テスト) → #934:
-    /// recruit grant で entry を生やした agent が、`clear_team` より **先に**
-    /// dismiss / record_agent_process_exit で role binding を失効する (= teardown 前に
-    /// exit/dismiss されるという通常運用) ケース。旧実装は agent-keyed map を binding の
-    /// 逆引きでしか掃除できず永久 leak していた (#829 は roster 追加で対症療法)。
-    /// AgentEntry 統合後は binding 失効が Active → Exited の遷移になり (entry は診断保持の
-    /// ため残る)、clear_team の team prefix retain が entry ごと回収する。
-    /// production の挿入経路 (`try_register_pending_recruit` → handshake) と失効経路
-    /// (`remove_agent_role_binding` = dismiss / 終了が呼ぶ glue) を使って実運用を忠実に再現する。
-    #[tokio::test]
-    async fn clear_team_reclaims_entry_when_binding_retired_before_teardown() {
-        let hub = make_hub();
-        let team_id = "team-829-orphan";
-        let agent_id = "vc-829-orphan";
-
-        s_register_active_team(&hub, team_id).await;
-
-        // (1) recruit grant: AgentEntry (Granted) を挿入する production 経路。
-        hub.try_register_pending_recruit(
-            agent_id.to_string(),
-            team_id.to_string(),
-            "programmer".to_string(),
-            "leader-orphan".to_string(),
-            false,
-            &[],
-        )
-        .await
-        .expect("pending recruit grant should be registered");
-
-        // handshake 成立で Granted → Active{role} へ遷移した状態を再現。
-        assert!(
-            hub.resolve_pending_recruit(agent_id, team_id, "programmer")
-                .await,
-            "handshake should succeed for the granted recruit"
-        );
-
-        // team_status 呼び出し相当で last_status_call_at にも値を生やす。
-        {
-            let mut s = hub.state.lock().await;
-            s.agent_entry_mut(team_id, agent_id).last_status_call_at = Some(Instant::now());
-        }
-
-        // 前提: entry が Active で diagnostics / last_status も積まれている。
-        {
-            let s = hub.state.lock().await;
-            let entry = s.agent_entry(team_id, agent_id).expect("entry exists");
-            assert_eq!(entry.active_role(), Some("programmer"));
-            assert!(entry.last_status_call_at.is_some());
-            assert!(!entry.diagnostics.recruited_at.is_empty());
-        }
-
-        // (2) clear_team **より先に** binding を失効 = 通常運用 (dismiss /
-        // record_agent_process_exit)。remove_agent_role_binding は dismiss と
-        // record_agent_process_exit が共有する production の失効経路。
-        assert!(
-            hub.remove_agent_role_binding(team_id, agent_id).await,
-            "binding should exist and be retired before teardown"
-        );
-        {
-            let s = hub.state.lock().await;
-            let entry = s.agent_entry(team_id, agent_id).expect("entry survives retire");
-            // binding (Active) は失効したが entry は診断保持のため残る。
-            assert_eq!(entry.active_role(), None);
-        }
-
-        // (3) teardown。
-        hub.clear_team(team_id).await;
-
-        let s = hub.state.lock().await;
-        // 修正後: team prefix retain が entry ごと回収する (掃除漏れの余地が無い)。
-        assert!(
-            s.agent_entry(team_id, agent_id).is_none(),
-            "AgentEntry must be reclaimed even though the binding was retired before clear_team"
-        );
-        assert!(
-            !s.agents.keys().any(|(tid, _)| tid == team_id),
-            "no agent entry for the cleared team may remain"
-        );
-    }
-
-    /// テスト用ヘルパ: 指定 team を active として登録する。
-    async fn s_register_active_team(hub: &TeamHub, team_id: &str) {
-        let mut s = hub.state.lock().await;
-        s.teams
-            .entry(team_id.to_string())
-            .or_insert_with(TeamInfo::default);
-        s.active_teams.insert(team_id.to_string());
-    }
-}
+#[path = "persistence/tests.rs"]
+mod tests;

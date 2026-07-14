@@ -3,9 +3,15 @@
 // ~/.claude/projects/<encoded-projectRoot>/*.jsonl を列挙し、
 // 各 jsonl から最初のユーザーメッセージ (=タイトル) と message count を抽出する。
 
-use crate::pty::path_norm::{encode_project_path, normalize_project_root};
+use crate::commands::authz::AuthorizedActiveProjectRoot;
+use crate::commands::error::CommandResult;
+use crate::commands::project_authority::ProjectRootIdentity;
+use crate::pty::path_norm::encode_project_path;
+use crate::state::AppState;
+use arc_swap::ArcSwapOption;
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use tauri::State;
 use tokio::io::AsyncBufReadExt;
 
 #[derive(Serialize)]
@@ -25,23 +31,81 @@ pub struct SessionInfo {
     pub last_modified_ms: i64,
 }
 
-fn projects_dir(root: &str) -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_default();
+fn projects_dir(home: &Path, root: &str) -> PathBuf {
     home.join(".claude")
         .join("projects")
         .join(encode_project_path(root))
 }
 
+/// JSONLに保存されたcwdを、gate後のI/Oなしで比較するためのkeyにする。
+///
+/// `normalize_project_root` はcanonicalizeを含むため、保存後にsymlinkがretargetされると
+/// foreign cwdをactive identityとして再解決してしまう。storage互換のためraw表記を保った
+/// まま、区切り・末尾slash・Windows caseだけを純粋に正規化する。
+fn lexical_project_root_key(raw: &str) -> String {
+    let normalized = raw.replace('\\', "/");
+    let stripped = normalized.trim_end_matches('/');
+    if cfg!(windows) {
+        stripped.to_lowercase()
+    } else {
+        stripped.to_string()
+    }
+}
+
 #[tauri::command]
-pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
-    let dir = projects_dir(&project_root);
+pub async fn sessions_list(
+    state: State<'_, AppState>,
+    project_root: String,
+) -> CommandResult<Vec<SessionInfo>> {
+    let home = dirs::home_dir().unwrap_or_default();
+    sessions_list_via(
+        &state.project_root,
+        &state.project_root_identity,
+        project_root,
+        move |authorized| sessions_list_from_home(authorized, home),
+    )
+    .await
+}
+
+/// command入口のstrict gateと後続readerの順序を1か所に固定する。readerは
+/// `AuthorizedActiveProjectRoot` なしでは呼べないため、拒否requestはdirectory I/Oへ進まない。
+pub(crate) async fn sessions_list_via<R, Reader, Fut>(
+    project_root_slot: &ArcSwapOption<String>,
+    project_root_identity_slot: &ArcSwapOption<ProjectRootIdentity>,
+    project_root: String,
+    reader: Reader,
+) -> CommandResult<R>
+where
+    Reader: FnOnce(AuthorizedActiveProjectRoot) -> Fut,
+    Fut: std::future::Future<Output = R>,
+{
+    let authorized = crate::commands::authz::assert_active_project_root_with_raw(
+        project_root_slot,
+        project_root_identity_slot,
+        &project_root,
+    )
+    .await?;
+    Ok(reader(authorized).await)
+}
+
+/// 認可済みactive rawをClaude CLI互換でencodeし、session metadataを列挙する。
+/// `home`を引数化して、実HOMEを変更せずdirectory selectionを統合テストできるようにする。
+pub(crate) async fn sessions_list_from_home(
+    authorized: AuthorizedActiveProjectRoot,
+    home: PathBuf,
+) -> Vec<SessionInfo> {
+    // directoryは既存Claude互換のactive raw、cwd selectorはgate時canonical identityと
+    // 同じsnapshotのactive raw identityのいずれかだけを許可する。どちらも後続I/Oなし。
+    let active_raw_key = authorized.active_raw_key();
+    let (canonical, project_root) = authorized.into_parts();
+    let dir = projects_dir(&home, &project_root);
     let Ok(mut rd) = tokio::fs::read_dir(&dir).await else {
         return vec![];
     };
     // Issue #31: encode_project_path は非英数を '-' に潰すので、別 project が同じ
     // encoded directory に衝突し得る (例: `C:\repo-a` と `C:\repo\a`)。
     // jsonl 内に Claude Code が書き込む cwd を読んで、異なる project のものは除外する。
-    let requested_norm = normalize_project_root(&project_root);
+    let canonical_key = canonical.comparison_key();
 
     // Issue #127: 旧実装は metadata + read_jsonl_summary を 1 ファイルずつ直列に await
     // しており、100+ セッションあるプロジェクトで I/O 直列化により 1〜3 秒かかっていた。
@@ -113,17 +177,24 @@ pub async fn sessions_list(project_root: String) -> Vec<SessionInfo> {
             if let Some(next) = iter.next() {
                 spawn_one(&mut in_flight, next);
             }
-            // cwd が jsonl から取れたときだけ厳密チェック (取れないものは fail-open)
-            if let Some(ref c) = summary.cwd {
-                if !c.trim().is_empty() && normalize_project_root(c) != requested_norm {
-                    tracing::debug!(
-                        "[sessions] skipping colliding session {}: cwd={} != requested={}",
-                        cand.id,
-                        c,
-                        project_root
-                    );
-                    continue;
-                }
+            // Claude directory名は衝突可能なので、cwdが無い/空の旧形式・破損JSONLも
+            // fail-closedで除外する。titleだけではactive projectを証明できない。
+            let Some(cwd) = summary.cwd.as_deref().filter(|cwd| !cwd.trim().is_empty()) else {
+                tracing::debug!(
+                    "[sessions] skipping session {} without a usable cwd",
+                    cand.id
+                );
+                continue;
+            };
+            let cwd_key = lexical_project_root_key(cwd);
+            if cwd_key != canonical_key && cwd_key != active_raw_key {
+                tracing::debug!(
+                    "[sessions] skipping colliding session {}: cwd={} != requested={}",
+                    cand.id,
+                    cwd,
+                    project_root
+                );
+                continue;
             }
             sessions.push(SessionInfo {
                 id: cand.id,

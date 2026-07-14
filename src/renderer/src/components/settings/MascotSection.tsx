@@ -15,14 +15,9 @@ export function MascotSection({ draft, update }: Props): JSX.Element {
   const customPath = draft.statusMascotCustomPath ?? '';
 
   const pickCustomImage = async (): Promise<void> => {
-    // Issue #820: Rust 側 is_allowed_mascot_path の画像ホワイトリストと同期した filter を
-    // picker に渡し、非画像選択 → silent reject の UX を防ぐ
-    const picked = await window.api.dialog.openFile(t('settings.mascot.pickTitle'), [
-      {
-        name: t('settings.mascot.imageFilterName'),
-        extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'ico', 'svg', 'apng']
-      }
-    ]);
+    // Issue #1193: native pickerの選択結果をRust側private storeへコピーする。同じpathを
+    // settingsに保存しても、それは表示用でありasset/fs authorityには使わない。
+    const picked = await window.api.settings.pickCustomMascot(t('settings.mascot.pickTitle'));
     if (!picked) return;
     update('statusMascotCustomPath', picked);
     if (selected !== 'custom') update('statusMascotVariant', 'custom');
@@ -31,6 +26,9 @@ export function MascotSection({ draft, update }: Props): JSX.Element {
   const clearCustomImage = (): void => {
     update('statusMascotCustomPath', '');
     update('statusMascotVariant', DEFAULT_SETTINGS.statusMascotVariant);
+    void window.api.settings.clearCustomMascot().catch((error) => {
+      console.warn('[mascot] private image cleanup failed:', error);
+    });
   };
 
   return (

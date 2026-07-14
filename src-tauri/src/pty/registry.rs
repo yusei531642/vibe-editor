@@ -236,7 +236,12 @@ impl SessionRegistry {
                             "[registry] replacing session {prev_sid} with {id} — killing old PTY"
                         );
                         let _ = old.kill();
-                        old.cleanup_codex_broker_if_stale();
+                        // Issue #1075: 旧実装はここで `inner` の MutexGuard 保持中に同期版 broker 掃除
+                        // (cleanup_stale_for_cwd の単発 pass) を呼んでおり、git rev-parse / tasklist / kill の
+                        // 子プロセス spawn の間グローバルロックが握られて全 PTY 操作が直列ブロックされていた。
+                        // `old.kill()` 直後なので remove() / kill_team() と同じ detached 版
+                        // `cleanup_codex_broker_after_kill` (_with_retry) に統一して掃除をロック外へ出す。
+                        old.cleanup_codex_broker_after_kill();
                     }
                 }
             }
@@ -367,8 +372,9 @@ impl SessionRegistry {
     ///  なったため削除した。)
     ///
     /// Issue #834: 終了経路では broker の stale state 掃除を**スキップ**する (掃除は best-effort で
-    /// 次回起動時の spawn 前 cleanup `cleanup_codex_broker_if_stale` で回収できる)。ここでは
-    /// process-tree kill だけを確実に行う。
+    /// 次回起動時の spawn 前 cleanup ― `terminal_create` 内の
+    /// `codex_broker::cleanup_stale_for_cwd` ― で回収できる)。ここでは process-tree kill だけを
+    /// 確実に行う。
     pub fn kill_all_blocking(&self, timeout: Duration) {
         let sessions: Vec<Arc<SessionHandle>> = {
             let mut g = recover(self.inner.lock());

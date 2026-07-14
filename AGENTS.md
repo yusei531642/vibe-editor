@@ -12,7 +12,7 @@
 | skill | 用途 |
 |-------|------|
 | **`vibeeditor`** | プロジェクト全体ガイド。アーキテクチャ / IPC / ディレクトリ / 頻出コマンド / Canvas / PTY / TeamHub / 設定永続化 等。**コードを読む・書く前に必ず起動する**。 |
-| **`pullrequest`** | PR 作成 → bot 自動レビュー → 指摘修正ループ → 自動 merge までの workflow。PR を扱うときは必ずこれに従う。 |
+| **`pullrequest`** | PR 作成 → bot 自動レビュー → 指摘修正ループ → 品質ゲート確認 → ユーザー明示承認後のマージまでの workflow。PR を扱うときは必ずこれに従う。 |
 
 skill を起動せずにコードを書き始めない。
 
@@ -37,19 +37,20 @@ skill を起動せずにコードを書き始めない。
 
 ### 1-3. `main` への直接 push は **絶対禁止**
 - `git push origin main` / `git push --force origin main` 等、`main` を直接更新する操作は一切行わない。
-- すべての変更は **feature branch → PR → bot による自動 merge** の経路を通す。
-- 手動 merge も禁止 (`gh pr merge` を人間/エージェントが叩かない)。merge は **vibe-editor-reviewer bot** に任せる。
+- すべての変更は **feature branch → PR → reviewer bot の確認 → ユーザー明示承認後のマージ** の経路を通す。
+- `vibe-editor-reviewer` はレビューと判定のみを行い、PR を自動マージしない。reviewer の OK はマージ承認ではない。
+- `gh pr merge` は、全品質ゲートとレビュー対応を完了し、対象 PR・現在の HEAD・マージをユーザーが明示承認した後にだけ実行できる。
 
 ### 1-4. PR 提出後はレビューループを完走させる
 PR を出したら投げっぱなしにせず、**merge されたことを確認するまでがタスク**。
 
 1. PR を作成すると **vibe-editor-reviewer (GitHub bot)** が自動レビューする。
 2. レビューコメントが来たら **すべて対応** (修正 / 反論コメント) → 同じブランチに push。
-3. push すると bot が再レビューする。これを **指摘ゼロ → bot が auto-merge** するまで繰り返す。
+3. push すると bot が再レビューする。指摘をすべて解消し、CI と必要な品質ゲートを完了するまで繰り返す。**reviewer の OK だけではマージしない**。
 4. 検知は手動 polling ではなく `loop` skill (または `/loop`) を使う:
    - 例: `/loop 3m` 等で `gh pr view <PR#> --json state,reviewDecision,comments,reviews` を周期的にチェックし、新規レビューが付いたら修正フェーズへ移る。
    - レビューが来ない間は idle、来たら差分を読んで修正コミットを push する。
-5. PR の `state` が `MERGED` になったらループを停止し、ユーザーに完了報告する。
+5. 対象 PR・現在の HEAD・CI 結果・レビュー結果をユーザーに提示して、マージの明示承認を得る。承認後に PR 経由でマージし、`state` が `MERGED` になったことを確認してから完了報告する。
 
 詳細手順・コマンド例は `pullrequest` skill に従うこと。
 
@@ -101,7 +102,8 @@ PR を出す前に必ず通すこと:
 - ❌ Issue を作らずにいきなり PR
 - ❌ ラベル無しで Issue 作成
 - ❌ `main` への直接 push / force push
-- ❌ 手動での `gh pr merge` (bot に任せる)
+- ❌ reviewer の OK だけでのマージ
+- ❌ ユーザーの明示承認前に `gh pr merge` を実行
 - ❌ PR を出したまま放置 (merge まで責任を持つ)
 - ❌ `--no-verify` で hook をスキップ (ユーザーが明示的に許可した場合のみ)
 - ❌ `vibeeditor` skill を起動せずにコードに手を入れる

@@ -213,6 +213,25 @@ pub struct AgentConfig {
     pub skill_ids: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_mode: Option<String>,
+    // ---- Issue #1113: custom agent descriptor フィールド (すべて additive-optional) ----
+    /// CLI custom が動作する engine ('claude' | 'codex')。未指定なら renderer 側で 'claude' 既定。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<String>,
+    /// 起動時に注入する環境変数。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub env: Option<HashMap<String, String>>,
+    /// カード表示アイコン (lucide アイコン名)。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<String>,
+    /// 分類・フィルタ用タグ。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+    /// 定義レベルの既定 skill 群 (Phase4)。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_skill_ids: Option<Vec<String>>,
+    /// skill 注入方式 ('claude-dir' | 'prompt-file' | 'none', Phase4 / Issue #1125)。
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skill_injection: Option<String>,
 }
 
 fn default_agent_runtime() -> String {
@@ -374,32 +393,29 @@ async fn read_optional_file_with_retry(
 pub async fn settings_load() -> CommandResult<Settings> {
     tracing::info!("[IPC] settings_load called");
     let path = crate::util::config_paths::settings_path();
-    let settings = match read_optional_file_with_retry(
-        &path,
-        "settings_load",
-        SETTINGS_READ_RETRY_DELAYS,
-    )
-    .await?
-    {
-        // Issue #29: 初回起動で settings.json がまだ無いときだけ default を返す。
-        // Issue #905: PermissionDenied / sharing violation 等の読み取り不能は default 扱いに
-        // しない。renderer 側へ Err を返し、default ベースの auto-save で原本を上書きしない。
-        None => Settings::default(),
-        Some(bytes) => {
-            backup_pre_v12_settings_snapshot(&path, &bytes).await;
-            match serde_json::from_slice::<Settings>(&bytes) {
-                Ok(v) => v,
-                // Issue #170 / #493 / #644 / #996: parse 失敗時の原本退避 + v11 スナップショット復旧は
-                // `settings_recovery` に集約 (settings.rs の肥大化を避ける)。
-                Err(e) => {
-                    crate::commands::settings_recovery::recover_after_parse_failure(
-                        &path, &bytes, e,
-                    )
-                    .await
+    let settings =
+        match read_optional_file_with_retry(&path, "settings_load", SETTINGS_READ_RETRY_DELAYS)
+            .await?
+        {
+            // Issue #29: 初回起動で settings.json がまだ無いときだけ default を返す。
+            // Issue #905: PermissionDenied / sharing violation 等の読み取り不能は default 扱いに
+            // しない。renderer 側へ Err を返し、default ベースの auto-save で原本を上書きしない。
+            None => Settings::default(),
+            Some(bytes) => {
+                backup_pre_v12_settings_snapshot(&path, &bytes).await;
+                match serde_json::from_slice::<Settings>(&bytes) {
+                    Ok(v) => v,
+                    // Issue #170 / #493 / #644 / #996: parse 失敗時の原本退避 + v11 スナップショット復旧は
+                    // `settings_recovery` に集約 (settings.rs の肥大化を避ける)。
+                    Err(e) => {
+                        crate::commands::settings_recovery::recover_after_parse_failure(
+                            &path, &bytes, e,
+                        )
+                        .await
+                    }
                 }
             }
-        }
-    };
+        };
     // Issue #1068: team_hub は永続 Settings を直接読まないため、起動時 load でミラーを同期する。
     crate::team_hub::codex_delivery::set_from_settings(Some(&settings.codex_team_send_delivery));
     Ok(settings)
@@ -510,7 +526,7 @@ async fn read_disk_schema_version(path: &std::path::Path) -> CommandResult<Optio
 }
 
 #[tauri::command]
-pub async fn settings_save(app: tauri::AppHandle, settings: Settings) -> CommandResult<()> {
+pub async fn settings_save(_app: tauri::AppHandle, settings: Settings) -> CommandResult<()> {
     let _g = SAVE_LOCK.lock().await;
     let path = crate::util::config_paths::settings_path();
     // Issue #641: 古い build が新スキーマの settings.json を silent に上書きするのを防ぐ。
@@ -526,32 +542,12 @@ pub async fn settings_save(app: tauri::AppHandle, settings: Settings) -> Command
         .map_err(|e| CommandError::Internal(e.to_string()))?;
     // Issue #1068: 設定変更を team_hub の配送方式ミラーへ即時反映する (settings.json が SSOT)。
     crate::team_hub::codex_delivery::set_from_settings(Some(&settings.codex_team_send_delivery));
-    // Issue #724: mascot custom 画像 (PR #716) をユーザーが設定画面で選び直したとき、
-    // assetProtocol.scope は空なので、再起動を待たず同一セッション内でその 1 ファイルを
-    // `asset://` で表示できるよう asset scope へ許可する。失敗しても save 自体は成功扱い。
-    //
-    // PR #775 (auto-review): `statusMascotCustomPath` は renderer 由来。XSS が
-    // `/etc/passwd` 等の任意パスを注入して asset scope に追加させるバイパスを防ぐため、
-    // `is_allowed_mascot_path` (画像拡張子ホワイトリスト + parent ディレクトリの
-    // is_safe_watch_root 検証) を通したものだけを許可する。
-    if let Some(mascot_path) = settings
-        .status_mascot_custom_path
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        let p = std::path::Path::new(mascot_path);
-        if crate::commands::asset_scope::is_allowed_mascot_path(p) {
-            crate::commands::asset_scope::allow_asset_file(&app, p);
-        } else {
-            tracing::warn!(
-                "[settings_save] rejected mascot path for asset scope (bad extension or unsafe directory): {}",
-                p.display()
-            );
-        }
-    }
+    // Issue #1193: rendererが更新できるsettingsのpathをglobal asset:// scopeへ追加しては
+    // ならない。custom mascotのnative選択・data URL読み出しはproject authority側の専用経路で
+    // 扱うため、settings_saveは表示用pathを保存するだけに留める。
     Ok(())
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -765,6 +761,12 @@ mod tests {
                 system_prompt: None,
                 skill_ids: None,
                 tool_mode: None,
+                engine: None,
+                env: None,
+                icon: None,
+                tags: None,
+                default_skill_ids: None,
+                skill_injection: None,
             }]),
             ..Settings::default()
         };
@@ -792,6 +794,12 @@ mod tests {
                 system_prompt: None,
                 skill_ids: None,
                 tool_mode: None,
+                engine: None,
+                env: None,
+                icon: None,
+                tags: None,
+                default_skill_ids: None,
+                skill_injection: None,
             }]),
             ..Settings::default()
         };

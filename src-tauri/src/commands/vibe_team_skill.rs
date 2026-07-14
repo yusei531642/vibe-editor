@@ -15,16 +15,20 @@
 // 配置タイミング: setup_team_mcp で「実チーム」を初めて起動するときに 1 回書き出す。
 // _init / 空 team_id ではスキップする。既存ファイルを上書きするかは forceOverwrite で制御。
 
-use crate::commands::atomic_write::atomic_write;
+use crate::commands::authz::assert_active_project_root;
 use crate::state::AppState;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tauri::State;
-use tokio::fs;
+
+mod secure_install;
+#[cfg(test)]
+#[path = "vibe_team_skill/secure_install_tests.rs"]
+mod secure_install_tests;
 
 /// Skill ファイル本文の現行バージョン。SKILL.md 先頭に埋め込んでおき、
 /// Rust 側がファイルを見たときに「ユーザーが手で編集したか / 古いバンドル版か」を判別できるようにする。
-const SKILL_VERSION: &str = "1.6.3";
+const SKILL_VERSION: &str = "1.6.5";
 
 /// vibe-team Skill 本文。Claude Code の Skill 形式 (frontmatter + Markdown body) で書く。
 const SKILL_BODY: &str = include_str!("./vibe_team_skill_body.md");
@@ -74,60 +78,112 @@ pub(crate) fn bundled_vibe_team_skill_text() -> String {
     current_skill_text()
 }
 
+/// SKILL.md 先頭の `<!-- vibe-team-skill-version: X.Y.Z -->` 行から
+/// (major, minor, patch) を抽出する。ヘッダが無い / 数値 3 連でない場合は None。
+///
+/// Issue #1108: バンドル版より新しい on-disk 版を縮退上書きしないための版比較に使う。
+fn parse_skill_version(text: &str) -> Option<(u64, u64, u64)> {
+    // ヘッダは先頭行にある想定だが、空行等を許容して先頭数行だけ走査する。
+    for line in text.lines().take(8) {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("<!-- vibe-team-skill-version:") {
+            let ver = rest.trim_end_matches("-->").trim();
+            return parse_semver(ver);
+        }
+    }
+    None
+}
+
+/// `X.Y.Z` 形式の文字列を (major, minor, patch) に parse する。
+/// 3 連の数値でない (要素数違い / 非数値) 場合は None を返し、呼び出し側は保守的に扱う。
+fn parse_semver(s: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = s.split('.');
+    let major = parts.next()?.trim().parse().ok()?;
+    let minor = parts.next()?.trim().parse().ok()?;
+    let patch = parts.next()?.trim().parse().ok()?;
+    if parts.next().is_some() {
+        // 4 要素以上は想定外の書式 → 不正とみなす。
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
 /// 実際の書き出し処理。境界チェックを通過した後の root を渡すこと。
 /// renderer から直接呼ばせない (state を経由した command 経由でのみ呼ばれる)。
 async fn install_skill_at(root: &Path, force: bool) -> InstallSkillResult {
-    if !root.is_dir() {
-        return InstallSkillResult {
-            ok: false,
-            error: Some(format!(
-                "project_root is not a directory: {}",
-                root.display()
-            )),
-            ..Default::default()
-        };
-    }
-    let dir = skill_dir(root);
     let path = skill_path(root);
-
     let new_text = current_skill_text();
     let header_prefix = header_line();
-    let mut overwritten = false;
+    let root = root.to_path_buf();
+    let outcome = tokio::task::spawn_blocking(move || {
+        secure_install::install(&root, new_text.as_bytes(), |existing| {
+            let starts_with_current_header = existing.starts_with(&header_prefix);
+            if starts_with_current_header && existing == new_text {
+                return secure_install::ExistingAction::Skip;
+            }
+            // Issue #1108: on-disk が bundled より「新しい」版なら、force=true でも縮退上書き
+            // しない。on-disk ヘッダの版を parse して bundled SKILL_VERSION と semver 比較し、
+            // disk が厳密に新しい場合だけ skip する。版がない / 同等以下の場合は guard を
+            // 素通りさせ、従来挙動 (下の force / ユーザー編集判定) を保守的に維持する。
+            if let (Some(disk_ver), Some(bundled_ver)) =
+                (parse_skill_version(existing), parse_semver(SKILL_VERSION))
+            {
+                if disk_ver > bundled_ver {
+                    // Issue #1108 / PR #1111: 縮退 skip を観測可能にする。force=true は明示的な
+                    // reinstall (self-heal) が newer on-disk により抑止されたケース = 潜在的な
+                    // tamper / downgrade-skip なので WARN で監査可能にする。force=false は
+                    // best-effort の通常スキップなので INFO に留める。skip 判定の挙動は不変。
+                    let disk = format!("{}.{}.{}", disk_ver.0, disk_ver.1, disk_ver.2);
+                    let bundled = format!("{}.{}.{}", bundled_ver.0, bundled_ver.1, bundled_ver.2);
+                    if force {
+                        tracing::warn!(
+                            "[skill] vibe-team SKILL.md force install skipped: on-disk version {disk} is newer than bundled {bundled}; preserving to avoid downgrade (verify on-disk file if unexpected)"
+                        );
+                    } else {
+                        tracing::info!(
+                            "[skill] vibe-team SKILL.md install skipped: on-disk version {disk} is newer than bundled {bundled}; preserving to avoid downgrade"
+                        );
+                    }
+                    return secure_install::ExistingAction::Skip;
+                }
+            }
+            if !force && !starts_with_current_header {
+                return secure_install::ExistingAction::Skip;
+            }
+            secure_install::ExistingAction::Replace
+        })
+    })
+    .await;
 
-    if let Ok(existing) = fs::read_to_string(&path).await {
-        let starts_with_current_header = existing.starts_with(&header_prefix);
-        if starts_with_current_header && existing == new_text {
-            // 内容まで完全一致 → no-op
-            return InstallSkillResult {
-                ok: true,
-                path: Some(path.to_string_lossy().into_owned()),
-                skipped: true,
-                ..Default::default()
-            };
-        }
-        if !force && !starts_with_current_header {
-            // ユーザー編集を上書きしない
-            return InstallSkillResult {
-                ok: true,
-                path: Some(path.to_string_lossy().into_owned()),
-                skipped: true,
-                ..Default::default()
-            };
-        }
-        overwritten = true;
-    }
-
-    if let Err(e) = fs::create_dir_all(&dir).await {
-        return InstallSkillResult {
+    match outcome {
+        Ok(outcome) => map_install_result(&path, outcome),
+        Err(_) => InstallSkillResult {
             ok: false,
-            error: Some(format!("create_dir_all failed: {e}")),
+            error: Some("secure skill install task failed".into()),
             ..Default::default()
-        };
+        },
     }
-    if let Err(e) = atomic_write(&path, new_text.as_bytes()).await {
+}
+
+fn map_install_result(
+    path: &Path,
+    outcome: std::io::Result<secure_install::InstallOutcome>,
+) -> InstallSkillResult {
+    let outcome = match outcome {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            return InstallSkillResult {
+                ok: false,
+                error: Some(format!("secure skill install failed: {error}")),
+                ..Default::default()
+            };
+        }
+    };
+    if outcome.skipped {
         return InstallSkillResult {
-            ok: false,
-            error: Some(format!("atomic_write failed: {e:#}")),
+            ok: true,
+            path: Some(path.to_string_lossy().into_owned()),
+            skipped: true,
             ..Default::default()
         };
     }
@@ -135,7 +191,8 @@ async fn install_skill_at(root: &Path, force: bool) -> InstallSkillResult {
     // INFO はマスク済み path、DEBUG にだけ生 path を残す。
     tracing::info!(
         "[skill] vibe-team SKILL.md installed at {} (overwrite={overwritten})",
-        crate::util::log_redact::redact_home(&path.to_string_lossy())
+        crate::util::log_redact::redact_home(&path.to_string_lossy()),
+        overwritten = outcome.overwritten
     );
     tracing::debug!(
         "[skill] vibe-team SKILL.md installed at (raw) {}",
@@ -144,7 +201,7 @@ async fn install_skill_at(root: &Path, force: bool) -> InstallSkillResult {
     InstallSkillResult {
         ok: true,
         path: Some(path.to_string_lossy().into_owned()),
-        overwritten,
+        overwritten: outcome.overwritten,
         skipped: false,
         error: None,
     }
@@ -157,54 +214,37 @@ pub async fn app_install_vibe_team_skill(
     force_overwrite: Option<bool>,
 ) -> crate::commands::error::CommandResult<InstallSkillResult> {
     let force = force_overwrite.unwrap_or(false);
-    let trimmed = project_root.trim();
-    if trimmed.is_empty() {
-        return Ok(InstallSkillResult {
-            ok: false,
-            error: Some("project_root is empty".into()),
-            ..Default::default()
-        });
-    }
     // Issue #135 (Security): renderer から来る project_root が AppState の現在値と一致
     // するか canonicalize 比較する。一致しないとユーザー HOME 等の任意ディレクトリ配下に
     // .claude/skills/vibe-team/SKILL.md を作成できてしまい AI hijack 経路になる。
-    // Issue #739: ArcSwapOption の lock-free load で現在値を読む。
-    let active = crate::state::current_project_root(&state.project_root).unwrap_or_default();
-    if active.trim().is_empty() {
-        return Ok(InstallSkillResult {
+    // Issue #1149: 認可をauthz helperへ一本化し、認可失敗は従来どおりresult.errorで返す。
+    Ok(install_skill_for_active_root(
+        &state.project_root,
+        &state.project_root_identity,
+        &project_root,
+        force,
+    )
+    .await)
+}
+
+async fn install_skill_for_active_root(
+    project_root_slot: &arc_swap::ArcSwapOption<String>,
+    project_root_identity_slot: &arc_swap::ArcSwapOption<
+        crate::commands::project_authority::ProjectRootIdentity,
+    >,
+    project_root: &str,
+    force: bool,
+) -> InstallSkillResult {
+    match assert_active_project_root(project_root_slot, project_root_identity_slot, project_root)
+        .await
+    {
+        Ok(root) => install_skill_at(root.as_path(), force).await,
+        Err(error) => InstallSkillResult {
             ok: false,
-            error: Some("no active project_root configured".into()),
+            error: Some(error.to_string()),
             ..Default::default()
-        });
+        },
     }
-    let req_canon = match std::fs::canonicalize(trimmed) {
-        Ok(p) => p,
-        Err(e) => {
-            return Ok(InstallSkillResult {
-                ok: false,
-                error: Some(format!("canonicalize requested project_root failed: {e}")),
-                ..Default::default()
-            });
-        }
-    };
-    let active_canon = match std::fs::canonicalize(active.trim()) {
-        Ok(p) => p,
-        Err(e) => {
-            return Ok(InstallSkillResult {
-                ok: false,
-                error: Some(format!("canonicalize active project_root failed: {e}")),
-                ..Default::default()
-            });
-        }
-    };
-    if req_canon != active_canon {
-        return Ok(InstallSkillResult {
-            ok: false,
-            error: Some("project_root does not match active project".into()),
-            ..Default::default()
-        });
-    }
-    Ok(install_skill_at(&req_canon, force).await)
 }
 
 /// 内部呼び出し版 (setup_team_mcp など他コマンドから使う)。force=false。
@@ -214,7 +254,7 @@ pub async fn install_skill_best_effort(project_root: &str) {
     if trimmed.is_empty() {
         return;
     }
-    let root = match std::fs::canonicalize(trimmed) {
+    let root = match tokio::fs::canonicalize(trimmed).await {
         Ok(p) => p,
         Err(e) => {
             tracing::warn!("[skill] canonicalize failed (best-effort): {e}");
@@ -228,3 +268,7 @@ pub async fn install_skill_best_effort(project_root: &str) {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "vibe_team_skill/tests.rs"]
+mod tests;

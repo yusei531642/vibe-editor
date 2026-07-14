@@ -29,7 +29,7 @@ export function resolveAgentConfig(
       name: 'Codex',
       command: settings.codexCommand || 'codex',
       args: settings.codexArgs || '',
-      cwd: settings.lastOpenedRoot || ''
+      cwd: ''
     };
   }
   if (agentId !== 'claude') {
@@ -42,7 +42,7 @@ export function resolveAgentConfig(
         name: custom.name,
         command: custom.command,
         args: custom.args,
-        cwd: custom.cwd || settings.lastOpenedRoot || '',
+        cwd: '',
         color: custom.color
       };
     }
@@ -53,6 +53,6 @@ export function resolveAgentConfig(
     name: 'Claude Code',
     command: settings.claudeCommand || 'claude',
     args: settings.claudeArgs || '',
-    cwd: settings.claudeCwd || settings.lastOpenedRoot || ''
+    cwd: ''
   };
 }

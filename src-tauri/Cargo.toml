@@ -1,6 +1,6 @@
 [package]
 name = "vibe-editor"
-version = "1.6.6"
+version = "1.6.7"
 description = "Electron→Tauri 移行版 vibe-editor (Claude Code / Codex 専用エディタ)"
 authors = ["yusei <yusei@yuseilab.com>"]
 edition = "2021"
@@ -34,6 +34,10 @@ notify = "8"
 
 # --- error / logging ---
 anyhow = "1"
+# Issue #1186: 認可済み project root の directory handle から相対 I/O だけを行い、
+# 子 symlink / junction / reparse と検査後差し替えによる越境を防ぐ。高水準の cap-std
+# wrapper は不要なので、必要な openat 相当 primitive だけを完全固定で直接利用する。
+cap-primitives = "=4.0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Issue #326: 設定モーダルからログを閲覧できるように、stderr に加えて
@@ -48,7 +52,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # OpenAI API key を OS の credential store に暗号化保管するための薄いラッパ。
 # Windows: Credential Manager / macOS: Keychain / Linux: secret-service。
 # Service: "vibe-editor", Account: "openai-realtime-api-key" で統一する。
-keyring = "3"
+keyring = "4"
 
 # --- misc ---
 once_cell = "1"
@@ -86,6 +90,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Pipes",
     "Win32_System_Threading",
     "Win32_Security",
+    "Win32_Storage_FileSystem",
     # Issue #950: PTY child の kill-on-close Job Object
     "Win32_System_JobObjects",
 ] }

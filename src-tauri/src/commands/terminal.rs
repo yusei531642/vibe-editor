@@ -5,36 +5,19 @@
 
 pub(crate) mod command_validation;
 pub(crate) mod shell_policy;
+mod codex_prompt;
 mod paste_image;
 mod prompt_files;
 
 use crate::pty::session::TerminalWarning;
 use crate::pty::{spawn_session, SpawnOptions, UserWriteOutcome};
 use crate::state::AppState;
-use crate::team_hub::inject::build_chunks;
+use codex_prompt::inject_codex_prompt_to_pty;
 use crate::util::log_redact::redact_home;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::time::Duration;
 use tauri::{AppHandle, State};
 use uuid::Uuid;
-
-/// Issue #739: `inject_codex_prompt_to_pty` が PTY 注入を始める前に待つ初期スリープ (ミリ秒)。
-///
-/// Codex の TUI が起動してから prompt 入力を受け付ける状態になるまでの猶予。旧実装は
-/// `sleep(Duration::from_millis(1800))` の magic number 直書きだった。短すぎると注入文字が
-/// TUI 初期化中に取りこぼされ、長すぎると初手の指示が遅れて UX が悪化するため、この 1 箇所で
-/// 調整できるよう定数化する。
-const CODEX_INITIAL_PROMPT_DELAY_MS: u64 = 1800;
-
-/// Issue #739: `inject_codex_prompt_to_pty` のチャンク間 / 末尾 `\r` 送出前スリープ (ミリ秒)。
-///
-/// ConPTY のリングバッファ事故を避けつつ Codex TUI が paste sequence を 1 件として
-/// バンドルできる時間的余裕を確保するための値。`team_hub::protocol::consts::INJECT_CHUNK_DELAY_MS`
-/// と意図的に同値だが、当該定数は `pub(in crate::team_hub)` で `commands` から不可視のため、
-/// terminal 側のチャンク注入用にローカル定数として持つ (旧実装は `15` の直書きだった)。
-const CODEX_PROMPT_CHUNK_DELAY_MS: u64 = 15;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -195,104 +178,6 @@ fn filter_codex_resume_id_in_place(is_codex: bool, args: Vec<String>) -> Vec<Str
             args.into_iter().skip(1).collect()
         }
     }
-}
-
-/// Codex の system prompt を、PTY (TUI) に直接「最初の入力」として注入する fallback 経路。
-///
-/// 動作:
-///   1. spawn 直後 1.8 秒スリープして Codex の TUI が prompt 入力を受け付ける状態になるのを待つ。
-///   2. team_hub::inject::build_chunks で ConPTY-safe チャンク (64B / 15ms / UTF-8 境界保護) に
-///      整形 (banner は空文字)。
-///   3. 各チャンクを順に書き込み、最後に \r で確定送信。
-///
-/// チームメッセージの inject() と違って banner は付けない (Codex に対する初手のユーザー指示として届く)。
-///
-/// Issue #620: `SessionHandle::write` は内部で `std::sync::Mutex::lock` + 同期 `write_all`/`flush`
-/// なので、tokio multi-thread runtime の async task 内から直接呼ぶと ConPTY back-pressure 時に
-/// worker thread を 1 本占有してしまう。`team_hub::inject::inject_once` と同じく
-/// `tokio::task::spawn_blocking` で blocking pool に逃がし、async runtime を解放する。
-async fn inject_codex_prompt_to_pty(
-    registry: Arc<crate::pty::SessionRegistry>,
-    term_id: String,
-    instructions: String,
-) {
-    use tokio::time::sleep;
-    sleep(Duration::from_millis(CODEX_INITIAL_PROMPT_DELAY_MS)).await;
-    let Some(session) = registry.get(&term_id) else {
-        return;
-    };
-    // Issue #153 / #619: 注入中はユーザーの xterm 入力 (terminal_write) を抑止する。
-    // RAII guard (`begin_injecting`) を使うことで、関数を抜けるあらゆる経路 (early return /
-    // panic / `?` 伝播 / 正常終了) で `injecting` フラグが必ず false に戻る。
-    // build_chunks は banner 込みで分割するが、Codex 注入では banner 不要なので空文字を渡す。
-    let _inject_guard = session.begin_injecting();
-    let chunks = build_chunks("", &instructions);
-    if chunks.is_empty() {
-        return;
-    }
-    let mut iter = chunks.into_iter();
-    if let Some(first) = iter.next() {
-        // Issue #620: spawn_blocking で同期 write を blocking pool に逃がす。
-        // Issue #619: 早期 return しても `_inject_guard` の Drop で injecting=false に戻る。
-        let s = session.clone();
-        match tokio::task::spawn_blocking(move || s.write(&first)).await {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => {
-                tracing::warn!(
-                    "[terminal] codex prompt write(first) failed for {term_id}: {e}"
-                );
-                return;
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "[terminal] codex prompt spawn_blocking(first) failed for {term_id}: {e}"
-                );
-                return;
-            }
-        }
-    }
-    for chunk in iter {
-        sleep(Duration::from_millis(CODEX_PROMPT_CHUNK_DELAY_MS)).await;
-        if registry.get(&term_id).is_none() {
-            return;
-        }
-        // Issue #620: 各チャンクの write も spawn_blocking 経由。
-        // Issue #619: 早期 return / panic でも guard Drop が injecting=false に戻す。
-        let s = session.clone();
-        match tokio::task::spawn_blocking(move || s.write(&chunk)).await {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => {
-                tracing::warn!(
-                    "[terminal] codex prompt write(chunk) failed for {term_id}: {e}"
-                );
-                return;
-            }
-            Err(e) => {
-                tracing::warn!(
-                    "[terminal] codex prompt spawn_blocking(chunk) failed for {term_id}: {e}"
-                );
-                return;
-            }
-        }
-    }
-    sleep(Duration::from_millis(CODEX_PROMPT_CHUNK_DELAY_MS)).await;
-    // Issue #620: 末尾の確定 `\r` も spawn_blocking 経由で送る。
-    let s = session.clone();
-    match tokio::task::spawn_blocking(move || s.write(b"\r")).await {
-        Ok(Ok(())) => {}
-        Ok(Err(e)) => {
-            tracing::warn!("[terminal] codex prompt write(\\r) failed for {term_id}: {e}");
-        }
-        Err(e) => {
-            tracing::warn!(
-                "[terminal] codex prompt spawn_blocking(\\r) failed for {term_id}: {e}"
-            );
-        }
-    }
-    tracing::info!(
-        "[terminal] codex prompt injected into pty {term_id} ({} bytes)",
-        instructions.len()
-    );
 }
 
 #[tauri::command]
@@ -559,6 +444,23 @@ pub async fn terminal_create(
         opts.agent_id.as_deref(),
     );
 
+    // Issue #1200: resume が返した cwd と spawn の check-to-use gap を塞ぐ。cwd が
+    // active / workspace root と同一 directory を指す場合のみ、TTL キャッシュを使わず
+    // platform identity を再照合し、置換されていれば起動しない (fail-closed)。
+    if let Err(error) = crate::commands::authz::assert_spawn_cwd_identity(
+        &state.project_root,
+        &state.project_root_identity,
+        &cwd,
+    )
+    .await
+    {
+        return Ok(TerminalCreateResult {
+            ok: false,
+            error: Some(format!("spawn cwd authorization failed: {error}")),
+            ..Default::default()
+        });
+    }
+
     let spawn_opts = SpawnOptions {
         command: command.clone(),
         args: args.clone(),
@@ -747,6 +649,26 @@ pub async fn terminal_write(
     Ok(())
 }
 
+/// Issue #1076: `terminal_resize` の下限クランプ値。spawn 経路 (`session/spawn.rs` の
+/// `openpty` で `cols.max(20)` / `rows.max(5)`) と揃える。
+///
+/// 通常は renderer 側の grid 計算が min 20x5 にクランプするため 0x0 resize は顕在化し
+/// にくいが、信頼境界外 (renderer の任意 invoke / 将来の別 caller) から `cols=0` / `rows=0`
+/// が来ると `PtySize { rows: 0, cols: 0 }` がそのまま portable-pty / ConPTY に渡り、
+/// 再描画破綻やクラッシュ気味挙動を招きうる。defense-in-depth で Rust 側にも下限を持つ。
+const TERMINAL_RESIZE_MIN_COLS: u16 = 20;
+const TERMINAL_RESIZE_MIN_ROWS: u16 = 5;
+
+/// renderer から来た任意の `cols` / `rows` を ConPTY に渡せる安全な範囲 (下限 20x5、
+/// 上限 `u16::MAX`) にクランプする。純粋関数として切り出して回帰テスト可能にする (#1076)。
+fn clamp_terminal_resize(cols: u32, rows: u32) -> (u16, u16) {
+    let cols = cols
+        .clamp(u32::from(TERMINAL_RESIZE_MIN_COLS), u32::from(u16::MAX)) as u16;
+    let rows = rows
+        .clamp(u32::from(TERMINAL_RESIZE_MIN_ROWS), u32::from(u16::MAX)) as u16;
+    (cols, rows)
+}
+
 #[tauri::command]
 pub async fn terminal_resize(
     state: State<'_, AppState>,
@@ -755,8 +677,9 @@ pub async fn terminal_resize(
     rows: u32,
 ) -> crate::commands::error::CommandResult<()> {
     if let Some(s) = state.pty_registry.get(&id) {
-        let cols = cols.min(u32::from(u16::MAX)) as u16;
-        let rows = rows.min(u32::from(u16::MAX)) as u16;
+        // Issue #1076: 上限 (u16::MAX) だけでなく下限 (20x5) もクランプし、0x0 等の
+        // 退行サイズが ConPTY に到達しないようにする。spawn 経路の下限と対称。
+        let (cols, rows) = clamp_terminal_resize(cols, rows);
         // resize 失敗は無害なので握りつぶす (旧実装と同じ)
         match tokio::task::spawn_blocking(move || s.resize(cols, rows)).await {
             Ok(Ok(())) | Ok(Err(_)) => {}
@@ -1012,5 +935,67 @@ mod codex_resume_filter_tests {
         let input = s(&["-c", "k=v", "resume", "abc;rm -rf /"]);
         let out = filter_codex_resume_id_in_place(true, input.clone());
         assert_eq!(out, input);
+    }
+}
+
+#[cfg(test)]
+mod clamp_terminal_resize_tests {
+    use super::{
+        clamp_terminal_resize, TERMINAL_RESIZE_MIN_COLS, TERMINAL_RESIZE_MIN_ROWS,
+    };
+
+    #[test]
+    fn zero_by_zero_is_clamped_to_lower_bound() {
+        // Issue #1076: 信頼境界外からの 0x0 resize が下限 (20x5) にクランプされること。
+        assert_eq!(
+            clamp_terminal_resize(0, 0),
+            (TERMINAL_RESIZE_MIN_COLS, TERMINAL_RESIZE_MIN_ROWS)
+        );
+    }
+
+    #[test]
+    fn below_minimum_is_clamped_up() {
+        assert_eq!(
+            clamp_terminal_resize(1, 1),
+            (TERMINAL_RESIZE_MIN_COLS, TERMINAL_RESIZE_MIN_ROWS)
+        );
+        assert_eq!(
+            clamp_terminal_resize(19, 4),
+            (TERMINAL_RESIZE_MIN_COLS, TERMINAL_RESIZE_MIN_ROWS)
+        );
+    }
+
+    #[test]
+    fn at_minimum_is_unchanged() {
+        assert_eq!(clamp_terminal_resize(20, 5), (20, 5));
+    }
+
+    #[test]
+    fn normal_size_is_unchanged() {
+        assert_eq!(clamp_terminal_resize(120, 40), (120, 40));
+    }
+
+    #[test]
+    fn above_u16_max_is_clamped_down() {
+        // 上限 u16::MAX クランプの回帰 (旧来の上限防御を維持していること)。
+        assert_eq!(
+            clamp_terminal_resize(100_000, 100_000),
+            (u16::MAX, u16::MAX)
+        );
+    }
+
+    #[test]
+    fn mixed_axis_clamps_independently() {
+        // Issue #1076 (review M1): 片側だけ下限未満でも各軸が独立にクランプされること。
+        assert_eq!(clamp_terminal_resize(0, 40), (TERMINAL_RESIZE_MIN_COLS, 40));
+        assert_eq!(clamp_terminal_resize(120, 0), (120, TERMINAL_RESIZE_MIN_ROWS));
+    }
+
+    #[test]
+    fn u16_max_boundary_is_exact() {
+        // Issue #1076 (review M2): 上限ちょうど (65535) は不変、+1 (65536) は 65535 に丸まる。
+        let max = u32::from(u16::MAX);
+        assert_eq!(clamp_terminal_resize(max, max), (u16::MAX, u16::MAX));
+        assert_eq!(clamp_terminal_resize(max + 1, max + 1), (u16::MAX, u16::MAX));
     }
 }

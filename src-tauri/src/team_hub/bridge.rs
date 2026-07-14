@@ -80,6 +80,10 @@ const MAX_RETRIES = 12;         // 合計 ~60 秒程度で諦める
 const BASE_RETRY_MS = 500;
 const MAX_RETRY_MS = 10000;
 let givenUp = false;
+// Issue #1080: 未接続中に空の tools/list をローカル応答したら true にする。Hub 接続が
+// 確立したら notifications/tools/list_changed を 1 度送って本物の tool 一覧を再取得させ、
+// slow-hub 時に tool が消えたままになる退行を防ぐ。
+let servedEmptyToolsList = false;
 
 // Issue #340: Hub の IDLE_TIMEOUT (300s) より十分短い間隔で no-op 通知を送り、
 // 正常稼働中の Leader が「データ無し」で切られて再接続を繰り返すのを防ぐ。
@@ -133,6 +137,13 @@ function connect() {
     pendingOut.length = 0;
     if (flushed || dropped) {
       process.stderr.write(`[team-bridge] flushed ${flushed} pending request(s), dropped ${dropped} stale\n`);
+    }
+    // Issue #1080: 未接続中に initialize/tools/list をローカル即答していた場合、client は
+    // 空の tool list を持っている。Hub 接続が確立したので list_changed を 1 度通知して
+    // 再取得させ、本物の team tools を反映させる (stdout = client 宛、Hub 宛ではない)。
+    if (servedEmptyToolsList) {
+      servedEmptyToolsList = false;
+      process.stdout.write('{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}\n');
     }
     // Issue #340: handshake 直後に keepalive を起動して Hub の idle drop を防ぐ。
     startKeepalive();
@@ -193,12 +204,10 @@ process.stdin.on('data', (chunk) => {
     stdinBuf = stdinBuf.slice(nl + 1);
     if (!line) continue;
 
-    // Issue #100: 未接続時の挙動を 3 状態に整理する。
-    //   1) MISSING_HUB_ENV: env 不在 = standalone tab → localFallback で no-op MCP 応答
-    //   2) givenUp:        再接続を諦めた状態 → localFallback で error 応答
-    //   3) それ以外の未接続: connect 中 → pendingOut に積み、connect 後に flush
-    // 旧実装は (3) でも localFallback を呼んでいたため、initialize が null 応答 →
-    // クライアントが応答待ちで詰まる、または成功扱いされてしまう問題があった。
+    // Issue #100 / #1080: 未接続時の挙動。env 不在/givenUp は localFallback、connect 済みは
+    // Hub に中継。connect 試行中は MCP handshake (initialize/tools/list/ping/notifications) を
+    // ローカル即答し、Hub 依存 (tools/call 等) だけ pendingOut に積む。旧実装は connect 試行中に
+    // initialize も積んでいたため、Hub socket が stale だと 30s startup timeout していた。
     if (MISSING_HUB_ENV || givenUp) {
       try {
         const req = JSON.parse(line);
@@ -207,49 +216,80 @@ process.stdin.on('data', (chunk) => {
       } catch {}
       continue;
     }
-    if (!connected) {
-      // pending queue: 上限超過なら最古を捨てる
-      if (pendingOut.length >= MAX_PENDING) {
-        pendingOut.shift();
-        process.stderr.write('[team-bridge] pending queue overflow, dropping oldest request\n');
-      }
-      pendingOut.push({ line: line + '\n', t: Date.now() });
+    if (connected) {
+      socket.write(line + '\n');
       continue;
     }
-    socket.write(line + '\n');
+    // connect 試行中: handshake はローカル即答、Hub 依存だけ queue。
+    let parsed = null;
+    try { parsed = JSON.parse(line); } catch {}
+    if (parsed) {
+      const hs = handshakeReply(parsed);
+      if (hs !== undefined) {
+        // tools/list を空応答したら、Hub 接続時に list_changed で再取得させる。
+        if (parsed.method === 'tools/list') servedEmptyToolsList = true;
+        if (hs) process.stdout.write(JSON.stringify(hs) + '\n');
+        continue;
+      }
+    }
+    // Hub 依存 request: pending queue に積む (上限超過なら最古を捨てる)。
+    if (pendingOut.length >= MAX_PENDING) {
+      pendingOut.shift();
+      process.stderr.write('[team-bridge] pending queue overflow, dropping oldest request\n');
+    }
+    pendingOut.push({ line: line + '\n', t: Date.now() });
   }
 });
 process.stdin.on('end', () => process.exit(0));
 
-function localFallback(req) {
-  // Issue #62 / #100 / #454: localFallback は env 不在 (MISSING_HUB_ENV) または再接続を
-  // 諦めた状態 (givenUp) でのみ呼ばれる。connect 試行中は pendingOut に積むので
-  // ここには到達しない。
-  // env 不在は standalone Codex / Claude 起動なので startup failure にしない。
-  // givenUp は本来 hub がある team session の異常なので error のまま返す。
+// Issue #1080: Hub の生死に依存しない MCP ハンドシェイクのローカル応答を 1 箇所に集約する。
+// initialize / tools/list / ping / notifications/* は env 不在でも givenUp でも connect 試行中でも
+// 同じ応答でよい (Hub に問い合わせる必要が無い)。戻り値の意味:
+//   - object   : その request への応答 (stdout に書く)
+//   - null     : handshake だが応答不要 (notifications/* を握りつぶす)
+//   - undefined: handshake ではない (= Hub 依存。caller が queue / error を決める)
+function handshakeReply(req) {
   const { method, id } = req;
+  const hasId = id !== undefined && id !== null;
+  if (method === 'initialize' && hasId) {
+    return {
+      jsonrpc: '2.0',
+      id,
+      result: {
+        protocolVersion: '2024-11-05',
+        // Issue #1080: listChanged:true。未接続中に空の tools/list を返した後、Hub 接続時に
+        // notifications/tools/list_changed で本物の一覧を再取得させるために宣言する。
+        capabilities: { tools: { listChanged: true } },
+        serverInfo: { name: 'vibe-team', version: 'standalone-noop' }
+      }
+    };
+  }
+  if (method === 'tools/list' && hasId) {
+    return { jsonrpc: '2.0', id, result: { tools: [] } };
+  }
+  if (method === 'ping' && hasId) {
+    return { jsonrpc: '2.0', id, result: {} };
+  }
+  if (method === 'notifications/initialized' || method === 'notifications/cancelled') {
+    return null;
+  }
+  return undefined;
+}
+
+function localFallback(req) {
+  // Issue #62 / #100 / #454 / #1080: localFallback は env 不在 (MISSING_HUB_ENV) または
+  // 再接続を諦めた状態 (givenUp) でのみ呼ばれる。connect 試行中は stdin ハンドラ側で
+  // handshakeReply / pendingOut に振り分けるのでここには到達しない。
+  // handshake (initialize/tools/list/ping/notifications) は両状態とも同じくローカル応答し、
+  // Hub 依存の tools/call 等だけ状態別に error 文言を変える。
+  const hs = handshakeReply(req);
+  if (hs !== undefined) return hs;
+
+  const { method, id } = req;
+  const hasId = id !== undefined && id !== null;
   if (MISSING_HUB_ENV) {
-    if (method === 'initialize' && id !== undefined && id !== null) {
-      return {
-        jsonrpc: '2.0',
-        id,
-        result: {
-          protocolVersion: '2024-11-05',
-          capabilities: { tools: {} },
-          serverInfo: { name: 'vibe-team', version: 'standalone-noop' }
-        }
-      };
-    }
-    if (method === 'tools/list' && id !== undefined && id !== null) {
-      return { jsonrpc: '2.0', id, result: { tools: [] } };
-    }
-    if (method === 'ping' && id !== undefined && id !== null) {
-      return { jsonrpc: '2.0', id, result: {} };
-    }
-    if (method === 'notifications/initialized' || method === 'notifications/cancelled') {
-      return null;
-    }
-    if (method === 'tools/call' && id !== undefined && id !== null) {
+    // env 不在は standalone Codex / Claude 起動なので startup failure にしない。
+    if (method === 'tools/call' && hasId) {
       return {
         jsonrpc: '2.0',
         id,
@@ -260,7 +300,7 @@ function localFallback(req) {
         }
       };
     }
-    if (id !== undefined && id !== null) {
+    if (hasId) {
       return {
         jsonrpc: '2.0',
         id,
@@ -269,11 +309,11 @@ function localFallback(req) {
     }
     return null;
   }
-  const reason = 'vibe-team hub is unreachable (gave up reconnecting)';
-  if (id !== undefined && id !== null) {
+  // givenUp: hub があるはずの team session で再接続を諦めた異常系なので error を返す。
+  if (hasId) {
     return {
       jsonrpc: '2.0', id,
-      error: { code: -32001, message: reason }
+      error: { code: -32001, message: 'vibe-team hub is unreachable (gave up reconnecting)' }
     };
   }
   // notification (id 無し) は応答不要
@@ -288,7 +328,10 @@ mod tests {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
-    fn run_bridge_without_team_env(input: &str) -> Option<Vec<Value>> {
+    /// bridge を node で起動して input を stdin に流し、stdout の JSON 行を集める共通ヘルパ。
+    /// `team_env` が `Some(sock)` なら 5 つの VIBE_TEAM_* を注入し SOCKET にそのパスを渡す
+    /// (team セッションを模す)。`None` なら 5 つの env を全て除去 (standalone タブを模す)。
+    fn run_bridge(input: &str, team_env: Option<&std::path::Path>) -> Option<Vec<Value>> {
         if Command::new("node").arg("--version").output().is_err() {
             return None;
         }
@@ -303,13 +346,25 @@ mod tests {
         ));
         std::fs::write(&path, SOURCE).expect("write bridge source");
 
-        let mut child = Command::new("node")
-            .arg(&path)
-            .env_remove("VIBE_TEAM_SOCKET")
-            .env_remove("VIBE_TEAM_TOKEN")
-            .env_remove("VIBE_TEAM_ID")
-            .env_remove("VIBE_TEAM_ROLE")
-            .env_remove("VIBE_AGENT_ID")
+        let mut cmd = Command::new("node");
+        cmd.arg(&path);
+        match team_env {
+            Some(sock) => {
+                cmd.env("VIBE_TEAM_SOCKET", sock)
+                    .env("VIBE_TEAM_TOKEN", "test-token")
+                    .env("VIBE_TEAM_ID", "test-team")
+                    .env("VIBE_TEAM_ROLE", "leader")
+                    .env("VIBE_AGENT_ID", "vc-test");
+            }
+            None => {
+                cmd.env_remove("VIBE_TEAM_SOCKET")
+                    .env_remove("VIBE_TEAM_TOKEN")
+                    .env_remove("VIBE_TEAM_ID")
+                    .env_remove("VIBE_TEAM_ROLE")
+                    .env_remove("VIBE_AGENT_ID");
+            }
+        }
+        let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -341,6 +396,69 @@ mod tests {
                 .map(|line| serde_json::from_str::<Value>(line).expect("json line"))
                 .collect(),
         )
+    }
+
+    /// 存在しない socket パス (= dead hub) を生成する。connect は ENOENT で失敗し続ける。
+    fn dead_hub_sock() -> std::path::PathBuf {
+        let nonce = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time")
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "vibe-team-deadhub-{}-{nonce}.sock",
+            std::process::id()
+        ))
+    }
+
+    fn run_bridge_without_team_env(input: &str) -> Option<Vec<Value>> {
+        run_bridge(input, None)
+    }
+
+    /// Issue #1080: env は注入されているが Hub socket が dead (= 到達不能) な team エージェントを模す。
+    fn run_bridge_with_dead_hub(input: &str) -> Option<Vec<Value>> {
+        run_bridge(input, Some(&dead_hub_sock()))
+    }
+
+    #[test]
+    fn dead_hub_answers_handshake_locally_without_blocking_initialize() {
+        // Issue #1080: env 有 + Hub socket dead でも、initialize と tools/list はローカル即答され、
+        // client の startup が 30s timeout しないこと。tools/call は Hub 依存なので pendingOut に
+        // 積まれたまま (dead hub では flush されない) 応答が返らないこと。
+        let Some(responses) = run_bridge_with_dead_hub(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}
+{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"team_info","arguments":{}}}
+"#,
+        ) else {
+            return;
+        };
+
+        let ids: Vec<i64> = responses.iter().filter_map(|r| r["id"].as_i64()).collect();
+        assert!(
+            ids.contains(&1),
+            "initialize must be answered locally even with a dead hub: {responses:?}"
+        );
+        assert!(
+            ids.contains(&2),
+            "tools/list must be answered locally even with a dead hub: {responses:?}"
+        );
+        assert!(
+            !ids.contains(&3),
+            "tools/call must NOT be answered while the hub is unreachable (it is queued): {responses:?}"
+        );
+
+        let init = responses.iter().find(|r| r["id"] == 1).expect("initialize response");
+        assert!(
+            init.get("result").is_some() && init.get("error").is_none(),
+            "initialize must be a success result, not an error: {init:?}"
+        );
+        let list = responses.iter().find(|r| r["id"] == 2).expect("tools/list response");
+        assert_eq!(
+            list["result"]["tools"].as_array().expect("tools array").len(),
+            0,
+            "tools/list must be empty while disconnected from the hub: {list:?}"
+        );
     }
 
     #[test]
