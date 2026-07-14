@@ -1,5 +1,25 @@
 # vibe-editor Tauri ハイブリッド移行 + 無限キャンバス UI 革新 TODO
 
+## Issue #1146 - API agent session削除失敗を伝播 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1146
+
+### 計画
+
+- [x] 現行の削除処理・エラー型・既存テスト構成を確認する。
+- [x] `NotFound` のみ成功扱いにし、その他のI/Oエラーを伝播する。
+- [x] 成功・NotFound・その他エラーのunit testを追加する。
+- [x] Rust関連品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 検証結果を記録する。
+- [ ] コミットして feature branch をpushする。
+- [x] targeted Rust test: PASS（2 passed / 0 failed）
+- [x] `cargo check --locked --manifest-path src-tauri\\Cargo.toml --all-targets`: PASS
+- [x] `git diff --check`: PASS
+- [ ] repository-wide `cargo fmt --check`: FAIL（今回の差分外に既存不整形あり）
+
 ## #736 team_hub/state.rs god-file 分割 + team_send 段階関数化 (完了)
 
 方針: 振る舞いを一切変えない純粋なリファクタ。lock の取得/解放タイミング・
@@ -758,27 +778,30 @@ Branch: `feature/issue-452`
 #### 検証結果（代替で PASS 済み）
 - [x] `git diff --check`: PASS
 
-## Issue #1155 - PTY registry lifecycle race (2026-07-14 / Codex)
+## Issue #1137 - 複数タブ復元時のcwdマッピング破壊を防止 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1137
 
 ### 計画
 
-- [x] registry登録、終了watcher、同一ID競合の順序を確認する。
-- [x] registry採否latchとidentity-safe removalを実装する。
-- [x] 即死、同一ID競合、collision loserの回帰テストを追加する。
+- [x] `addTerminalTab` の同期戻り値と永続化mapの依存関係を確認する。
+- [x] stateと同期更新するrefで上限判定とID採番をupdater前に確定する。
+- [x] 同一batchの連続追加が全IDを同期返却する退行テストを追加する。
+- [x] 同一batchの削除後追加が上限判定で拒否されない退行テストを追加する。
+- [x] #588上限契約を含む関連テストと全品質ゲートを実行する。
 
-### RCA結果
+### Next Steps
 
-- [x] Root Cause Confirmed: exit watcherがregistry insert前に開始し、終了時にIDだけで無条件removeしていた。
-- [x] 即死時はremove(None)後にdead handleがinsertされ、衝突時は古いwatcherが別handleを削除できる経路をテストで固定した。
+- [x] reviewer指摘を修正してfeature branchへpushする。
+- [x] 最新mainを取り込み、CIと再レビューを確認する。
 
 ### 検証結果
 
-- [x] lifecycle回帰テスト: PASS（3 tests）
-- [x] PTY全体テスト: PASS（130 passed / 2 ignored）
-- [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
-- [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
-- [x] `npm run lint:file-size`: PASS（spawn.rs 733 → 688行）
+- [x] `use-terminal-tabs` Vitest: PASS (11 tests)
 - [x] `npm run typecheck`: PASS
+- [x] `npm run lint`: PASS (0 errors / 既存12 warnings)
+- [x] `npm run lint:file-size`: PASS
+- [x] `git diff --check`: PASS
 
 ## PR #1208 - file-size ratchet修正 (2026-07-14 / Codex)
 
@@ -830,6 +853,28 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1139
 - [x] `npm run lint`: PASS (0 errors / 既存 11 warnings)
 - [x] `npm run build:vite`: PASS
 - [x] `git diff --check`: PASS
+## Issue #1161 - Release quality gate (2026-07-14 / Codex)
+
+### 計画
+
+- [x] 現行 release / CI workflow と署名前の gate 欠落を確認する。
+- [x] `tasks/fortress-implement/issue-1161/mission-brief.md` に Mission Brief と Slice 境界を記録する。
+- [x] Slice 1: `ci.yml` を reusable workflow 化し、既存品質ゲートを release から呼び出せるようにする。
+- [x] Slice 2: v* tag / main ancestry guard と quality gate dependency を署名 build の前段へ追加する。
+- [x] release workflow の静的契約 lint と RPM 記載を追加する。
+
+### Next Steps
+
+- [x] `npm run lint:release-workflow`、typecheck、Vitest、Clippy を実行する。
+- [ ] PR 上の GitHub Actions で workflow 構文と全品質ゲートを確認する。
+
+### 検証結果
+
+- [x] `npm run lint:release-workflow`: PASS
+- [x] `npm run typecheck`: PASS
+- [x] `npm test`: PASS（87 files / 522 tests）
+- [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
+- [ ] `cargo test --locked --manifest-path src-tauri/Cargo.toml`: 環境制約で未完了（リンク用 archive 生成時に OS error 112、ディスク空き容量不足）。同じ Rust tree の Clippy は PASS。PR CI で再検証する。
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）
@@ -2110,18 +2155,35 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1045
 - [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
 - [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
 - [x] `git diff --check`: PASS
-## Issue #1178 Rust PTY lifecycle (2026-07-14 / Codex)
 
-- [x] `TerminationReason` を `SessionHandle` に first-writer-wins で保持する。
-- [x] user close / team cleanup / app shutdown / ID collision の kill origin を記録する。
-- [x] expected termination は registry / broker cleanup のみ行い、renderer / TeamHub の exit 通知を抑止する。
-- [x] 同一 `agent_id` の暗黙 replace-kill を廃止し、registry lock 内で重複登録を拒否する。
-- [x] first-writer-wins・通知判定・重複拒否の回帰テストを追加する。
+## Issue #1143 - 組み込みプリセット説明の i18n (2026-07-14 / Codex)
 
-### Next Tasks
+Issue: https://github.com/yusei531642/vibe-editor/issues/1143
 
-- [x] 新規spawnを150ms間隔へ整流し、queued中のunmountでcreateを取消可能にする。
-- [x] `attachOnly` / `attachMiss` の2段契約でattach hitを即時、missだけをpaced spawnにする。
-- [x] replay前のlistener queueとclient id再購読の順序を回帰テストする。
-- [x] renderer 24 tests、typecheck、Rust attach契約test、cargo check/clippy、file-sizeを通す。
-- [ ] PR #1235 を基準にpush・PR作成し、CI / reviewerを完走する。
+### 計画
+
+- [x] 組み込みプリセットの説明を生文字列から翻訳キーへ置き換える。
+- [x] Canvas の組み込み項目と voice metadata を現在の言語へ同期する。
+- [x] ユーザー保存プリセットの自由入力説明は原文のまま維持する。
+- [x] 翻訳契約と表示経路の回帰テストを追加し、品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 最小差分を実装する。
+- [x] typecheck、対象テスト、全テスト、lint、Vite build を実行する。
+- [ ] feature branch を push し、PR 作成の明示承認を待つ。
+
+### 進捗
+
+- [x] 組み込み2プリセットの説明を `descriptionI18nKey` へ置換した。
+- [x] Canvas popover と voice metadata を ja/en 辞書へ接続した。
+- [x] 保存プリセットの自由入力説明を変更しない回帰テストを追加した。
+
+### 検証結果
+
+- [x] `npm run typecheck`: PASS
+- [x] 対象 Vitest: PASS (2 files / 6 tests)
+- [x] `npm run test`: PASS (87 files / 522 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 warnings 12)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS

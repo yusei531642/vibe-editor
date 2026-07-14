@@ -7,6 +7,7 @@ on:
     tags-ignore:
       - 'v*'
   pull_request:
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -82,6 +83,10 @@ jobs:
       # 行数を上限として固定し、悪化のみ fail させる。縮小時は baseline 引き下げを促す。
       - name: File-size ratchet
         run: npm run lint:file-size
+
+      # Issue #1161: release workflow の署名 job が依存する品質契約を静的に固定する。
+      - name: Release workflow contract
+        run: npm run lint:release-workflow
 
       # Issue #931: #[tauri::command] の戻り値を CommandResult<T> ({ code, message } の
       # 構造化エラー) に強制する。旧 3 流派 (Option<T> / ok+error 埋め込み) は baseline
@@ -177,6 +182,12 @@ jobs:
       # 各 OS でも clippy を走らせて cfg-gated コードの lint 違反を捕捉する。
       - name: Cargo clippy (cfg-gated, -D warnings)
         run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      # Issue #1158: cfg(windows)配下のConPTY / Job Object unit testはLinuxでは列挙も実行も
+      # されないため、Windows runnerでlib testを実行する。#[ignore]付き実機E2Eは対象外。
+      - name: Cargo test (Windows cfg-gated unit tests)
+        if: runner.os == 'Windows'
+        run: "cargo test --locked --manifest-path src-tauri/Cargo.toml --lib pty::"
 
   # Issue #745: 既存の `npm audit` / `cargo audit` は advisory DB ベースの依存脆弱性検査で、
   # 「うっかり API key / token / 暗号鍵をコミットした」を検知できない。
