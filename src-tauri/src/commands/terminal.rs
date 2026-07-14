@@ -3,6 +3,7 @@
 // portable-pty 経由で PTY を spawn、SessionRegistry に登録、
 // terminal:data:{id} / terminal:exit:{id} イベントを emit する。
 
+mod blocking_spawn;
 mod codex_prompt;
 pub(crate) mod command_validation;
 mod create_types;
@@ -11,7 +12,7 @@ mod prompt_files;
 pub(crate) mod shell_policy;
 pub(crate) mod write_outcome;
 
-use crate::pty::{spawn_session, SpawnOptions};
+use crate::pty::SpawnOptions;
 use crate::state::AppState;
 use crate::util::log_redact::redact_home;
 use codex_prompt::inject_codex_prompt_to_pty;
@@ -56,9 +57,7 @@ fn filter_resume_args_in_place(args: Vec<String>) -> Vec<String> {
                     );
                 }
                 None => {
-                    tracing::warn!(
-                        "[terminal] trailing --resume with no following id, stripping"
-                    );
+                    tracing::warn!("[terminal] trailing --resume with no following id, stripping");
                 }
             }
         } else if let Some(rest) = arg.strip_prefix("--resume=") {
@@ -133,7 +132,9 @@ pub async fn terminal_create(
     }
     // Issue #933: シェルは対話セッション起動のみ許可 (allowlist 契約 / shell_policy.rs)
     let registered = shell_policy::settings_registered_command_lines();
-    if let Some(reason) = shell_policy::reject_non_interactive_shell_args(&command, &args, &registered) {
+    if let Some(reason) =
+        shell_policy::reject_non_interactive_shell_args(&command, &args, &registered)
+    {
         return Ok(TerminalCreateResult {
             ok: false,
             error: Some(reason),
@@ -243,7 +244,14 @@ pub async fn terminal_create(
     let (cwd, warning) =
         crate::pty::session::resolve_valid_cwd(&opts.cwd, opts.fallback_cwd.as_deref());
     if is_codex_command {
-        crate::pty::codex_broker::cleanup_stale_for_cwd(&cwd);
+        let cleanup_cwd = cwd.clone();
+        if let Err(error) = tokio::task::spawn_blocking(move || {
+            crate::pty::codex_broker::cleanup_stale_for_cwd(&cleanup_cwd);
+        })
+        .await
+        {
+            tracing::warn!("[terminal] Codex stale cleanup task failed: {error}");
+        }
     }
 
     if !is_codex_command {
@@ -266,9 +274,7 @@ pub async fn terminal_create(
                 None => {
                     return Ok(TerminalCreateResult {
                         ok: false,
-                        error: Some(
-                            "failed to prepare Claude system prompt file".to_string(),
-                        ),
+                        error: Some("failed to prepare Claude system prompt file".to_string()),
                         ..Default::default()
                     });
                 }
@@ -390,19 +396,22 @@ pub async fn terminal_create(
     // Issue #1200: resume が返した cwd と spawn の check-to-use gap を塞ぐ。cwd が
     // active / workspace root と同一 directory を指す場合のみ、TTL キャッシュを使わず
     // platform identity を再照合し、置換されていれば起動しない (fail-closed)。
-    if let Err(error) = crate::commands::authz::assert_spawn_cwd_identity(
+    let spawn_cwd_identity = match crate::commands::authz::assert_spawn_cwd_identity(
         &state.project_root,
         &state.project_root_identity,
         &cwd,
     )
     .await
     {
-        return Ok(TerminalCreateResult {
-            ok: false,
-            error: Some(format!("spawn cwd authorization failed: {error}")),
-            ..Default::default()
-        });
-    }
+        Ok(identity) => identity,
+        Err(error) => {
+            return Ok(TerminalCreateResult {
+                ok: false,
+                error: Some(format!("spawn cwd authorization failed: {error}")),
+                ..Default::default()
+            });
+        }
+    };
 
     let spawn_opts = SpawnOptions {
         command: command.clone(),
@@ -420,47 +429,14 @@ pub async fn terminal_create(
         role: opts.role,
     };
 
-    // Issue #292: id 衝突時の retry 上限。実発生はほぼ皆無 (UUID v4 衝突は
-    // 122-bit エントロピー + 同時 spawn 競合) なので 3 回もあれば十分。
-    const MAX_ID_ATTEMPTS: usize = 3;
-    let mut id_candidate = initial_id;
-    let mut attempt = 0usize;
-    let adopt_id_result: Result<String, anyhow::Error> = loop {
-        attempt += 1;
-        match spawn_session(
-            app.clone(),
-            id_candidate.clone(),
-            spawn_opts.clone(),
-            state.pty_registry.clone(),
-        ) {
-            Ok(handle) => match state
-                .pty_registry
-                .insert_if_absent(id_candidate.clone(), handle)
-            {
-                Ok(()) => break Ok(id_candidate),
-                Err(crate::pty::registry::InsertError::IdCollision(returned_handle)) => {
-                    let _ = returned_handle.kill(crate::pty::session::TerminationReason::IdCollision);
-                    if attempt >= MAX_ID_ATTEMPTS {
-                        break Err(anyhow::anyhow!(
-                            "terminal_create failed: id collision persisted after {attempt} attempts"
-                        ));
-                    }
-                    tracing::warn!(
-                        "[terminal] id {id_candidate} collided in registry (attempt {attempt}/{MAX_ID_ATTEMPTS}), retrying with fresh UUID"
-                    );
-                    id_candidate = Uuid::new_v4().to_string();
-                }
-                Err(crate::pty::registry::InsertError::AgentIdCollision(returned_handle)) => {
-                    let agent_id = returned_handle.agent_id.clone().unwrap_or_default();
-                    let _ = returned_handle.kill(crate::pty::session::TerminationReason::IdCollision);
-                    break Err(anyhow::anyhow!(
-                        "terminal_create failed: agent_id '{agent_id}' already has an active PTY"
-                    ));
-                }
-            },
-            Err(e) => break Err(e),
-        }
-    };
+    let adopt_id_result = blocking_spawn::spawn_and_register(
+        app.clone(),
+        initial_id,
+        spawn_opts,
+        state.pty_registry.clone(),
+        spawn_cwd_identity,
+    )
+    .await;
 
     match adopt_id_result {
         Ok(id) => {
@@ -573,10 +549,8 @@ const TERMINAL_RESIZE_MIN_ROWS: u16 = 5;
 /// renderer から来た任意の `cols` / `rows` を ConPTY に渡せる安全な範囲 (下限 20x5、
 /// 上限 `u16::MAX`) にクランプする。純粋関数として切り出して回帰テスト可能にする (#1076)。
 fn clamp_terminal_resize(cols: u32, rows: u32) -> (u16, u16) {
-    let cols = cols
-        .clamp(u32::from(TERMINAL_RESIZE_MIN_COLS), u32::from(u16::MAX)) as u16;
-    let rows = rows
-        .clamp(u32::from(TERMINAL_RESIZE_MIN_ROWS), u32::from(u16::MAX)) as u16;
+    let cols = cols.clamp(u32::from(TERMINAL_RESIZE_MIN_COLS), u32::from(u16::MAX)) as u16;
+    let rows = rows.clamp(u32::from(TERMINAL_RESIZE_MIN_ROWS), u32::from(u16::MAX)) as u16;
     (cols, rows)
 }
 
@@ -851,9 +825,7 @@ mod codex_resume_filter_tests {
 
 #[cfg(test)]
 mod clamp_terminal_resize_tests {
-    use super::{
-        clamp_terminal_resize, TERMINAL_RESIZE_MIN_COLS, TERMINAL_RESIZE_MIN_ROWS,
-    };
+    use super::{clamp_terminal_resize, TERMINAL_RESIZE_MIN_COLS, TERMINAL_RESIZE_MIN_ROWS};
 
     #[test]
     fn zero_by_zero_is_clamped_to_lower_bound() {
@@ -899,7 +871,10 @@ mod clamp_terminal_resize_tests {
     fn mixed_axis_clamps_independently() {
         // Issue #1076 (review M1): 片側だけ下限未満でも各軸が独立にクランプされること。
         assert_eq!(clamp_terminal_resize(0, 40), (TERMINAL_RESIZE_MIN_COLS, 40));
-        assert_eq!(clamp_terminal_resize(120, 0), (120, TERMINAL_RESIZE_MIN_ROWS));
+        assert_eq!(
+            clamp_terminal_resize(120, 0),
+            (120, TERMINAL_RESIZE_MIN_ROWS)
+        );
     }
 
     #[test]
@@ -907,6 +882,9 @@ mod clamp_terminal_resize_tests {
         // Issue #1076 (review M2): 上限ちょうど (65535) は不変、+1 (65536) は 65535 に丸まる。
         let max = u32::from(u16::MAX);
         assert_eq!(clamp_terminal_resize(max, max), (u16::MAX, u16::MAX));
-        assert_eq!(clamp_terminal_resize(max + 1, max + 1), (u16::MAX, u16::MAX));
+        assert_eq!(
+            clamp_terminal_resize(max + 1, max + 1),
+            (u16::MAX, u16::MAX)
+        );
     }
 }
