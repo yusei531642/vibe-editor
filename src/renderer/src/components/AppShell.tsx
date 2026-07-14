@@ -72,6 +72,7 @@ import {
 } from '../lib/terminal-render-gate';
 import { formatTerminalRuntimeStatus } from '../lib/terminal-status';
 import { useProject, useTabs, useTeam } from '../lib/app-state-context';
+import { reportRefreshFailure } from '../lib/refresh-error';
 
 export interface AppShellProps {
   /**
@@ -225,12 +226,11 @@ export function AppShell({
       const sess = await window.api.sessions.list(projectRoot);
       setSessions(sess);
     } catch (err) {
-      // #1147: authz rejectをcatch。toast UXは #1139 の対象なのでconsole診断を維持する。
-      console.warn('[app-shell] sessions.list failed:', err);
+      reportRefreshFailure('sessions.list', err, t('toast.sessionsRefreshFailed'), showToast);
     } finally {
       setSessionsLoading(false);
     }
-  }, [projectRoot]);
+  }, [projectRoot, setSessions, showToast, t]);
   useEffect(() => {
     if (sidebarView === 'sessions') void refreshSessions();
   }, [sidebarView, refreshSessions]);
