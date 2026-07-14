@@ -26,6 +26,7 @@ use std::time::Instant;
 use super::injecting_guard::InjectingGuard;
 use super::lock::{lock_poisoned, LockResult};
 use super::registration::RegistrationLatch;
+use super::termination::{TerminationReason, TerminationState};
 /// 1 セッションぶんの状態。kill / write / resize 用に master と writer を Mutex 保持。
 pub struct SessionHandle {
     /// 旧 Session.pty.write 相当
@@ -65,6 +66,7 @@ pub struct SessionHandle {
     /// 並走する」リソース蓄積を防ぐ。
     pub(super) watcher_cancel: Arc<AtomicBool>,
     pub(crate) registration: Arc<RegistrationLatch>,
+    pub(super) termination: Arc<TerminationState>,
     /// Issue #950: child プロセスツリーを bind した kill-on-close Job Object。
     /// この handle の drop (= タブ close / kill_all / vibe-editor 異常死による OS の
     /// handle 強制 close) で job 内の全プロセス (孫含む) が OS により kill される。
@@ -161,10 +163,8 @@ impl SessionHandle {
         })?;
         Ok(())
     }
-
-    pub fn kill(&self) -> Result<()> {
-        // Issue #632: kill 時点で watcher_cancel を立てる。これにより claude_watcher が
-        // 60 秒 deadline まで待たずに即座 (短い polling 間隔以内で) exit する。
+    pub fn kill(&self, reason: TerminationReason) -> Result<()> {
+        self.request_termination(reason);
         self.watcher_cancel.store(true, Ordering::Release);
         let mut k = lock_poisoned!(self.killer, "killer")?;
         #[cfg(windows)]
@@ -175,14 +175,13 @@ impl SessionHandle {
         let _ = k.kill();
         Ok(())
     }
-
     /// Issue #951: シャットダウン / 再起動経路専用の **同期** kill。
     ///
     /// `kill()` は Windows で taskkill を detached thread に逃がして即返るため、直後に
     /// プロセスごと exit すると taskkill が走り切る前に殺され、子プロセスが孤児化する
     /// 競合があった。本メソッドは process-tree kill を呼び出し thread 上で同期実行する。
-    /// 通常のタブ close では従来どおり `kill()` を使う (UI をブロックしないため)。
-    pub fn kill_blocking(&self) {
+    pub fn kill_blocking(&self, reason: TerminationReason) {
+        self.request_termination(reason);
         self.watcher_cancel.store(true, Ordering::Release);
         #[cfg(windows)]
         if let Some(pid) = self.process_id {
@@ -276,7 +275,9 @@ impl Drop for SessionHandle {
         let mut k = match killer_lock {
             Ok(g) => g,
             Err(poisoned) => {
-                tracing::warn!("[pty] SessionHandle killer mutex poisoned - recovering for drop kill");
+                tracing::warn!(
+                    "[pty] SessionHandle killer mutex poisoned - recovering for drop kill"
+                );
                 poisoned.into_inner()
             }
         };
@@ -299,7 +300,7 @@ impl Drop for SessionHandle {
 pub(crate) mod test_support {
     use super::SessionHandle;
     use crate::pty::scrollback::{new_scrollback, WriteBudget};
-    use crate::pty::session::RegistrationLatch;
+    use crate::pty::session::{termination::TerminationState, RegistrationLatch};
     use portable_pty::{MasterPty, PtySize};
     use std::io::{Cursor, Read, Result as IoResult, Write};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -338,9 +339,7 @@ pub(crate) mod test_support {
             })
         }
 
-        fn try_clone_reader(
-            &self,
-        ) -> std::result::Result<Box<dyn Read + Send>, anyhow::Error> {
+        fn try_clone_reader(&self) -> std::result::Result<Box<dyn Read + Send>, anyhow::Error> {
             Ok(Box::new(Cursor::new(Vec::<u8>::new())))
         }
 
@@ -392,6 +391,7 @@ pub(crate) mod test_support {
             scrollback: new_scrollback(),
             watcher_cancel: Arc::new(AtomicBool::new(false)),
             registration: Arc::new(RegistrationLatch::new()),
+            termination: Arc::new(TerminationState::default()),
             #[cfg(windows)]
             job: None,
         }
@@ -439,7 +439,7 @@ mod drop_tests {
         let handle = test_handle(kills);
         let token = handle.watcher_cancel_token();
         assert!(!token.load(Ordering::Acquire), "初期状態は false");
-        handle.kill().expect("kill ok");
+        handle.kill(TerminationReason::UserClose).expect("kill ok");
         assert!(
             token.load(Ordering::Acquire),
             "kill() 直後に watcher_cancel が true になっていること"

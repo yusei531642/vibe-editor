@@ -1,4 +1,6 @@
 use crate::commands::project_authority::ProjectRootIdentity;
+use crate::pty::registry::InsertError;
+use crate::pty::session::TerminationReason;
 use crate::pty::{spawn_session, SessionRegistry, SpawnOptions};
 use std::sync::Arc;
 use tauri::AppHandle;
@@ -25,8 +27,8 @@ pub(super) async fn spawn_and_register(
             )?;
             match registry.insert_if_absent(id_candidate.clone(), handle) {
                 Ok(()) => return Ok(id_candidate),
-                Err(returned_handle) => {
-                    let _ = returned_handle.kill();
+                Err(InsertError::IdCollision(returned_handle)) => {
+                    let _ = returned_handle.kill(TerminationReason::IdCollision);
                     if attempt == MAX_ID_ATTEMPTS {
                         anyhow::bail!(
                             "terminal_create failed: id collision persisted after {attempt} attempts"
@@ -36,6 +38,13 @@ pub(super) async fn spawn_and_register(
                         "[terminal] id {id_candidate} collided in registry (attempt {attempt}/{MAX_ID_ATTEMPTS}), retrying with fresh UUID"
                     );
                     id_candidate = Uuid::new_v4().to_string();
+                }
+                Err(InsertError::AgentIdCollision(returned_handle)) => {
+                    let agent_id = returned_handle.agent_id.clone().unwrap_or_default();
+                    let _ = returned_handle.kill(TerminationReason::IdCollision);
+                    anyhow::bail!(
+                        "terminal_create failed: agent_id '{agent_id}' already has an active PTY"
+                    );
                 }
             }
         }

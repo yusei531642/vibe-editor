@@ -31,7 +31,6 @@ impl SessionRegistry {
             }
             handle
         };
-        let _ = removed.kill();
         removed.cleanup_codex_broker_after_kill();
         Some(removed)
     }
@@ -42,6 +41,7 @@ mod tests {
     use super::*;
     use crate::pty::session::test_support::handle_with;
     use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
     use std::sync::mpsc;
     use std::time::Duration;
 
@@ -101,9 +101,11 @@ mod tests {
         assert!(registry
             .insert_if_absent("collision".into(), current)
             .is_ok());
-        assert!(registry
-            .insert_if_absent("collision".into(), rejected)
-            .is_err());
+        let result = registry.insert_if_absent("collision".into(), rejected);
+        assert!(matches!(
+            result,
+            Err(crate::pty::registry::InsertError::IdCollision(_))
+        ));
         assert!(!rejected_registration.wait_until_registered());
         assert!(registry.get("collision").is_some());
     }
@@ -124,5 +126,38 @@ mod tests {
         assert!(done_rx.recv_timeout(Duration::from_millis(20)).is_err());
         drop(handle);
         assert_eq!(done_rx.recv_timeout(Duration::from_secs(1)), Ok(false));
+    }
+
+    #[test]
+    fn duplicate_agent_is_rejected_without_killing_existing_session() {
+        let registry = SessionRegistry::new();
+        let existing_kills = Arc::new(AtomicUsize::new(0));
+        assert!(registry
+            .insert_if_absent(
+                "existing".into(),
+                handle_with(
+                    Some("agent-a"),
+                    None,
+                    Some("team-a"),
+                    existing_kills.clone(),
+                ),
+            )
+            .is_ok());
+        let result = registry.insert_if_absent(
+                "duplicate".into(),
+                handle_with(
+                    Some("agent-a"),
+                    None,
+                    Some("team-a"),
+                    Arc::new(AtomicUsize::new(0)),
+                ),
+            );
+        assert!(matches!(
+            result,
+            Err(crate::pty::registry::InsertError::AgentIdCollision(_))
+        ));
+        assert!(registry.get("existing").is_some());
+        assert!(registry.get("duplicate").is_none());
+        assert_eq!(existing_kills.load(Ordering::SeqCst), 0);
     }
 }

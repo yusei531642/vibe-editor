@@ -441,6 +441,7 @@ pub fn spawn_session(
 
     let registration = Arc::new(super::RegistrationLatch::new());
 
+    let termination = Arc::new(super::termination::TerminationState::default());
     spawn_exit_watcher(
         app.clone(),
         exit_event,
@@ -448,7 +449,10 @@ pub fn spawn_session(
         child,
         batcher_done,
         registry,
-        registration.clone(),
+        super::exit_watcher::WatcherLifecycle {
+            registration: registration.clone(),
+            termination: termination.clone(),
+        },
     );
 
     Ok(SessionHandle {
@@ -473,6 +477,7 @@ pub fn spawn_session(
         // Issue #632: watcher cancel token は session 起動と同寿命。kill() / Drop で flip。
         watcher_cancel: Arc::new(AtomicBool::new(false)),
         registration,
+        termination,
         #[cfg(windows)]
         job,
     })

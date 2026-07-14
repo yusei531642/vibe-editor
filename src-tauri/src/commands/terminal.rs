@@ -6,84 +6,19 @@
 mod blocking_spawn;
 mod codex_prompt;
 pub(crate) mod command_validation;
+mod create_types;
 mod paste_image;
 mod prompt_files;
 pub(crate) mod shell_policy;
 pub(crate) mod write_outcome;
 
-use crate::pty::session::TerminalWarning;
 use crate::pty::SpawnOptions;
 use crate::state::AppState;
 use crate::util::log_redact::redact_home;
 use codex_prompt::inject_codex_prompt_to_pty;
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+pub use create_types::{SavePastedImageResult, TerminalCreateOptions, TerminalCreateResult};
 use tauri::{AppHandle, State};
 use uuid::Uuid;
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TerminalCreateOptions {
-    /// Issue #285: renderer が pre-subscribe 用に渡すクライアント側生成 id。
-    /// `[A-Za-z0-9_-]{1,64}` 以外や未指定の場合は Rust 側で UUID を生成する。
-    #[serde(default)]
-    pub id: Option<String>,
-    pub cwd: String,
-    #[serde(default)]
-    pub fallback_cwd: Option<String>,
-    #[serde(default)]
-    pub command: Option<String>,
-    #[serde(default)]
-    pub args: Option<Vec<String>>,
-    pub cols: u32,
-    pub rows: u32,
-    #[serde(default)]
-    pub env: Option<HashMap<String, String>>,
-    #[serde(default)]
-    pub team_id: Option<String>,
-    #[serde(default)]
-    pub agent_id: Option<String>,
-    #[serde(default)]
-    pub role: Option<String>,
-    /// Issue #271: HMR 経路で同じ React mount identity を共有する論理キー。
-    #[serde(default)]
-    pub session_key: Option<String>,
-    /// Issue #271: true の場合、同じ session_key / agent_id の生存 PTY があれば
-    /// spawn せず既存 id を返す。デフォルトは false (従来通り常に新規 spawn)。
-    #[serde(default)]
-    pub attach_if_exists: bool,
-    #[serde(default)]
-    pub claude_instructions: Option<String>,
-    #[serde(default)]
-    pub codex_instructions: Option<String>,
-}
-
-#[derive(Serialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct TerminalCreateResult {
-    pub ok: bool,
-    pub id: Option<String>,
-    pub error: Option<String>,
-    pub command: Option<String>,
-    /// Issue #818: warning を structured (i18n key + params) で返す。renderer 側で
-    /// `t(messageKey, params)` 評価。旧実装は日本語ハードコード String を返していた。
-    pub warning: Option<TerminalWarning>,
-    /// Issue #271: attachIfExists により既存 PTY に接続した場合 true。新規 spawn 時は None。
-    pub attached: Option<bool>,
-    /// Issue #285 follow-up: attach 経路で renderer に渡す既存 PTY の直近出力 snapshot。
-    /// HMR remount / Canvas/IDE 切替で xterm が新規生成されると banner / prompt は既に
-    /// emit 済みで listener には届かないため、直前 64 KiB を文字列で同梱して replay させる。
-    /// 新規 spawn 経路や attach 不発 (snapshot 空) では None。
-    pub replay: Option<String>,
-}
-
-#[derive(Serialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct SavePastedImageResult {
-    pub ok: bool,
-    pub path: Option<String>,
-    pub error: Option<String>,
-}
 
 fn resolve_command(command: Option<String>, args: Option<Vec<String>>) -> (String, Vec<String>) {
     command_validation::normalize_terminal_command(command, args)
@@ -283,6 +218,13 @@ pub async fn terminal_create(
                 ..Default::default()
             });
         }
+    }
+    if opts.attach_only {
+        return Ok(TerminalCreateResult {
+            ok: false,
+            attach_miss: Some(true),
+            ..Default::default()
+        });
     }
 
     // Issue #293: 新規 spawn 経路は DoS ガードを通す。
@@ -581,6 +523,7 @@ pub async fn terminal_create(
                 // Issue #271: 新規 spawn は明示的に Some(false)。renderer 側で
                 // 「attach 復帰経路かどうか」を毎回判別するときの不確実性をなくす。
                 attached: Some(false),
+                attach_miss: None,
                 // Issue #285 follow-up: 新規 spawn では replay すべき過去出力は無いので None。
                 replay: None,
             })
@@ -639,7 +582,7 @@ pub async fn terminal_kill(
     id: String,
 ) -> crate::commands::error::CommandResult<()> {
     if let Some(s) = state.pty_registry.remove(&id) {
-        let _ = s.kill();
+        let _ = s.kill(crate::pty::session::TerminationReason::UserClose);
     }
     Ok(())
 }
