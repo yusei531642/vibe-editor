@@ -140,7 +140,9 @@ describe('migrateSettings', () => {
         ]
       });
 
-      expect(migrated.customAgents?.[0]?.args).toBe('--model opus --yes');
+      const agent = migrated.customAgents?.[0];
+      expect(agent).toMatchObject({ runtime: 'cli' });
+      expect(agent?.runtime === 'cli' ? agent.args : undefined).toBe('--model opus --yes');
     });
 
     it('leaves ASCII-only args strings unchanged', () => {

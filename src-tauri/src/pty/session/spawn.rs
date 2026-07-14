@@ -9,8 +9,11 @@
 //! 一切変えていない。Windows 専用のパス解決は `super::windows_resolve` に分離した。
 
 use crate::pty::batcher::{spawn_batcher, PtyOutputObserver};
-use crate::pty::scrollback::{new_scrollback, scrollback_to_string, WriteBudget};
-use crate::{commands::terminal::command_validation, commands::terminal::shell_policy, util::log_redact::redact_home};
+use crate::pty::scrollback::{new_scrollback, WriteBudget};
+use crate::{
+    commands::terminal::command_validation, commands::terminal::shell_policy,
+    util::log_redact::redact_home,
+};
 use anyhow::{anyhow, Result};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use serde::Serialize;
@@ -19,11 +22,11 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-use tauri::{AppHandle, Emitter, Manager};
+use std::time::Instant;
+use tauri::{AppHandle, Manager};
 use tokio::sync::mpsc;
 
-use super::exit_info::{normalize_exit_code, summarize_exit_tail, TerminalExitInfo};
+use super::exit_watcher::spawn_exit_watcher;
 use super::handle::SessionHandle;
 use super::spawn_metrics::{build_cmd_label, engine_label, log_spawn_outcome, platform_label};
 
@@ -145,7 +148,9 @@ pub(crate) fn prepare_spawn_command(opts: &SpawnOptions) -> Result<PreparedSpawn
     }
     // Issue #933: シェルは対話セッション起動のみ許可 (allowlist 契約 / shell_policy.rs)
     let registered = shell_policy::settings_registered_command_lines();
-    if let Some(reason) = shell_policy::reject_non_interactive_shell_args(&command, &args, &registered) {
+    if let Some(reason) =
+        shell_policy::reject_non_interactive_shell_args(&command, &args, &registered)
+    {
         return Err(anyhow!("{reason}"));
     }
     let sanctioned_flags = command_validation::settings_sanctioned_danger_flags(&command);
@@ -289,7 +294,7 @@ pub fn spawn_session(
     let started = Instant::now();
     let spawn_result = pair.slave.spawn_command(cmd);
     let elapsed_ms = started.elapsed().as_millis() as u64;
-    let mut child = match spawn_result {
+    let child = match spawn_result {
         Ok(child) => {
             log_spawn_outcome(&cmd_label, engine, platform, elapsed_ms, None);
             child
@@ -309,10 +314,9 @@ pub fn spawn_session(
     // クラッシュ / 強制終了でも OS が handle close 経由で子プロセスツリーを回収できる
     // ようにする。作成 / assign 失敗は warn のみ (従来の taskkill 経路で回収継続)。
     #[cfg(windows)]
-    let job = process_id
-        .and_then(|pid| {
-            crate::pty::win_job_object::KillOnCloseJob::create().filter(|job| job.assign_pid(pid))
-        });
+    let job = process_id.and_then(|pid| {
+        crate::pty::win_job_object::KillOnCloseJob::create().filter(|job| job.assign_pid(pid))
+    });
 
     // reader thread (blocking IO -> mpsc)
     let mut reader = pair.master.try_clone_reader()?;
@@ -435,67 +439,17 @@ pub fn spawn_session(
 
     let batcher_done = spawn_batcher(app.clone(), data_event, rx, scrollback.clone(), on_output);
 
-    // exit watcher (blocking child.wait → emit exit event)
-    // Issue #152: child.wait() の後に registry からも remove して、孤立 entry が
-    // residual に残らないようにする (renderer が落ちて terminal_kill が呼ばれない経路で必要)。
-    let app_for_exit = app.clone();
-    let exit_event_clone = exit_event.clone();
-    let registry_for_exit = registry.clone();
-    let id_for_exit = id.clone();
-    std::thread::spawn(move || {
-        let exit_status = child.wait().ok();
-        // child.wait() 後は kill 不要だが registry::remove が handle.kill() を呼ぶ (二重 kill は no-op で安全)。
-        let removed = registry_for_exit.remove(&id_for_exit);
-        let exit_record = removed.as_ref().and_then(|handle| {
-            if let (Some(team_id), Some(agent_id)) =
-                (handle.team_id.clone(), handle.agent_id.clone())
-            {
-                Some((team_id, agent_id, handle.scrollback.clone()))
-            } else {
-                None
-            }
-        });
-        // Windows ConPTY は master drop 後に reader EOF → batcher final flush となる (removed 保持中は master が残り進まない)。
-        drop(removed);
+    let registration = Arc::new(super::RegistrationLatch::new());
 
-        let exit_flush_wait_timeout = Duration::from_secs(2);
-        match batcher_done.recv_timeout(exit_flush_wait_timeout) {
-            Ok(()) => {}
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                tracing::warn!(
-                    "[pty] timed out waiting for final data flush before exit event: {exit_event_clone}"
-                );
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
-        }
-
-        let output_tail = exit_record
-            .as_ref()
-            .and_then(|(_, _, scrollback)| scrollback_to_string(scrollback));
-
-        let info = TerminalExitInfo {
-            exit_code: exit_status
-                .as_ref()
-                .map(|s| normalize_exit_code(s.exit_code()))
-                .unwrap_or(-1),
-            signal: None,
-            tail: summarize_exit_tail(output_tail.as_deref()),
-        };
-        if let Err(e) = app_for_exit.emit(&exit_event_clone, info.clone()) {
-            tracing::warn!("emit {exit_event_clone} failed: {e}");
-        }
-        if let Some((team_id, agent_id, _)) = exit_record {
-            let app = app_for_exit.clone();
-            tauri::async_runtime::spawn(async move {
-                let Some(state) = app.try_state::<crate::state::AppState>() else {
-                    return;
-                };
-                let hub = state.team_hub.clone();
-                hub.record_agent_process_exit(&team_id, &agent_id, info.exit_code, output_tail)
-                    .await;
-            });
-        }
-    });
+    spawn_exit_watcher(
+        app.clone(),
+        exit_event,
+        id,
+        child,
+        batcher_done,
+        registry,
+        registration.clone(),
+    );
 
     Ok(SessionHandle {
         writer: Mutex::new(writer),
@@ -518,6 +472,7 @@ pub fn spawn_session(
         scrollback,
         // Issue #632: watcher cancel token は session 起動と同寿命。kill() / Drop で flip。
         watcher_cancel: Arc::new(AtomicBool::new(false)),
+        registration,
         #[cfg(windows)]
         job,
     })

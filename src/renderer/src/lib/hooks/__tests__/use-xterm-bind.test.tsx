@@ -24,11 +24,6 @@ import {
   type PtySpawnSnapshot
 } from '../use-xterm-bind';
 
-type TestWindow = Window &
-  typeof globalThis & {
-    api?: unknown;
-  };
-
 type TestTerminal = Terminal & {
   textarea: HTMLTextAreaElement;
 };
@@ -56,13 +51,13 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
   let originalFontsDescriptor: PropertyDescriptor | undefined;
 
   beforeEach(() => {
-    originalApi = (window as TestWindow).api;
+    originalApi = window.api;
     originalFontsDescriptor = Object.getOwnPropertyDescriptor(document, 'fonts');
     // fonts.ready が即時 resolve するように上書き (loadInitialMetrics の 300ms タイムアウト経路を
     // 待たずに spawn まで進める)。
     Object.defineProperty(document, 'fonts', {
       configurable: true,
-      value: { ready: Promise.resolve() } as Partial<FontFaceSet>
+      value: { ready: Promise.resolve({} as FontFaceSet) }
     });
   });
 
@@ -70,14 +65,14 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
     cleanup();
     vi.restoreAllMocks();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
-      (window as TestWindow).api = originalApi;
+      Object.defineProperty(window, 'api', { configurable: true, writable: true, value: originalApi });
     }
     if (originalFontsDescriptor) {
       Object.defineProperty(document, 'fonts', originalFontsDescriptor);
     } else {
-      delete (document as Document & { fonts?: unknown }).fonts;
+      Reflect.deleteProperty(document, 'fonts');
     }
   });
 
@@ -90,7 +85,7 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
     }));
     const kill = vi.fn(async () => undefined);
 
-    (window as TestWindow).api = {
+    Object.defineProperty(window, 'api', { configurable: true, writable: true, value: {
       terminal: {
         onDataReady: vi.fn(async () => vi.fn()),
         onExitReady: vi.fn(async () => vi.fn()),
@@ -101,9 +96,10 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
         create,
         write: vi.fn(async () => undefined),
         resize: vi.fn(async () => undefined),
+        savePastedImage: vi.fn(async () => ''),
         kill
       }
-    };
+    } });
 
     const ptyIdRef = makeRef<string | null>(null);
 
@@ -167,7 +163,7 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
       tone: 'error' as const
     }));
 
-    (window as TestWindow).api = {
+    Object.defineProperty(window, 'api', { configurable: true, writable: true, value: {
       terminal: {
         onDataReady: vi.fn(async () => vi.fn()),
         onExitReady: vi.fn(async () => vi.fn()),
@@ -178,9 +174,10 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
         create,
         write: vi.fn(async () => undefined),
         resize: vi.fn(async () => undefined),
+        savePastedImage: vi.fn(async () => ''),
         kill
       }
-    };
+    } });
 
     const ptyIdRef = makeRef<string | null>(null);
 
@@ -232,7 +229,7 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
     }));
     const kill = vi.fn(async () => undefined);
 
-    (window as TestWindow).api = {
+    Object.defineProperty(window, 'api', { configurable: true, writable: true, value: {
       terminal: {
         onDataReady: vi.fn(async () => vi.fn()),
         onExitReady: vi.fn(async () => vi.fn()),
@@ -243,9 +240,10 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
         create,
         write: vi.fn(async () => undefined),
         resize: vi.fn(async () => undefined),
+        savePastedImage: vi.fn(async () => ''),
         kill
       }
-    };
+    } });
 
     const ptyIdRef = makeRef<string | null>(null);
     const termRef = makeRef<Terminal | null>(term);

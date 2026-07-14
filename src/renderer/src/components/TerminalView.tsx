@@ -281,6 +281,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
         void window.api.terminal.write(ptyIdRef.current, text);
       }
     };
+    const writePastedImageToPty = async (text: string) => {
+      const id = ptyIdRef.current;
+      if (!id) return { outcome: 'sessionNotFound' as const };
+      return window.api.terminal.write(id, text);
+    };
 
     // --- initialMessage の自動送信 ---
     const { observeChunk: observeInitialMessage } = useAutoInitialMessage({
@@ -326,6 +331,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       termRef,
       containerRef,
       writeToPty,
+      writePastedImageToPty,
       langRef
     });
 

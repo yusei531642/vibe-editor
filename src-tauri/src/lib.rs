@@ -265,7 +265,7 @@ pub fn run() {
             commands::logs::logs_open_dir,
             // ---- terminal ----
             commands::terminal::terminal_create,
-            commands::terminal::terminal_write,
+            commands::terminal::write_outcome::terminal_write,
             commands::terminal::terminal_resize,
             commands::terminal::terminal_kill,
             commands::terminal::terminal_save_pasted_image,

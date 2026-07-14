@@ -36,11 +36,6 @@ import { ToastProvider } from '../../../../lib/toast-context';
 import { DEFAULT_SETTINGS } from '../../../../../../types/shared';
 import type { ReactNode } from 'react';
 
-type TestWindow = Window &
-  typeof globalThis & {
-    api?: unknown;
-  };
-
 function installApi(): {
   read: ReturnType<typeof vi.fn>;
   write: ReturnType<typeof vi.fn>;
@@ -54,7 +49,7 @@ function installApi(): {
     mtimeMs: 1000,
     sizeBytes: 5,
     contentHash: 'hash-1',
-    error: null
+    error: undefined
   }));
   const write = vi.fn(async () => ({
     ok: true,
@@ -62,16 +57,21 @@ function installApi(): {
     sizeBytes: 7,
     contentHash: 'hash-2'
   }));
-  (window as TestWindow).api = {
+  window.api = {
+    ...window.api,
     settings: {
+      ...window.api?.settings,
       load: vi.fn(async () => DEFAULT_SETTINGS),
-      save: vi.fn(async () => undefined)
+      save: vi.fn(async () => undefined),
+      pickCustomMascot: vi.fn(async () => null),
+      loadCustomMascot: vi.fn(async () => null),
+      clearCustomMascot: vi.fn(async () => undefined)
     },
     app: {
-      setProjectRoot: vi.fn(async () => undefined),
+      ...window.api?.app,
       setZoomLevel: vi.fn(async () => undefined)
     },
-    files: { read, write }
+    files: { ...window.api?.files, read, write }
   };
   return { read, write };
 }
@@ -122,10 +122,10 @@ function renderCard(payload?: { projectRoot: string; relPath: string }) {
 }
 
 describe('EditorCard (smoke)', () => {
-  let originalApi: unknown;
+  let originalApi: typeof window.api | undefined;
 
   beforeEach(() => {
-    originalApi = (window as TestWindow).api;
+    originalApi = window.api;
     editorViewMock.mockClear();
     confirmMock.mockReset();
     confirmMock.mockResolvedValue(true);
@@ -134,9 +134,9 @@ describe('EditorCard (smoke)', () => {
   afterEach(() => {
     cleanup();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
-      (window as TestWindow).api = originalApi;
+      window.api = originalApi;
     }
     vi.restoreAllMocks();
   });

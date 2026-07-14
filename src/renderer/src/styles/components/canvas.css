@@ -27,6 +27,13 @@
   stroke: var(--canvas-grid, #1c1c20);
 }
 
+/* MiniMapはReact stateではなくCSS cascadeで全themeへ即時追従させる。 */
+.react-flow__minimap {
+  --xy-minimap-background-color: var(--canvas-minimap-bg);
+  --xy-minimap-mask-background-color: var(--canvas-minimap-mask);
+  border: 1px solid var(--border);
+}
+
 /* ---------- layout root ---------- */
 .canvas-layout {
   position: fixed;
@@ -185,7 +192,7 @@
   align-items: center;
   gap: 6px;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 .api-chat__team-role input {
   flex: 1;
@@ -194,7 +201,7 @@
   font-family: var(--mono-font);
   font-size: 11px;
   color: var(--fg);
-  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  background: color-mix(in srgb, var(--surface-elev) 70%, transparent);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm, 8px);
 }
@@ -211,7 +218,7 @@
 
 .api-chat__empty {
   font-size: 12px;
-  color: var(--muted);
+  color: var(--fg-muted);
   padding: 8px 0;
 }
 
@@ -232,7 +239,7 @@
 .api-chat__sys {
   font-size: 11px;
   line-height: 1.5;
-  color: var(--muted);
+  color: var(--fg-muted);
   white-space: pre-line;
 }
 
@@ -249,7 +256,7 @@
 .api-chat__time {
   font-size: 11px;
   letter-spacing: 0.02em;
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 .api-chat__who {
   font-size: 11px;
@@ -279,7 +286,7 @@
   align-items: center;
   gap: 8px;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 .api-chat__dots {
   display: inline-flex;
@@ -312,7 +319,7 @@
 
 .api-chat__status {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 
 .api-chat__composer {
@@ -323,7 +330,7 @@
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md, 12px);
-  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  background: color-mix(in srgb, var(--surface-elev) 70%, transparent);
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 .api-chat__composer:focus-within {
@@ -332,7 +339,7 @@
 }
 .api-chat__prompt {
   font-size: 14px;
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 .api-chat__input {
   min-width: 0;
@@ -351,7 +358,7 @@
   outline: none;
 }
 .api-chat__input::placeholder {
-  color: var(--muted);
+  color: var(--fg-muted);
 }
 
 .api-chat__actions {
@@ -368,7 +375,7 @@
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--muted);
+  color: var(--fg-muted);
   cursor: pointer;
   transition: background-color 150ms ease, color 150ms ease;
 }
@@ -388,8 +395,8 @@
   height: 34px;
   border: 0;
   border-radius: 10px;
-  background: var(--chat-accent);
-  color: #fff;
+  background: var(--accent);
+  color: var(--accent-foreground, #fff);
   cursor: pointer;
   transition: filter 150ms ease, transform 100ms ease;
 }
@@ -416,8 +423,8 @@
   padding: 6px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 60%, transparent);
-  color: var(--muted);
+  background: color-mix(in srgb, var(--surface-elev) 60%, transparent);
+  color: var(--fg-muted);
   font-family: var(--mono-font);
   font-size: 11px;
   cursor: pointer;
@@ -705,7 +712,7 @@
   height: 14px;
   border-radius: 50%;
   background: var(--dot-color, var(--accent));
-  color: #0a0a0d;
+  color: var(--dot-foreground, var(--accent-foreground));
   font-size: 9px;
   font-weight: 700;
   display: inline-flex;
@@ -876,30 +883,6 @@
   gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
-}
-/*
- * Avatar: Claude Code の `⏺` メッセージマーカーに着想。
- * 円形 + ロール色 + 微弱な glow リング。文字は role glyph (P/R/... 1 文字)。
- */
-.canvas-agent-card__avatar {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--agent-accent, var(--accent));
-  color: #0a0a0d;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  flex-shrink: 0;
-  box-shadow: 0 0 0 3px
-    color-mix(in srgb, var(--agent-accent, var(--accent)) 18%, transparent);
-  transition: box-shadow var(--dur-fast, 180ms) var(--ease-standard);
-}
-.canvas-agent-card:hover .canvas-agent-card__avatar {
-  box-shadow: 0 0 0 4px
-    color-mix(in srgb, var(--agent-accent, var(--accent)) 26%, transparent);
 }
 /*
  * Title: Claude 公式風に serif。

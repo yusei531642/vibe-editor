@@ -11,9 +11,9 @@
 export async function insertPastedImageToPty(
   blob: Blob,
   mime: string,
-  writeToPty: (text: string) => void | Promise<void>,
+  writeToPty: (text: string) => Promise<TerminalWriteResult>,
   unknownError = 'Unknown error'
-): Promise<{ ok: true } | { ok: false; error: string }> {
+): Promise<{ ok: true } | { ok: false; error: string; errorKey?: string }> {
   // Issue #160: 旧実装は 32KB チャンクで Array.from(Uint8Array) → String.fromCharCode.apply
   // を回しており、20MB クラスのスクショで Array.from が 20M 要素配列を作成 → UI ハング。
   // FileReader.readAsDataURL で base64 をネイティブ実装一発で取得する方が圧倒的に速い。
@@ -38,6 +38,11 @@ export async function insertPastedImageToPty(
   const p = res.path;
   const needQuote = /\s/.test(p);
   const inserted = (needQuote ? `"${p}"` : p) + ' ';
-  await writeToPty(inserted);
+  const writeResult = await writeToPty(inserted);
+  if (writeResult.outcome !== 'written') {
+    const errorKey = `terminal.pasteImage.${writeResult.outcome}`;
+    return { ok: false, error: writeResult.outcome, errorKey };
+  }
   return { ok: true };
 }
+import type { TerminalWriteResult } from '../../../types/shared';

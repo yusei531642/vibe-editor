@@ -23,9 +23,11 @@ pub(crate) mod env_allowlist;
 // Issue #1098: exit イベント payload 型 (`TerminalExitInfo`) と exit code 正規化 /
 // 末尾出力サマリ生成。`spawn.rs` の exit watcher が参照する (外部からはパス参照しない)。
 mod exit_info;
+mod exit_watcher;
 mod handle;
 mod injecting_guard;
 mod lock;
+mod registration;
 pub(crate) mod spawn;
 pub(crate) mod spawn_metrics;
 #[cfg(not(windows))]
@@ -39,6 +41,7 @@ pub(crate) mod windows_resolve;
 // `TerminalExitInfo` (emit payload) と `InjectingGuard` (`begin_injecting` の戻り値型) は
 // `pub` のまま各サブモジュールに置く — 外部はパス参照しないため再エクスポート不要。
 pub use handle::{SessionHandle, UserWriteOutcome};
+pub(crate) use registration::RegistrationLatch;
 pub use spawn::{resolve_valid_cwd, spawn_session, SpawnOptions, TerminalWarning};
 
 // Issue #937: registry の kill_team テスト等が mock killer 付き handle を作れるよう、

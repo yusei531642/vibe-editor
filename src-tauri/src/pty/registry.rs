@@ -7,7 +7,7 @@ use crate::pty::session::SessionHandle;
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
-
+mod lifecycle;
 /// Issue #293: 同時 PTY 数の上限。CLAUDE.md の「ターミナル最大 10 タブ」+ Canvas 上の
 /// agent ノード等を考慮しても十分余裕がある値として 100 を採用。renderer の暴走 / 悪意ある
 /// 連投で OS リソースを枯渇させない安全網。
@@ -206,6 +206,7 @@ impl SessionRegistry {
     pub fn insert_if_absent(&self, id: String, handle: SessionHandle) -> Result<(), SessionHandle> {
         let mut g = recover(self.inner.lock());
         if g.by_id.contains_key(&id) {
+            handle.registration.mark_rejected();
             return Err(handle);
         }
         Self::insert_locked(&mut g, id, handle);
@@ -262,14 +263,14 @@ impl SessionRegistry {
                 }
             }
         }
-        g.by_id.insert(id, Arc::new(handle));
+        let handle = Arc::new(handle);
+        g.by_id.insert(id, handle.clone()); // remove_if_same はこの lock 解放後に進む
+        handle.registration.mark_registered();
     }
-
     pub fn get(&self, id: &str) -> Option<Arc<SessionHandle>> {
         let g = recover(self.inner.lock());
         g.by_id.get(id).cloned()
     }
-
     /// agent_id 経由で取得 (TeamHub がメッセージ注入時に使う)
     pub fn get_by_agent(&self, agent_id: &str) -> Option<Arc<SessionHandle>> {
         let g = recover(self.inner.lock());
@@ -277,7 +278,6 @@ impl SessionRegistry {
             .get(agent_id)
             .and_then(|sid| g.by_id.get(sid).cloned())
     }
-
     /// Issue #271: HMR remount で attach 候補となる生存 PTY の session_id を探す。
     /// session_key を最優先 (Canvas 通常 Terminal は agent_id を持たないため)、
     /// 次に agent_id を見る。`by_id` に entry がない孤立 index は **その場で掃除する**。

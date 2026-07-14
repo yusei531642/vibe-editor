@@ -85,11 +85,6 @@ vi.mock('../../../../lib/app-state-context', () => ({
 }));
 import { DEFAULT_SETTINGS } from '../../../../../../types/shared';
 
-type TestWindow = Window &
-  typeof globalThis & {
-    api?: unknown;
-  };
-
 function installApi(): {
   load: ReturnType<typeof vi.fn>;
   save: ReturnType<typeof vi.fn>;
@@ -109,18 +104,40 @@ function installApi(): {
       markdownPath: '/tmp/handoff.md',
       fromAgentId: 'leader-agent-1',
       toAgentId: null,
-      replacementForAgentId: 'leader-agent-1'
+      replacementForAgentId: 'leader-agent-1',
+      schemaVersion: 1,
+      projectRoot: '/repo',
+      retireAfterAck: false,
+      trigger: 'test',
+      content: {
+        summary: '',
+        decisions: [],
+        filesTouched: [],
+        openTasks: [],
+        risks: [],
+        nextActions: [],
+        verification: [],
+        notes: []
+      }
     }
   }));
 
-  (window as TestWindow).api = {
-    settings: { load, save },
-    app: {
-      setProjectRoot: vi.fn(async () => undefined),
-      setZoomLevel: vi.fn(async () => undefined),
-      revealInFileManager: vi.fn(async () => undefined)
+  window.api = {
+    ...window.api,
+    settings: {
+      ...window.api?.settings,
+      load,
+      save,
+      pickCustomMascot: vi.fn(async () => null),
+      loadCustomMascot: vi.fn(async () => null),
+      clearCustomMascot: vi.fn(async () => undefined)
     },
-    handoffs: { create: handoffsCreate }
+    app: {
+      ...window.api?.app,
+      setZoomLevel: vi.fn(async () => undefined),
+      revealInFileManager: vi.fn(async () => ({ ok: true }))
+    },
+    handoffs: { ...window.api?.handoffs, create: handoffsCreate }
   };
 
   return { load, save, handoffsCreate };
@@ -156,18 +173,18 @@ function renderCard(overrides: { id?: string; data?: Record<string, unknown> }) 
 }
 
 describe('AgentNodeCard', () => {
-  let originalApi: unknown;
+  let originalApi: typeof window.api | undefined;
 
   beforeEach(() => {
-    originalApi = (window as TestWindow).api;
+    originalApi = window.api;
   });
 
   afterEach(() => {
     cleanup();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
-      (window as TestWindow).api = originalApi;
+      window.api = originalApi;
     }
     vi.restoreAllMocks();
   });

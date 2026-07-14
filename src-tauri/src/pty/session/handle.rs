@@ -25,7 +25,7 @@ use std::time::Instant;
 
 use super::injecting_guard::InjectingGuard;
 use super::lock::{lock_poisoned, LockResult};
-
+use super::registration::RegistrationLatch;
 /// 1 セッションぶんの状態。kill / write / resize 用に master と writer を Mutex 保持。
 pub struct SessionHandle {
     /// 旧 Session.pty.write 相当
@@ -64,6 +64,7 @@ pub struct SessionHandle {
     /// 観測して即時 exit する。これにより「session が 1 秒で死んでも watcher が 60 秒
     /// 並走する」リソース蓄積を防ぐ。
     pub(super) watcher_cancel: Arc<AtomicBool>,
+    pub(crate) registration: Arc<RegistrationLatch>,
     /// Issue #950: child プロセスツリーを bind した kill-on-close Job Object。
     /// この handle の drop (= タブ close / kill_all / vibe-editor 異常死による OS の
     /// handle 強制 close) で job 内の全プロセス (孫含む) が OS により kill される。
@@ -76,7 +77,6 @@ pub struct SessionHandle {
     #[allow(dead_code)]
     pub(super) job: Option<crate::pty::win_job_object::KillOnCloseJob>,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UserWriteOutcome {
     Written,
@@ -84,7 +84,6 @@ pub enum UserWriteOutcome {
     DroppedTooLarge,
     DroppedRateLimited,
 }
-
 impl SessionHandle {
     /// 内部 / inject 経路用: フラグの状態にかかわらず常に書き込む。
     pub fn write(&self, data: &[u8]) -> Result<()> {
@@ -93,7 +92,6 @@ impl SessionHandle {
         w.flush()?;
         Ok(())
     }
-
     /// Issue #153 / #214:
     /// - inject 中は drop
     /// - 1 回の payload は 64 KiB 上限
@@ -258,7 +256,6 @@ impl SessionHandle {
         }
     }
 }
-
 /// Issue #144: SessionHandle が drop されたタイミングで child プロセスを必ず kill する。
 /// SessionRegistry::remove() は kill を呼ばずに Map から外すだけだったため、
 /// Arc の参照が残っている間 reader thread が PTY master を保持し続け、
@@ -268,6 +265,7 @@ impl SessionHandle {
 /// が確実に成立する。kill 時の Mutex poison でも inner を回収し、child kill だけは試みる。
 impl Drop for SessionHandle {
     fn drop(&mut self) {
+        self.registration.mark_rejected();
         // Issue #632: 明示 kill() を経ずに drop されるパスでも watcher を解放する。
         // 例: registry::insert_if_absent が Err を返して caller 側が handle を捨てるとき、
         //     terminal_create の早期 return パスで insert に到達しないとき、等。
@@ -301,6 +299,7 @@ impl Drop for SessionHandle {
 pub(crate) mod test_support {
     use super::SessionHandle;
     use crate::pty::scrollback::{new_scrollback, WriteBudget};
+    use crate::pty::session::RegistrationLatch;
     use portable_pty::{MasterPty, PtySize};
     use std::io::{Cursor, Read, Result as IoResult, Write};
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -392,6 +391,7 @@ pub(crate) mod test_support {
             }),
             scrollback: new_scrollback(),
             watcher_cancel: Arc::new(AtomicBool::new(false)),
+            registration: Arc::new(RegistrationLatch::new()),
             #[cfg(windows)]
             job: None,
         }

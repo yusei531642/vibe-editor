@@ -51,8 +51,8 @@ npm install -D vitest @vitest/ui @testing-library/react @testing-library/jest-do
 ```jsonc
 {
   "scripts": {
-    "test": "vitest",
-    "test:run": "vitest run",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage"
   }
@@ -351,18 +351,18 @@ cargo test --manifest-path src-tauri/Cargo.toml
 ```yaml
 - run: npm ci
 - run: npm run typecheck
-- run: npm run test:run
+- run: npm test
 - run: cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
 > Renderer テストだけ Linux runner (軽い)、Rust テストは matrix の中で 1 OS だけ走らせる、で OK。
-> Windows 固有 (PTY 系) はそもそも除外している前提なのでクロス OS は不要。
+> Renderer 単体テストは Linux runner で実行する。Windows 固有経路の検証は、対象コードに応じてWindows runnerまたは実機テストを別途追加する。
 
 ---
 
 ## Phase 7: テスト規約 (これだけ守る)
 
-- ファイル配置: テスト対象と **同じフォルダ** に `<name>.test.ts(x)`。`__tests__/` フォルダは作らない。
+- ファイル配置: テスト対象の近くにある `__tests__/` へ `<name>.test.ts(x)` を置く。既存の配置規約とVitestの収集設定を揃える。
 - テスト名: `describe('<対象>', ...)` + `it('<期待される振る舞い>', ...)` の日本語 OK。
 - 1 テスト 1 アサーション原則は **しない** (関連アサーションはまとめて 1 テスト)。
 - IPC モックは **必ず `beforeEach(() => __mock.reset())`** で初期化 (テスト間の状態漏れ防止)。
@@ -383,7 +383,7 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 ## 完了判定 (このスキルが言う「終わった」)
 
-1. `npm run test:run` が **0 ファイル / 0 テスト** ではなく、Phase 4 のサンプル 3 本以上が緑で通る。
+1. `npm test` が **0 ファイル / 0 テスト** ではなく、Phase 4 のサンプル 3 本以上が緑で通る。
 2. `cargo test --manifest-path src-tauri/Cargo.toml` で 1 つ以上の lib テストが緑。
 3. `npm run typecheck` が通る (テストファイルも含めて)。
 4. `.github/workflows/ci.yml` に test step が追加され、Actions の最新 run が緑。

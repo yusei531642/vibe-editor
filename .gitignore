@@ -17,6 +17,7 @@ build/render.html
 *.log
 npm-debug.log*
 .vite/
+*.tsbuildinfo
 .DS_Store
 Thumbs.db
 .env
