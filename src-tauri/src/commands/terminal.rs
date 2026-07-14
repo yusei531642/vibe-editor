@@ -438,7 +438,7 @@ pub async fn terminal_create(
                 .insert_if_absent(id_candidate.clone(), handle)
             {
                 Ok(()) => break Ok(id_candidate),
-                Err(returned_handle) => {
+                Err(crate::pty::registry::InsertError::IdCollision(returned_handle)) => {
                     let _ = returned_handle.kill(crate::pty::session::TerminationReason::IdCollision);
                     if attempt >= MAX_ID_ATTEMPTS {
                         break Err(anyhow::anyhow!(
@@ -449,6 +449,13 @@ pub async fn terminal_create(
                         "[terminal] id {id_candidate} collided in registry (attempt {attempt}/{MAX_ID_ATTEMPTS}), retrying with fresh UUID"
                     );
                     id_candidate = Uuid::new_v4().to_string();
+                }
+                Err(crate::pty::registry::InsertError::AgentIdCollision(returned_handle)) => {
+                    let agent_id = returned_handle.agent_id.clone().unwrap_or_default();
+                    let _ = returned_handle.kill(crate::pty::session::TerminationReason::IdCollision);
+                    break Err(anyhow::anyhow!(
+                        "terminal_create failed: agent_id '{agent_id}' already has an active PTY"
+                    ));
                 }
             },
             Err(e) => break Err(e),

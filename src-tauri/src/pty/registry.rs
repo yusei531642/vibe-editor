@@ -29,6 +29,13 @@ pub enum SpawnGateError {
     RateLimited,
 }
 
+/// `insert_if_absent` が新しい handle を採用しなかった理由。
+/// caller は id 衝突だけを fresh UUID で再試行し、agent_id 重複は即時失敗させる。
+pub enum InsertError {
+    IdCollision(SessionHandle),
+    AgentIdCollision(SessionHandle),
+}
+
 impl SpawnGateError {
     pub fn message(self) -> String {
         match self {
@@ -197,17 +204,17 @@ impl SessionRegistry {
     ///
     /// 戻り値:
     ///   - `Ok(())`: 採用された (id は registry に登録済み)
-    ///   - `Err(handle)`: 既存 PTY と id が衝突。caller の handle はそのまま返却される
-    ///     ので、caller 側で `handle.kill()` してから別 id で retry する責務がある。
+    ///   - `Err(InsertError::IdCollision(handle))`: id 衝突。handle を回収後、別 id で retry 可。
+    ///   - `Err(InsertError::AgentIdCollision(handle))`: agent_id 重複。id を変えても解消しない。
     ///
     /// Issue #939: `Err` に大きな `SessionHandle` を載せるのは「衝突時に handle を呼び出し元へ
     /// 返して回収させる」という設計上の意図 (Box 化すると毎回ヒープ確保が増える)。許容する。
     #[allow(clippy::result_large_err)]
-    pub fn insert_if_absent(&self, id: String, handle: SessionHandle) -> Result<(), SessionHandle> {
+    pub fn insert_if_absent(&self, id: String, handle: SessionHandle) -> Result<(), InsertError> {
         let mut g = recover(self.inner.lock());
         if g.by_id.contains_key(&id) {
             handle.registration.mark_rejected();
-            return Err(handle);
+            return Err(InsertError::IdCollision(handle));
         }
         if handle
             .agent_id
@@ -215,7 +222,7 @@ impl SessionRegistry {
             .is_some_and(|agent_id| g.by_agent.contains_key(agent_id))
         {
             handle.registration.mark_rejected();
-            return Err(handle);
+            return Err(InsertError::AgentIdCollision(handle));
         }
         Self::insert_locked(&mut g, id, handle);
         Ok(())
