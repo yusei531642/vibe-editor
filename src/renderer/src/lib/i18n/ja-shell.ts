@@ -256,6 +256,8 @@ export const jaShell: Dict = {
   // ---------- Toast ----------
   'toast.reviewRequested': '差分レビューを依頼: {path}',
   'toast.sessionResumed': 'セッションに復帰: {title}',
+  'toast.sessionsRefreshFailed': 'セッション一覧の取得に失敗しました',
+  'toast.gitRefreshFailed': 'Gitの状態取得に失敗しました',
   'toast.pathCopied': 'パスをクリップボードにコピー',
   'toast.copyFailed': 'クリップボードへのコピーに失敗しました',
   'toast.revealFailed': 'ファイルマネージャでの表示に失敗しました',

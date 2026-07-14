@@ -15,6 +15,7 @@ mod providers;
 pub mod skills;
 pub mod models;
 mod project_docs;
+mod session_delete;
 mod tools;
 mod tools_exec;
 mod tools_search;
@@ -26,6 +27,7 @@ pub mod types;
 mod tests;
 
 use self::providers::{call_provider, provider_preset, TeamToolCtx, ToolRuntime};
+use self::session_delete::map_session_delete_result;
 use self::types::*;
 use crate::state::{current_project_root, AppState};
 use tauri::State;
@@ -138,9 +140,7 @@ pub async fn api_agent_session_load(session_id: String) -> CommandResult<Option<
 pub async fn api_agent_session_delete(session_id: String) -> CommandResult<()> {
     validate_id("sessionId", &session_id)?;
     let path = session_path(&session_id)?;
-    match tokio::fs::remove_file(path).await {
-        Ok(()) | Err(_) => Ok(()),
-    }
+    map_session_delete_result(tokio::fs::remove_file(path).await)
 }
 
 #[tauri::command]
