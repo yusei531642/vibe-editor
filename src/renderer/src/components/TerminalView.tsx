@@ -14,6 +14,7 @@ import { useFitToContainer } from '../lib/use-fit-to-container';
 import { useCanvasTerminalPointerNormalizer } from '../lib/use-canvas-terminal-pointer-normalizer';
 import type { CellSize } from '../lib/measure-cell-size';
 import type { TerminalRuntimeStatus } from '../lib/terminal-status';
+import { formatTerminalDiagnostic, type TerminalDiagnostic } from '../lib/terminal-diagnostics';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu';
 import { useToast } from '../lib/toast-context';
 import { createApiErrorDetector, type ApiErrorDetector } from '../lib/pty-api-error-detector';
@@ -180,21 +181,18 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     // ref で渡す。settings 変化のたびに同期するので stale にならない。
     const langRef = useRef(settings.language);
     langRef.current = settings.language;
-
     // Issue #356: 右クリックコンテキストメニュー (paste / copy selection / clear)。
     const [contextMenu, setContextMenu] = useState<{
       x: number;
       y: number;
       items: ContextMenuItem[];
     } | null>(null);
-
     // --- Terminal インスタンス ---
     const { containerRef, termRef, fitRef } = useXtermInstance(
       settings,
       disableWebgl,
       forceWheelScrollback
     );
-
     // --- ref で state を hook 間共有 ---
     const ptyIdRef = useRef<string | null>(null);
     const disposedRef = useRef(false);
@@ -202,7 +200,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     // 30ms 後 visible-effect refit が同じ cols/rows を計算したとき dedupe で IPC を skip する。
     // これにより SIGWINCH の二重発火を防ぐ。
     const lastScheduledRef = useRef<{ cols: number; rows: number } | null>(null);
-
+    const pendingPtyResizeRef = useRef<{ cols: number; rows: number } | null>(null);
     // 不変式 #2: args / env / teamId / agentId / role / initialMessage は
     // spawn 時に一度だけ使う値。ref 経由で usePtySession 内部に渡す。
     const snapRef = useRef<PtySpawnSnapshot>({
@@ -225,11 +223,9 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       claudeInstructions,
       codexInstructions
     };
-
     // useAutoInitialMessage は snap とは別に initialMessage を再参照するので ref を渡す
     const initialMessageRef = useRef(initialMessage);
     initialMessageRef.current = initialMessage;
-
     // Issue #818: Rust 側から structured (i18n key + params) で来る warning を
     // 現在言語で評価して banner 文字列を返す。空 requested / 空 fallback は i18n の
     // `terminal.cwd.unsetLabel` で言語に応じた placeholder (`(未設定)` / `(unset)`) に
@@ -247,7 +243,9 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       },
       [t]
     );
-
+    const formatDiagnostic = useCallback(
+      (diagnostic: TerminalDiagnostic) => formatTerminalDiagnostic(diagnostic, t), [t]
+    );
     // callbacks は毎レンダー更新されるので ref で安定化
     const callbacksRef = useRef<PtySessionCallbacks>({
       onStatus,
@@ -256,7 +254,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       onSessionId,
       onUserInput,
       onSpawnError,
-      formatTerminalWarning
+      formatTerminalWarning,
+      formatTerminalDiagnostic: formatDiagnostic
     });
     callbacksRef.current = {
       onStatus,
@@ -265,7 +264,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       onSessionId,
       onUserInput,
       onSpawnError,
-      formatTerminalWarning
+      formatTerminalWarning,
+      formatTerminalDiagnostic: formatDiagnostic
     };
 
     // --- 共通の write ヘルパ (closure で ptyIdRef を読む) ---
@@ -273,6 +273,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       if (ptyIdRef.current) {
         void window.api.terminal.write(ptyIdRef.current, text);
       }
+    };
+    const writePastedImageToPty = async (text: string) => {
+      const id = ptyIdRef.current;
+      if (!id) return { outcome: 'sessionNotFound' as const };
+      return window.api.terminal.write(id, text);
     };
 
     // --- initialMessage の自動送信 ---
@@ -309,6 +314,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       getCellSize,
       containerRef,
       lastScheduledRef,
+      pendingPtyResizeRef,
       // Issue #662: 永続化復元時の初回 spawn size seed (未指定なら fit 経路に倒す)
       initialCols,
       initialRows
@@ -319,6 +325,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       termRef,
       containerRef,
       writeToPty,
+      writePastedImageToPty,
       langRef
     });
 
@@ -369,7 +376,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       getCellSize,
       zoomSubscribe,
       getZoom,
-      lastScheduledRef
+      lastScheduledRef,
+      pendingPtyResizeRef
     });
 
     // Issue #356: 右クリックでカスタムメニューを開く。xterm 本体上の contextmenu を拾う。

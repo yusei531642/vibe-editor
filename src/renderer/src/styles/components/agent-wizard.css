@@ -119,7 +119,7 @@
 .agent-wizard__primary {
   border: 1px solid var(--accent, #d97757);
   background: var(--accent, #d97757);
-  color: #fff;
+  color: var(--accent-foreground, #fff);
   border-radius: 6px;
   padding: 6px 14px;
   font-size: 14px;

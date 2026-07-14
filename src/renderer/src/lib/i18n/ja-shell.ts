@@ -284,7 +284,11 @@ export const jaShell: Dict = {
 
 
   // ---------- Terminal (pasteエラー等) ----------
-  'terminal.pasteImageFailed': '画像保存失敗',
+  'terminal.pasteImageFailed': '画像の貼り付け失敗',
+  'terminal.pasteImage.suppressedInjecting': 'プロンプト注入中のため挿入できませんでした',
+  'terminal.pasteImage.droppedTooLarge': '挿入データが大きすぎます',
+  'terminal.pasteImage.droppedRateLimited': '入力が多すぎたため挿入できませんでした',
+  'terminal.pasteImage.sessionNotFound': 'ターミナル接続が見つかりません',
   'terminal.pasteException': 'ペースト例外',
 
 
@@ -367,6 +371,11 @@ export const jaShell: Dict = {
   'terminal.status.reconnect': '再接続: {command}',
   'terminal.status.reconnectRestored': '再接続 (出力復元): {command}',
   'terminal.status.exception': '例外: {error}',
+  'terminal.diagnostic.exited': '[プロセス終了: {status}]',
+  'terminal.diagnostic.finalOutput': '── 最終出力 (死因の可能性) ──',
+  'terminal.diagnostic.spawnFailed': '[起動エラー] {error}',
+  'terminal.diagnostic.unknownError': '不明なエラー',
+  'terminal.diagnostic.exception': '[例外] {error}',
   'terminal.limitReached': 'ターミナル上限（{max}）に達しました',
   'terminal.limitWarning': 'ターミナル数が {threshold} に達しました（上限 {max}）',
   'terminal.restart': '再起動',

@@ -287,6 +287,10 @@ export const enShell: Dict = {
 
   // ---------- Terminal (paste errors) ----------
   'terminal.pasteImageFailed': 'Paste image failed',
+  'terminal.pasteImage.suppressedInjecting': 'Could not insert while prompt injection is active',
+  'terminal.pasteImage.droppedTooLarge': 'The inserted data is too large',
+  'terminal.pasteImage.droppedRateLimited': 'Could not insert because input was rate-limited',
+  'terminal.pasteImage.sessionNotFound': 'The terminal session was not found',
   'terminal.pasteException': 'Paste exception',
 
 
@@ -371,6 +375,11 @@ export const enShell: Dict = {
   'terminal.status.reconnect': 'Reconnected: {command}',
   'terminal.status.reconnectRestored': 'Reconnected (restored output): {command}',
   'terminal.status.exception': 'Exception: {error}',
+  'terminal.diagnostic.exited': '[Process exited: {status}]',
+  'terminal.diagnostic.finalOutput': '── Final output (possible cause) ──',
+  'terminal.diagnostic.spawnFailed': '[Start error] {error}',
+  'terminal.diagnostic.unknownError': 'Unknown error',
+  'terminal.diagnostic.exception': '[Exception] {error}',
   'terminal.limitReached': 'Terminal limit reached ({max})',
   'terminal.limitWarning': 'Terminal count reached {threshold} (limit {max})',
   'terminal.restart': 'Restart',

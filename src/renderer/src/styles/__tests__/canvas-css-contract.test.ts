@@ -75,4 +75,37 @@ describe('Canvas CSS contract', () => {
       /\.react-flow__background-pattern\s+path\s*\{[\s\S]*stroke:\s*var\(--canvas-grid[^)]*\)\s*;/
     );
   });
+
+  it('Issue #1167: MiniMap background and mask follow semantic theme tokens', () => {
+    const tokens = stripCssComments(readStyleFile('tokens.css'));
+    const canvas = stripCssComments(readComponentCss('canvas.css'));
+    const glass = stripCssComments(readComponentCss('glass.css'));
+
+    expect(tokens).toMatch(/--canvas-minimap-bg\s*:\s*var\(--surface-elev\)\s*;/);
+    expect(tokens).toMatch(
+      /--canvas-minimap-mask\s*:\s*color-mix\(in srgb,\s*var\(--surface-panel\)\s*70%,\s*transparent\)\s*;/
+    );
+    expect(canvas).toMatch(
+      /\.react-flow__minimap\s*\{[\s\S]*--xy-minimap-background-color\s*:\s*var\(--canvas-minimap-bg\)\s*;[\s\S]*--xy-minimap-mask-background-color\s*:\s*var\(--canvas-minimap-mask\)\s*;/
+    );
+    expect(glass).toMatch(
+      /:root\[data-theme='glass'\]\s+\.react-flow__minimap[\s\S]*backdrop-filter:\s*blur\(var\(--glass-blur\)\)/
+    );
+
+    for (const theme of ['claude-dark', 'claude-light', 'dark', 'light', 'midnight', 'glass']) {
+      const blockRe = new RegExp(
+        String.raw`\[data-theme='${theme}'\][^{]*\{[\s\S]*?--surface-panel\s*:[^;]+;[\s\S]*?--surface-elev\s*:[^;]+;[\s\S]*?\}`
+      );
+      expect(tokens, `theme '${theme}' must supply MiniMap surface tokens`).toMatch(blockRe);
+    }
+  });
+
+  it('Issue #1167: Canvas does not restore dark-only inline MiniMap colors', () => {
+    const canvasComponent = readFileSync(
+      join(stylesDir, '..', 'components', 'canvas', 'Canvas.tsx'),
+      'utf8'
+    );
+    expect(canvasComponent).not.toMatch(/MINIMAP_(?:STYLE|MASK_COLOR)/);
+    expect(canvasComponent).not.toMatch(/<MiniMap[^>]*(?:maskColor|style)=/);
+  });
 });

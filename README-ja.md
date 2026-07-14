@@ -143,7 +143,7 @@ Tauri が Claude Code ターミナル1つで起動します。左上のプロジ
 ### その他のスクリプト
 
 ```bash
-npm run typecheck    # tsc --noEmit (strict)
+npm run typecheck    # tsc -b --force (strict)
 npm run dev:vite     # レンダラーのみ起動 (Rust なし)
 npm run build        # cargo tauri build → src-tauri/target/release/bundle/
 npm run icons        # build/icon.svg から ICO を再生成
@@ -165,12 +165,12 @@ src-tauri/                       # Rust 側 (Tauri ホスト)
 ├── Cargo.toml
 └── tauri.conf.json
 
-src/renderer/src/                # React 18 + TypeScript, UI 専用
+src/renderer/src/                # React 19 + TypeScript 6, UI 専用
 ├── App.tsx
 ├── components/                  # UI コンポーネント
 ├── components/canvas/           # @xyflow/react 無限キャンバスモード
 ├── stores/                      # zustand (ui, canvas)
-└── lib/                         # themes, i18n, tauri-api, commands, …
+└── lib/                         # themes, i18n, tauri-api/, commands, …
 ```
 
 ### TeamHub の仕組み

@@ -28,17 +28,14 @@ import type { CellSize } from '../measure-cell-size';
 
 // getXtermRuntimeCellSize は xterm 内部 _core を読む helper。jsdom では runtime cell が
 // 取れないので null を返してもらい、fallback (getCellSize) を使う経路に乗せる。
-const getXtermRuntimeCellSizeMock = vi.fn((): CellSize | null => null);
+const getXtermRuntimeCellSizeMock = vi.fn((..._args: unknown[]): CellSize | null => null);
 vi.mock('../get-xterm-runtime-cell-size', () => ({
   getXtermRuntimeCellSize: (...args: unknown[]) => getXtermRuntimeCellSizeMock(...args)
 }));
 
 import { useFitToContainer } from '../use-fit-to-container';
 
-type TestWindow = Window &
-  typeof globalThis & {
-    api?: unknown;
-  };
+type TestWindow = { api?: unknown };
 
 function makeRef<T>(current: T): MutableRefObject<T> {
   return { current };
@@ -90,7 +87,7 @@ function makeResizableContainer(
 
 function setupTerminalApi(): { resize: ReturnType<typeof vi.fn> } {
   const resize = vi.fn(async () => undefined);
-  (window as TestWindow).api = {
+  (window as unknown as TestWindow).api = {
     terminal: {
       resize
     }
@@ -102,7 +99,7 @@ describe('useFitToContainer: zoom 単独 refit で xterm 全行 refresh を skip
   let originalApi: unknown;
 
   beforeEach(() => {
-    originalApi = (window as TestWindow).api;
+    originalApi = (window as unknown as TestWindow).api;
     vi.useFakeTimers();
     getXtermRuntimeCellSizeMock.mockReturnValue(null);
   });
@@ -111,9 +108,9 @@ describe('useFitToContainer: zoom 単独 refit で xterm 全行 refresh を skip
     cleanup();
     vi.useRealTimers();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      delete (window as unknown as TestWindow).api;
     } else {
-      (window as TestWindow).api = originalApi;
+      (window as unknown as TestWindow).api = originalApi;
     }
     vi.restoreAllMocks();
   });
@@ -235,5 +232,41 @@ describe('useFitToContainer: zoom 単独 refit で xterm 全行 refresh を skip
     // grid が cols=150 (= floor(1200/8)) に変わるので term.resize / term.refresh が再実行される
     expect(t.resize).toHaveBeenLastCalledWith(150, 33);
     expect((t.refresh as ReturnType<typeof vi.fn>).mock.calls.length).toBe(baselineRefreshCalls + 1);
+  });
+
+  it('ptyId未確定中は最新gridだけをpendingへ保持する', () => {
+    const t = freshTerminal();
+    const fit = { fit: vi.fn() } as unknown as FitAddon;
+    const container = makeResizableContainer(800, 600);
+    const pendingPtyResizeRef = makeRef<{ cols: number; rows: number } | null>(null);
+    const api = setupTerminalApi();
+    let zoomCb: (() => void) | null = null;
+
+    renderHook(() =>
+      useFitToContainer({
+        containerRef: { current: container.el },
+        termRef: makeRef<Terminal | null>(t),
+        fitRef: makeRef<FitAddon | null>(fit),
+        ptyIdRef: makeRef<string | null>(null),
+        visible: true,
+        refitTriggers: [],
+        unscaledFit: true,
+        getCellSize: () => ({ cellW: 8, cellH: 18, fallback: false }),
+        zoomSubscribe: (cb) => {
+          zoomCb = cb;
+          return () => undefined;
+        },
+        pendingPtyResizeRef
+      })
+    );
+
+    vi.advanceTimersByTime(60);
+    expect(pendingPtyResizeRef.current).toEqual({ cols: 100, rows: 33 });
+    container.setSize(1200, 600);
+    zoomCb!();
+    vi.advanceTimersByTime(120);
+
+    expect(pendingPtyResizeRef.current).toEqual({ cols: 150, rows: 33 });
+    expect(api.resize).not.toHaveBeenCalled();
   });
 });

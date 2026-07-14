@@ -44,11 +44,6 @@ import {
   type UseProjectLoaderOptions
 } from '../use-project-loader';
 
-type TestWindow = Window &
-  typeof globalThis & {
-    api?: MockApi;
-  };
-
 interface MockApi {
   app: {
     restoreAuthorizedProjectRoot: ReturnType<typeof vi.fn>;
@@ -99,7 +94,7 @@ function installApi(): MockApi {
       list: vi.fn(async () => [])
     }
   };
-  (window as TestWindow).api = api;
+  Object.defineProperty(window, 'api', { configurable: true, writable: true, value: api });
   return api;
 }
 
@@ -115,10 +110,10 @@ function options(overrides: Partial<UseProjectLoaderOptions> = {}): UseProjectLo
 }
 
 describe('useProjectLoader', () => {
-  let originalApi: MockApi | undefined;
+  let originalApi: Window['api'] | undefined;
 
   beforeEach(() => {
-    originalApi = (window as TestWindow).api;
+    originalApi = window.api;
     mocks.settingsLoading = false;
     mocks.settingsValues.claudeCwd = '';
     mocks.settingsValues.lastOpenedRoot = '';
@@ -134,9 +129,9 @@ describe('useProjectLoader', () => {
   afterEach(() => {
     cleanup();
     if (originalApi === undefined) {
-      delete (window as TestWindow).api;
+      Reflect.deleteProperty(window, 'api');
     } else {
-      (window as TestWindow).api = originalApi;
+      Object.defineProperty(window, 'api', { configurable: true, writable: true, value: originalApi });
     }
     vi.restoreAllMocks();
   });
