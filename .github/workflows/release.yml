@@ -1,13 +1,13 @@
 # Release build — Linux / macOS / Windows
 #
 # トリガー: `v*` タグの push のみ (例: v1.1.6)。通常の main push では走らない。
-# 手動実行したい時は GitHub Actions タブから "Run workflow" もしくは
-# `gh workflow run release.yml` で起動可能 (workflow_dispatch)。
+# 手動実行したい時は GitHub Actions タブから v* tag を ref に選んで "Run workflow"
+# もしくは `gh workflow run release.yml --ref <v* tag>` で起動可能 (workflow_dispatch)。
 #
 # 成果物: tauri-apps/tauri-action が GitHub Release を draft で作成し、
 #   - Windows: .exe (NSIS インストーラ)
 #   - macOS:   .dmg (universal2 — Apple Silicon + Intel)
-#   - Linux:   .AppImage / .deb
+#   - Linux:   .AppImage / .deb / .rpm
 # を upload する。確認後、Releases ページで手動 publish する。
 name: release
 
@@ -17,8 +17,46 @@ on:
       - 'v*'
   workflow_dispatch:
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 jobs:
+  validate-release-ref:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout release ref
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Require v* tag on main history
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" != refs/tags/v* ]]; then
+            echo "Release ref must be a v* tag: ${GITHUB_REF}" >&2
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "Release commit ${GITHUB_SHA} is not in origin/main history" >&2
+            exit 1
+          fi
+
+  quality-gate:
+    needs: validate-release-ref
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
   build:
+    needs:
+      - validate-release-ref
+      - quality-gate
     permissions:
       actions: read
       artifact-metadata: write
@@ -103,7 +141,7 @@ jobs:
 
             - Windows: `.exe` (NSIS インストーラ)
             - macOS:   `.dmg` (universal2 — Apple Silicon + Intel)
-            - Linux:   `.AppImage` / `.deb`
+            - Linux:   `.AppImage` / `.deb` / `.rpm`
 
             動作確認後にこの draft を publish してください。
           releaseDraft: true
