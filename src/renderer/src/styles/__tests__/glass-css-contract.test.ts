@@ -160,10 +160,26 @@ describe('Glass CSS contract', () => {
       '.terminal-pane',
       '.claude-code-panel',
       '.canvas-agent-card',
+      '.canvas-card-frame',
       '.canvas-toolbar'
     ]) {
       expect(glass).toContain(`:root[data-theme='glass'] ${selector}`);
     }
+  });
+
+  it('Issue #1168: common Canvas cards opt into blur without glass-surface shadow', () => {
+    const glass = stripCssComments(readComponentCss('glass.css'));
+    const canvas = stripCssComments(readComponentCss('canvas.css'));
+    const cardFrame = readRendererFile('components/canvas/CardFrame.tsx');
+
+    expect(glass).toMatch(
+      /:root\[data-theme='glass'\]\s+\.canvas-card-frame[\s\S]*backdrop-filter:\s*blur\(var\(--glass-blur\)\)/
+    );
+    const frameRule = canvas.match(/\.canvas-card-frame\s*\{([^}]*)\}/);
+    expect(frameRule, 'canvas-card-frame base rule must exist').not.toBeNull();
+    expect(frameRule![1]).not.toMatch(/box-shadow\s*:/);
+    expect(cardFrame).toContain('className="canvas-card-frame"');
+    expect(cardFrame).not.toContain('glass-surface');
   });
 
   it('Issue #806/#886: every glass overlay surface opts into the high-density background', () => {

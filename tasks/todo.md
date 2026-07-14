@@ -2037,3 +2037,34 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1045
 - [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
 - [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
 - [x] `git diff --check`: PASS
+
+## Issue #1168 - glass Canvas共通カードのblur (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1168
+
+### 計画
+
+- [x] `.canvas-card-frame`をglass backdrop filter対象へ追加する。
+- [x] `glass-surface` classとbox-shadowを追加しない不変条件を維持する。
+- [x] CSS contract testでfilter opt-inとshadow禁止を固定する。
+- [x] typecheck、対象テスト、全テスト、lint、Vite buildを実行する。
+
+### Next Steps
+
+- [x] selector 1件と契約テストだけを変更する。
+- [ ] feature branchをpushし、PR作成の明示承認を待つ。
+
+### 進捗
+
+- [x] 共通CardFrameを既存glass blur/saturate/brightness対象へ追加した。
+- [x] `glass-surface` class、box-shadow、surface alphaは変更していない。
+- [x] Terminal/Editor/Diff/Changes/FileTree/API chatが共有するroot classで一括適用した。
+
+### 検証結果
+
+- [x] Glass CSS contract: PASS (8 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (86 files / 520 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存warnings 12)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
