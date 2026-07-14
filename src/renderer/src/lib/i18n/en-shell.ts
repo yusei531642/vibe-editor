@@ -256,6 +256,8 @@ export const enShell: Dict = {
   // ---------- Toast ----------
   'toast.reviewRequested': 'Review requested: {path}',
   'toast.sessionResumed': 'Resumed session: {title}',
+  'toast.sessionsRefreshFailed': 'Failed to refresh sessions',
+  'toast.gitRefreshFailed': 'Failed to refresh Git status',
   'toast.pathCopied': 'Path copied to clipboard',
   'toast.copyFailed': 'Failed to copy to clipboard',
   'toast.revealFailed': 'Failed to reveal in file manager',
