@@ -300,7 +300,14 @@ pub async fn terminal_create(
     let (cwd, warning) =
         crate::pty::session::resolve_valid_cwd(&opts.cwd, opts.fallback_cwd.as_deref());
     if is_codex_command {
-        crate::pty::codex_broker::cleanup_stale_for_cwd(&cwd);
+        let cleanup_cwd = cwd.clone();
+        if let Err(error) = tokio::task::spawn_blocking(move || {
+            crate::pty::codex_broker::cleanup_stale_for_cwd(&cleanup_cwd);
+        })
+        .await
+        {
+            tracing::warn!("[terminal] Codex stale cleanup task failed: {error}");
+        }
     }
 
     if !is_codex_command {
@@ -480,37 +487,48 @@ pub async fn terminal_create(
     // Issue #292: id 衝突時の retry 上限。実発生はほぼ皆無 (UUID v4 衝突は
     // 122-bit エントロピー + 同時 spawn 競合) なので 3 回もあれば十分。
     const MAX_ID_ATTEMPTS: usize = 3;
-    let mut id_candidate = initial_id;
-    let mut attempt = 0usize;
-    let adopt_id_result: Result<String, anyhow::Error> = loop {
-        attempt += 1;
-        match spawn_session(
-            app.clone(),
-            id_candidate.clone(),
-            spawn_opts.clone(),
-            state.pty_registry.clone(),
-        ) {
-            Ok(handle) => match state
-                .pty_registry
-                .insert_if_absent(id_candidate.clone(), handle)
-            {
-                Ok(()) => break Ok(id_candidate),
-                Err(returned_handle) => {
-                    let _ = returned_handle.kill();
-                    if attempt >= MAX_ID_ATTEMPTS {
-                        break Err(anyhow::anyhow!(
-                            "terminal_create failed: id collision persisted after {attempt} attempts"
-                        ));
+    let spawn_app = app.clone();
+    let spawn_registry = state.pty_registry.clone();
+    let adopt_id_result: Result<String, anyhow::Error> =
+        match tokio::task::spawn_blocking(move || {
+            let mut id_candidate = initial_id;
+            let mut attempt = 0usize;
+            loop {
+                attempt += 1;
+                match spawn_session(
+                    spawn_app.clone(),
+                    id_candidate.clone(),
+                    spawn_opts.clone(),
+                    spawn_registry.clone(),
+                ) {
+                    Ok(handle) => {
+                        match spawn_registry.insert_if_absent(id_candidate.clone(), handle) {
+                            Ok(()) => break Ok(id_candidate),
+                            Err(returned_handle) => {
+                                let _ = returned_handle.kill();
+                                if attempt >= MAX_ID_ATTEMPTS {
+                                    break Err(anyhow::anyhow!(
+                                        "terminal_create failed: id collision persisted after {attempt} attempts"
+                                    ));
+                                }
+                                tracing::warn!(
+                                    "[terminal] id {id_candidate} collided in registry (attempt {attempt}/{MAX_ID_ATTEMPTS}), retrying with fresh UUID"
+                                );
+                                id_candidate = Uuid::new_v4().to_string();
+                            }
+                        }
                     }
-                    tracing::warn!(
-                        "[terminal] id {id_candidate} collided in registry (attempt {attempt}/{MAX_ID_ATTEMPTS}), retrying with fresh UUID"
-                    );
-                    id_candidate = Uuid::new_v4().to_string();
+                    Err(e) => break Err(e),
                 }
-            },
-            Err(e) => break Err(e),
-        }
-    };
+            }
+        })
+        .await
+        {
+            Ok(result) => result,
+            Err(error) => Err(anyhow::anyhow!(
+                "terminal_create blocking spawn task failed: {error}"
+            )),
+        };
 
     match adopt_id_result {
         Ok(id) => {

@@ -1,5 +1,26 @@
 # vibe-editor Tauri ハイブリッド移行 + 無限キャンバス UI 革新 TODO
 
+## Issue #1153 - terminal spawnのblocking処理を隔離 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1153
+
+### 計画
+
+- [x] async worker上の同期cleanup・PTY spawn境界と順序を確認する。
+- [x] Codex cleanupをspawn_blockingへ移し、完了後spawnの順序を維持する。
+- [x] PTY spawn・registry衝突retryを単一spawn_blocking jobへ移す。
+- [x] Rust関連品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 検証結果を記録する。
+- [ ] コミットして feature branch をpushする。
+- [x] terminal Rust tests: PASS（117 passed / 0 failed）
+- [x] PTY Rust tests: PASS（169 passed / 0 failed / 2 ignored）
+- [x] `cargo check --locked --manifest-path src-tauri\\Cargo.toml --all-targets`: PASS
+- [x] `cargo clippy --locked --manifest-path src-tauri\\Cargo.toml --all-targets -- -D warnings`: PASS
+- [x] `git diff --check`: PASS
+
 ## #736 team_hub/state.rs god-file 分割 + team_send 段階関数化 (完了)
 
 方針: 振る舞いを一切変えない純粋なリファクタ。lock の取得/解放タイミング・
