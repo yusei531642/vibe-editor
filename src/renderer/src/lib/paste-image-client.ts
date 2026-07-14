@@ -11,7 +11,8 @@
 export async function insertPastedImageToPty(
   blob: Blob,
   mime: string,
-  writeToPty: (text: string) => Promise<TerminalWriteResult>
+  writeToPty: (text: string) => Promise<TerminalWriteResult>,
+  unknownError = 'Unknown error'
 ): Promise<{ ok: true } | { ok: false; error: string; errorKey?: string }> {
   // Issue #160: 旧実装は 32KB チャンクで Array.from(Uint8Array) → String.fromCharCode.apply
   // を回しており、20MB クラスのスクショで Array.from が 20M 要素配列を作成 → UI ハング。
@@ -31,7 +32,7 @@ export async function insertPastedImageToPty(
 
   const res = await window.api.terminal.savePastedImage(base64, mime);
   if (!res.ok || !res.path) {
-    return { ok: false, error: res.error ?? '不明なエラー' };
+    return { ok: false, error: res.error ?? unknownError };
   }
 
   const p = res.path;

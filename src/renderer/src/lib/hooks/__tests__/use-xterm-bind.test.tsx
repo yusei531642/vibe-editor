@@ -158,6 +158,10 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
     }));
     const kill = vi.fn(async () => undefined);
     const onSpawnError = vi.fn();
+    const formatTerminalDiagnostic = vi.fn(() => ({
+      message: '[Start error] spawn failed: command not found',
+      tone: 'error' as const
+    }));
 
     Object.defineProperty(window, 'api', { configurable: true, writable: true, value: {
       terminal: {
@@ -184,7 +188,10 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
         termRef: makeRef<Terminal | null>(term),
         fitRef: makeRef<FitAddon | null>(fit),
         snapRef: makeRef<PtySpawnSnapshot>({}),
-        callbacksRef: makeRef<PtySessionCallbacks>({ onSpawnError }),
+        callbacksRef: makeRef<PtySessionCallbacks>({
+          onSpawnError,
+          formatTerminalDiagnostic
+        }),
         ptyIdRef,
         disposedRef: makeRef(false),
         observeChunk: vi.fn(),
@@ -196,6 +203,13 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
     // spawn 失敗時は ptyIdRef が空のまま、onSpawnError が error 文字列で呼ばれる。
     await waitFor(() => expect(onSpawnError).toHaveBeenCalledTimes(1));
     expect(onSpawnError).toHaveBeenCalledWith('spawn failed: command not found');
+    expect(formatTerminalDiagnostic).toHaveBeenCalledWith({
+      kind: 'spawn_failed',
+      error: 'spawn failed: command not found'
+    });
+    expect(term.writeln).toHaveBeenCalledWith(
+      expect.stringContaining('[Start error] spawn failed: command not found')
+    );
     expect(ptyIdRef.current).toBeNull();
 
     await act(async () => {
@@ -204,6 +218,57 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
     });
     // ptyId を持っていないので kill は呼ばれない (orphan kill 防止)。
     expect(kill).not.toHaveBeenCalled();
+  });
+
+  it('create待機中の最新gridをptyId確定直後に1回flushする', async () => {
+    const term = makeTerminal();
+    const fit = { fit: vi.fn() } as unknown as FitAddon;
+    let resolveCreate!: (value: { ok: true; id: string }) => void;
+    const create = vi.fn(
+      () => new Promise<{ ok: true; id: string }>((resolve) => (resolveCreate = resolve))
+    );
+    const resize = vi.fn(async () => undefined);
+    Object.defineProperty(window, 'api', { configurable: true, writable: true, value: {
+      terminal: {
+        onDataReady: vi.fn(async () => vi.fn()),
+        onExitReady: vi.fn(async () => vi.fn()),
+        onSessionIdReady: vi.fn(async () => vi.fn()),
+        onData: vi.fn(() => vi.fn()),
+        onExit: vi.fn(() => vi.fn()),
+        onSessionId: vi.fn(() => vi.fn()),
+        create,
+        write: vi.fn(async () => undefined),
+        resize,
+        kill: vi.fn(async () => undefined)
+      }
+    } });
+    const pendingPtyResizeRef = makeRef<{ cols: number; rows: number } | null>(null);
+    const lastScheduledRef = makeRef<{ cols: number; rows: number } | null>(null);
+
+    renderHook(() =>
+      useXtermBind({
+        cwd: '/tmp/work',
+        command: 'claude',
+        termRef: makeRef<Terminal | null>(term),
+        fitRef: makeRef<FitAddon | null>(fit),
+        snapRef: makeRef<PtySpawnSnapshot>({}),
+        callbacksRef: makeRef<PtySessionCallbacks>({}),
+        ptyIdRef: makeRef<string | null>(null),
+        disposedRef: makeRef(false),
+        observeChunk: vi.fn(),
+        pendingPtyResizeRef,
+        lastScheduledRef
+      })
+    );
+
+    await waitFor(() => expect(create).toHaveBeenCalledTimes(1));
+    pendingPtyResizeRef.current = { cols: 132, rows: 41 };
+    resolveCreate({ ok: true, id: 'pty-delayed' });
+
+    await waitFor(() => expect(resize).toHaveBeenCalledWith('pty-delayed', 132, 41));
+    expect(resize).toHaveBeenCalledTimes(1);
+    expect(pendingPtyResizeRef.current).toBeNull();
+    expect(lastScheduledRef.current).toEqual({ cols: 132, rows: 41 });
   });
 
   it('spawnEnabled=false では PTY 起動を延期し、true になった時点で起動する', async () => {
