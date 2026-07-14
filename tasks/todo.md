@@ -757,6 +757,31 @@ Branch: `feature/issue-452`
 
 #### 検証結果（代替で PASS 済み）
 - [x] `git diff --check`: PASS
+
+## Issue #1172 - コマンドパレットCSSを単一所有へ統合 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1172
+
+### 計画
+
+- [x] `index.css` と `palette.css` の重複宣言・cascade依存を確認する。
+- [x] 現行表示に必要な基礎宣言を `palette.css` へ移管する。
+- [x] `index.css` の旧コマンドパレット定義を削除する。
+- [x] インライン `499` を共有z-indexトークン参照へ変更する。
+- [x] CSS所有権の契約テストと全品質ゲートを実行する。
+
+### Next Steps
+
+- [x] コミットして feature branch を push する。
+
+### 検証結果
+
+- [x] 契約 Vitest: PASS (1 file / 3 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (87 files / 522 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 12 warnings)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）

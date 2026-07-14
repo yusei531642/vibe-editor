@@ -27,12 +27,16 @@
 .cmdp {
   /* Claude 公式風: フラットな bg (gradient 禁止)、radius-lg 相当 */
   position: relative;
+  display: flex;
+  flex-direction: column;
   width: min(640px, calc(100vw - 32px));
   max-height: min(72vh, 760px);
   border-radius: var(--radius-lg, 16px);
   border: 1px solid var(--border);
   background: var(--bg-panel);
+  color: var(--text);
   box-shadow: var(--shadow-modal);
+  overflow: hidden;
   opacity: 0;
   transform: translateY(16px) scale(0.98);
   transform-origin: top center;
@@ -84,12 +88,19 @@
 
 .cmdp__prompt {
   color: var(--text-mute);
+  flex-shrink: 0;
 }
 
 .cmdp__input {
+  flex: 1;
   min-width: 0;
+  background: transparent;
+  border: none;
+  color: var(--text);
   font-size: 15px;
+  font-family: inherit;
   letter-spacing: -0.01em;
+  outline: none;
 }
 
 .cmdp__meta {
@@ -111,6 +122,7 @@
   color: var(--text-mute);
   font-size: 11px;
   letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 
 .cmdp__count {
@@ -118,17 +130,25 @@
 }
 
 .cmdp__list {
+  flex: 1;
+  overflow-y: auto;
+  list-style: none;
+  margin: 0;
   padding: 8px;
 }
 
 .cmdp__item {
   /* Claude 公式風: フラット (translate/heavy shadow 禁止)、選択行は brand-glow + 左バー */
+  display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   gap: 12px;
   margin: 0;
   padding: 10px 14px;
   border-left: 2px solid transparent;
   border-radius: var(--radius-sm, 6px);
+  cursor: pointer;
+  font-size: 13px;
   transition:
     background-color var(--dur-fast, 180ms) var(--ease-standard),
     border-left-color var(--dur-fast, 180ms) var(--ease-standard);
@@ -150,13 +170,19 @@
 }
 
 .cmdp__category {
+  color: var(--text-mute);
   font-size: 10px;
+  text-transform: uppercase;
   letter-spacing: 0.06em;
 }
 
 .cmdp__title {
+  color: var(--text);
   font-size: 14px;
   letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .cmdp__subtitle {
@@ -164,6 +190,8 @@
   padding-left: 12px;
   border-left: 1px solid var(--border);
   color: var(--text-mute);
+  font-size: 11px;
+  font-family: var(--mono-font);
 }
 
 .cmdp__empty {
@@ -171,6 +199,9 @@
   border: 1px dashed var(--border);
   border-radius: 14px;
   background: color-mix(in srgb, var(--bg-hover) 70%, transparent);
+  color: var(--text-mute);
+  font-size: 12px;
+  text-align: center;
 }
 
 @media (max-width: 720px) {
