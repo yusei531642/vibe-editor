@@ -20,6 +20,7 @@ import {
 } from '../../../../types/shared';
 import { useT } from '../../lib/i18n';
 import { useToast } from '../../lib/toast-context';
+import { useModalA11y } from '../../lib/hooks/use-modal-a11y';
 
 interface Props {
   /** 作成した agent を customAgents に追加する。 */
@@ -40,6 +41,7 @@ function makeId(): string {
 export function AgentWizard({ onCreate, onCancel }: Props): JSX.Element {
   const t = useT();
   const { showToast } = useToast();
+  const modal = useModalA11y(onCancel);
   const [stepIdx, setStepIdx] = useState(0);
   const [runtime, setRuntime] = useState<Runtime>('api');
   const [name, setName] = useState('');
@@ -159,7 +161,15 @@ export function AgentWizard({ onCreate, onCancel }: Props): JSX.Element {
   };
 
   return (
-    <div className="agent-wizard" role="dialog" aria-modal="true" aria-label={t('settings.agentWizard.title')}>
+    <div
+      ref={modal.dialogRef}
+      className="agent-wizard"
+      role="dialog"
+      aria-modal="true"
+      aria-label={t('settings.agentWizard.title')}
+      tabIndex={-1}
+      data-modal-escape-owner="true"
+    >
       <div className="agent-wizard__card glass-surface">
         <div className="agent-wizard__progress" aria-hidden>
           {STEPS.map((s, i) => (

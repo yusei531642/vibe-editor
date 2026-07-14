@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Eye, EyeOff, Lock, Mic, RotateCcw, Volume2 } from 'lucide-react';
 import type { AppSettings, VoiceSettings } from '../../../../types/shared';
 import { useT } from '../../lib/i18n';
+import { useModalA11y } from '../../lib/hooks/use-modal-a11y';
 import { useToast } from '../../lib/toast-context';
 import {
   ensureAudioPermissionForLabels,
@@ -455,15 +456,20 @@ function DisclaimerModal({
   onCancel: () => void;
 }): JSX.Element {
   const t = useT();
+  const modal = useModalA11y(onCancel);
   return (
     <div className="voice-disclaimer-backdrop" onClick={onCancel} role="presentation">
       <div
+        ref={modal.dialogRef}
         className="voice-disclaimer-modal"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
+        aria-labelledby="voice-disclaimer-title"
+        tabIndex={-1}
+        data-modal-escape-owner="true"
       >
-        <h3>
+        <h3 id="voice-disclaimer-title">
           <Mic size={16} strokeWidth={1.75} />
           {t('settings.voice.disclaimer.title')}
         </h3>

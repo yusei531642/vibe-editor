@@ -21,6 +21,32 @@ const en: Dict = { ...enShell, ...enCanvas, ...enSettings };
 
 const translations: Record<Language, Dict> = { ja, en };
 
+export const BOOTSTRAP_LANGUAGE_STORAGE_KEY = 'vibe-editor:language';
+
+export function resolveBootstrapLanguage(): Language {
+  try {
+    const cached = window.localStorage.getItem(BOOTSTRAP_LANGUAGE_STORAGE_KEY);
+    if (cached === 'ja' || cached === 'en') return cached;
+  } catch {
+    // localStorage が利用できない環境ではブラウザ言語へフォールバックする。
+  }
+
+  const browserLanguage = typeof navigator === 'undefined'
+    ? ''
+    : (navigator.language || '').toLowerCase();
+  if (!browserLanguage) return 'ja';
+  return browserLanguage.startsWith('ja') ? 'ja' : 'en';
+}
+
+export function syncBootstrapLanguage(language: Language): void {
+  try {
+    window.localStorage.setItem(BOOTSTRAP_LANGUAGE_STORAGE_KEY, language);
+  } catch {
+    // 設定本体の保存を阻害しない。現在の document だけは同期を続ける。
+  }
+  document.documentElement.lang = language;
+}
+
 /**
  * React フック: 現在の言語設定に基づいた翻訳関数を返す。
  *
