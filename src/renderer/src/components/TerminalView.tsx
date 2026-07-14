@@ -181,21 +181,18 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     // ref で渡す。settings 変化のたびに同期するので stale にならない。
     const langRef = useRef(settings.language);
     langRef.current = settings.language;
-
     // Issue #356: 右クリックコンテキストメニュー (paste / copy selection / clear)。
     const [contextMenu, setContextMenu] = useState<{
       x: number;
       y: number;
       items: ContextMenuItem[];
     } | null>(null);
-
     // --- Terminal インスタンス ---
     const { containerRef, termRef, fitRef } = useXtermInstance(
       settings,
       disableWebgl,
       forceWheelScrollback
     );
-
     // --- ref で state を hook 間共有 ---
     const ptyIdRef = useRef<string | null>(null);
     const disposedRef = useRef(false);
@@ -226,7 +223,6 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       claudeInstructions,
       codexInstructions
     };
-
     // useAutoInitialMessage は snap とは別に initialMessage を再参照するので ref を渡す
     const initialMessageRef = useRef(initialMessage);
     initialMessageRef.current = initialMessage;
@@ -248,7 +244,6 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       },
       [t]
     );
-
     const formatDiagnostic = useCallback(
       (diagnostic: TerminalDiagnostic) => formatTerminalDiagnostic(diagnostic, t), [t]
     );
