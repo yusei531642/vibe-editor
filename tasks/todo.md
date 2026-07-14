@@ -2037,3 +2037,38 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1045
 - [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
 - [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
 - [x] `git diff --check`: PASS
+
+## Issue #1165 - lightテーマのprimary buttonコントラスト (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1165
+
+### 計画
+
+- [x] 設定primary buttonの文字色を`--accent-foreground`へ接続する。
+- [x] `#rrggbb`背景に対して黒・白の高コントラスト側を返す純関数を追加する。
+- [x] Canvas role dotへ背景色と対になるforegroundを注入する。
+- [x] 未使用の旧avatar CSSを削除する。
+- [x] unit/component test、typecheck、全テスト、lint、Vite buildを実行する。
+
+### Next Steps
+
+- [x] 最小差分を実装する。
+- [x] light/dark色と不正入力の回帰テストを追加する。
+- [ ] feature branchをpushし、PR作成の明示承認を待つ。
+
+### 進捗
+
+- [x] light themeの黒いaccent上でprimary labelを白へ切り替えた。
+- [x] role/custom agentの任意`#rrggbb`色から高コントラストforegroundを算出した。
+- [x] 不正形式ではtheme tokenへ安全にfallbackする。
+- [x] JSX参照のない`.canvas-agent-card__avatar` CSSを削除した。
+
+### 検証結果
+
+- [x] 算出foregroundのcontrast ratio: テスト対象すべて4.5:1以上
+- [x] `npm run typecheck`: PASS
+- [x] 対象Vitest: PASS (3 files / 12 tests)
+- [x] `npm run test`: PASS (89 files / 531 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存warnings 12)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
