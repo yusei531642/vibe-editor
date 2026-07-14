@@ -758,39 +758,68 @@ Branch: `feature/issue-452`
 #### 検証結果（代替で PASS 済み）
 - [x] `git diff --check`: PASS
 
-## Issue #1157 テストコードの型チェック有効化 (2026-07-14 / Codex)
+## Issue #1157 - テストコードの型チェック有効化 (2026-07-14 / Codex)
 
 Issue: https://github.com/yusei531642/vibe-editor/issues/1157
 
-### 計画
+- [x] `__tests__`除外を削除し、productionと同じstrict設定で型検査する。
+- [x] 顕在化したtest型エラーを本番契約に合わせて修正する。
+- [x] 再excludeを防ぐcontract testを追加する。
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS
+- [x] `npm run lint:file-size`: PASS
+- [x] 最新mainを取り込み、再CI対象にする。
 
-- [x] `tsconfig.web.json`、Vitest、CI、テスト配置、既存計画を確認する。
-- [x] `__tests__`除外を削除し、productionと同じstrict設定でテストも型検査する。
-- [x] 初回typecheckで顕在化するtest型エラーを本番契約に合わせて修正する。
-- [x] 再excludeを防ぐcontract testと、実態に合う`__tests__`配置規約を追加する。
-- [x] typecheck、test、build:vite、lint、diff checkを実行する。
-- [ ] commit/push後、PR draftを提示して作成承認を得る。
+## PR #1208 - file-size ratchet修正 (2026-07-14 / Codex)
 
-### スコープ境界
+### RCA結果
 
-- allowed: `tsconfig.web.json`、test型エラーが実在するテスト・mock、`.claude/skills/test-setup-vitest/SKILL.md`、contract test、`tasks/todo.md`
-- non-goals: テスト83件の移動、production strictness緩和、`any`による一括回避、E2E導入
+- [x] 症状: `AppShell.tsx` が982行となり、baseline上限977行を超えてCIが失敗した。
+- [x] 再現: `npm run lint:file-size` が同じ982/977でFAILした。
+- [x] 原因: 共通通知処理は別moduleへ切り出し済みだが、その呼び出しを6行展開して行数を純増させた。
+- [x] 代替原因除外: baseline変更漏れではなく、branch差分の5行純増とCI計測値が一致した。
+- [x] 修正方針: 機能・責務・baselineを変えず、既存helper呼び出しだけを1行に整形する。
+- [x] 判定: A=YES、B=YES、C=YES、D=YES（Root Cause Confirmed）。
 
 ### Next Steps
 
-- [ ] commit/push後、PR draftを提示して作成承認を得る。
+- [x] 修正前と同じ `npm run lint:file-size` でPASSを確認する。
+- [x] 関連テスト、typecheck、lint、build、diff checkを実行する。
+- [ ] PR #1208へpushし、CIと再レビューを確認する。
+
+### 修正後検証
+
+- [x] `npm run lint:file-size`: PASS（485 files、baseline免除39件）。
+- [x] targeted Vitest: PASS（2 files / 5 tests）。
+- [x] `npm run typecheck`: PASS。
+- [x] `npm run lint`: PASS（0 errors / 既存11 warnings）。
+- [x] `npm run build:vite`: PASS（既存warningのみ）。
+- [x] `git diff --check`: PASS。
+
+## Issue #1139 - セッション/Git再取得失敗を通知 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1139
+
+### 計画
+
+- [x] IDEのsessions/Git refresh失敗経路とCanvas側の処理状況を確認する。
+- [x] console.warnとerror toastの共通通知を追加する。
+- [x] Git refreshのrejection吸収・loading解除・通知をテストする。
+- [x] 関連テストと全品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 検証結果を記録する。
+- [x] コミットして feature branch をpushする。
 
 ### 検証結果
 
-- [x] 初回`npm run typecheck`: FAIL（test mockの既存型不整合を検出）
-- [x] 修正後`npm run typecheck`: PASS
-- [x] `npm test`: 87 files / 520 tests PASS
+- [x] 関連 Vitest: PASS (2 files / 5 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (87 files / 522 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 11 warnings)
 - [x] `npm run build:vite`: PASS
-- [x] `npm run lint`: PASS（error 0、既存warning 12件）
 - [x] `git diff --check`: PASS
-- [x] components担当: 8 files / 22 tests PASS
-- [x] hooks担当: 9 files / 39 tests PASS
-- [x] lib担当: 54 files / 372 tests PASS
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）
