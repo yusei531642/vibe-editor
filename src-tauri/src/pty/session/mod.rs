@@ -28,6 +28,7 @@ mod handle;
 mod injecting_guard;
 mod lock;
 mod registration;
+mod termination;
 pub(crate) mod spawn;
 pub(crate) mod spawn_metrics;
 #[cfg(not(windows))]
@@ -41,6 +42,7 @@ pub(crate) mod windows_resolve;
 // `TerminalExitInfo` (emit payload) と `InjectingGuard` (`begin_injecting` の戻り値型) は
 // `pub` のまま各サブモジュールに置く — 外部はパス参照しないため再エクスポート不要。
 pub use handle::{SessionHandle, UserWriteOutcome};
+pub use termination::TerminationReason;
 pub(crate) use registration::RegistrationLatch;
 pub use spawn::{resolve_valid_cwd, spawn_session, SpawnOptions, TerminalWarning};
 

@@ -3,7 +3,7 @@
 // id → Arc<SessionHandle> の HashMap + agent_id → id の二次 index。
 // TeamHub 側からは agent_id 経由で SessionHandle を引きたいので両方持つ。
 
-use crate::pty::session::SessionHandle;
+use crate::pty::session::{SessionHandle, TerminationReason};
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
@@ -209,43 +209,24 @@ impl SessionRegistry {
             handle.registration.mark_rejected();
             return Err(handle);
         }
+        if handle
+            .agent_id
+            .as_ref()
+            .is_some_and(|agent_id| g.by_agent.contains_key(agent_id))
+        {
+            handle.registration.mark_rejected();
+            return Err(handle);
+        }
         Self::insert_locked(&mut g, id, handle);
         Ok(())
     }
 
     /// `insert` / `insert_if_absent` の共通ボディ。caller 側で Mutex を取った状態で呼ぶ。
     fn insert_locked(g: &mut MutexGuard<'_, Inner>, id: String, handle: SessionHandle) {
-        // Issue #42: 同じ agent_id で再 spawn されると、旧 session_id を by_agent が手放した後も
-        // by_id に旧 SessionHandle が残り続け、以後 kill されない孤立 PTY になる。
-        // insert 時点で同 agent_id の旧 session があれば、by_id から取り出して kill + drop する。
-        // Issue #271: HMR 経路では terminal_create の preflight (find_attach_target) で
-        // 既存 PTY に attach するため、ここまで到達するのは「本当に新しい PTY を生やしたい場合」
-        // (通常 spawn / restart) のみ。よって insert 時の旧 PTY kill は維持して問題ない。
+        // Issue #1178: agent_id 重複は insert_if_absent の同一 lock 内で拒否済み。
+        // 既存 PTY を暗黙に置換・killせず、明示終了後の再登録だけを許可する。
         if let Some(aid) = handle.agent_id.clone() {
-            if let Some(prev_sid) = g.by_agent.insert(aid, id.clone()) {
-                if prev_sid != id {
-                    if let Some(old) = g.by_id.remove(&prev_sid) {
-                        // by_session_key からも掃除する (古い session_id を指す entry を消す)
-                        if let Some(old_key) = &old.session_key {
-                            if g.by_session_key.get(old_key).map(String::as_str)
-                                == Some(prev_sid.as_str())
-                            {
-                                g.by_session_key.remove(old_key);
-                            }
-                        }
-                        tracing::info!(
-                            "[registry] replacing session {prev_sid} with {id} — killing old PTY"
-                        );
-                        let _ = old.kill();
-                        // Issue #1075: 旧実装はここで `inner` の MutexGuard 保持中に同期版 broker 掃除
-                        // (cleanup_stale_for_cwd の単発 pass) を呼んでおり、git rev-parse / tasklist / kill の
-                        // 子プロセス spawn の間グローバルロックが握られて全 PTY 操作が直列ブロックされていた。
-                        // `old.kill()` 直後なので remove() / kill_team() と同じ detached 版
-                        // `cleanup_codex_broker_after_kill` (_with_retry) に統一して掃除をロック外へ出す。
-                        old.cleanup_codex_broker_after_kill();
-                    }
-                }
-            }
+            g.by_agent.insert(aid, id.clone());
         }
         // Issue #271: session_key index を更新。
         // 旧設計では同 key の旧 entry を kill していたが、これは renderer から信頼でき
@@ -353,7 +334,7 @@ impl SessionRegistry {
             // PTY master 経由の read を EOF にし、reader thread を自然終了させる。
             // ※ Drop impl も kill するが「最後の Arc が drop されるまで」遅れるため、
             //   ここで早期 kill しておく。
-            let _ = handle.kill();
+            let _ = handle.kill(TerminationReason::UserClose);
             handle.cleanup_codex_broker_after_kill();
         }
         removed
@@ -390,7 +371,7 @@ impl SessionRegistry {
             "pty-kill-worker",
             sessions,
             timeout,
-            |session| session.kill_blocking(),
+            |session| session.kill_blocking(TerminationReason::AppShutdown),
         );
         if done < total {
             tracing::warn!(
@@ -444,7 +425,7 @@ impl SessionRegistry {
         };
         let count = sessions.len();
         for handle in &sessions {
-            let _ = handle.kill();
+            let _ = handle.kill(TerminationReason::TeamCleanup);
             handle.cleanup_codex_broker_after_kill();
         }
         if count > 0 {
@@ -722,8 +703,14 @@ mod kill_all_blocking_tests {
         reg.kill_all_blocking(Duration::from_secs(5));
 
         // 返った時点で各 session の killer が呼ばれている (>=1 は Drop 経由の冪等二重 kill 許容)
-        assert!(k1.load(Ordering::SeqCst) >= 1, "s1 must be killed before return");
-        assert!(k2.load(Ordering::SeqCst) >= 1, "s2 must be killed before return");
+        assert!(
+            k1.load(Ordering::SeqCst) >= 1,
+            "s1 must be killed before return"
+        );
+        assert!(
+            k2.load(Ordering::SeqCst) >= 1,
+            "s2 must be killed before return"
+        );
         assert!(reg.get("s1").is_none());
         assert!(reg.get("s2").is_none());
     }
@@ -797,7 +784,12 @@ mod kill_team_tests {
         assert!(
             reg.insert_if_absent(
                 "s1b".to_string(),
-                handle_with(Some("a1"), Some("k1"), Some("team-a"), Arc::new(AtomicUsize::new(0))),
+                handle_with(
+                    Some("a1"),
+                    Some("k1"),
+                    Some("team-a"),
+                    Arc::new(AtomicUsize::new(0))
+                ),
             )
             .is_ok(),
             "re-insert with reclaimed agent/session key must succeed"

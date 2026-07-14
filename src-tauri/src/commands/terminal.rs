@@ -496,7 +496,7 @@ pub async fn terminal_create(
             {
                 Ok(()) => break Ok(id_candidate),
                 Err(returned_handle) => {
-                    let _ = returned_handle.kill();
+                    let _ = returned_handle.kill(crate::pty::session::TerminationReason::IdCollision);
                     if attempt >= MAX_ID_ATTEMPTS {
                         break Err(anyhow::anyhow!(
                             "terminal_create failed: id collision persisted after {attempt} attempts"
@@ -697,7 +697,7 @@ pub async fn terminal_kill(
     id: String,
 ) -> crate::commands::error::CommandResult<()> {
     if let Some(s) = state.pty_registry.remove(&id) {
-        let _ = s.kill();
+        let _ = s.kill(crate::pty::session::TerminationReason::UserClose);
     }
     Ok(())
 }
