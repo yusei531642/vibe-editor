@@ -757,6 +757,31 @@ Branch: `feature/issue-452`
 
 #### 検証結果（代替で PASS 済み）
 - [x] `git diff --check`: PASS
+
+## Issue #1138 - IDEチーム再開の二重起動を防止 (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1138
+
+### 計画
+
+- [x] IDE再開経路とCanvas側の既存ガードを比較する。
+- [x] 既存teamIdタブとin-flight resume予約を同時に検査する。
+- [x] 既存チーム再開と高速二重クリックの退行テストを追加する。
+- [x] 関連テストと全品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 検証結果を記録する。
+- [x] コミットして feature branch を push する。
+
+### 検証結果
+
+- [x] `use-team-history-sync` Vitest: PASS (3 tests)
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS (86 files / 521 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存 12 warnings)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）

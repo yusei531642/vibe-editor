@@ -1,4 +1,4 @@
-import { cleanup, renderHook, waitFor } from '@testing-library/react';
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -17,6 +17,7 @@ import {
   useTeamHistorySync,
   type UseTeamHistorySyncOptions
 } from '../use-team-history-sync';
+import type { TeamHistoryEntry } from '../../../../../types/shared';
 
 type MockApi = {
   teamHistory: {
@@ -59,6 +60,24 @@ function options(
   };
 }
 
+function teamEntry(): TeamHistoryEntry {
+  return {
+    id: 'team-1',
+    name: 'Test Team',
+    projectRoot: '/workspace/active',
+    createdAt: '2026-07-14T00:00:00.000Z',
+    lastUsedAt: '2026-07-14T00:00:00.000Z',
+    members: [
+      {
+        role: 'leader',
+        agent: 'claude',
+        agentId: 'leader-1',
+        sessionId: 'session-1'
+      }
+    ]
+  };
+}
+
 describe('useTeamHistorySync', () => {
   let originalApi: MockApi | undefined;
 
@@ -92,5 +111,42 @@ describe('useTeamHistorySync', () => {
       expect(warn).toHaveBeenCalledWith('[teamHistory] list failed:', authzError);
     });
     expect(result.current.teamHistoryEntries).toEqual([]);
+  });
+
+  it('does not resume a team that already has an IDE terminal tab (#1138)', async () => {
+    installApi();
+    const addTerminalTab = vi.fn(() => 2);
+    const showToast = vi.fn();
+    const existingTab = {
+      teamId: 'team-1'
+    } as UseTeamHistorySyncOptions['terminalTabs'][number];
+    const { result } = renderHook(() =>
+      useTeamHistorySync(options({ terminalTabs: [existingTab], addTerminalTab, showToast }))
+    );
+
+    await act(async () => result.current.handleResumeTeam(teamEntry()));
+
+    expect(addTerminalTab).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith('teamHistory.alreadyOpen', { tone: 'info' });
+  });
+
+  it('reserves the team id so rapid resume clicks spawn members only once (#1138)', async () => {
+    installApi();
+    const addTerminalTab = vi.fn(() => 1);
+    const showToast = vi.fn();
+    const { result } = renderHook(() =>
+      useTeamHistorySync(options({ addTerminalTab, showToast }))
+    );
+    const entry = teamEntry();
+
+    await act(async () => {
+      await Promise.all([
+        result.current.handleResumeTeam(entry),
+        result.current.handleResumeTeam(entry)
+      ]);
+    });
+
+    expect(addTerminalTab).toHaveBeenCalledTimes(entry.members.length);
+    expect(showToast).toHaveBeenCalledWith('teamHistory.alreadyOpen', { tone: 'info' });
   });
 });

@@ -53,6 +53,7 @@ export function useTeamHistorySync(
 
   const optsRef = useRef(opts);
   optsRef.current = opts;
+  const resumingTeamIdsRef = useRef(new Set<string>());
 
   const [teamHistoryEntries, setTeamHistoryEntries] = useState<TeamHistoryEntry[]>(
     []
@@ -118,6 +119,17 @@ export function useTeamHistorySync(
     void refreshTeamHistory();
   }, [opts.projectRoot, refreshTeamHistory]);
 
+  // Issue #1138: resume予約はタブがstateへ反映されるまで保持する。同一tickの連打では
+  // optsRef.current.terminalTabsがまだ空のため、既存タブ判定だけでは二重起動を防げない。
+  useEffect(() => {
+    const openTeamIds = new Set(
+      opts.terminalTabs.flatMap((tab) => (tab.teamId ? [tab.teamId] : []))
+    );
+    for (const teamId of resumingTeamIdsRef.current) {
+      if (openTeamIds.has(teamId)) resumingTeamIdsRef.current.delete(teamId);
+    }
+  }, [opts.terminalTabs]);
+
   const handleResumeTeam = useCallback(
     async (entry: TeamHistoryEntry) => {
       const {
@@ -129,10 +141,20 @@ export function useTeamHistorySync(
         setTeams
       } = optsRef.current;
       if (!projectRoot) return;
+      if (
+        resumingTeamIdsRef.current.has(entry.id) ||
+        terminalTabs.some((tab) => tab.teamId === entry.id)
+      ) {
+        showToast(t('teamHistory.alreadyOpen', { name: entry.name || entry.id }), {
+          tone: 'info'
+        });
+        return;
+      }
       if (!entry.members || entry.members.length === 0) {
         showToast(t('teamHistory.resume.emptyMembers'), { tone: 'warning' });
         return;
       }
+      resumingTeamIdsRef.current.add(entry.id);
       if (entry.projectRoot && entry.projectRoot !== projectRoot) {
         showToast(
           t('teamHistory.resume.otherProject', {
@@ -199,9 +221,10 @@ export function useTeamHistorySync(
       }
 
       // 各メンバーをタブとしてスポーン (sessionId があれば --resume 付き、customLabel があれば復元)
+      let addedTabs = 0;
       for (let i = 0; i < entry.members.length; i++) {
         const m = entry.members[i];
-        addTerminalTab({
+        const id = addTerminalTab({
           agent: m.agent,
           role: m.role,
           teamId: entry.id,
@@ -210,7 +233,11 @@ export function useTeamHistorySync(
           teamHistoryMemberIdx: i,
           customLabel: m.customLabel ?? null
         });
+        if (id !== null) addedTabs += 1;
       }
+
+      // 容量競合などで1件も追加できなかった場合は、次の明示操作で再試行可能にする。
+      if (addedTabs === 0) resumingTeamIdsRef.current.delete(entry.id);
 
       showToast(t('teamHistory.resumed', { name: entry.name }), { tone: 'info' });
     },
