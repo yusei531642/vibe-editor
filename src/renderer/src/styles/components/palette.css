@@ -162,6 +162,10 @@
   border-left-color: var(--claude-brand, var(--accent));
 }
 
+:root[data-theme^='claude'] .cmdp__item.is-selected {
+  background: var(--bg-active);
+}
+
 .cmdp__item-main {
   display: flex;
   flex-direction: column;

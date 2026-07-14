@@ -26,6 +26,14 @@ describe('Command palette CSS ownership (Issue #1172)', () => {
     expect(palette).toMatch(/\.cmdp-backdrop\s*\{[^}]*z-index:\s*var\(--z-palette\)/);
   });
 
+  it('preserves the Claude theme selected-row override in palette.css', () => {
+    const palette = readRendererFile('styles/components/palette.css');
+
+    expect(palette).toMatch(
+      /:root\[data-theme\^='claude'\]\s+\.cmdp__item\.is-selected\s*\{[^}]*background:\s*var\(--bg-active\)/,
+    );
+  });
+
   it('uses the shared backdrop token instead of duplicating 499 in AppShell', () => {
     const appShell = readRendererFile('components/AppShell.tsx');
 
