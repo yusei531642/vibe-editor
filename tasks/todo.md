@@ -757,6 +757,34 @@ Branch: `feature/issue-452`
 
 #### 検証結果（代替で PASS 済み）
 - [x] `git diff --check`: PASS
+
+## Issue #1155 - PTY registry lifecycle race (2026-07-14 / Codex)
+
+### 計画
+
+- [x] 現行の registry 登録、終了 watcher、同一 ID 競合の順序を確認する。
+- [x] `tasks/fortress-implement/issue-1155/mission-brief.md` に Mission Brief と Slice 境界を記録する。
+- [x] Slice 1 を RED → GREEN で実装する。
+- [x] Slice 1 の検証後、Slice 2 を実装し全品質ゲートを実行する。
+
+### Next Steps
+
+- [x] registry採否latchとidentity-safe removalを実装する。
+- [x] 即死、同一ID競合、collision loserの回帰テストを追加する。
+
+### RCA結果
+
+- [x] Root Cause Confirmed: exit watcherがregistry insert前に開始し、終了時にIDだけで無条件removeしていた。
+- [x] 即死時はremove(None)後にdead handleがinsertされ、衝突時は古いwatcherが別handleを削除できることをコード経路と回帰テストで固定した。
+
+### 検証結果
+
+- [x] lifecycle回帰テスト: PASS（3 tests）
+- [x] PTY全体テスト: PASS（130 passed / 2 ignored）
+- [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
+- [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
+- [x] `npm run lint:file-size`: PASS（spawn.rs 733 → 688行）
+- [x] `npm run typecheck`: PASS（`npm ci`で依存をlockfileへ同期後に再実行）
 - [x] `npm run typecheck`: PASS
 - [x] `npm run build:vite`: PASS（既存警告あり）
 - [x] targeted Vitest: PASS（2 files / 11 tests）
