@@ -123,7 +123,9 @@ export function useTeamHistorySync(
   // optsRef.current.terminalTabsがまだ空のため、既存タブ判定だけでは二重起動を防げない。
   useEffect(() => {
     const openTeamIds = new Set(
-      opts.terminalTabs.flatMap((tab) => (tab.teamId ? [tab.teamId] : []))
+      opts.terminalTabs.flatMap((tab) =>
+        tab.teamId && !tab.exited ? [tab.teamId] : []
+      )
     );
     for (const teamId of resumingTeamIdsRef.current) {
       if (openTeamIds.has(teamId)) resumingTeamIdsRef.current.delete(teamId);
@@ -236,7 +238,7 @@ export function useTeamHistorySync(
         if (id !== null) addedTabs += 1;
       }
 
-      // 容量競合などで1件も追加できなかった場合は、次の明示操作で再試行可能にする。
+      // 容量競合などで1件も追加できなかった場合は、次の明示的な操作で再試行可能にする。
       if (addedTabs === 0) resumingTeamIdsRef.current.delete(entry.id);
 
       showToast(t('teamHistory.resumed', { name: entry.name }), { tone: 'info' });

@@ -166,6 +166,40 @@ describe('useTeamHistorySync', () => {
     expect(showToast).toHaveBeenCalledWith('teamHistory.alreadyOpen', { tone: 'info' });
   });
 
+  it('keeps the resume reservation when only an exited team tab remains (#1138)', async () => {
+    const api = installApi();
+    mocks.mcpAutoSetup = true;
+    let resolveSetup!: (value: { changed: boolean }) => void;
+    const setupPromise = new Promise<{ changed: boolean }>((resolve) => {
+      resolveSetup = resolve;
+    });
+    (api as MockApi & { app: { setupTeamMcp: ReturnType<typeof vi.fn> } }).app = {
+      setupTeamMcp: vi.fn(() => setupPromise)
+    };
+    const addTerminalTab = vi.fn(() => 1);
+    const showToast = vi.fn();
+    let terminalTabs = [
+      { teamId: 'team-1', exited: true } as UseTeamHistorySyncOptions['terminalTabs'][number]
+    ];
+    const { result, rerender } = renderHook(() =>
+      useTeamHistorySync(options({ terminalTabs, addTerminalTab, showToast }))
+    );
+    const entry = teamEntry();
+
+    let firstResume!: Promise<void>;
+    act(() => {
+      firstResume = result.current.handleResumeTeam(entry);
+    });
+    terminalTabs = [...terminalTabs];
+    rerender();
+    await act(async () => result.current.handleResumeTeam(entry));
+    resolveSetup({ changed: false });
+    await act(async () => firstResume);
+
+    expect(addTerminalTab).toHaveBeenCalledTimes(entry.members.length);
+    expect(showToast).toHaveBeenCalledWith('teamHistory.alreadyOpen', { tone: 'info' });
+  });
+
   it('does not reserve a team rejected for another project', async () => {
     installApi();
     const addTerminalTab = vi.fn(() => 1);
