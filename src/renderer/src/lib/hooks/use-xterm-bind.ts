@@ -119,6 +119,8 @@ export interface UseXtermBindOptions {
    * useFitToContainer の visible-effect refit が IPC を二重発火させずに済む。
    */
   lastScheduledRef?: MutableRefObject<{ cols: number; rows: number } | null>;
+  /** create待機中にuseFitToContainerが保持した最新grid。 */
+  pendingPtyResizeRef?: MutableRefObject<{ cols: number; rows: number } | null>;
   /**
    * Issue #662: 永続化復元時の PTY 初回 spawn cols/rows seed。
    * 指定があると `fit.fit()` / `computeUnscaledGrid` より先に `term.resize(seed)` を
@@ -149,6 +151,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
     getCellSize,
     containerRef,
     lastScheduledRef,
+    pendingPtyResizeRef,
     initialCols: persistedInitialCols,
     initialRows: persistedInitialRows
   } = options;
@@ -611,6 +614,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         });
 
         if (localDisposed || disposedRef.current) {
+          if (pendingPtyResizeRef) pendingPtyResizeRef.current = null;
           // 古い effect の戻り値だった場合の race 処理。
           // - 通常 cleanup (タブ close / restart): kill する
           // - HMR cleanup (hmrDisposeArmed.current = true 中): kill せず cache に id を残し、
@@ -627,6 +631,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         }
 
         if (!res.ok || !res.id) {
+          if (pendingPtyResizeRef) pendingPtyResizeRef.current = null;
           // pre-subscribe 経路で create が失敗した場合は orphan listener を必ず解除。
           unsubscribePtyListeners();
           const errMsg = res.error ?? '不明なエラー';
@@ -656,12 +661,19 @@ export function useXtermBind(options: UseXtermBindOptions): void {
             newSpawnSessionIdCb
           );
           if (!ok) {
+            if (pendingPtyResizeRef) pendingPtyResizeRef.current = null;
             void window.api.terminal.kill(res.id);
             return;
           }
         }
 
         ptyIdRef.current = res.id;
+        const pendingResize = pendingPtyResizeRef?.current ?? null;
+        if (pendingPtyResizeRef) pendingPtyResizeRef.current = null;
+        if (pendingResize) {
+          if (lastScheduledRef) lastScheduledRef.current = pendingResize;
+          void window.api.terminal.resize(res.id, pendingResize.cols, pendingResize.rows);
+        }
         // Issue #271: HMR remount で再 attach できるよう ptyId と世代番号を退避。
         cacheUpsert(skey, res.id, myGeneration);
         // Issue #818: warning は Rust 側から `{ messageKey, params }` で来る。
@@ -842,6 +854,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
 
     return () => {
       localDisposed = true;
+      if (pendingPtyResizeRef) pendingPtyResizeRef.current = null;
       disposedRef.current = true;
       dataSub.dispose();
       textarea?.removeEventListener('compositionstart', onCompStart);

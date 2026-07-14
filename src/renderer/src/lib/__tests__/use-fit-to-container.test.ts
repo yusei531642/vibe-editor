@@ -236,4 +236,40 @@ describe('useFitToContainer: zoom 単独 refit で xterm 全行 refresh を skip
     expect(t.resize).toHaveBeenLastCalledWith(150, 33);
     expect((t.refresh as ReturnType<typeof vi.fn>).mock.calls.length).toBe(baselineRefreshCalls + 1);
   });
+
+  it('ptyId未確定中は最新gridだけをpendingへ保持する', () => {
+    const t = freshTerminal();
+    const fit = { fit: vi.fn() } as unknown as FitAddon;
+    const container = makeResizableContainer(800, 600);
+    const pendingPtyResizeRef = makeRef<{ cols: number; rows: number } | null>(null);
+    const api = setupTerminalApi();
+    let zoomCb: (() => void) | null = null;
+
+    renderHook(() =>
+      useFitToContainer({
+        containerRef: { current: container.el },
+        termRef: makeRef<Terminal | null>(t),
+        fitRef: makeRef<FitAddon | null>(fit),
+        ptyIdRef: makeRef<string | null>(null),
+        visible: true,
+        refitTriggers: [],
+        unscaledFit: true,
+        getCellSize: () => ({ cellW: 8, cellH: 18, fallback: false }),
+        zoomSubscribe: (cb) => {
+          zoomCb = cb;
+          return () => undefined;
+        },
+        pendingPtyResizeRef
+      })
+    );
+
+    vi.advanceTimersByTime(60);
+    expect(pendingPtyResizeRef.current).toEqual({ cols: 100, rows: 33 });
+    container.setSize(1200, 600);
+    zoomCb!();
+    vi.advanceTimersByTime(120);
+
+    expect(pendingPtyResizeRef.current).toEqual({ cols: 150, rows: 33 });
+    expect(api.resize).not.toHaveBeenCalled();
+  });
 });

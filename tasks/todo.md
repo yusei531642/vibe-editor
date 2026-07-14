@@ -1,5 +1,27 @@
 # vibe-editor Tauri ハイブリッド移行 + 無限キャンバス UI 革新 TODO
 
+## Issue #1152 - PTY確定時に最新gridをflush (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1152
+
+### 計画
+
+- [x] create待機中のresize取りこぼし経路を確認する。
+- [x] ptyId未確定時の最新gridをpending refへ保存する。
+- [x] create成功直後にpending gridを1回flushし、失敗・cleanup時は破棄する。
+- [x] 関連テストと全JS品質ゲートを実行する。
+
+### Next Steps
+
+- [x] 検証結果を記録する。
+- [ ] コミットして feature branch をpushする。
+- [x] targeted Vitest: PASS（2 files / 7 tests）
+- [x] `npm run typecheck`: PASS
+- [x] `npm run test`: PASS（86 files / 521 tests）
+- [x] `npm run lint`: PASS（0 errors / 既存12 warnings）
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS
+
 ## #736 team_hub/state.rs god-file 分割 + team_send 段階関数化 (完了)
 
 方針: 振る舞いを一切変えない純粋なリファクタ。lock の取得/解放タイミング・

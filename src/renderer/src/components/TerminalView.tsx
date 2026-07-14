@@ -202,6 +202,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
     // 30ms 後 visible-effect refit が同じ cols/rows を計算したとき dedupe で IPC を skip する。
     // これにより SIGWINCH の二重発火を防ぐ。
     const lastScheduledRef = useRef<{ cols: number; rows: number } | null>(null);
+    const pendingPtyResizeRef = useRef<{ cols: number; rows: number } | null>(null);
 
     // 不変式 #2: args / env / teamId / agentId / role / initialMessage は
     // spawn 時に一度だけ使う値。ref 経由で usePtySession 内部に渡す。
@@ -309,6 +310,7 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       getCellSize,
       containerRef,
       lastScheduledRef,
+      pendingPtyResizeRef,
       // Issue #662: 永続化復元時の初回 spawn size seed (未指定なら fit 経路に倒す)
       initialCols,
       initialRows
@@ -369,7 +371,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       getCellSize,
       zoomSubscribe,
       getZoom,
-      lastScheduledRef
+      lastScheduledRef,
+      pendingPtyResizeRef
     });
 
     // Issue #356: 右クリックでカスタムメニューを開く。xterm 本体上の contextmenu を拾う。
