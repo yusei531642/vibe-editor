@@ -7,6 +7,7 @@ import type {
 } from '../../../../types/shared';
 import type { WorkspacePreset } from '../../lib/workspace-presets';
 import { ROLE_META, roleMetaFor } from '../../lib/team-roles';
+import { readableForegroundForHex } from '../../lib/color-contrast';
 
 function RoleDot({
   role,
@@ -20,7 +21,12 @@ function RoleDot({
     <span
       className="canvas-role-dot"
       title={`${meta.label} (${agent})`}
-      style={{ ['--dot-color' as string]: meta.color } as CSSProperties}
+      style={
+        {
+          ['--dot-color' as string]: meta.color,
+          ['--dot-foreground' as string]: readableForegroundForHex(meta.color)
+        } as CSSProperties
+      }
     >
       {meta.glyph}
     </span>
@@ -140,6 +146,7 @@ export function AgentBadge({ label, color }: { label: string; color: string }): 
       style={
         {
           ['--dot-color' as string]: color,
+          ['--dot-foreground' as string]: readableForegroundForHex(color),
           width: 18,
           height: 18,
           borderRadius: 4,

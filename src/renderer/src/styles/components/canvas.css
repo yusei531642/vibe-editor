@@ -712,7 +712,7 @@
   height: 14px;
   border-radius: 50%;
   background: var(--dot-color, var(--accent));
-  color: #0a0a0d;
+  color: var(--dot-foreground, var(--accent-foreground));
   font-size: 9px;
   font-weight: 700;
   display: inline-flex;
@@ -883,30 +883,6 @@
   gap: 8px;
   flex: 1 1 auto;
   min-width: 0;
-}
-/*
- * Avatar: Claude Code の `⏺` メッセージマーカーに着想。
- * 円形 + ロール色 + 微弱な glow リング。文字は role glyph (P/R/... 1 文字)。
- */
-.canvas-agent-card__avatar {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: var(--agent-accent, var(--accent));
-  color: #0a0a0d;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  flex-shrink: 0;
-  box-shadow: 0 0 0 3px
-    color-mix(in srgb, var(--agent-accent, var(--accent)) 18%, transparent);
-  transition: box-shadow var(--dur-fast, 180ms) var(--ease-standard);
-}
-.canvas-agent-card:hover .canvas-agent-card__avatar {
-  box-shadow: 0 0 0 4px
-    color-mix(in srgb, var(--agent-accent, var(--accent)) 26%, transparent);
 }
 /*
  * Title: Claude 公式風に serif。

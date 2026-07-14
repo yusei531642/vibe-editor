@@ -1287,7 +1287,7 @@
 .settings-button--primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #0a0a0d;
+  color: var(--accent-foreground);
 }
 .settings-button--primary:hover {
   background: var(--accent-hover);
