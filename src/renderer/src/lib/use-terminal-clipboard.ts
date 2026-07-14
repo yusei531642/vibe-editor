@@ -43,7 +43,12 @@ export function useTerminalClipboard(options: {
     };
 
     const handleImageBlob = async (blob: Blob, mime: string): Promise<void> => {
-      const res = await insertPastedImageToPty(blob, mime, (text) => writeRef.current(text));
+      const res = await insertPastedImageToPty(
+        blob,
+        mime,
+        (text) => writeRef.current(text),
+        translate(langRef.current, 'terminal.diagnostic.unknownError')
+      );
       if (!res.ok) {
         writeError(translate(langRef.current, 'terminal.pasteImageFailed'), res.error);
       }

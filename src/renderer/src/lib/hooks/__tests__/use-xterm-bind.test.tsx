@@ -162,6 +162,10 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
     }));
     const kill = vi.fn(async () => undefined);
     const onSpawnError = vi.fn();
+    const formatTerminalDiagnostic = vi.fn(() => ({
+      message: '[Start error] spawn failed: command not found',
+      tone: 'error' as const
+    }));
 
     (window as TestWindow).api = {
       terminal: {
@@ -187,7 +191,10 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
         termRef: makeRef<Terminal | null>(term),
         fitRef: makeRef<FitAddon | null>(fit),
         snapRef: makeRef<PtySpawnSnapshot>({}),
-        callbacksRef: makeRef<PtySessionCallbacks>({ onSpawnError }),
+        callbacksRef: makeRef<PtySessionCallbacks>({
+          onSpawnError,
+          formatTerminalDiagnostic
+        }),
         ptyIdRef,
         disposedRef: makeRef(false),
         observeChunk: vi.fn(),
@@ -199,6 +206,13 @@ describe('useXtermBind: spawn → unmount lifecycle', () => {
     // spawn 失敗時は ptyIdRef が空のまま、onSpawnError が error 文字列で呼ばれる。
     await waitFor(() => expect(onSpawnError).toHaveBeenCalledTimes(1));
     expect(onSpawnError).toHaveBeenCalledWith('spawn failed: command not found');
+    expect(formatTerminalDiagnostic).toHaveBeenCalledWith({
+      kind: 'spawn_failed',
+      error: 'spawn failed: command not found'
+    });
+    expect(term.writeln).toHaveBeenCalledWith(
+      expect.stringContaining('[Start error] spawn failed: command not found')
+    );
     expect(ptyIdRef.current).toBeNull();
 
     await act(async () => {

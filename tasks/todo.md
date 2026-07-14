@@ -2037,3 +2037,38 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1045
 - [x] `cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings`: PASS
 - [x] `cargo check --locked --manifest-path src-tauri/Cargo.toml --all-targets`: PASS
 - [x] `git diff --check`: PASS
+
+## Issue #1144 - ターミナル診断メッセージの i18n (2026-07-14 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1144
+
+### 計画
+
+- [x] PTY終了・起動失敗・例外を構造化診断として共通writerへ集約する。
+- [x] 診断ラベルをTerminalViewの現在言語で整形し、tail本文は原文維持する。
+- [x] 画像ペーストのunknown errorを呼び元localeで補完する。
+- [x] ja/en、tail有無、動的エラー保持の回帰テストを追加する。
+- [x] typecheck、対象テスト、全テスト、lint、Vite buildを実行する。
+
+### Next Steps
+
+- [x] 最小差分を実装する。
+- [x] 品質ゲートを実行し、結果を記録する。
+- [ ] feature branchをpushし、PR作成の明示承認を待つ。
+
+### 進捗
+
+- [x] 3つのexit callbackを共通writerへ集約した。
+- [x] 終了・起動失敗・例外のラベルをja/en辞書へ接続した。
+- [x] ANSI装飾、exitCode/signal、tail本文と改行変換を維持した。
+- [x] 画像ペーストの具体的backend errorは原文のまま、欠落時だけlocale fallbackを使う。
+
+### 検証結果
+
+- [x] 固定日本語文字列検索: 対象低レベルhook/helperで0件
+- [x] `npm run typecheck`: PASS
+- [x] 対象Vitest: PASS (4 files / 11 tests)
+- [x] `npm run test`: PASS (88 files / 525 tests)
+- [x] `npm run lint`: PASS (0 errors / 既存warnings 12)
+- [x] `npm run build:vite`: PASS
+- [x] `git diff --check`: PASS

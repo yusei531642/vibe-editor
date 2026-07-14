@@ -31,6 +31,10 @@ import {
   type TerminalInputGateResetReason
 } from '../terminal-input-gate';
 import type { TerminalRuntimeStatus } from '../terminal-status';
+import type {
+  FormattedTerminalDiagnostic,
+  TerminalDiagnostic
+} from '../terminal-diagnostics';
 import {
   acquireGeneration,
   cacheDelete,
@@ -75,6 +79,10 @@ export interface PtySessionCallbacks {
    * 未指定の場合はフォールバックで messageKey をそのまま表示する (debug 用)。
    */
   formatTerminalWarning?: (warning: TerminalWarning) => string;
+  /** Issue #1144: renderer生成の診断ラベルを現在言語で整形する。 */
+  formatTerminalDiagnostic?: (
+    diagnostic: TerminalDiagnostic
+  ) => FormattedTerminalDiagnostic;
 }
 
 export interface UseXtermBindOptions {
@@ -407,6 +415,32 @@ export function useXtermBind(options: UseXtermBindOptions): void {
       return true;
     };
 
+    const writeTerminalDiagnostic = (diagnostic: TerminalDiagnostic): void => {
+      const formatter = callbacksRef.current.formatTerminalDiagnostic;
+      const formatted = formatter
+        ? formatter(diagnostic)
+        : diagnostic.kind === 'exited'
+          ? {
+              message: `[Process exited: exitCode=${diagnostic.info.exitCode}${diagnostic.info.signal ? `, signal=${diagnostic.info.signal}` : ''}]`,
+              tone: 'warning' as const,
+              tailHeading: diagnostic.info.tail
+                ? '── Final output (possible cause) ──'
+                : undefined
+            }
+          : {
+              message:
+                diagnostic.kind === 'spawn_failed'
+                  ? `[Start error] ${diagnostic.error || 'Unknown error'}`
+                  : `[Exception] ${diagnostic.error}`,
+              tone: 'error' as const
+            };
+      const color = formatted.tone === 'warning' ? '\x1b[33m' : '\x1b[31m';
+      const tail = diagnostic.kind === 'exited' ? diagnostic.info.tail : undefined;
+      term.writeln(
+        `\r\n${color}${formatted.message}\x1b[0m${tail && formatted.tailHeading ? `\r\n\x1b[90m${formatted.tailHeading}\x1b[0m\r\n${tail.replace(/\n/g, '\r\n')}` : ''}`
+      );
+    };
+
     // === Helper 3: setupPostSubscribe ===
     // attach 経路 (HMR remount): pre-subscribe を skip しているのでここで sync
     // post-subscribe する。PTY は既に動作中で startup race は起きないため
@@ -430,9 +464,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
       if (!offExit) {
         offExit = window.api.terminal.onExit(resId, (info) => {
           if (!isCurrentGeneration()) return;
-          term.writeln(
-            `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m${info.tail ? `\r\n\x1b[90m── 最終出力 (死因の可能性) ──\x1b[0m\r\n${info.tail.replace(/\n/g, '\r\n')}` : ''}`
-          );
+          writeTerminalDiagnostic({ kind: 'exited', info });
           callbacksRef.current.onStatus?.({
             kind: 'exited',
             exitCode: info.exitCode,
@@ -491,9 +523,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         };
         const newSpawnExitCb = (info: TerminalExitInfo): void => {
           if (!isCurrentGeneration()) return;
-          term.writeln(
-            `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m${info.tail ? `\r\n\x1b[90m── 最終出力 (死因の可能性) ──\x1b[0m\r\n${info.tail.replace(/\n/g, '\r\n')}` : ''}`
-          );
+          writeTerminalDiagnostic({ kind: 'exited', info });
           callbacksRef.current.onStatus?.({
             kind: 'exited',
             exitCode: info.exitCode,
@@ -538,9 +568,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         };
         const attachExitCb = (info: TerminalExitInfo): void => {
           if (!isCurrentGeneration()) return;
-          term.writeln(
-            `\r\n\x1b[33m[プロセス終了: exitCode=${info.exitCode}${info.signal ? `, signal=${info.signal}` : ''}]\x1b[0m${info.tail ? `\r\n\x1b[90m── 最終出力 (死因の可能性) ──\x1b[0m\r\n${info.tail.replace(/\n/g, '\r\n')}` : ''}`
-          );
+          writeTerminalDiagnostic({ kind: 'exited', info });
           callbacksRef.current.onStatus?.({
             kind: 'exited',
             exitCode: info.exitCode,
@@ -629,8 +657,8 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         if (!res.ok || !res.id) {
           // pre-subscribe 経路で create が失敗した場合は orphan listener を必ず解除。
           unsubscribePtyListeners();
-          const errMsg = res.error ?? '不明なエラー';
-          term.writeln(`\x1b[31m[起動エラー] ${errMsg}\x1b[0m`);
+          const errMsg = res.error ?? 'Unknown error';
+          writeTerminalDiagnostic({ kind: 'spawn_failed', error: res.error });
           callbacksRef.current.onStatus?.({
             kind: 'spawn_failed',
             error: res.error ?? ''
@@ -775,7 +803,7 @@ export function useXtermBind(options: UseXtermBindOptions): void {
         // した listener が orphan になるのを防ぐため、catch でも明示的に解除する。
         unsubscribePtyListeners();
         try {
-          term.writeln(`\x1b[31m[例外] ${String(err)}\x1b[0m`);
+          writeTerminalDiagnostic({ kind: 'exception', error: String(err) });
         } catch {
           /* term が dispose 済み等で writeln 自体が落ちる可能性に備える */
         }

@@ -14,6 +14,10 @@ import { useFitToContainer } from '../lib/use-fit-to-container';
 import { useCanvasTerminalPointerNormalizer } from '../lib/use-canvas-terminal-pointer-normalizer';
 import type { CellSize } from '../lib/measure-cell-size';
 import type { TerminalRuntimeStatus } from '../lib/terminal-status';
+import {
+  formatTerminalDiagnostic,
+  type TerminalDiagnostic
+} from '../lib/terminal-diagnostics';
 import { ContextMenu, type ContextMenuItem } from './ContextMenu';
 import { useToast } from '../lib/toast-context';
 import { createApiErrorDetector, type ApiErrorDetector } from '../lib/pty-api-error-detector';
@@ -248,6 +252,11 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       [t]
     );
 
+    const formatDiagnostic = useCallback(
+      (diagnostic: TerminalDiagnostic) => formatTerminalDiagnostic(diagnostic, t),
+      [t]
+    );
+
     // callbacks は毎レンダー更新されるので ref で安定化
     const callbacksRef = useRef<PtySessionCallbacks>({
       onStatus,
@@ -256,7 +265,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       onSessionId,
       onUserInput,
       onSpawnError,
-      formatTerminalWarning
+      formatTerminalWarning,
+      formatTerminalDiagnostic: formatDiagnostic
     });
     callbacksRef.current = {
       onStatus,
@@ -265,7 +275,8 @@ export const TerminalView = forwardRef<TerminalViewHandle, TerminalViewProps>(
       onSessionId,
       onUserInput,
       onSpawnError,
-      formatTerminalWarning
+      formatTerminalWarning,
+      formatTerminalDiagnostic: formatDiagnostic
     };
 
     // --- 共通の write ヘルパ (closure で ptyIdRef を読む) ---
