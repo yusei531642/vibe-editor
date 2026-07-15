@@ -1,5 +1,43 @@
 # vibe-editor Tauri ハイブリッド移行 + 無限キャンバス UI 革新 TODO
 
+## Issue #1243 - Windows project root authority復元修正 (2026-07-15 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1243
+
+### RCA結果
+
+- RCA Mode: Root Cause Confirmed
+- 症状: v1.6.9でnative承認済みrootがWindowsのcase/verbatim表記差により初期IPCで拒否される。
+- 原因箇所: `project_identity.rs`の保存用keyと`authz.rs` / `authz/active_project.rs`の`PathBuf`直接比較が不整合。
+- 独立証拠: 実機ログの`requested=\\?\C:\... not active project`とproductionコード経路が一致。
+- 修正方針: comparison keyを統一しidentity再照合を維持する。ledgerなし時はnative再承認を促し、一時的な初期IPC失敗でledgerを破壊しない。
+- 判定: A=YES, B=YES, C=YES, D=YES
+
+### 計画
+
+- [x] Windows path表記差の回帰テストを追加する（実機ログと旧コード経路をRED相当の証拠として採用）。
+- [x] strict/readable gateを共通comparison keyへ統一し、filesystem identity再照合を維持する。
+- [x] ledgerなし+`lastOpenedRoot`ありではnative reconfirm pickerを使う。
+- [x] 初期IPC失敗時にactive authorityを削除しない契約をテスト・実装する。
+- [x] targeted/full test、typecheck、lint、Rust checksを実行する。
+- [ ] fresh review、Fable one-shot、PR、CI/reviewer確認まで進める。
+
+### 進捗
+
+- [x] Symptom Gone: Windows native identityのdisplay pathをstrict/readable gateが受理する回帰テスト PASS。
+- [x] Security Invariant: 同一pathのfilesystem identity差し替え拒否テスト PASS。
+- [x] Frontend: typecheck、604 tests、Vite build PASS。lintは0 errors / 11 warnings。
+- [x] Rust: cargo check、clippy `-D warnings`、関連テスト PASS。
+- [x] CI file-size ratchet: 回帰テストを`active_project.rs`へ責務移動し、baseline引き上げなしでPASS。
+- [ ] Rust全体テストは928 PASS / 2 ignored / 2環境依存FAIL（junction fixture、Windows access denied）。
+- [ ] `cargo fmt --check`はmain既存の広範な未整形差分によりFAIL。今回外の一括整形は実施しない。
+
+### Next Tasks
+
+- [x] Fable one-shotでauthority保持時の安全境界を重点確認する（実コード未添付由来の検証要求を照合し、reconfirm失敗のfail-closedテストを追加）。
+- [ ] feature branchをpushし、`Closes #1243`付きPRを作成する。
+- [ ] CIとvibe-editor-reviewerの本レビューを確認する。
+
 ## Issue #1146 - API agent session削除失敗を伝播 (2026-07-14 / Codex)
 
 Issue: https://github.com/yusei531642/vibe-editor/issues/1146

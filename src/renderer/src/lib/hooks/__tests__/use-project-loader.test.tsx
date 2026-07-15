@@ -136,14 +136,14 @@ describe('useProjectLoader', () => {
     vi.restoreAllMocks();
   });
 
-  it('保存済み root はauthorityに使わず、native pickerの結果だけを起動する', async () => {
+  it('保存済み root はauthorityに使わず、native reconfirmの結果だけを起動する', async () => {
     const invalidRoot = 'C:\\Users\\zooyo';
     const pickedRoot =
       'C:\\Users\\zooyo\\Documents\\GitHub\\DX\\digital-management-consulting-app';
     mocks.settingsValues.lastOpenedRoot = invalidRoot;
     mocks.settingsValues.claudeCwd = invalidRoot;
     const api = installApi();
-    api.app.pickAndActivateProjectRoot.mockResolvedValueOnce(pickedRoot);
+    api.app.reconfirmProjectRoot.mockResolvedValueOnce(pickedRoot);
     const onLoaded = vi.fn();
     const onProjectSwitched = vi.fn();
 
@@ -151,11 +151,15 @@ describe('useProjectLoader', () => {
       useProjectLoader(options({ onLoaded, onProjectSwitched }))
     );
 
-    await waitFor(() => expect(api.app.pickAndActivateProjectRoot).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(api.app.reconfirmProjectRoot).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(api.git.status).toHaveBeenCalledWith(pickedRoot));
 
     expect(api.app.restoreAuthorizedProjectRoot).toHaveBeenCalledTimes(1);
-    expect(api.app.pickAndActivateProjectRoot).toHaveBeenCalledWith('appMenu.openFolderDialogTitle');
+    expect(api.app.reconfirmProjectRoot).toHaveBeenCalledWith(
+      invalidRoot,
+      'appMenu.openFolderDialogTitle'
+    );
+    expect(api.app.pickAndActivateProjectRoot).not.toHaveBeenCalled();
     expect(mocks.updateSettings).toHaveBeenCalledWith({ lastOpenedRoot: pickedRoot });
     expect(result.current.projectRoot).toBe(pickedRoot);
     expect(onLoaded).toHaveBeenCalledWith({
@@ -163,6 +167,48 @@ describe('useProjectLoader', () => {
       sessions: []
     });
     expect(onProjectSwitched).not.toHaveBeenCalled();
+  });
+
+  it('初期IPC失敗時もnative authorityと選択rootを保持する', async () => {
+    const api = installApi();
+    api.app.restoreAuthorizedProjectRoot.mockResolvedValueOnce('/repo');
+    api.git.status.mockRejectedValueOnce(new Error('transient git failure'));
+    const onProjectSwitched = vi.fn();
+
+    const { result } = renderHook(() =>
+      useProjectLoader(options({ onProjectSwitched }))
+    );
+
+    await waitFor(() => expect(result.current.gitLoading).toBe(false));
+
+    expect(result.current.projectRoot).toBe('/repo');
+    expect(api.app.clearActiveProjectRoot).not.toHaveBeenCalled();
+    expect(onProjectSwitched).not.toHaveBeenCalled();
+    expect(mocks.setStatus).toHaveBeenLastCalledWith(
+      'project.initError: Error: transient git failure'
+    );
+  });
+
+  it('native reconfirm失敗時はsettingsのrootを採用しない', async () => {
+    const untrustedRoot = 'C:\\Users\\zooyo\\Documents\\untrusted';
+    mocks.settingsValues.lastOpenedRoot = untrustedRoot;
+    const api = installApi();
+    api.app.reconfirmProjectRoot.mockRejectedValueOnce(new Error('reconfirm failed'));
+
+    const { result } = renderHook(() => useProjectLoader(options()));
+
+    await waitFor(() => expect(result.current.gitLoading).toBe(false));
+
+    expect(api.app.reconfirmProjectRoot).toHaveBeenCalledWith(
+      untrustedRoot,
+      'appMenu.openFolderDialogTitle'
+    );
+    expect(result.current.projectRoot).toBe('');
+    expect(api.git.status).not.toHaveBeenCalled();
+    expect(api.app.clearActiveProjectRoot).not.toHaveBeenCalled();
+    expect(mocks.setStatus).toHaveBeenLastCalledWith(
+      'project.initError: Error: reconfirm failed'
+    );
   });
 
   it('recent pathはnative pickerの初期位置にだけ渡し、再選択結果をloadする', async () => {

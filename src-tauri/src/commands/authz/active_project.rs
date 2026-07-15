@@ -6,6 +6,11 @@ use crate::commands::project_authority::ProjectRootIdentity;
 use crate::state::{current_project_root, current_project_root_identity};
 use arc_swap::ArcSwapOption;
 
+pub(super) fn canonical_roots_match(left: &std::path::Path, right: &std::path::Path) -> bool {
+    crate::commands::project_identity::canonical_root_key(left)
+        == crate::commands::project_identity::canonical_root_key(right)
+}
+
 /// active projectとの照合に成功した同一snapshotを表すcapability。
 /// requested rawは保持せず、Claude directory互換用のactive rawだけを保持する。
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -154,7 +159,7 @@ pub(crate) async fn assert_active_project_root_policy(
         }
     };
 
-    if req_canon != active_canon {
+    if !canonical_roots_match(&req_canon, &active_canon) {
         tracing::warn!(
             requested = %clamp_for_log(&req_canon.to_string_lossy()),
             active = %clamp_for_log(&active_canon.to_string_lossy()),
@@ -309,6 +314,27 @@ pub fn invalidate_identity_recheck() {
 #[cfg(test)]
 mod recheck_cache_tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn native_identity_canonical_root_accepts_windows_display_path() {
+        let project = tempfile::tempdir().expect("project");
+        let approved = crate::commands::project_authority::capture_identity(project.path())
+            .await
+            .expect("capture native identity");
+        let active = ArcSwapOption::from(Some(std::sync::Arc::new(
+            approved.canonical_root.clone(),
+        )));
+        let identity = ArcSwapOption::from(Some(std::sync::Arc::new(approved)));
+        let requested = project.path().to_string_lossy();
+
+        assert_active_project_root(&active, &identity, &requested)
+            .await
+            .expect("strict gate should accept the native display path");
+        super::super::assert_readable_project_root(&active, &identity, &requested)
+            .await
+            .expect("readable gate should accept the native display path");
+    }
 
     fn identity(root: &str, file_id: &str) -> ProjectRootIdentity {
         ProjectRootIdentity {

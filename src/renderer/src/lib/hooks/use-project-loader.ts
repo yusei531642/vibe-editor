@@ -170,9 +170,15 @@ export function useProjectLoader(
         // 起動時のauthorityに使わない。Rustのprivate ledgerが復元したactive rootだけを使う。
         let root = await window.api.app.restoreAuthorizedProjectRoot();
         if (!root) {
-          const picked = await window.api.app.pickAndActivateProjectRoot(
-            t('appMenu.openFolderDialogTitle')
-          );
+          // settingsの保存値はauthorityには使わず、native pickerの初期位置にだけ渡す。
+          const picked = lastOpenedRoot
+            ? await window.api.app.reconfirmProjectRoot(
+                lastOpenedRoot,
+                t('appMenu.openFolderDialogTitle')
+              )
+            : await window.api.app.pickAndActivateProjectRoot(
+                t('appMenu.openFolderDialogTitle')
+              );
           if (cancelled) return;
           if (!picked) {
             // ユーザーがキャンセルした場合は projectRoot 未設定のまま空状態を維持。
@@ -206,10 +212,9 @@ export function useProjectLoader(
         optsRef.current.onLoaded({ gitStatus: gs, sessions: sess });
         useUiStore.getState().setStatus(root.split(/[\\/]/).pop() ?? root);
       } catch (err) {
-        await window.api.app.clearActiveProjectRoot().catch(() => undefined);
-        setProjectRoot('');
+        // git/sessionの一時的な初期化失敗は、native承認済みauthorityを失効させる理由ではない。
+        // rootを保持し、ユーザーが再読込または別folder選択で復旧できる状態にする。
         setGitStatus(null);
-        optsRef.current.onProjectSwitched('');
         useUiStore.getState().setStatus(t('project.initError', { error: String(err) }));
         setGitLoading(false);
       }

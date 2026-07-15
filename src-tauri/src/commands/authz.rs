@@ -139,7 +139,7 @@ pub async fn assert_readable_project_root(
     let active = current_project_root(project_root_slot).unwrap_or_default();
     if !active.trim().is_empty() {
         if let Ok(active_canon) = tokio::fs::canonicalize(active.trim()).await {
-            if req_canon == active_canon {
+            if active_project::canonical_roots_match(&req_canon, &active_canon) {
                 return assert_active_project_root(
                     project_root_slot,
                     project_root_identity_slot,
