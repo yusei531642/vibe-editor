@@ -189,6 +189,28 @@ describe('useProjectLoader', () => {
     );
   });
 
+  it('native reconfirm失敗時はsettingsのrootを採用しない', async () => {
+    const untrustedRoot = 'C:\\Users\\zooyo\\Documents\\untrusted';
+    mocks.settingsValues.lastOpenedRoot = untrustedRoot;
+    const api = installApi();
+    api.app.reconfirmProjectRoot.mockRejectedValueOnce(new Error('reconfirm failed'));
+
+    const { result } = renderHook(() => useProjectLoader(options()));
+
+    await waitFor(() => expect(result.current.gitLoading).toBe(false));
+
+    expect(api.app.reconfirmProjectRoot).toHaveBeenCalledWith(
+      untrustedRoot,
+      'appMenu.openFolderDialogTitle'
+    );
+    expect(result.current.projectRoot).toBe('');
+    expect(api.git.status).not.toHaveBeenCalled();
+    expect(api.app.clearActiveProjectRoot).not.toHaveBeenCalled();
+    expect(mocks.setStatus).toHaveBeenLastCalledWith(
+      'project.initError: Error: reconfirm failed'
+    );
+  });
+
   it('recent pathはnative pickerの初期位置にだけ渡し、再選択結果をloadする', async () => {
     const api = installApi();
     api.app.restoreAuthorizedProjectRoot.mockResolvedValueOnce('/repo');

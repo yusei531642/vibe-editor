@@ -33,7 +33,7 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1243
 
 ### Next Tasks
 
-- [ ] Fable one-shotでauthority保持時の安全境界を重点確認する。
+- [x] Fable one-shotでauthority保持時の安全境界を重点確認する（実コード未添付由来の検証要求を照合し、reconfirm失敗のfail-closedテストを追加）。
 - [ ] feature branchをpushし、`Closes #1243`付きPRを作成する。
 - [ ] CIとvibe-editor-reviewerの本レビューを確認する。
 
