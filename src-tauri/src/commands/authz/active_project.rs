@@ -154,7 +154,9 @@ pub(crate) async fn assert_active_project_root_policy(
         }
     };
 
-    if req_canon != active_canon {
+    if crate::commands::project_identity::canonical_root_key(&req_canon)
+        != crate::commands::project_identity::canonical_root_key(&active_canon)
+    {
         tracing::warn!(
             requested = %clamp_for_log(&req_canon.to_string_lossy()),
             active = %clamp_for_log(&active_canon.to_string_lossy()),
