@@ -28,6 +28,7 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1243
 - [x] Security Invariant: 同一pathのfilesystem identity差し替え拒否テスト PASS。
 - [x] Frontend: typecheck、604 tests、Vite build PASS。lintは0 errors / 11 warnings。
 - [x] Rust: cargo check、clippy `-D warnings`、関連テスト PASS。
+- [x] CI file-size ratchet: 回帰テストを`active_project.rs`へ責務移動し、baseline引き上げなしでPASS。
 - [ ] Rust全体テストは928 PASS / 2 ignored / 2環境依存FAIL（junction fixture、Windows access denied）。
 - [ ] `cargo fmt --check`はmain既存の広範な未整形差分によりFAIL。今回外の一括整形は実施しない。
 

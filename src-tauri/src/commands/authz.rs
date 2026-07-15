@@ -139,9 +139,7 @@ pub async fn assert_readable_project_root(
     let active = current_project_root(project_root_slot).unwrap_or_default();
     if !active.trim().is_empty() {
         if let Ok(active_canon) = tokio::fs::canonicalize(active.trim()).await {
-            if crate::commands::project_identity::canonical_root_key(&req_canon)
-                == crate::commands::project_identity::canonical_root_key(&active_canon)
-            {
+            if active_project::canonical_roots_match(&req_canon, &active_canon) {
                 return assert_active_project_root(
                     project_root_slot,
                     project_root_identity_slot,
@@ -401,27 +399,6 @@ mod tests {
             canon.as_path(),
             std::fs::canonicalize(project.path()).unwrap().as_path()
         );
-    }
-
-    #[cfg(windows)]
-    #[tokio::test]
-    async fn native_identity_canonical_root_accepts_windows_display_path() {
-        let project = tempdir().expect("project");
-        let approved = crate::commands::project_authority::capture_identity(project.path())
-            .await
-            .expect("capture native identity");
-        let active = ArcSwapOption::from(Some(std::sync::Arc::new(
-            approved.canonical_root.clone(),
-        )));
-        let identity = ArcSwapOption::from(Some(std::sync::Arc::new(approved)));
-        let requested = project.path().to_string_lossy();
-
-        assert_active_project_root(&active, &identity, &requested)
-            .await
-            .expect("strict gate should accept the native display path");
-        assert_readable_project_root(&active, &identity, &requested)
-            .await
-            .expect("readable gate should accept the native display path");
     }
 
     #[tokio::test]
