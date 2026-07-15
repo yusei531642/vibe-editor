@@ -30,7 +30,7 @@ Plan hash: `402caac06b8ec5e2959bc1c69092d2eacaf943d1db6c3c158608693bb6cfca13`
 - [x] 実 bootstrap tree、実 Context guard、実 `CanvasLayout` を通す回帰テストを追加する。
 - [x] Provider 一意性、project/tabs/team 共有、Canvas 常時 mount、`display:none` 契約を固定する。
 - [x] typecheck、対象 Vitest、全 Vitest、lint、Vite build、Tauri build を実行する。
-- [ ] fresh diff review、PR、CI、CodeRabbit、vibe-editor-reviewer の指摘を解消する。
+- [x] fresh diff review、PR、CI、CodeRabbit、vibe-editor-reviewer の指摘を解消する。
 - [ ] PR を main へ merge し、patch version を上げて release PR・tag・workflow・draft publish を完了する。
 - [ ] Windows ローカルPCへ公開版をインストールし、起動、IDE/Canvas往復、project切替、PTY継続を確認する。
 - [ ] Issue #1240へ完了根拠を投稿し、`implemented`、`CLOSED` を再確認する。
@@ -51,7 +51,7 @@ Plan hash: `402caac06b8ec5e2959bc1c69092d2eacaf943d1db6c3c158608693bb6cfca13`
 
 ### Next Tasks
 
-- [ ] fix PRのCI・CodeRabbit・vibe-editor-reviewerを完了し、mainへmergeする。
+- [x] fix PRのCI・CodeRabbit・vibe-editor-reviewerを完了し、mainへmergeする。
 - [ ] v1.6.9 release PR・tag・release workflow・draft publishを完了する。
 - [ ] 公開版をWindowsへ導入してSymptom Goneを実証し、Issue #1240をcloseする。
 
