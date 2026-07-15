@@ -12,15 +12,16 @@
  *   - `AppShell` (components/AppShell.tsx) — 画面本体 (巨大 JSX + 画面ローカル
  *     state / derived / handler)。3 consumer hook で状態を購読する。
  *
- * よって App はこの「Provider tree + 画面本体マウント」だけを担う。ref ブリッジは
- * 完全に AppStateProvider 内部へ閉じ込められ、ここからは見えない (callbacks-down /
- * events-up の依存性逆転)。
+ * App は Provider tree と IDE / Canvas の両画面をマウントする。両画面を同じ
+ * AppStateProvider の子に置くため、ref ブリッジは完全に Provider 内部へ閉じ込められ、
+ * 両者は同じ project / tabs / team state を購読する。
  */
 import { useCallback, useState } from 'react';
 import type { SessionInfo } from '../../types/shared';
 import { useWindowFrameInsets } from './lib/use-window-frame-insets';
 import { AppStateProvider } from './lib/app-state-context';
 import { AppShell } from './components/AppShell';
+import { CanvasLayout } from './layouts/CanvasLayout';
 
 export function App(): JSX.Element {
   // Issue #307: Windows 11 フレームレス最大化時の不可視リサイズ境界を CSS 変数で補正。
@@ -51,6 +52,7 @@ export function App(): JSX.Element {
         activeSessionId={activeSessionId}
         setActiveSessionId={setActiveSessionId}
       />
+      <CanvasLayout />
     </AppStateProvider>
   );
 }

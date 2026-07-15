@@ -19,6 +19,43 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1146
 - [x] `cargo check --locked --manifest-path src-tauri\\Cargo.toml --all-targets`: PASS
 - [x] `git diff --check`: PASS
 
+## Issue #1240 - v1.6.8 AppStateProvider境界違反の起動不能修正・リリース (2026-07-15 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1240
+Plan hash: `402caac06b8ec5e2959bc1c69092d2eacaf943d1db6c3c158608693bb6cfca13`
+
+### 計画
+
+- [x] `main.tsx` の Provider 外に残った `CanvasLayout` を、`App.tsx` の既存 `AppStateProvider` 配下へ移す。
+- [x] 実 bootstrap tree、実 Context guard、実 `CanvasLayout` を通す回帰テストを追加する。
+- [x] Provider 一意性、project/tabs/team 共有、Canvas 常時 mount、`display:none` 契約を固定する。
+- [x] typecheck、対象 Vitest、全 Vitest、lint、Vite build、Tauri build を実行する。
+- [ ] fresh diff review、PR、CI、CodeRabbit、vibe-editor-reviewer の指摘を解消する。
+- [ ] PR を main へ merge し、patch version を上げて release PR・tag・workflow・draft publish を完了する。
+- [ ] Windows ローカルPCへ公開版をインストールし、起動、IDE/Canvas往復、project切替、PTY継続を確認する。
+- [ ] Issue #1240へ完了根拠を投稿し、`implemented`、`CLOSED` を再確認する。
+
+### Next Steps
+
+- [x] Terra Build候補patchを取得し、SolがscopeとRCA接続を確認して適用する。
+- [x] canonical testとfresh diff reviewを実行する。
+- [ ] PR・release・ローカル実機確認・Issue closeoutまで継続する。
+
+### 進捗
+
+- [x] Terra Build run `a74bf9a31e4344629fd707ef5034f90e` を選定し、production 2ファイルへ最小差分を適用した。
+- [x] targeted Vitest 1/1、全Vitest 603/603、typecheck、lint、Vite build、JS契約lint、npm監査がPASSした。
+- [x] `cargo check --all-targets` と `cargo clippy --all-targets -- -D warnings` がPASSした。
+- [x] Windows release binaryとNSIS installerを生成した。Updater署名秘密鍵はCI専用のため、ローカルbuildの終了値のみ非0。
+- [x] Terra Review run `30e55fece813479aa9f6a78544289f6a` は対象hash `e4668c...b2d8a` にactionableなしと判定した。
+
+### Next Tasks
+
+- [ ] fix PRのCI・CodeRabbit・vibe-editor-reviewerを完了し、mainへmergeする。
+- [ ] v1.6.9 release PR・tag・release workflow・draft publishを完了する。
+- [ ] 公開版をWindowsへ導入してSymptom Goneを実証し、Issue #1240をcloseする。
+
+
 ## Issue #1164 - Zustand / marked の重複依存解消 (2026-07-15 / Codex)
 
 Issue: https://github.com/yusei531642/vibe-editor/issues/1164

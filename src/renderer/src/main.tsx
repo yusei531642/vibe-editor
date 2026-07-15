@@ -22,7 +22,6 @@ import './styles/fonts.css';
 import React, { useEffect } from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
-import { CanvasLayout } from './layouts/CanvasLayout';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
 import { SettingsProvider } from './lib/settings-context';
 import { ToastProvider } from './lib/toast-context';
@@ -108,20 +107,10 @@ function Root(): JSX.Element {
     document.documentElement.dataset.viewMode = viewMode;
   }, [viewMode]);
 
-  // bug_027 対策: <App/> を unmount すると全 PTY が kill され、未保存エディタも失われる。
-  // そこで <App/> は常時マウントし、Canvas モードではその上に CanvasLayout を
-  // position:fixed でオーバーレイするだけに留める。これにより切替で
-  // terminalTabs / editorTabs / teams がすべて保持される。
-  //
-  // 同様の理由で <CanvasLayout/> も常時マウントし、IDE モードでは display:none で
-  // 隠す (CanvasLayout 自身が viewMode を読んでルート div を toggle する)。
-  // これで Canvas 上の AgentNodeCard も unmount されず、PTY が kill されない。
-  return (
-    <>
-      <App />
-      <CanvasLayout />
-    </>
-  );
+  // bug_027 対策: App は常時マウントする。CanvasLayout も AppStateProvider 内で
+  // App と同時に常時マウントされ、IDE モードでは CanvasLayout 自身が display:none
+  // に切り替える。これにより両画面の PTY / editorTabs / teams を保持する。
+  return <App />;
 }
 
 ReactDOM.createRoot(rootEl).render(
