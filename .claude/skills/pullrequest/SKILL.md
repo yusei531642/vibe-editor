@@ -127,6 +127,21 @@ git push -u origin $(git branch --show-current)
 
 ## Step 3: レビュー内容を取得して整理
 
+まず現在の PR HEAD と、GitHub review に記録された対象 commit を照合する。
+
+```bash
+HEAD_SHA=$(gh pr view <PR番号> --json headRefOid --jq '.headRefOid')
+gh api repos/{owner}/{repo}/pulls/<PR番号>/reviews --paginate \
+  | jq -s --arg head "$HEAD_SHA" \
+  '[.[][] | select(.user.login == "vibe-editor-reviewer[bot]")
+        | {id, state, commit_id, submitted_at, head_match: (.commit_id == $head)}]
+   | sort_by(.submitted_at) | last'
+```
+
+採用できるのは、現在の `HEAD_SHA` と `commit_id` が一致する最新の本レビューだけ。
+古い HEAD の LGTM、walkthrough コメント、レビュー開始コメントは通過根拠にしない。
+一致する本レビューがなければレビュー待ちへ戻る。
+
 ```bash
 gh pr view <PR番号> --json comments,reviews --jq '
   [.comments[], .reviews[]]
@@ -142,8 +157,14 @@ gh pr view <PR番号> --json comments,reviews --jq '
 inline comments (差分行への指摘) もある場合は別途取得:
 
 ```bash
-gh api repos/{owner}/{repo}/pulls/<PR番号>/comments --jq '.[] | select(.user.login == "vibe-editor-reviewer") | {path, line, body: .body[:300]}'
+gh api repos/{owner}/{repo}/pulls/<PR番号>/comments --paginate --jq \
+  '.[] | select(.user.login == "vibe-editor-reviewer[bot]")
+   | {id, path, line, commit_id, body: .body[:300]}'
 ```
+
+本レビュー本文だけでなく、全 inline comment と review thread の解決状態を確認する。
+critical / warning の thread が1件でも未解決なら品質ゲートは未通過。GitHub API から
+thread解決状態を取得できない場合も、解決済みと推測せず hard block とする。
 
 ### 指摘の優先度
 
@@ -210,6 +231,7 @@ gh pr view <PR番号> --json state,mergedAt,mergeCommit
 ```
 
 - 次をすべて確認してから、対象 PR・現在の HEAD・CI 結果・reviewer の最終判定をユーザーへ提示する。
+  - reviewer の最新本レビューが現在の HEAD SHA を対象にしている
   - reviewer の critical / warning がすべて解消済み
   - 必須 CI とタスク固有の品質ゲートが成功
   - inline thread がすべて解決済み

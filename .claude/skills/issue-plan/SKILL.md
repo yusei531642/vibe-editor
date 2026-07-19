@@ -213,6 +213,6 @@ gh issue view <num> --json comments --jq '.comments[-1].url'
 ## 参考: 関連 skill
 
 - `vibeeditor` — 実装フェーズに入ったら必ず参照
-- `pullrequest` — 実装が済んだら PR → bot レビュー → merge まで持っていく
+- `pullrequest` — 実装が済んだら PR → reviewer確認 → CI → ユーザー明示承認後のmergeまで持っていく
 - `label-and-issue-workflow` — そもそも issue 起票時にラベルが付いていない場合
 - `tauri-ipc-commands` / `theme-customization` / `monaco-language-setup` / `canvas-nodecard-pattern` / `pty-portable-debugging` — 計画段階で該当領域なら必ず読む

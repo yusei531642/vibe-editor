@@ -1,6 +1,10 @@
 import { readFileSync } from 'node:fs';
 
 const activePolicyFiles = [
+  'AGENTS.md',
+  'CLAUDE.md',
+  '.claude/skills/pullrequest/SKILL.md',
+  '.claude/skills/issue-plan/SKILL.md',
   '.claude/skills/issue-autopilot-batch/SKILL.md',
   'skills/vibe-autopilot-batch/SKILL.md',
   'skills/vibe-autopilot-batch/references/leader-pipeline-loop.md',
@@ -43,18 +47,50 @@ for (const staleSource of ['Google Drive', 'folderId:', 'mcp__*__read_file_conte
     failures.push(`Claude互換エントリが外部の旧正典を参照しています: ${staleSource}`);
   }
 }
-for (const staleMergeRule of [
+const staleMergeRules = [
   'bot レビュー → 自動 merge',
   'PR を bot に merge してもらう',
   'vibe-editor-reviewer (bot) が自動 merge',
-]) {
-  if (claudeEntry.includes(staleMergeRule)) {
-    failures.push(`Claude互換エントリにreviewer自動merge規則が残っています: ${staleMergeRule}`);
+];
+for (const path of activePolicyFiles) {
+  const content = readFileSync(path, 'utf8');
+  for (const staleMergeRule of staleMergeRules) {
+    if (content.includes(staleMergeRule)) {
+      failures.push(`${path}にreviewer自動merge規則が残っています: ${staleMergeRule}`);
+    }
   }
 }
-for (const humanGate of ['自動mergeしない', 'ユーザー明示承認後にmerge']) {
-  if (!claudeEntry.includes(humanGate)) {
-    failures.push(`Claude互換エントリのHuman Gateが欠落しています: ${humanGate}`);
+
+const workflowContracts = [
+  {
+    path: 'AGENTS.md',
+    required: ['PR を自動マージしない', 'ユーザー明示承認後のマージ'],
+  },
+  {
+    path: 'CLAUDE.md',
+    required: ['自動マージしない', 'ユーザーの明示承認'],
+  },
+  {
+    path: '.claude/skills/pullrequest/SKILL.md',
+    required: [
+      'PR を自動マージしない',
+      '現在の `HEAD_SHA` と `commit_id` が一致',
+      '全 inline comment と review thread の解決状態',
+      'ユーザー明示承認',
+    ],
+  },
+  {
+    path: '.claude/skills/issue-autopilot-batch/SKILL.md',
+    required: ['自動mergeしない', 'ユーザー明示承認後にmerge'],
+  },
+];
+
+for (const contract of workflowContracts) {
+  const content = readFileSync(contract.path, 'utf8');
+  for (const invariant of contract.required) {
+    if (!content.includes(invariant)) {
+      failures.push(`${contract.path}のreviewer-only契約が欠落しています: ${invariant}`);
+    }
   }
 }
 
