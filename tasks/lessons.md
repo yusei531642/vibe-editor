@@ -5,7 +5,7 @@
 - 契約解約とGitHub App削除だけでは移行完了ではない。必須チェック、ruleset、webhook、Actions secrets/variables、現行skillの待機ロジック、状態スキーマ、レート制限、外部コピーの正典参照まで監査する。
 - reviewer結果はPR番号だけで再利用せず、確認済みHEAD SHAへ結び付ける。push後は古いOKを失効させ、本レビュー欠落・trivial判定・critical/warning未解決をfail-closedにする。
 - 過去のCodeRabbit記録は比較証拠として残す。現行運用ファイルの必須依存だけを除去し、再混入はCIの決定的な契約検査で止める。
-- PR #380型の見逃しを回帰テストで塞ぐまで、契約移行と能力移行を同一視しない。Issue #1261を能力同等化のclose gateにする。
+- reviewer本体のリポジトリが非公開でも、検出対象が決定的に判定できるならアプリ側CIへ検査を実装できる。PR #380型はMarkdownの詳細一覧とカテゴリ集計をprelintで照合し、LLMのtrivial判定に依存せず塞ぐ。
 
 ## bot auto-merge は超大型 PR で停滞する / is_safe_watch_root verbatim bug (2026-06-10〜11)
 

@@ -1,5 +1,46 @@
 # vibe-editor Tauri ハイブリッド移行 + 無限キャンバス UI 革新 TODO
 
+## Issue #1261 - trivial文書の数値整合検査 (2026-07-19 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1261
+
+### RCA結果
+
+- RCA Mode: Root Cause Confirmed
+- 症状: PR #380のlint詳細15件に対し、カテゴリ集計が`doc_lazy_continuation` 6件、その他1件となり、実数7件・0件と不一致だった。
+- 原因: reviewerのtrivial判定で詳細レビューを省略し、決定的に検査できる表の件数整合も実行されなかった。
+- 修正: LLM判定に依存しないMarkdown集計checkerをprelintへ追加し、trivial/docsでも常時実行する。
+- 判定: A=YES, B=NO（reviewer本体は非公開）, C=YES, D=YES
+
+### 計画
+
+- [x] reviewer本体のアクセス可能なGitHubリポジトリとvibe-editor内の実装経路を実測する。
+- [x] PR #380相当の不整合を再現するREDテストを追加する。
+- [x] Markdownの詳細一覧・カテゴリ集計・合計を決定的に照合する検査を実装する。
+- [x] 正常文書で誤検出しないテストと、現行tasks全体のスキャンを通す。
+- [x] prelintへ接続し、typecheck・lint・関連テストを実行する。
+
+### 進捗
+
+- [x] RED: checker未実装時に`ERR_MODULE_NOT_FOUND`で失敗を確認。
+- [x] GREEN: PR #380相当で`doc_lazy_continuation` 6対7、その他1対0を検出。
+- [x] 正常系: PR #382相当と通常のMarkdown表で指摘ゼロ。
+- [x] `npm run lint:markdown-counts` PASS（現行tasks/docs全体）。
+- [x] `npm run lint` PASS（prelint 2検査PASS、ESLint 0 errors / main既存11 warnings）。
+- [x] `npm run typecheck` PASS。
+- [x] Vitest初回は既存`main-provider-boundary`が5秒timeout。単体PASS後の全体再実行で605/605 PASS。
+
+### Review
+
+- 受入条件5項目をfixture、checker、prelintで満たした。
+- reviewer本体が非公開でも、CIの決定的検査として同じ見逃しを阻止できる。
+- verified critical/high: 0
+
+### Next Steps
+
+- [ ] #1262とは別コミットにし、pushする。
+- [ ] PR本文で`Closes #1261`と`Closes #1262`を提示し、作成承認を得る。
+
 ## Issue #1262 - CodeRabbit廃止とreviewer一本化 (2026-07-19 / Codex)
 
 Issue: https://github.com/yusei531642/vibe-editor/issues/1262
