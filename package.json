@@ -58,7 +58,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.3",
     "esbuild": "^0.28.0",
-    "eslint": "^10.5.0",
+    "eslint": "^10.7.0",
     "eslint-plugin-react-hooks": "^7.1.1",
     "jsdom": "^26.0.0",
     "png-to-ico": "^3.0.1",
