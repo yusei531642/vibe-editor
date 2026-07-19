@@ -1,46 +1,5 @@
 # vibe-editor Tauri ハイブリッド移行 + 無限キャンバス UI 革新 TODO
 
-## Issue #1261 - trivial文書の数値整合検査 (2026-07-19 / Codex)
-
-Issue: https://github.com/yusei531642/vibe-editor/issues/1261
-
-### RCA結果
-
-- RCA Mode: Root Cause Confirmed
-- 症状: PR #380のlint詳細15件に対し、カテゴリ集計が`doc_lazy_continuation` 6件、その他1件となり、実数7件・0件と不一致だった。
-- 原因: reviewerのtrivial判定で詳細レビューを省略し、決定的に検査できる表の件数整合も実行されなかった。
-- 修正: LLM判定に依存しないMarkdown集計checkerをprelintへ追加し、trivial/docsでも常時実行する。
-- 判定: A=YES, B=NO（reviewer本体は非公開）, C=YES, D=YES
-
-### 計画
-
-- [x] reviewer本体のアクセス可能なGitHubリポジトリとvibe-editor内の実装経路を実測する。
-- [x] PR #380相当の不整合を再現するREDテストを追加する。
-- [x] Markdownの詳細一覧・カテゴリ集計・合計を決定的に照合する検査を実装する。
-- [x] 正常文書で誤検出しないテストと、現行tasks全体のスキャンを通す。
-- [x] prelintへ接続し、typecheck・lint・関連テストを実行する。
-
-### 進捗
-
-- [x] RED: checker未実装時に`ERR_MODULE_NOT_FOUND`で失敗を確認。
-- [x] GREEN: PR #380相当で`doc_lazy_continuation` 6対7、その他1対0を検出。
-- [x] 正常系: PR #382相当と通常のMarkdown表で指摘ゼロ。
-- [x] `npm run lint:markdown-counts` PASS（現行tasks/docs全体）。
-- [x] `npm run lint` PASS（prelint 2検査PASS、ESLint 0 errors / main既存11 warnings）。
-- [x] `npm run typecheck` PASS。
-- [x] Vitest初回は既存`main-provider-boundary`が5秒timeout。単体PASS後の全体再実行で605/605 PASS。
-
-### Review
-
-- 受入条件5項目をfixture、checker、prelintで満たした。
-- reviewer本体が非公開でも、CIの決定的検査として同じ見逃しを阻止できる。
-- verified critical/high: 0
-
-### Next Steps
-
-- [ ] #1262とは別コミットにし、pushする。
-- [ ] PR本文で`Closes #1261`と`Closes #1262`を提示し、作成承認を得る。
-
 ## Issue #1262 - CodeRabbit廃止とreviewer一本化 (2026-07-19 / Codex)
 
 Issue: https://github.com/yusei531642/vibe-editor/issues/1262
@@ -49,9 +8,9 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1262
 
 - RCA Mode: Root Cause Confirmed
 - 症状: PR #380ではvibe-editor-reviewerがtrivial判定で詳細レビューを省略し、文書内の集計値「6」と明細7件の不整合を見逃した。CodeRabbitだけが検出し、PR #382で修正された。
-- 原因箇所: reviewer本体のソースは公開リポジトリを確認できないため未特定。ただし、trivial判定後に数値整合チェックを実行しない挙動が見逃しの直接条件。
+- 原因箇所: reviewer本体のソースはこちらの作業範囲にないため未特定。ただし、trivial判定後に数値整合チェックを実行しない挙動が見逃しの直接条件。
 - 独立証拠: PR #380のレビュー結果、PR #382の修正差分、Issue #1261の回帰条件が一致する。
-- 修正方針: #1261でtrivial/docsにも決定的な数値整合チェックを適用する。本IssueではCodeRabbit待機を現行実行経路から除去し、reviewer・CI・人間承認へ一本化する。
+- 修正方針: #1261をreviewer担当者向けの実装仕様書とし、reviewer本体でtrivial/docsにも決定的な数値整合チェックを適用する。本IssueではCodeRabbit待機を現行実行経路から除去し、reviewer・CI・人間承認へ一本化する。
 - 判定: A=YES, B=NO, C=YES, D=YES
 
 ### 計画
@@ -75,11 +34,12 @@ Issue: https://github.com/yusei531642/vibe-editor/issues/1262
 - [x] `npm run lint:release-workflow` PASS。
 - [x] 2つの変更対象skillで`quick_validate.py` PASS。
 - [x] `.github/workflows/ci.yml`変更はOAuthの`workflow` scope不足でpush拒否されたため撤回。既存CIが実行する`npm run lint`の`prelint`へ契約検査を接続し、再実行PASS。
+- [x] #1261本文を別担当者向けの実装仕様書へ更新し、アプリ側に作った代替検査はrevertした。
 
 ### Review
 
 - verified critical/high: 0
-- medium hold: Issue #1261のreviewer本体回帰テストは未実装。これが完了するまで能力移行完了とIssue #1262 closeを禁止する。
+- medium hold: Issue #1261は別担当者がreviewer本体で実装するplanned task。実PRで回帰テストが通るまで、能力移行完了とIssue #1262 closeを禁止する。
 - advisor: Sol/TerraのHEAD拘束・旧状態fail-closed案を採用。Fable/Grokは有効artifactなし。
 
 ### Next Steps
