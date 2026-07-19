@@ -200,8 +200,10 @@ planned Issue群 -> 順序決定 -> [Phase A: 実装~レビュー | Phase B: sta
 ### 14. Issueクローズ完了監査（必須）
 - `## E2E結果` + `## クローズ根拠` がIssueコメントに存在しないと `gh issue close` 禁止
 
-### 15. CodeRabbitレビュー確認（Phase A完了後必須）
-- soft gate。ただしセキュリティ/バグ指摘は hard block
+### 15. vibe-editor-reviewer確認（Phase A完了後必須）
+- 現在のPR HEADに対する本レビュー到着を必須とする。trivial判定、レビュー欠落、古いHEADの結果は通過根拠にしない
+- critical / warning が1件でも未解決なら hard block。reviewerが利用不能な場合もPhase Bへ進めない
+- reviewer通過後も、CI成功、inline thread解決、ユーザーの明示承認を独立した必須条件として維持する
 
 ### 16. Tier判定統合（vibe-fortress-review / vibe-fortress-implement連携）
 - `fortress-review-required` ラベル → 実装前に `/vibe-fortress-review --auto-gate` 自動実行
@@ -245,7 +247,7 @@ B12(error_patterns上限)、B13(冪等性)、B14(E2E報告ゲート検証)、B15
 **B16(自信ゲート)**: ワーカーPhase B E2E報告前に5問の自信ゲート全回答必須（C1:直接操作、C2:ユーザー視点、C3:全項目消化、C4:実動作確認、C5:修正前→後検証）、
 **B17(変更箇所カバレッジ)**: 全IssueのE2E報告にchange_coverage_map必須（feat種別はCodex評価追加）、
 **B18(ブラウザ外操作制約)**: ブラウザ外操作のE2Eテストで `browser_boundary` 必須、
-B19(CodeRabbit確認ゲート)、
+B19(vibe-editor-reviewer確認ゲート)、
 B20(E2Eリレー出力)、B21(fortress-review必須ゲート)、B22(過剰品質ゲート禁止)、
 B23(GUI起動経路明示義務)、B24(revert前の現状再現確認)
 

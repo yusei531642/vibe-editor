@@ -101,13 +101,24 @@
 - `state_keeper` に状態更新を委任: phase -> "A_completed"、pr_number、changed_files 記録
 - `.vibe-team/tmp/issue-{N}-phase-a-summary.md` を作成（Phase Bワーカーへの引き継ぎ）
 
-## 7b-post. CodeRabbitレビュー確認（Phase A完了直後、必須）
+## 7b-post. vibe-editor-reviewer確認（Phase A完了直後、必須）
 
-- **冪等性チェック**: `processed_events` に `"coderabbit_checked"` が含まれていれば -> スキップ
-- `gh pr checks <PR番号> --watch` でCodeRabbit check完了まで待機
-- soft gate。ただし **セキュリティ/バグ指摘は hard block**
-- 指摘の3分類: 即時修正(`FIXED`) / 技術的負債Issue化(`TECH_DEBT`) / スキップ(`SKIPPED`)
-- `coderabbit_status` 未確定のまま mergeゲート判定に進めてはならない
+1. `gh pr view <PR番号> --json headRefOid` で現在のHEAD SHAを取得し、同commitのcommitter timestampも取得する。
+2. `vibe-editor-reviewer`の最新 `## 🤖 Claude Auto-Review` 本レビューとinline commentsを取得する。review APIにcommit IDがある場合はHEAD完全一致を必須とし、issue commentの場合は`createdAt`がHEADのcommitter timestampより後であることを必須とする。
+3. 本レビュー待機中にHEADが変わっていないことを再確認し、次を状態へ保存する。
+   - `reviewer_status`: `PASS` / `FIXED` / `BLOCKED`
+   - `reviewer_head_sha`: 本レビュー対象として確認したHEAD SHA
+   - `reviewer_review_id`: 採用した本レビューのcommentまたはreview ID
+   - `reviewer_reviewed_at`: 採用した本レビューの`createdAt`または`submittedAt`
+   - `reviewer_unresolved`: critical / warning の未解決件数
+4. **冪等性チェック**: `processed_events` に `"reviewer_checked:<HEAD SHA>"` があり、`reviewer_head_sha`が現在のHEADと一致し、`reviewer_status`が`PASS`または`FIXED`で、`reviewer_unresolved.critical == 0`かつ`reviewer_unresolved.warning == 0`なら再取得を省略できる。
+5. 次のどれかに該当する場合は `BLOCKED` とし、mergeゲート判定へ進まない。
+   - 本レビューが未到着または取得不能
+   - trivial判定だけで本レビューがない
+   - reviewのcommit IDがHEADと不一致、またはreview時刻がHEADのcommitter timestamp以前
+   - 保存済みHEADと現在のHEADが不一致
+   - criticalまたはwarningが1件以上未解決
+6. reviewer通過後も `gh pr checks <PR番号> --watch` の成功、inline thread全解決、ユーザーの明示承認を別々に確認する。reviewerのOKだけでmergeしない。
 
 ## 7b-post2. fortress-review 完了確認（Tier A のみ）
 
@@ -221,12 +232,7 @@ Issueクローズコメント末尾に「ユーザー手動GUI確認依頼」ブ
 経過時間: 45分 | 完了: 1/3 | 発見不具合: 0件
 ```
 
-## 7g. Issue間クールダウン（60秒）
-
-- 各IssueのPR作成後、次PR作成まで最低60秒空ける（CodeRabbitレート制限回避）
-- 待機中も状態ファイル更新・ログ出力は可。新規PR作成・ワーカー起動は保留
-
-## 7g-post. Compaction検知時のコンテキストリセット推奨
+## 7g. Compaction検知時のコンテキストリセット推奨
 
 Compaction発生時は `/clear` + resume を推奨するメッセージをユーザーに出力。
 ユーザーが続行を選択した場合はそのまま継続（強制停止しない）。

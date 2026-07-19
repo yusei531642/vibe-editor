@@ -30,7 +30,7 @@ planned -> implementing -> implemented
 
 ```json
 {
-  "version": "1.0",
+  "version": "1.1",
   "mode": "all-planned",
   "batch_id": "vibe-batch-20260502-1200",
   "repo": "owner/repo",
@@ -53,8 +53,12 @@ planned -> implementing -> implemented
         "has_l2_test": true
       },
       "worker_summary": "src/auth.ts のインポート順序を変更。#14との競合注意。",
-      "coderabbit_status": "PASS",
-      "processed_events": ["phaseA_complete", "coderabbit_checked", "phaseB_e2e_pass"],
+      "reviewer_status": "PASS",
+      "reviewer_head_sha": "0123456789abcdef0123456789abcdef01234567",
+      "reviewer_review_id": 123456789,
+      "reviewer_reviewed_at": "2026-07-19T04:00:00Z",
+      "reviewer_unresolved": { "critical": 0, "warning": 0 },
+      "processed_events": ["phaseA_complete", "reviewer_checked:0123456789abcdef0123456789abcdef01234567", "phaseB_e2e_pass"],
       "phase_a_worker_id": "implementer_11",
       "phase_b_worker_id": "e2e_tester_11"
     }
@@ -91,7 +95,11 @@ planned -> implementing -> implemented
 | `issues[].tier_score` | number/null | Tier判定スコア |
 | `issues[].fortress_review_result` | string/null | "Go"/"No-Go"/"条件付きGo"/"skipped"/null |
 | `issues[].processed_events` | string[] | 冪等性保証。処理済みイベントを記録 |
-| `issues[].coderabbit_status` | string | PASS/FIXED/TECH_DEBT/SKIPPED |
+| `issues[].reviewer_status` | string | PENDING/PASS/FIXED/BLOCKED。PASS/FIXEDだけが通過値 |
+| `issues[].reviewer_head_sha` | string/null | 本レビュー対象として確認した40桁のPR HEAD SHA |
+| `issues[].reviewer_review_id` | number/string/null | 採用した本レビューのcommentまたはreview ID |
+| `issues[].reviewer_reviewed_at` | string/null | 採用した本レビューの`createdAt`または`submittedAt` |
+| `issues[].reviewer_unresolved` | object | critical / warning の未解決件数。どちらも0が必須 |
 | `issues[].phase_a_worker_id` | string | Phase Aワーカーの team_recruit ID |
 | `issues[].phase_b_worker_id` | string | Phase Bワーカーの team_recruit ID |
 | `context.error_patterns` | string[] | 発見パターン（最大5件、FIFO） |
@@ -106,13 +114,15 @@ planned -> implementing -> implemented
 ## resumeモードの復元手順
 
 1. `.vibe-team/tmp/batch-pipeline-state.json` を Read
-2. `context.next_action` を確認 -> 次のアクションを即座に把握
-3. `context.error_patterns` を確認 -> 蓄積された学習を復元
-4. 各 issue の `phase` + `processed_events` を確認 -> 現在位置を特定
-5. GitHub実状態照合:
+2. 旧フィールド `coderabbit_status` または旧イベント `coderabbit_checked` がある場合、それらをreviewer通過根拠にしない。`B_completed`以外は`reviewer_status: "PENDING"`として現在のHEADを再レビューし、次回保存時に旧フィールドと旧イベントを除去して`version: "1.1"`へ移行する。
+3. `context.next_action` を確認 -> 次のアクションを即座に把握
+4. `context.error_patterns` を確認 -> 蓄積された学習を復元
+5. 各 issue の `phase` + `processed_events` を確認 -> 現在位置を特定
+6. `reviewer_checked:<HEAD SHA>`と`reviewer_head_sha`が現在のPR HEADに一致しない場合、reviewer結果を失効させて`PENDING`へ戻す。
+7. GitHub実状態照合:
    phase が "A_completed" かつ e2e_result が null のIssueについて:
    `gh pr view` + `gh issue view` でGitHub実状態を確認し、
    全完了済みなら B_completed + e2e_result: "PASS" に自動補正
-6. `implementing` ラベルのIssueを特定し、状態ファイルのphaseと照合
-7. 必要なワーカーを `team_recruit` で再採用（Phase A未完了 -> implementer、Phase A完了 -> e2e_tester）
-8. 既完了Issueの `worker_summary` + PR番号・変更ファイルをバッチコンテキストとして復元
+8. `implementing` ラベルのIssueを特定し、状態ファイルのphaseと照合
+9. 必要なワーカーを `team_recruit` で再採用（Phase A未完了 -> implementer、Phase A完了 -> e2e_tester）
+10. 既完了Issueの `worker_summary` + PR番号・変更ファイルをバッチコンテキストとして復元

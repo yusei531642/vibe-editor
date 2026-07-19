@@ -1,7 +1,15 @@
 # vibe-editor 教訓集
 
+## 外部レビューサービスを廃止するときの境界 (2026-07-19)
+
+- 契約解約とGitHub App削除だけでは移行完了ではない。必須チェック、ruleset、webhook、Actions secrets/variables、現行skillの待機ロジック、状態スキーマ、レート制限、外部コピーの正典参照まで監査する。
+- reviewer結果はPR番号だけで再利用せず、確認済みHEAD SHAへ結び付ける。push後は古いOKを失効させ、本レビュー欠落・trivial判定・critical/warning未解決をfail-closedにする。
+- 過去のCodeRabbit記録は比較証拠として残す。現行運用ファイルの必須依存だけを除去し、再混入はCIの決定的な契約検査で止める。
+- PR #380型の見逃しを回帰テストで塞ぐまで、契約移行と能力移行を同一視しない。Issue #1261を能力同等化のclose gateにする。
+
 ## bot auto-merge は超大型 PR で停滞する / is_safe_watch_root verbatim bug (2026-06-10〜11)
 
+- **歴史記録**: 現在の正典ではvibe-editor-reviewerは自動mergeしない。AGENTS.mdとpullrequest skillに従い、CI・reviewer・ユーザーの明示承認後にだけPRをmergeする。
 - **bot (vibe-editor-reviewer) は 60 ファイル級の大型 PR を APPROVED + CI green(CLEAN) + nitpick 0 でも auto-merge しないことがある** (#841 / PR #966)。小〜中規模 PR (#957〜#970) は APPROVED 後すぐ merge される。試した誘発策はすべて不発: (1) 軽微な no-op commit → 2 度目も APPROVED するだけ、(2) origin/main を merge して branch 最新化 + CI 再実行 → CLEAN になっても merge せず。**手動 merge は CLAUDE.md で禁止 → 停滞したら AskUserQuestion でユーザーに委ねる** (ユーザーが GitHub 上で手動 merge する判断もある)。教訓: typecheck 実効化のような本質的に大型な変更は、可能なら tsconfig 切替と型修正を別 PR に割る。
 - **#841 の旧 lessons「275 型エラーと同時でないと単独 merge 不可」は撤回**。検証済み旧ブランチ (d179a75) を現 main に cherry-pick + drift 15 件追加修正で typecheck 0 を達成し単一 PR で完結。cherry-pick 衝突は CanvasSidebar / use-team-dashboard の 2 ファイルのみ (HEAD 採用で解決)。
 - **`fs_watch::is_safe_watch_root` の verbatim-prefix 既存セキュリティバグ** (#963 で発見・修正): `Path::canonicalize` が Windows で返す `\\?\C:\...` を `to_string_lossy` のまま lowercase 比較 → denylist の `c:\windows` 前方一致・ドライブルート判定が常に false → **C:\Windows やドライブルートが「safe」と誤判定** (= #639 の project_root setter ガードも Windows で無効化されていた)。verbatim prefix (`\\?\` / `\\?\UNC\`) を剥がしてから比較する。`is_safe_watch_root` は raw path を渡す前提 (内部 canonicalize) なので canonicalize 済み path を渡すと二重に壊れる。

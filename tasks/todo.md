@@ -1,5 +1,52 @@
 # vibe-editor Tauri ハイブリッド移行 + 無限キャンバス UI 革新 TODO
 
+## Issue #1262 - CodeRabbit廃止とreviewer一本化 (2026-07-19 / Codex)
+
+Issue: https://github.com/yusei531642/vibe-editor/issues/1262
+
+### RCA結果
+
+- RCA Mode: Root Cause Confirmed
+- 症状: PR #380ではvibe-editor-reviewerがtrivial判定で詳細レビューを省略し、文書内の集計値「6」と明細7件の不整合を見逃した。CodeRabbitだけが検出し、PR #382で修正された。
+- 原因箇所: reviewer本体のソースは公開リポジトリを確認できないため未特定。ただし、trivial判定後に数値整合チェックを実行しない挙動が見逃しの直接条件。
+- 独立証拠: PR #380のレビュー結果、PR #382の修正差分、Issue #1261の回帰条件が一致する。
+- 修正方針: #1261でtrivial/docsにも決定的な数値整合チェックを適用する。本IssueではCodeRabbit待機を現行実行経路から除去し、reviewer・CI・人間承認へ一本化する。
+- 判定: A=YES, B=NO, C=YES, D=YES
+
+### 計画
+
+- [x] CodeRabbitの契約終了予定、GitHub Appアンインストール、GitHub設定の残存依存を実測する。
+- [x] frontier teamで移行計画、状態・権限、失敗シナリオを独立レビューする。
+- [x] 現行自動実行スキルのCodeRabbit待機、状態フィールド、レート制限をreviewer用へ置換する。
+- [x] 歴史資料を改変せず、現行運用経路にCodeRabbit必須記述がないことを検査する。
+- [ ] canonical check、差分レビュー、PR、CI、vibe-editor-reviewer確認まで進める。
+
+### 進捗
+
+- [x] Sol/Terraは独立計画を完了。Fableはtimeout、Grokはschema不正で破棄し、adaptive契約に従って本線を継続した。
+- [x] reviewer結果を現在のHEAD SHA、review ID、review時刻、未解決severityへ拘束した。
+- [x] 旧coderabbit状態はreviewer通過へ昇格させず、非完了IssueをPENDINGへ移行する契約にした。
+- [x] 外部Driveコピーを正典から外し、repo-local skillを正典にした。
+- [x] reviewer自動mergeの旧記述を除去し、CI・reviewer・ユーザー明示承認へ統一した。
+- [x] `npm run lint:review-policy` PASS。禁止語の一時注入時にFAIL、除去後にPASSを確認した。
+- [x] `npm run typecheck` PASS。
+- [x] `npm run lint` PASS（0 errors、main既存11 warnings）。
+- [x] `npm run lint:release-workflow` PASS。
+- [x] 2つの変更対象skillで`quick_validate.py` PASS。
+- [x] `.github/workflows/ci.yml`変更はOAuthの`workflow` scope不足でpush拒否されたため撤回。既存CIが実行する`npm run lint`の`prelint`へ契約検査を接続し、再実行PASS。
+
+### Review
+
+- verified critical/high: 0
+- medium hold: Issue #1261のreviewer本体回帰テストは未実装。これが完了するまで能力移行完了とIssue #1262 closeを禁止する。
+- advisor: Sol/TerraのHEAD拘束・旧状態fail-closed案を採用。Fable/Grokは有効artifactなし。
+
+### Next Steps
+
+- [ ] PR draftをユーザーへ提示し、作成承認を得る。
+- [ ] PR作成後、CIと現在HEADに対するvibe-editor-reviewer本レビューを確認する。
+- [ ] Issue #1261の回帰テスト完了までIssue #1262を`CLOSE_HOLD`で維持する。
+
 ## Issue #1243 - Windows project root authority復元修正 (2026-07-15 / Codex)
 
 Issue: https://github.com/yusei531642/vibe-editor/issues/1243
